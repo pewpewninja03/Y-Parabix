@@ -594,11 +594,34 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
     U21_to_UTF8(P, NFD_Basis, OutputBasis);
 
-    SHOW_BIXNUM(OutputBasis);
+    StreamSet * u8index2 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(OutputBasis, u8index2);
+    SHOW_STREAM(u8index2);
 
-    StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    P.CreateKernelCall<StdOutKernel>(OutputBytes);
+    StreamSet * U8_Violation_Marks = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, u8index2, Violation_Seq, U8_Violation_Marks);
+
+    StreamSet * U8_ViolationSeq = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(U8_Violation_Marks, u8index2, U8_ViolationSeq);
+    SHOW_STREAM(U8_ViolationSeq);
+
+    StreamSet * Violation_Basis = P.CreateStreamSet(8);
+    FilterByMask(P, U8_ViolationSeq, OutputBasis, Violation_Basis);
+    SHOW_BIXNUM(Violation_Basis);
+
+    StreamSet * Violation_CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+    P.CreateKernelCall<UnicodePropertyBasis>(enumObj, Violation_Basis, Violation_CCC_Basis);
+    SHOW_BIXNUM(Violation_CCC_Basis);
+
+    StreamSet * ViolationSeqBytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(Violation_Basis, ViolationSeqBytes);
+    SHOW_BYTES(ViolationSeqBytes);
+
+    StreamSet * ViolationCCCBytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(Violation_CCC_Basis, ViolationCCCBytes);
+    SHOW_BYTES(ViolationCCCBytes);
+
+    //P.CreateKernelCall<StdOutKernel>(OutputBytes);
 
     return P.compile();
 }
