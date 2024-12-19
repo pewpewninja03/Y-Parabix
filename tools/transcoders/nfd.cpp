@@ -621,7 +621,20 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<P2SKernel>(Violation_CCC_Basis, ViolationCCCBytes);
     SHOW_BYTES(ViolationCCCBytes);
 
-    //P.CreateKernelCall<StdOutKernel>(OutputBytes);
+/*  TO DO */
+    StreamSet * ReorderedBytes = P.CreateStreamSet(1, 8);
+//  P.CreateKernelCall<CanonicalReordering>(ViolationSeqBytes, ViolationCCCBytes, ReorderedBytes);
+
+    StreamSet * ReorderedOutput = P.CreateStreamSet(1, 8);
+//  SpreadByMask(P, U8_ViolationSeq, ReorderedBytes, ReorderedStream);
+
+    StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(Output_Basis, OutputBytes);
+
+    StreamSet * ReorderedOutput = P.CreateStreamSet(1, 8);
+//  P.CreateKernelCall<StreamsMerge>(OutputBytes, ReorderedBytes, ReorderedOutput);
+
+//  P.CreateKernelCall<StdOutKernel>(ReorderedOutput);
 
     return P.compile();
 }
