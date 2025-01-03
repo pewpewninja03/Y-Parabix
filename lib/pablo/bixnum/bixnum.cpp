@@ -342,6 +342,24 @@ BixNum BixNumCompiler::MulFull(BixNum multiplicand, unsigned multiplier) {
     return product;
 }
 
+void BixNumCompiler::Div(BixNum dividend, unsigned divisor,
+                         BixNum & quotient, BixNum & remainder) {
+    if (divisor == 0) {
+        llvm::report_fatal_error("BixNum division by 0.");
+    }
+    unsigned dividend_bits = dividend.size();
+    unsigned divisor_bits = floor_log2(divisor)+1;
+    BixNum Q(dividend_bits, mPB.createZeroes());
+    BixNum R(divisor_bits, mPB.createZeroes());
+    for (int i = dividend_bits - 1 ; i >= 0; i--) {
+        R.insert(R.begin(), dividend[i]);
+        Q[i] = UGE(R, divisor);
+        R = Select(Q[i], SubModular(R, divisor), R);
+    }
+    quotient = Q;
+    remainder = Truncate(R, divisor_bits);
+}
+
 const unsigned CONSECUTIVE_SEQ_OPTIMIZATION_MINIMUM = 4;
 unsigned BixNumTableCompiler::getTableVal(unsigned inputVal) {
     return mTable[inputVal];

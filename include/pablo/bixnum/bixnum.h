@@ -56,6 +56,12 @@ public:
     BixNum AddFull(BixNum augend, unsigned addend);
     BixNum AddFull(BixNum augend, BixNum addend);
     BixNum MulFull(BixNum multiplicand, unsigned multiplier);
+    //
+    //  Perform unsigned integer division of the dividend by the divisor.
+    //  Return a quotient BixNum having the same size as the dividend, and
+    //  a remainder BixNum having the same number of bits as the divisor.
+    //
+    void Div(BixNum dividend, unsigned divisor, BixNum & quotient, BixNum & remainder);
 
 private:
     PabloBuilder & mPB;
