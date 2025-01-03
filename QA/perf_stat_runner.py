@@ -13,9 +13,6 @@ def perf_stat_counts(filename, perf_counters):
     return result_dict
 
 def run_with_perf_stat(program_under_test, args, perf_counters):
-    # First run the program without measurement to ensure
-    # that generated kernels are compiled to the object cache.
-    subprocess.run([program_under_test] + args, encoding="utf-8")
     # Now do a perf stat run with a repeat count of 5 and generating csv output
     statsf = open("/tmp/perfout", "w")
     perf_args = ["perf", "stat", "-x,", "-r5", program_under_test] + args

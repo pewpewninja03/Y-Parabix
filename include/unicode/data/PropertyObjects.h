@@ -49,6 +49,7 @@ public:
     virtual const UnicodeSet GetCodepointSetMatchingPattern(re::RE * pattern, GrepLinesFunctionType);
     virtual const UnicodeSet GetNullSet() const;   // The set of codepoints mapping to the empty string.
     virtual const UnicodeSet GetReflexiveSet() const;  // The set of codepoints mapping to themselves.
+    virtual const std::u32string GetU32StringValue(UCD::codepoint_t cp) const;  // The mapping for a codepoint.
     virtual const std::string GetStringValue(UCD::codepoint_t cp) const;  // The mapping for a codepoint.
     virtual const UnicodeSet GetPropertyIntersection(PropertyObject * p);
 
@@ -228,6 +229,7 @@ public:
     // Get the codepoint property value for a given cp.
     // Precondition: cp is not within GetNullSet();
     const UCD::codepoint_t GetCodePointValue(UCD::codepoint_t cp) const;
+    const std::u32string GetU32StringValue(UCD::codepoint_t cp) const override;
     const std::string GetStringValue(UCD::codepoint_t cp) const override;
     const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
     // Return bit_xform_sets such that bit_xform_sets[i] includes a given
@@ -272,6 +274,7 @@ public:
     const UnicodeSet GetCodepointSetMatchingPattern(re::RE * pattern, GrepLinesFunctionType) override;
     const UnicodeSet GetNullSet() const override;
     const UnicodeSet GetReflexiveSet() const override;
+    const std::u32string GetU32StringValue(UCD::codepoint_t cp) const override;
     const std::string GetStringValue(UCD::codepoint_t cp) const override;
     const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
     const std::vector<UCD::codepoint_t> & GetExplicitCps() {return mExplicitCps;}
@@ -311,6 +314,7 @@ public:
     const UnicodeSet GetReflexiveSet() const override;
     const UCD::property_t GetBaseProperty() {return mBaseProperty;}
     const UnicodeSet & GetOverriddenSet() const {return mOverriddenSet;}
+    const std::u32string GetU32StringValue(UCD::codepoint_t cp) const override;
     const std::string GetStringValue(UCD::codepoint_t cp) const override;
     const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
 

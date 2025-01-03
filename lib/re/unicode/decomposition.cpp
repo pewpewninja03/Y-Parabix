@@ -7,8 +7,6 @@
 
 #include <string>
 #include <vector>
-#include <locale>
-#include <codecvt>
 #include <llvm/Support/Casting.h>
 #include <re/adt/adt.h>
 #include <re/transforms/re_transformer.h>

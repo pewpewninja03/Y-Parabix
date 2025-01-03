@@ -5,8 +5,6 @@
 
 #pragma once
 #include <string>
-#include <locale>
-#include <codecvt>
 #include <unicode/core/UCD_Config.h>
 #include <unicode/data/PropertyObjects.h>
 
@@ -20,7 +18,7 @@ enum DecompositionOptions : int { NFD = 0, CaseFold = 1, NFKD = 2 };
 class NFD_Engine {
 public:
     NFD_Engine(DecompositionOptions opt);
-    std::string decompose(std::string);
+    std::u32string decompose(std::u32string);
     /* Helpers to convert and append an individual codepoint or a u32string
     to an existing NFD_string.   The process performs any necessary
     reordering of marks of the existing string and the appended data
@@ -41,6 +39,5 @@ protected:
     const UnicodeSet selfNFKD;
     const UnicodeSet selfCaseFold;
     const UnicodeSet HangulPrecomposed;
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
 };
 }

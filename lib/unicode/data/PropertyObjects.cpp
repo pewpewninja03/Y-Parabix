@@ -5,7 +5,6 @@
  */
 
 #include <unicode/data/PropertyObjects.h>
-
 #include <string>
 #include <locale>
 #include <codecvt>
@@ -47,6 +46,16 @@ const UnicodeSet PropertyObject::GetCodepointSet(const std::string &) {
 
 const UnicodeSet PropertyObject::GetCodepointSetMatchingPattern(re::RE * re, GrepLinesFunctionType grep) {
     report_fatal_error(Twine("GetCodepointSetMatchingPattern for ") + UCD::getPropertyFullName(the_property) + " unsupported.");
+}
+
+const std::u32string PropertyObject::GetU32StringValue(codepoint_t cp) const {
+    std::string s = GetStringValue(cp);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+    return conv.from_bytes(s);
+#pragma GCC diagnostic pop
 }
 
 const std::string PropertyObject::GetStringValue(codepoint_t cp) const {
@@ -401,10 +410,19 @@ const codepoint_t CodePointPropertyObject::GetCodePointValue(codepoint_t cp) con
     llvm::report_fatal_error("codepoint property value not found");
 }
 
-const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const {
+const std::u32string CodePointPropertyObject::GetU32StringValue(codepoint_t cp) const {
     std::u32string s(1, GetCodePointValue(cp));
+    return s;
+}
+
+const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+    std::u32string s(1, GetCodePointValue(cp));
     return conv.to_bytes(s);
+#pragma GCC diagnostic pop
 }
 
 std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
@@ -500,12 +518,31 @@ const UnicodeSet StringPropertyObject::GetReflexiveSet() const {
     return mSelfCodepointSet;
 }
 
+const std::u32string StringPropertyObject::GetU32StringValue(codepoint_t cp) const {
+    if (mNullCodepointSet.contains(cp)) return std::u32string();
+    if (mSelfCodepointSet.contains(cp)) {
+        std::u32string s(1, cp);
+        return s;
+    }
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+    std::string s = GetStringValue(cp);
+    return conv.from_bytes(s);
+#pragma GCC diagnostic pop
+}
+
 const std::string StringPropertyObject::GetStringValue(codepoint_t cp) const {
     if (mNullCodepointSet.contains(cp)) return "";
     if (mSelfCodepointSet.contains(cp)) {
         std::u32string s(1, cp);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
         return conv.to_bytes(s);
+#pragma GCC diagnostic pop
     }
     // Otherwise, binary search through the explicit cps to find the index.
     // string index.
@@ -548,6 +585,17 @@ const UnicodeSet StringOverridePropertyObject::GetNullSet() const {
 
 const UnicodeSet StringOverridePropertyObject::GetReflexiveSet() const {
     return getPropertyObject(mBaseProperty)->GetReflexiveSet() - mOverriddenSet;
+}
+
+const std::u32string StringOverridePropertyObject::GetU32StringValue(codepoint_t cp) const {
+    if (!mOverriddenSet.contains(cp)) return getPropertyObject(mBaseProperty)->GetU32StringValue(cp);
+    std::string s = GetStringValue(cp);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
+    return conv.from_bytes(s);
+#pragma GCC diagnostic pop
 }
 
 const std::string StringOverridePropertyObject::GetStringValue(codepoint_t cp) const {

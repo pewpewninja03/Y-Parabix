@@ -35,6 +35,13 @@ static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::ca
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> RangeMaskFactor("RangeMaskFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+enum class PartitioningKind {Linear, Logarithmic, Geometric, Gaps};
+static cl::opt<PartitioningKind> Partitioning("Partitioning", cl::ValueOptional,
+cl::values(
+           clEnumValN(PartitioningKind::Linear, "Linear", "Partitioning based on linear division."),
+           clEnumValN(PartitioningKind::Logarithmic, "Logarithmic", "Partitioning based on logarithmic division")),
+                                                                               cl::cat(codegen::CodeGenOptions), cl::init(PartitioningKind::Linear));
 static cl::opt<bool> PartitioningRevision("PartitioningRevision", cl::init(true), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> AdvanceBasis("AdvanceBasis", cl::desc("Advance basis bits before compileCodeUnit"), cl::init(false), cl::cat(codegen::CodeGenOptions));
@@ -47,7 +54,13 @@ cl::values(
            clEnumValN(InitialTestMode::NonASCII, "NonASCII", "Initial test based on non ASCII (any prefix/suffix).")),
                                             cl::cat(codegen::CodeGenOptions), cl::init(InitialTestMode::PrefixCC));
 static cl::opt<bool> UTF_CompilationTracing("UTF_CompilationTracing", cl::init(false), cl::cat(codegen::CodeGenOptions));
-static cl::opt<bool> BixNumCCs("BixNumCCs", cl::init(false), cl::cat(codegen::CodeGenOptions));
+enum class CC_Mode {BixNumCCs, SyntheticBasis, TruncatedBasis};
+static cl::opt<CC_Mode> CCmode("CCmode", cl::ValueOptional,
+cl::values(
+           clEnumValN(CC_Mode::BixNumCCs, "BixNumCCs", "Use BixNum compiler for CC calculations."),
+           clEnumValN(CC_Mode::SyntheticBasis, "SyntheticBasis", "Use a full synthetic basis for CCs."),
+           clEnumValN(CC_Mode::TruncatedBasis, "TruncatedBasis", "Use truncated basis based on range.significant_bits for CCs.")),
+                                            cl::cat(codegen::CodeGenOptions), cl::init(CC_Mode::TruncatedBasis));
 
 std::string kernelAnnotation() {
     std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
@@ -56,6 +69,7 @@ std::string kernelAnnotation() {
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
     a += "p" + std::to_string(PartitioningCostThreshhold);
     a += "f" + std::to_string(PartitioningFactor);
+    a += "x" + std::to_string(RangeMaskFactor);
     a += "r" + std::to_string(PartitioningRevision);
     a += "m" + std::to_string(PrefixTestMax);
     if (AdvanceBasis) {
@@ -64,13 +78,20 @@ std::string kernelAnnotation() {
     if (SuffixOptimization) {
         a += "x";
     }
+    if (Partitioning == PartitioningKind::Linear) {
+        a += "lP";
+    } else if (Partitioning == PartitioningKind::Logarithmic) {
+        a += "+gP";
+    }
     if (InitialTest == InitialTestMode::NonASCII) {
         a += "+nA";
     } else if (InitialTest == InitialTestMode::RangeCC) {
         a += "+rCC";
     }
-    if (BixNumCCs) {
-        a += "+bx";
+    if (CCmode == CC_Mode::SyntheticBasis) {
+        a += "+sB";
+    } else if (CCmode == CC_Mode::BixNumCCs) {
+        a += "+bX";
     }
     return a;
 }
@@ -177,9 +198,10 @@ protected:
     Target_List  &          mTargets;
     PabloBuilder &          mPB;
     unsigned costModel(CC_List & ccs);
+    Basis_Set RangeBasis(Range enclosing_range, PabloBuilder & pb);
+    std::vector<Range> selectPartitions(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
     void subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
-    void compileSubrange(CC_List & ccs, EnclosingInfo & enclosing, Range & subrange, PabloBuilder & pb);
-    void compileUnguardedSubrange(CC_List & ccs, EnclosingInfo & enclosing, Range & subrange, PabloBuilder & pb);
+    void compileUnguardedSubrange(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
     PabloAST * compileCodeRange(EnclosingInfo & enclosing, Range & codepointRange, PabloBuilder & pb);
 };
 
@@ -196,98 +218,125 @@ unsigned Unicode_Range_Compiler::costModel(CC_List & ccs) {
     return total_codepoints * bits_to_test * BinaryLogicCostPerByte / 8;
 }
 
-void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
-    unsigned range_bits = enclosing.range.significant_bits();
-    CC_List subrangeCCs(ccs.size());
-    extract_CCs_by_range(enclosing.range, ccs, subrangeCCs);
-    Range actual_subrange = CC_Set_Range(subrangeCCs);
-    codepoint_t partition_size = (actual_subrange.hi - actual_subrange.lo + PartitioningFactor)/PartitioningFactor;
-
-    //codepoint_t partition_size = (1U << (range_bits - 1))/PartitioningFactor;
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::subrangePartitioning(" << enclosing.range.hex_string() << ")\n";
-        llvm::errs() << "  partition_size = " << partition_size << "\n";
+Basis_Set Unicode_Range_Compiler::RangeBasis(Range enclosing_range, PabloBuilder & pb) {
+    Basis_Set rb(mBasis.size());
+    unsigned significant_bits = enclosing_range.significant_bits();
+    for (unsigned i = 0; i < significant_bits; i++) {
+        rb[i] = mBasis[i];
     }
-    if (partition_size <= 32) {
-        compileUnguardedSubrange(ccs, enclosing, enclosing.range, pb);
-        return;
-    }
-    std::string range_alphabet = "Low" + std::to_string(range_bits);
-    cc::CodeUnitAlphabet CodeAlpha(range_alphabet, range_alphabet, range_bits);
-    pablo::BixNumCompiler bnc(pb);
-    BixNum rangeBasis = bnc.Truncate(mBasis, range_bits);
-    std::unique_ptr<cc::CC_Compiler> rangeCompiler;
-    rangeCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(rangeBasis);
-
-    for (unsigned partition_lo = actual_subrange.lo; partition_lo <= actual_subrange.hi; partition_lo += partition_size) {
-        unsigned partition_hi = std::min(partition_lo + partition_size - 1, actual_subrange.hi);
-        Range partition{partition_lo, partition_hi};
-        CC_List partitionCCs(ccs.size());
-        extract_CCs_by_range(partition, ccs, partitionCCs);
-        Range partition_actual = CC_Set_Range(partitionCCs);
-        if (!partition_actual.is_empty()) {
-            unsigned subpartition_bits = partition_actual.significant_bits();
-            //codepoint_t mask = (1u << subpartition_bits) - 1;
-            //Range subpartition{actual_subrange.lo & ~mask, actual_subrange.hi | mask};
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "partition.significant_bits() = " << partition.significant_bits() << "\n";
-                llvm::errs() << "actual_subrange: " << partition_actual.hex_string() << "\n";
-                //llvm::errs() << "subpartition: " << subpartition.hex_string() << "\n";
-                llvm::errs() << "partition_actual.significant_bits() = " << subpartition_bits << "\n";
-            }
-            re::CC * subpartitionCC = re::makeCC(partition_actual.lo, partition_actual.hi, &CodeAlpha);
-            PabloAST * subpartitionTest = rangeCompiler->compileCC(subpartitionCC, pb);
-            subpartitionTest = pb.createAnd(enclosing.test, subpartitionTest, "Range_" + partition_actual.hex_string());
-            EnclosingInfo narrowed(partition_actual, subpartitionTest);
-            compileSubrange(partitionCCs, narrowed, partition_actual, pb);
-        }
-    }
-}
-
-void Unicode_Range_Compiler::compileSubrange(CC_List & subrangeCCs, EnclosingInfo & enclosing, Range & subrange, PabloBuilder & pb) {
-    //
-    // Determine whether compilation of the CCs is below our cost model threshhold.
-    unsigned costFactor = costModel(subrangeCCs);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::compileSubrange(" << enclosing.range.hex_string() << ") subrange(" << subrange.hex_string() << ")\n";
-        llvm::errs() << "  costFactor = " << costFactor << "\n";
-    }
-    if (costFactor < IfEmbeddingCostThreshhold) {
-        if (costFactor < PartitioningCostThreshhold) {
-            compileUnguardedSubrange(subrangeCCs, enclosing, subrange, pb);
+    for (unsigned i = significant_bits; i < mBasis.size(); i++) {
+        if (((enclosing_range.lo >> i) & 1) == 1) {
+                rb[i] = pb.createOnes();
         } else {
-            subrangePartitioning(subrangeCCs, enclosing, pb);
+            rb[i] = pb.createZeroes();
         }
-        return;
     }
-    // The subrange logic cost exceeds our cost model threshhold.
-    // Construct a guarded if-block and partition into further subranges.
-    PabloAST * unit_test = compileCodeRange(enclosing, subrange, pb);
-    PabloAST * subrange_test = pb.createAnd(enclosing.test, unit_test);
-    EnclosingInfo narrowed(subrange, subrange_test);
-    // Construct an if-block.
-    auto nested = pb.createScope();
-    pb.createIf(subrange_test, nested);
-    subrangePartitioning(subrangeCCs, narrowed, nested);
+    return rb;
 }
 
-void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, EnclosingInfo & enclosing, Range & subrange, PabloBuilder & pb) {
-    CC_List subrangeCCs(ccs.size());
-    extract_CCs_by_range(subrange, ccs, subrangeCCs);
-    //  If there are no CCs that intersect the subrange, no code
-    //  generation is required.
-    Range actual_subrange = CC_Set_Range(subrangeCCs);
+std::vector<Range> Unicode_Range_Compiler::selectPartitions(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
+    std::vector<Range> partitions;
+    Range actual_subrange = CC_Set_Range(ccs);
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "URC::selectPartitions(" << enclosing.range.hex_string() << ")\n";
+    }
+    if (actual_subrange.is_empty()) return partitions;
+    unsigned working_bits = actual_subrange.significant_bits();
+    if (working_bits <= PartitioningFactor) {
+        return {enclosing.range};
+    }
+    unsigned working_bitmask = (1u << working_bits) - 1u;
+    if (Partitioning == PartitioningKind::Linear) {
+        unsigned partition_bits = ceil_log2(PartitioningFactor);
+        unsigned partition_size = 1u << (working_bits - partition_bits);
+        unsigned partition_lo = actual_subrange.lo &~working_bitmask;
+        for (unsigned i = 0; i < PartitioningFactor; i++) {
+            unsigned partition_hi = std::min(partition_lo + partition_size - 1, actual_subrange.hi);
+            partitions.push_back(Range{partition_lo, partition_hi});
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "URC::selectPartitions: partition " << i << ": " << partitions[i].hex_string() << ")\n";
+            }
+            partition_lo = partition_hi + 1;
+        }
+        partitions[PartitioningFactor - 1].hi = actual_subrange.hi;
+    } else if (Partitioning == PartitioningKind::Logarithmic) {
+        unsigned pcount = working_bits > PartitioningFactor ? PartitioningFactor : 1;
+        unsigned partition_lo = actual_subrange.lo;
+        for (unsigned i = 0; i < pcount; i++) {
+            unsigned shift = pcount - i - 1;
+            unsigned partition_hi = partition_lo | (working_bitmask >> shift);
+            partitions.push_back(Range{partition_lo, partition_hi});
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "URC::selectPartitions: partition " << i << ": " << partitions[i].hex_string() << ")\n";
+            }
+            partition_lo = partition_hi + 1;
+        }
+    }    return partitions;
+}
+
+void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
+    std::vector<Range> partitions = selectPartitions(ccs, enclosing, pb);
+    if (partitions.size() < 2) {
+        compileUnguardedSubrange(ccs, enclosing, pb);
+        return;
+    }
+    Basis_Set basis = RangeBasis(enclosing.range, pb);
+    cc::Parabix_CC_Compiler_Builder rangeCompiler(basis);
+    std::vector<EnclosingInfo> partitionInfo;
+    std::vector<CC_List> partitionCCs(partitions.size());
+    std::vector<unsigned> partitionCosts(partitions.size());
+    for (unsigned i = 0; i < partitions.size(); i++) {
+        partitionCCs[i].resize(ccs.size());
+        extract_CCs_by_range(partitions[i], ccs, partitionCCs[i]);
+        Range partition_subrange = CC_Set_Range(partitionCCs[i]);
+        PabloAST * subrangeTest = nullptr;
+        if (!partition_subrange.is_empty()) {
+            unsigned partition_bits = partition_subrange.significant_bits();
+            codepoint_t mask = (1u << partition_bits) - 1;
+            mask >>= RangeMaskFactor;
+            partition_subrange.lo &= ~mask;
+            partition_subrange.hi |= mask;
+            re::CC * subrangeCC = re::makeCC(partition_subrange.lo, partition_subrange.hi, &Unicode);
+            subrangeTest = rangeCompiler.compileCC(subrangeCC, pb);
+            subrangeTest = pb.createAnd(enclosing.test, subrangeTest, "Range_" + partition_subrange.hex_string());
+            partitionCosts[i] = costModel(partitionCCs[i]);
+        } else {
+            subrangeTest = pb.createZeroes();
+            partitionCosts[i] = 0;
+        }
+        partitionInfo.push_back(EnclosingInfo(partition_subrange, subrangeTest));
+    }
+    for (unsigned i = 0; i < partitions.size(); i++) {
+        if (partitionCosts[i] < IfEmbeddingCostThreshhold) {
+            compileUnguardedSubrange(partitionCCs[i], partitionInfo[i], pb);
+        } else if (partitionCosts[i] >= IfEmbeddingCostThreshhold) {
+            auto nested = pb.createScope();
+            pb.createIf(partitionInfo[i].test, nested);
+            subrangePartitioning(partitionCCs[i], partitionInfo[i], nested);
+        }
+    }
+}
+
+void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
+    Range actual_subrange = CC_Set_Range(ccs);
     if (actual_subrange.is_empty()) return;
     if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::compileUnguardedSubrange(" << enclosing.range.hex_string() << ") subrange(" << subrange.hex_string() << ")\n";
+        llvm::errs() << "URC::compileUnguardedSubrange(" << enclosing.range.hex_string() << ")\n";
     }
-    if (BixNumCCs) {
-        for (unsigned i = 0; i < subrangeCCs.size(); i++) {
-            for (const auto range : *subrangeCCs[i]) {
+    if (CCmode == CC_Mode::BixNumCCs) {
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            for (const auto range : *ccs[i]) {
                 Range r{re::lo_codepoint(range), re::hi_codepoint(range)};
                 PabloAST * compiled = compileCodeRange(enclosing, r, pb);
                 pb.createAssign(mTargets[i], pb.createOr(mTargets[i], compiled));
             }
+        }
+    } else if (CCmode == CC_Mode::SyntheticBasis) {
+        Basis_Set basis = RangeBasis(enclosing.range, pb);
+        cc::Parabix_CC_Compiler_Builder rangeCompiler(basis);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            PabloAST * compiled = rangeCompiler.compileCC(ccs[i], pb);
+            pb.createAssign(mTargets[i], pb.createOr(mTargets[i], pb.createAnd(compiled, enclosing.test)));
         }
     } else {
         unsigned significant_bits = enclosing.range.significant_bits();
@@ -296,11 +345,10 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, EnclosingIn
         codepoint_t mask = (1U << significant_bits) - 1;
         pablo::BixNumCompiler bnc(pb);
         BixNum truncated = bnc.Truncate(mBasis, significant_bits);
-        std::unique_ptr<cc::CC_Compiler> truncatedCompiler;
-        truncatedCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(truncated);
-        for (unsigned i = 0; i < subrangeCCs.size(); i++) {
-            re::CC * reducedCC = reduceCC(subrangeCCs[i], mask, CodeAlpha);
-            PabloAST * compiled = truncatedCompiler->compileCC(reducedCC, pb);
+        cc::Parabix_CC_Compiler_Builder truncatedCompiler(truncated);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            re::CC * reducedCC = reduceCC(ccs[i], mask, CodeAlpha);
+            PabloAST * compiled = truncatedCompiler.compileCC(reducedCC, pb);
             pb.createAssign(mTargets[i], pb.createOr(mTargets[i], pb.createAnd(compiled, enclosing.test)));
         }
     }
@@ -310,14 +358,6 @@ PabloAST * Unicode_Range_Compiler::compileCodeRange(EnclosingInfo & enclosing, R
     pablo::BixNumCompiler bnc(pb);
     unsigned significant_bits = enclosing.range.significant_bits();
     codepoint_t mask = (1 << significant_bits) - 1;
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "compileCodeRange(";
-        llvm::errs().write_hex(codepointRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(codepointRange.hi);
-        llvm::errs() << ")\n";
-        llvm::errs() << "  significant_bits = " << significant_bits << "\n";
-    }
     BixNum truncated = bnc.Truncate(mBasis, significant_bits);
     codepoint_t lo = codepointRange.lo & mask;
     codepoint_t hi = codepointRange.hi & mask;

@@ -67,8 +67,7 @@ void NFD_Engine::NFD_append1(std::u32string & NFD_string, codepoint_t cp) {
             NFD_string.push_back(Hangul_TBase + TIndex);
         }
     } else if (canonicalMapped.contains(cp)) {
-        std::string u8decomposed = decompMappingObj->GetStringValue(cp);
-        std::u32string dms = conv.from_bytes(u8decomposed);
+        std::u32string dms = decompMappingObj->GetU32StringValue(cp);
         // Recursive normalization may be necessary.
         NFD_append(NFD_string, dms);
         // After canonical mappings are handled, canonical ordering may be required.
@@ -80,10 +79,10 @@ void NFD_Engine::NFD_append1(std::u32string & NFD_string, codepoint_t cp) {
         NFD_string.pop_back();
         NFD_append(NFD_string, reordered);
     } else if (hasOption(mOptions, CaseFold) && !selfCaseFold.contains(cp)) {
-        std::u32string dms = conv.from_bytes(caseFoldObj->GetStringValue(cp));
+        std::u32string dms = caseFoldObj->GetU32StringValue(cp);
         NFD_append(NFD_string, dms);
     } else if (hasOption(mOptions, NFKD) && (!selfNFKD.contains(cp))) {
-        std::u32string dms = conv.from_bytes(decompMappingObj->GetStringValue(cp));
+        std::u32string dms = decompMappingObj->GetU32StringValue(cp);
         NFD_append(NFD_string, dms);
     } else {
         NFD_string.push_back(cp);
@@ -96,10 +95,9 @@ void NFD_Engine::NFD_append(std::u32string & NFD_string, std::u32string & to_con
     }
 }
 
-std::string NFD_Engine::decompose (std::string to_decompose) {
-    std::u32string s = conv.from_bytes(to_decompose);
+std::u32string NFD_Engine::decompose (std::u32string to_decompose) {
     std::u32string rslt;
-    NFD_append(rslt, s);
-    return conv.to_bytes(rslt);
+    NFD_append(rslt, to_decompose);
+    return rslt;
 }
 } // end namespace UCD
