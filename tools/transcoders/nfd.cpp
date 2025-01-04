@@ -59,6 +59,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
+static cl::opt<bool> NFD_Full("NFD_Full", cl::desc("Use integrated NFD Full kernel with BixNum division"), cl::init(true), cl::cat(NFD_Options));
 static cl::opt<bool> LDiv("LDiv", cl::desc("Use BixNum division for L indexes"), cl::init(true), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
@@ -329,8 +330,8 @@ const unsigned T_Index_bits = 5;
 void Hangul_LVT::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    BixNumCompiler bnc(pb);
-    PabloAST * Hangul_precomposed = pb.createAnd(bnc.UGE(basis, Hangul_SBase), bnc.ULT(basis, Hangul_SBase + Hangul_SCount));
+    BixNumCompiler bnc0(pb);
+    PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul_SBase), bnc0.ULT(basis, Hangul_SBase + Hangul_SCount));
     BixNum ZeroBasis(basis.size(), pb.createZeroes());
 
     std::vector<Var *> L_indexVar(L_Index_bits);
@@ -348,17 +349,17 @@ void Hangul_LVT::generatePabloMethod() {
 
     auto nested = pb.createScope();
     pb.createIf(Hangul_precomposed, nested);
-    BixNumCompiler bnc1(nested);
+    BixNumCompiler bnc(nested);
 
-    BixNum S_Index = bnc1.Select(Hangul_precomposed, bnc1.SubModular(basis, Hangul_SBase), ZeroBasis);
-    S_Index = bnc1.Truncate(S_Index, S_Index_bits);
+    BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul_SBase), ZeroBasis);
+    S_Index = bnc.Truncate(S_Index, S_Index_bits);
     BixNum LV_index;
     BixNum T_index;
-    bnc1.Div(S_Index, Hangul_TCount, LV_index, T_index);
-    LV_index = bnc1.Truncate(LV_index, L_Index_bits + V_Index_bits);
+    bnc.Div(S_Index, Hangul_TCount, LV_index, T_index);
+    LV_index = bnc.Truncate(LV_index, L_Index_bits + V_Index_bits);
     BixNum L_index;
     BixNum V_index;
-    bnc1.Div(LV_index, Hangul_VCount, L_index, V_index);
+    bnc.Div(LV_index, Hangul_VCount, L_index, V_index);
     
     for (unsigned i = 0; i < L_Index_bits; i++) {
         nested.createAssign(L_indexVar[i], L_index[i]);
@@ -381,6 +382,75 @@ void Hangul_LVT::generatePabloMethod() {
     Var * T_out = getOutputStreamVar("T_index");
     for (unsigned i = 0; i < T_Index_bits; i++) {
         pb.createAssign(pb.createExtract(T_out, pb.getInteger(i)), T_indexVar[i]);
+    }
+}
+
+class Hangul_NFD_Full : public pablo::PabloKernel {
+public:
+    Hangul_NFD_Full(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * NFD_Basis);
+protected:
+    void generatePabloMethod() override;
+};
+
+Hangul_NFD_Full::Hangul_NFD_Full(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * NFD_Basis)
+: PabloKernel(ts, "Hangul_NFD_Full" + std::to_string(Basis->getNumElements()) + "x1",
+// inputs
+{Binding{"basis", Basis}},
+// output
+{Binding{"NFD_Basis", NFD_Basis}}) {
+}
+
+void Hangul_NFD_Full::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    BixNumCompiler bnc0(pb);
+    PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul_SBase), bnc0.ULT(basis, Hangul_SBase + Hangul_SCount));
+    BixNum ZeroBasis(basis.size(), pb.createZeroes());
+    // Set up Vars to receive the generated basis values.
+    std::vector<Var *> basisVar(21);
+    for (unsigned i = 0; i < 21; i++) {
+        basisVar[i] = pb.createVar("basisVar" + std::to_string(i), basis[i]);
+    }
+    auto nested = pb.createScope();
+    pb.createIf(Hangul_precomposed, nested);
+    BixNumCompiler bnc(nested);
+
+    BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul_SBase), ZeroBasis);
+    S_Index = bnc.Truncate(S_Index, S_Index_bits);
+    BixNum LV_index;
+    BixNum T_index;
+    bnc.Div(S_Index, Hangul_TCount, LV_index, T_index);
+    LV_index = bnc.Truncate(LV_index, L_Index_bits + V_Index_bits);
+    BixNum L_index;
+    BixNum V_index;
+    bnc.Div(LV_index, Hangul_VCount, L_index, V_index);
+    BixNum LPart = bnc.ZeroExtend(L_index, 21);
+    // The LPart will be encoded at the original precomposed position.
+    LPart = bnc.AddModular(LPart, Hangul_LBase);
+    // The V Part, when it exists, is one position after the opening L Part.
+    PabloAST * V_position = nested.createAdvance(Hangul_precomposed, 1);
+    for (unsigned i = 0; i < V_Index_bits; i++) {
+        V_index[i] = nested.createAdvance(V_index[i], 1);
+    }
+    BixNum VPart = bnc.ZeroExtend(V_index, 21);
+    VPart = bnc.AddModular(VPart, Hangul_VBase);
+    // The T Part, if it exists is two positions after the opening
+    // L Part.  A T Part only exists for LVT initials.
+    PabloAST * T_position = nested.createAdvance(nested.createAnd(Hangul_precomposed, bnc.NEQ(T_index, 0)), 2);
+    for (unsigned i = 0; i < T_Index_bits; i++) {
+        T_index[i] = nested.createAdvance(T_index[i], 2);
+    }
+    BixNum TPart = bnc.ZeroExtend(T_index, 21);
+    TPart = bnc.AddModular(TPart, Hangul_TBase);
+    for (unsigned i = 0; i < 21; i++) {
+        PabloAST * bit = nested.createSel(Hangul_precomposed, LPart[i], basis[i]);
+        bit = nested.createSel(V_position, VPart[i], bit);
+        bit = nested.createSel(T_position, TPart[i], bit);
+        nested.createAssign(basisVar[i], bit);
+    }
+    Var * NFD_Basis_Var = getOutputStreamVar("NFD_Basis");
+    for (unsigned i = 0; i < 21; i++) {
+        pb.createAssign(pb.createExtract(NFD_Basis_Var, pb.getInteger(i)), basisVar[i]);
     }
 }
 
@@ -653,29 +723,33 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
-    auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
-
-    StreamSet * LV_LVT =  P.CreateStreamSet(LV_LVT_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
-    SHOW_BIXNUM(LV_LVT);
-
-    StreamSet * LIndexBixNum = P.CreateStreamSet(L_Index_bits);
-    StreamSet * VIndexBixNum = P.CreateStreamSet(V_Index_bits);
-    StreamSet * TIndexBixNum = P.CreateStreamSet(T_Index_bits);
-
-    if (LDiv) {
-        P.CreateKernelCall<Hangul_LVT>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
-    } else {
-        auto Lindex_ccs = LIndexBixNumCCs();
-        P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
-        P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
-    }
-    SHOW_BIXNUM(LIndexBixNum);
-    SHOW_BIXNUM(VIndexBixNum);
-    SHOW_BIXNUM(TIndexBixNum);
-
     StreamSet * Hangul_NFD_Basis = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
+    if (NFD_Full) {
+        P.CreateKernelCall<Hangul_NFD_Full>(ExpandedBasis, Hangul_NFD_Basis);
+    } else {
+        StreamSet * LIndexBixNum = P.CreateStreamSet(L_Index_bits);
+        StreamSet * VIndexBixNum = P.CreateStreamSet(V_Index_bits);
+        StreamSet * TIndexBixNum = P.CreateStreamSet(T_Index_bits);
+
+        auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
+
+        StreamSet * LV_LVT =  P.CreateStreamSet(LV_LVT_ccs.size());
+        P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
+        SHOW_BIXNUM(LV_LVT);
+
+        if (LDiv) {
+            P.CreateKernelCall<Hangul_LVT>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+        } else {
+            auto Lindex_ccs = LIndexBixNumCCs();
+            P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
+            P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+        }
+        SHOW_BIXNUM(LIndexBixNum);
+        SHOW_BIXNUM(VIndexBixNum);
+        SHOW_BIXNUM(TIndexBixNum);
+
+        P.CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
+    }
     SHOW_BIXNUM(Hangul_NFD_Basis);
 
     StreamSet * NFD_Basis = P.CreateStreamSet(21, 1);
