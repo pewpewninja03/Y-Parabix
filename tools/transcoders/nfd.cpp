@@ -59,6 +59,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
+static cl::opt<bool> LDiv("LDiv", cl::desc("Use BixNum division for L indexes"), cl::init(true), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -272,6 +273,117 @@ std::vector<re::CC *> VIndexBixNumCCs() {
     return V_CC;
 }
 
+class Hangul_S_Index : public pablo::PabloKernel {
+public:
+    Hangul_S_Index(LLVMTypeSystemInterface & ts,
+                      StreamSet * Basis, StreamSet * S_index);
+protected:
+    void generatePabloMethod() override;
+};
+
+Hangul_S_Index::Hangul_S_Index (LLVMTypeSystemInterface & ts,
+                                      StreamSet * Basis, StreamSet * S_index)
+: PabloKernel(ts, "Hangul_S_Index" + std::to_string(Basis->getNumElements()) + "x1",
+// inputs
+{Binding{"basis", Basis}},
+// output
+{Binding{"S_index", S_index}}) {
+}
+
+// The S_index will have up to 14 significant bits.
+const unsigned S_Index_bits = 14;
+void Hangul_S_Index::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    BixNumCompiler bnc(pb);
+    BixNum ZeroBasis(basis.size(), pb.createZeroes());
+    PabloAST * Hangul_precomposed = pb.createAnd(bnc.UGE(basis, Hangul_SBase), bnc.ULT(basis, Hangul_SBase + Hangul_SCount));
+    BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul_SBase), ZeroBasis);
+    Var * S_out = getOutputStreamVar("S_index");
+    for (unsigned i = 0; i < S_Index_bits; i++) {
+        pb.createAssign(pb.createExtract(S_out, pb.getInteger(i)), S_Index[i]);
+    }
+}
+
+class Hangul_LVT : public pablo::PabloKernel {
+public:
+    Hangul_LVT(LLVMTypeSystemInterface & ts,
+                      StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index);
+protected:
+    void generatePabloMethod() override;
+};
+
+Hangul_LVT::Hangul_LVT (LLVMTypeSystemInterface & ts,
+                                      StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index)
+: PabloKernel(ts, "Hangul_LVT" + std::to_string(Basis->getNumElements()) + "x1",
+// inputs
+{Binding{"basis", Basis}},
+// output
+    {Binding{"L_index", L_index}, Binding{"V_index", V_index}, Binding{"T_index", T_index}}) {
+}
+
+const unsigned L_Index_bits = 5;
+const unsigned V_Index_bits = 5;
+const unsigned T_Index_bits = 5;
+
+void Hangul_LVT::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    BixNumCompiler bnc(pb);
+    PabloAST * Hangul_precomposed = pb.createAnd(bnc.UGE(basis, Hangul_SBase), bnc.ULT(basis, Hangul_SBase + Hangul_SCount));
+    BixNum ZeroBasis(basis.size(), pb.createZeroes());
+
+    std::vector<Var *> L_indexVar(L_Index_bits);
+    for (unsigned i = 0; i < L_Index_bits; i++) {
+        L_indexVar[i] = pb.createVar("L_var" + std::to_string(i), pb.createZeroes());
+    }
+    std::vector<Var *> V_indexVar(V_Index_bits);
+    for (unsigned i = 0; i < V_Index_bits; i++) {
+        V_indexVar[i] = pb.createVar("V_var" + std::to_string(i), pb.createZeroes());
+    }
+    std::vector<Var *> T_indexVar(T_Index_bits);
+    for (unsigned i = 0; i < T_Index_bits; i++) {
+        T_indexVar[i] = pb.createVar("T_var" + std::to_string(i), pb.createZeroes());
+    }
+
+    auto nested = pb.createScope();
+    pb.createIf(Hangul_precomposed, nested);
+    BixNumCompiler bnc1(nested);
+
+    BixNum S_Index = bnc1.Select(Hangul_precomposed, bnc1.SubModular(basis, Hangul_SBase), ZeroBasis);
+    S_Index = bnc1.Truncate(S_Index, S_Index_bits);
+    BixNum LV_index;
+    BixNum T_index;
+    bnc1.Div(S_Index, Hangul_TCount, LV_index, T_index);
+    LV_index = bnc1.Truncate(LV_index, L_Index_bits + V_Index_bits);
+    BixNum L_index;
+    BixNum V_index;
+    bnc1.Div(LV_index, Hangul_VCount, L_index, V_index);
+    
+    for (unsigned i = 0; i < L_Index_bits; i++) {
+        nested.createAssign(L_indexVar[i], L_index[i]);
+    }
+    for (unsigned i = 0; i < V_Index_bits; i++) {
+        nested.createAssign(V_indexVar[i], V_index[i]);
+    }
+    for (unsigned i = 0; i < T_Index_bits; i++) {
+        nested.createAssign(T_indexVar[i], T_index[i]);
+    }
+
+    Var * L_out = getOutputStreamVar("L_index");
+    for (unsigned i = 0; i < L_Index_bits; i++) {
+        pb.createAssign(pb.createExtract(L_out, pb.getInteger(i)), L_indexVar[i]);
+    }
+    Var * V_out = getOutputStreamVar("V_index");
+    for (unsigned i = 0; i < V_Index_bits; i++) {
+        pb.createAssign(pb.createExtract(V_out, pb.getInteger(i)), V_indexVar[i]);
+    }
+    Var * T_out = getOutputStreamVar("T_index");
+    for (unsigned i = 0; i < T_Index_bits; i++) {
+        pb.createAssign(pb.createExtract(T_out, pb.getInteger(i)), T_indexVar[i]);
+    }
+}
+
 class Hangul_VT_Indices : public pablo::PabloKernel {
 public:
     Hangul_VT_Indices(LLVMTypeSystemInterface & ts,
@@ -399,7 +511,7 @@ void Hangul_NFD::generatePabloMethod() {
     LPart = bnc.AddModular(LPart, Hangul_LBase);
     // The V Part, when it exists, is one position after the opening L Part.
     PabloAST * V_position = nested.createAdvance(Hangul_L, 1);
-    for (unsigned i = 0; i < 5; i++) {
+    for (unsigned i = 0; i < V_Index_bits; i++) {
         V_index[i] = nested.createAdvance(V_index[i], 1);
     }
     BixNum VPart = bnc.ZeroExtend(V_index, 21);
@@ -407,7 +519,7 @@ void Hangul_NFD::generatePabloMethod() {
     // The T Part, if it exists is two positions after the opening
     // L Part.  A T Part only exists for LVT initials.
     PabloAST * T_position = nested.createAdvance(LV_LVT[1], 2);
-    for (unsigned i = 0; i < 5; i++) {
+    for (unsigned i = 0; i < T_Index_bits; i++) {
         T_index[i] = nested.createAdvance(T_index[i], 2);
     }
     BixNum TPart = bnc.ZeroExtend(T_index, 21);
@@ -547,14 +659,18 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
     SHOW_BIXNUM(LV_LVT);
 
-    auto Lindex_ccs = LIndexBixNumCCs();
-    StreamSet * LIndexBixNum = P.CreateStreamSet(Lindex_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
-    SHOW_BIXNUM(LIndexBixNum);
+    StreamSet * LIndexBixNum = P.CreateStreamSet(L_Index_bits);
+    StreamSet * VIndexBixNum = P.CreateStreamSet(V_Index_bits);
+    StreamSet * TIndexBixNum = P.CreateStreamSet(T_Index_bits);
 
-    StreamSet * VIndexBixNum = P.CreateStreamSet(5);
-    StreamSet * TIndexBixNum = P.CreateStreamSet(5);
-    P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+    if (LDiv) {
+        P.CreateKernelCall<Hangul_LVT>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+    } else {
+        auto Lindex_ccs = LIndexBixNumCCs();
+        P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
+        P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+    }
+    SHOW_BIXNUM(LIndexBixNum);
     SHOW_BIXNUM(VIndexBixNum);
     SHOW_BIXNUM(TIndexBixNum);
 
@@ -622,19 +738,20 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_BYTES(ViolationCCCBytes);
 
 /*  TO DO */
-    StreamSet * ReorderedBytes = P.CreateStreamSet(1, 8);
+//  StreamSet * ReorderedBytes = P.CreateStreamSet(1, 8);
 //  P.CreateKernelCall<CanonicalReordering>(ViolationSeqBytes, ViolationCCCBytes, ReorderedBytes);
 
-    StreamSet * ReorderedStream = P.CreateStreamSet(1, 8);
+//  StreamSet * ReorderedStream = P.CreateStreamSet(1, 8);
 //  SpreadByMask(P, U8_ViolationSeq, ReorderedBytes, ReorderedStream);
 
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
 
-    StreamSet * ReorderedOutput = P.CreateStreamSet(1, 8);
+//  StreamSet * ReorderedOutput = P.CreateStreamSet(1, 8);
 //  P.CreateKernelCall<StreamsBlend>(U8_ViolationSeq, OutputBytes, ReorderedBytes, ReorderedOutput);
 
-//  P.CreateKernelCall<StdOutKernel>(ReorderedOutput);
+//  P.CreateKernelCall<StdOutKernel>(ReorderedBytes);
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
 
     return P.compile();
 }
