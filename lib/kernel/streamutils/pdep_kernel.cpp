@@ -844,6 +844,42 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
     return finalmask;
 }
 
+ByteCombine::ByteCombine(LLVMTypeSystemInterface & ts,
+                     StreamSet * const byteStream1,
+                     StreamSet * const byteStream2,
+                     StreamSet * const outputBytes)
+: MultiBlockKernel(ts, "ByteCombine"
+, {Binding{"byteStream1", byteStream1}, Binding{"byteStream2", byteStream2}}
+, {Binding{"outputBytes", outputBytes}}, {}, {}, {}) {
+}
+
+void ByteCombine::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * combineLoop = b.CreateBasicBlock("combineLoop");
+    BasicBlock * combineDone = b.CreateBasicBlock("combineDone");
+    Constant * const sz_ZERO = b.getSize(0);
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
+    }
+    b.CreateBr(combineLoop);
+
+    b.SetInsertPoint(combineLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockOffsetPhi->addIncoming(sz_ZERO, entry);
+    for (unsigned i = 0; i < 8; i++) {
+        Value * bytepack1 = b.loadInputStreamPack("byteStream1", sz_ZERO, b.getInt32(i), blockOffsetPhi);
+        Value * bytepack2 = b.loadInputStreamPack("byteStream2", sz_ZERO, b.getInt32(i), blockOffsetPhi);
+        Value * combined = b.CreateOr(bytepack1, bytepack2);
+        b.storeOutputStreamPack("outputBytes", sz_ZERO, b.getInt32(i), blockOffsetPhi, combined);
+    }
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    blockOffsetPhi->addIncoming(nextBlk, combineLoop);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
+    b.CreateCondBr(moreToDo, combineLoop, combineDone);
+
+    b.SetInsertPoint(combineDone);
+}
 
 ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const output, Scalar * streamOffset)
 : MultiBlockKernel(b, [&]() {

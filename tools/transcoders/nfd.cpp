@@ -62,7 +62,8 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
-static cl::opt<bool> LateU21("LateU21", cl::desc("Delay conversion to Unicode 21-bit values until after filtering"), cl::cat(NFD_Options));
+static cl::opt<bool> LateU21("LateU21", cl::desc("Delay conversion to Unicode 21-bit values until after filtering"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -716,9 +717,15 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
 
-    StreamSet * const NonModifiedBasis = P.CreateStreamSet(8, 1);
-    FilterByMask(P, NonModifiedMask, BasisBits, NonModifiedBasis);
-    SHOW_BIXNUM(NonModifiedBasis);
+    StreamSet * NonModifiedBasis = nullptr;
+    if (ByteMerging) {
+        NonModifiedBasis = P.CreateStreamSet(1, 8);
+        FilterByMask(P, NonModifiedMask, ByteStream, NonModifiedBasis);
+    } else {
+        NonModifiedBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, NonModifiedMask, BasisBits, NonModifiedBasis);
+        SHOW_BIXNUM(NonModifiedBasis);
+    }
 
     UTF_Encoder U8_Encoder(8);
     NFD_BixData NFD_Data(U8_Encoder);
@@ -836,24 +843,32 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     U21_to_UTF8(P, SortResults[1], ReorderedBasis);
     SHOW_BIXNUM(ReorderedBasis);
 
-    StreamSet * const ReorderedPlaced = P.CreateStreamSet(8);
-    SpreadByMask(P, FinalWorkPlacementMask, ReorderedBasis, ReorderedPlaced);
-    SHOW_BIXNUM(ReorderedPlaced);
-
     StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<Invert>(FinalWorkPlacementMask, NonModifiedPlacementMask);
 
-    StreamSet * const NonModifiedPlaced = P.CreateStreamSet(8);
-    SpreadByMask(P, NonModifiedPlacementMask, NonModifiedBasis, NonModifiedPlaced);
-    SHOW_BIXNUM(NonModifiedPlaced);
-
-    StreamSet * const OutputBasis = P.CreateStreamSet(8);
-    MergeByMask(P, FinalWorkPlacementMask, ReorderedBasis, NonModifiedBasis, OutputBasis);
-    SHOW_BIXNUM(OutputBasis);
-
     StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    if (ByteMerging) {
+        StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
+        SpreadByMask(P, NonModifiedPlacementMask, NonModifiedBasis, NonModifiedPlaced);
 
+        StreamSet * const ReorderedBytes = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<P2SKernel>(ReorderedBasis, ReorderedBytes);
+        
+        StreamSet * const ReorderedPlaced = P.CreateStreamSet(1, 8);
+        SpreadByMask(P, FinalWorkPlacementMask, ReorderedBytes, ReorderedPlaced);
+        
+        P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, ReorderedPlaced, OutputBytes);
+    } else {
+        StreamSet * const ReorderedPlaced = P.CreateStreamSet(8);
+        SpreadByMask(P, FinalWorkPlacementMask, ReorderedBasis, ReorderedPlaced);
+        SHOW_BIXNUM(ReorderedPlaced);
+
+        StreamSet * const OutputBasis = P.CreateStreamSet(8);
+        MergeByMask(P, FinalWorkPlacementMask, ReorderedBasis, NonModifiedBasis, OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
+
+        P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    }
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
     return P.compile();
 }
