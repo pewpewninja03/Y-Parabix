@@ -62,7 +62,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
-static cl::opt<bool> EarlyInsertion("early-insertion", cl::desc("Perform insertion of necessary space in UTF-8 space"), cl::cat(NFD_Options));
+static cl::opt<bool> LateU21("LateU21", cl::desc("Delay conversion to Unicode 21-bit values until after filtering"), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -712,14 +712,6 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
 
-    StreamSet * const WorkingBasis = P.CreateStreamSet(8, 1);
-    FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
-    SHOW_BIXNUM(WorkingBasis);
-
-    StreamSet * const WorkingU8index = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UTF8_index>(WorkingBasis, WorkingU8index);
-    SHOW_STREAM(WorkingU8index);
-
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
@@ -771,11 +763,21 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_STREAM(FinalWorkPlacementMask);
 
     StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
-    SHOW_BIXNUM(U21_u8indexed);
-
     StreamSet * U21_focus = P.CreateStreamSet(21, 1);
-    FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
+    if (LateU21) {
+        StreamSet * const WorkingBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
+        SHOW_BIXNUM(WorkingBasis);
+        StreamSet * const WorkingU8index = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<UTF8_index>(WorkingBasis, WorkingU8index);
+        SHOW_STREAM(WorkingU8index);
+        P.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
+        FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
+    } else {
+        P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+        FilterByMask(P, NFD_WorkItems, U21_u8indexed, U21_focus);
+    }
+    SHOW_BIXNUM(U21_u8indexed);
     SHOW_BIXNUM(U21_focus);
 
     // Now we have a Unicode-indexed representation of all significant
