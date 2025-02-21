@@ -1067,15 +1067,28 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
     return IDISA_AVX2_Builder::mvmd_compress(fw, a, select_mask);
 }
 
+#define MVMD_EXPAND_BY_INDUCTIVE_DOUBLING
 Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_mask) {
     const auto fieldCount = mBitBlockWidth / fw;
     Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
-    if (hasFeature(Feature::AVX512_VBMI2)) {
+    bool has_avx_512_mask_expand = (fw == 32) || (fw == 64) || (hasFeature(Feature::AVX512_VBMI2) && ((fw == 16) | (fw == 8)));
+    if (has_avx_512_mask_expand) {
         Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
         return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(fw, a), fwCast(fw, allZeroes()), CreateBitCast(mask, maskTy)});
-    } else if (fw > 16 || hasFeature(Feature::AVX512_VBMI) || hasFeature(Feature::AVX512_BW)) {
-
+    } else if ((fw == 8) || (fw == 16)) {
+#ifdef MVMD_EXPAND_BY_INDUCTIVE_DOUBLING
+        Value * hi_mask = CreateLShr(mask, Constant::getIntegerValue(mask->getType(), APInt(fieldCount, fieldCount/2)));
+        hi_mask = CreateTrunc(hi_mask, getIntNTy(fieldCount/2));
+        Value * lo_mask = CreateTrunc(mask, getIntNTy(fieldCount/2));
+        Value * lo_to_hi = CreatePopcount(CreateNot(lo_mask));
+        Value * lo_vec = esimd_mergel(fw, a, allZeroes());
+        Value * hi_vec = esimd_mergeh(fw, mvmd_sll(fw, a, lo_to_hi, true), allZeroes());
+        Value * expand_lo = mvmd_expand(fw * 2, lo_vec, lo_mask);
+        Value * expand_hi = mvmd_expand(fw * 2, hi_vec, hi_mask);
+        Value * packed = bitCast(hsimd_packl(fw * 2, expand_lo, expand_hi));
+        return packed;
+#else
         uint64_t indices[6] = {
             0xAAAAAAAAAAAAAAAA,
             0xCCCCCCCCCCCCCCCC,
@@ -1123,6 +1136,7 @@ Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * selec
         Constant * zero_vec = ConstantVector::getNullValue(a->getType());
         Value * const shuffled = mvmd_shuffle2(fw, a, zero_vec, permute_vec);
         return CreateAnd(shuffled, simd_any(fw, esimd_bitspread(fw, mask)));
+#endif
     }
     return IDISA_AVX2_Builder::mvmd_expand(fw, a, select_mask);
 }
