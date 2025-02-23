@@ -195,5 +195,12 @@ protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
+class ByteReplaceByMask final : public MultiBlockKernel {
+public:
+    ByteReplaceByMask(LLVMTypeSystemInterface & b, StreamSet * mask, StreamSet * ToFill, StreamSet * Filler, StreamSet * Filled);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+};
+
 }
 

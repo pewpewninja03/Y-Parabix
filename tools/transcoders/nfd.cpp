@@ -64,6 +64,7 @@ static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Opti
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
 static cl::opt<bool> LateU21("LateU21", cl::desc("Delay conversion to Unicode 21-bit values until after filtering"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(false), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -854,10 +855,14 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         StreamSet * const ReorderedBytes = P.CreateStreamSet(1, 8);
         P.CreateKernelCall<P2SKernel>(ReorderedBasis, ReorderedBytes);
         
-        StreamSet * const ReorderedPlaced = P.CreateStreamSet(1, 8);
-        SpreadByMask(P, FinalWorkPlacementMask, ReorderedBytes, ReorderedPlaced);
-        
-        P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, ReorderedPlaced, OutputBytes);
+        if (ByteReplace) {
+            ByteReplaceByMask(P, FinalWorkPlacementMask, NonModifiedPlaced, ReorderedBytes, OutputBytes);
+        } else {
+            StreamSet * const ReorderedPlaced = P.CreateStreamSet(1, 8);
+            SpreadByMask(P, FinalWorkPlacementMask, ReorderedBytes, ReorderedPlaced);
+
+            P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, ReorderedPlaced, OutputBytes);
+        }
     } else {
         StreamSet * const ReorderedPlaced = P.CreateStreamSet(8);
         SpreadByMask(P, FinalWorkPlacementMask, ReorderedBasis, ReorderedPlaced);
