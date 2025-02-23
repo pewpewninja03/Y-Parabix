@@ -881,28 +881,17 @@ void ByteCombine::generateMultiBlockLogic(KernelBuilder & b, Value * const numOf
     b.SetInsertPoint(combineDone);
 }
 
-ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const output, Scalar * streamOffset)
-: MultiBlockKernel(b, [&]() {
-   std::string tmp;
-   raw_string_ostream nm(tmp);
-   nm << "ByteSpreadByMask" << output->getNumElements() << 'x' << byteStream->getFieldWidth();
-   if (streamOffset) {
-       nm << 'S';
-   }
-   nm.flush();
-   return tmp;
-}(),
-{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread}},
-{Binding{"output", output}}, {}, {}, {}) {
-    if (streamOffset) {
-        mInputScalars.emplace_back("offset", streamOffset);
-    }
-}
-
 ByteReplaceByMask::ByteReplaceByMask(LLVMTypeSystemInterface & b, StreamSet * mask, StreamSet * ToFill, StreamSet * Filler, StreamSet * output)
-: MultiBlockKernel(b, "ByteReplaceByMask",
+: MultiBlockKernel(b, "ByteReplaceByMask" + ToFill->shapeString(),
 {Binding{"mask", mask}, Binding{"ToFill", ToFill}, Binding{"Filler", Filler, PopcountOf("mask")}},
 {Binding{"output", output, FixedRate(), InOut("ToFill")}}, {}, {}, {}) {
+    assert(mask->getNumElements() == 1);
+    assert(mask->getFieldWidth() == 1);
+    assert(ToFill->getFieldWidth() == ToFill->getFieldWidth());
+    assert(ToFill->getFieldWidth() == output->getFieldWidth());
+    assert(ToFill->getNumElements() == 1);
+    assert(Filler->getNumElements() == 1);
+    assert(output->getNumElements() == 1);
 }
 
 void ByteReplaceByMask::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -912,23 +901,9 @@ void ByteReplaceByMask::generateMultiBlockLogic(KernelBuilder & b, Value * const
     BasicBlock * packLoopMain = b.CreateBasicBlock("packLoopMain");
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
     Constant * const sz_ZERO = b.getSize(0);
-    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
-    if (LLVM_UNLIKELY(fieldWidth != 8)) {
-        report_fatal_error(Twine{getName(), ": does not support field widths other than 8 bits"});
-    }
-    StreamSet * const output = getOutputStreamSet(0);
-    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
-        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
-    }
-
-    Value * initPos = b.getProcessedItemCount("byteStream");
-    const auto numElements = output->getNumElements();
-    const auto numInputElements = getInputStreamSet(0)->getNumElements();
-    if (numElements > numInputElements) {
-        report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
-    }
-
-    FixedVectorType * dataVecTy = b.fwVectorType(fieldWidth); // FixedVectorType::get(b.getIntNTy(fieldWidth), b.getBitBlockWidth() / fieldWidth);
+    Value * initPos = b.getProcessedItemCount("Filler");
+    const auto fieldWidth = getInputStreamSet(1)->getFieldWidth();
+    FixedVectorType * dataVecTy = b.fwVectorType(fieldWidth);
     FixedVectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
 
     b.CreateBr(packLoop);
@@ -950,9 +925,6 @@ void ByteReplaceByMask::generateMultiBlockLogic(KernelBuilder & b, Value * const
     b.CreateCondBr(nullSpread, packLoopShortCut, packLoopMain);
 
     b.SetInsertPoint(packLoopShortCut);
-    for (unsigned i = 0; i < fieldWidth; ++i) {
-        b.storeOutputStreamPack("output", sz_ZERO, b.getSize(i), blockOffsetPhi, b.allZeroes());
-    }
     toReadPosPhi->addIncoming(toReadPos, packLoopShortCut);
     blockOffsetPhi->addIncoming(nextBlk, packLoopShortCut);
     b.CreateCondBr(moreToDo, packLoop, packFinalize);
@@ -984,6 +956,23 @@ void ByteReplaceByMask::generateMultiBlockLogic(KernelBuilder & b, Value * const
     b.SetInsertPoint(packFinalize);
 }
 
+ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const output, Scalar * streamOffset)
+: MultiBlockKernel(b, [&]() {
+   std::string tmp;
+   raw_string_ostream nm(tmp);
+   nm << "ByteSpreadByMask" << output->getNumElements() << 'x' << byteStream->getFieldWidth();
+   if (streamOffset) {
+       nm << 'S';
+   }
+   nm.flush();
+   return tmp;
+}(),
+{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread}},
+{Binding{"output", output}}, {}, {}, {}) {
+    if (streamOffset) {
+        mInputScalars.emplace_back("offset", streamOffset);
+    }
+}
 
 void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();

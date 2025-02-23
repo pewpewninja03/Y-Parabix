@@ -856,7 +856,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         P.CreateKernelCall<P2SKernel>(ReorderedBasis, ReorderedBytes);
         
         if (ByteReplace) {
-            ByteReplaceByMask(P, FinalWorkPlacementMask, NonModifiedPlaced, ReorderedBytes, OutputBytes);
+            P.CreateKernelCall<ByteReplaceByMask>(FinalWorkPlacementMask, NonModifiedPlaced, ReorderedBytes, OutputBytes);
         } else {
             StreamSet * const ReorderedPlaced = P.CreateStreamSet(1, 8);
             SpreadByMask(P, FinalWorkPlacementMask, ReorderedBytes, ReorderedPlaced);
