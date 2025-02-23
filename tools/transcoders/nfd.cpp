@@ -666,141 +666,21 @@ void CreateU8_FilterMask::generatePabloMethod() {
     pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
 }
 
-typedef void (*XfrmFunctionType)(uint32_t fd);
 
-XfrmFunctionType generate_pipeline(CPUDriver & driver) {
-    // A Parabix program is build as a set of kernel calls called a pipeline.
-    // A pipeline is construction using a Parabix driver object.
-
-    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
-
-    //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
-    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
-    //  from a file descriptor.
-    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    SHOW_BYTES(ByteStream);
-
-    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    SHOW_BIXNUM(BasisBits);
-
-    StreamSet * const u8index = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
-    SHOW_STREAM(u8index);
-
-    re::RE * dtCanProp = re::makePropertyExpression("dt", "Can");
-    dtCanProp = UCD::linkAndResolve(dtCanProp);
-    re::Name * dtCanName = re::makeName("dt", "Can");
-    dtCanName->setDefinition(dtCanProp);
-    StreamSet * const DT_Can = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(dtCanName, BasisBits, DT_Can);
-    SHOW_STREAM(DT_Can);
-
-    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
-    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
-    re::Name * CCC0_Name = re::makeName("CCC", "NR");
-    CCC0_Name->setDefinition(CCC0_Prop);
-    StreamSet * const CCC_0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, CCC_0);//, BitMovementMode::LookAhead);
-    SHOW_STREAM(CCC_0);
-
-    StreamSet * const NFD_WorkItems = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<NFD_Focus>(u8index, DT_Can, CCC_0, NFD_WorkItems);
-    SHOW_STREAM(NFD_WorkItems);
-
-    StreamSet * const WorkSelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
-    SHOW_STREAM(WorkSelectionMask);
-
-    StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
-    SHOW_STREAM(NonModifiedMask);
-
-    StreamSet * NonModifiedBasis = nullptr;
-    if (ByteMerging) {
-        NonModifiedBasis = P.CreateStreamSet(1, 8);
-        FilterByMask(P, NonModifiedMask, ByteStream, NonModifiedBasis);
-    } else {
-        NonModifiedBasis = P.CreateStreamSet(8, 1);
-        FilterByMask(P, NonModifiedMask, BasisBits, NonModifiedBasis);
-        SHOW_BIXNUM(NonModifiedBasis);
-    }
-
-    UTF_Encoder U8_Encoder(8);
-    NFD_BixData NFD_Data(U8_Encoder);
-    auto u8_insert_ccs = NFD_Data.UTF8_Insertion_BixNumCCs();
-    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(u8_insert_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(u8_insert_ccs, BasisBits, U8_Insertion_BixNum);
-    SHOW_BIXNUM(U8_Insertion_BixNum);
-
-    auto u8_deletion_ccs = NFD_Data.UTF8_Deletion_BixNumCCs();
-    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(u8_deletion_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(u8_deletion_ccs, BasisBits, U8_Deletion_BixNum);
-    SHOW_BIXNUM(U8_Deletion_BixNum);
-
-    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
-    SHOW_STREAM(U8_FilterMask);
-
-    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(U8_SpreadMask);
-
-    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
-
-    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
-    SHOW_STREAM(ExpandedFilterMask);
-
-    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
-    SHOW_STREAM(U8_PostSpreadFilterMask);
-
-    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, WorkSelectionMask, WorkSpreadMask);
-    SHOW_STREAM(WorkSpreadMask);
-
-    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
-    SHOW_STREAM(WorkExpansionMask);
-
-    StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
-    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, FinalWorkPlacementMask);
-    SHOW_STREAM(FinalWorkPlacementMask);
-
-    StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
-    StreamSet * U21_focus = P.CreateStreamSet(21, 1);
-    if (LateU21) {
-        StreamSet * const WorkingBasis = P.CreateStreamSet(8, 1);
-        FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
-        SHOW_BIXNUM(WorkingBasis);
-        StreamSet * const WorkingU8index = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<UTF8_index>(WorkingBasis, WorkingU8index);
-        SHOW_STREAM(WorkingU8index);
-        P.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
-        FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
-    } else {
-        P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
-        FilterByMask(P, NFD_WorkItems, U21_u8indexed, U21_focus);
-    }
-    SHOW_BIXNUM(U21_u8indexed);
-    SHOW_BIXNUM(U21_focus);
-
+StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U21_Basis) {
     // Now we have a Unicode-indexed representation of all significant
     // sequences for NFD processing.
     // Expand to make room for decompositions.
     auto insert_ccs = NFD_Data.NFD_Insertion_BixNumCCs();
     StreamSet * const U21_Insertion_BixNum = P.CreateStreamSet(insert_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21_focus, U21_Insertion_BixNum);
+    P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21_Basis, U21_Insertion_BixNum);
     SHOW_BIXNUM(U21_Insertion_BixNum);
 
     StreamSet * const U21_SpreadMask = InsertionSpreadMask(P, U21_Insertion_BixNum, kernel::InsertPosition::After);
     SHOW_STREAM(U21_SpreadMask);
 
     StreamSet * const U21_ExpandedBasis = P.CreateStreamSet(21, 1);
-    SpreadByMask(P, U21_SpreadMask, U21_focus, U21_ExpandedBasis);
+    SpreadByMask(P, U21_SpreadMask, U21_Basis, U21_ExpandedBasis);
     SHOW_BIXNUM(U21_ExpandedBasis);
 
     //  The Hangul decomposition algorithm calculates replacements for LV and
@@ -840,8 +720,147 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_BIXNUM(SortResults[0]);
     SHOW_BIXNUM(SortResults[1]);
 
+    return SortResults[1];
+}
+
+StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, StreamSet * U8_Basis, StreamSet * u8index) {
+    re::RE * dtCanProp = re::makePropertyExpression("dt", "Can");
+    dtCanProp = UCD::linkAndResolve(dtCanProp);
+    re::Name * dtCanName = re::makeName("dt", "Can");
+    dtCanName->setDefinition(dtCanProp);
+    StreamSet * const DT_Can = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(dtCanName, U8_Basis, DT_Can);
+    SHOW_STREAM(DT_Can);
+
+    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+    re::Name * CCC0_Name = re::makeName("CCC", "NR");
+    CCC0_Name->setDefinition(CCC0_Prop);
+    StreamSet * const CCC_0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, U8_Basis, CCC_0);//, BitMovementMode::LookAhead);
+    SHOW_STREAM(CCC_0);
+
+    StreamSet * const NFD_WorkItems = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<NFD_Focus>(u8index, DT_Can, CCC_0, NFD_WorkItems);
+    SHOW_STREAM(NFD_WorkItems);
+
+    return NFD_WorkItems;
+}
+
+StreamSet * WorkPlacementMask(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * SelectionMask) {
+    auto u8_insert_ccs = NFD_Data.UTF8_Insertion_BixNumCCs();
+    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(u8_insert_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(u8_insert_ccs, U8_Basis, U8_Insertion_BixNum);
+    SHOW_BIXNUM(U8_Insertion_BixNum);
+
+    auto u8_deletion_ccs = NFD_Data.UTF8_Deletion_BixNumCCs();
+    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(u8_deletion_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(u8_deletion_ccs, U8_Basis, U8_Deletion_BixNum);
+    SHOW_BIXNUM(U8_Deletion_BixNum);
+
+    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
+    SHOW_STREAM(U8_FilterMask);
+
+    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(U8_SpreadMask);
+
+    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
+
+    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
+    SHOW_STREAM(ExpandedFilterMask);
+
+    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
+    SHOW_STREAM(U8_PostSpreadFilterMask);
+
+    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, U8_SpreadMask, SelectionMask, WorkSpreadMask);
+    SHOW_STREAM(WorkSpreadMask);
+
+    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
+    SHOW_STREAM(WorkExpansionMask);
+
+    StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, FinalWorkPlacementMask);
+    SHOW_STREAM(FinalWorkPlacementMask);
+    return FinalWorkPlacementMask;
+}
+
+typedef void (*XfrmFunctionType)(uint32_t fd);
+
+XfrmFunctionType generate_pipeline(CPUDriver & driver) {
+    // A Parabix program is build as a set of kernel calls called a pipeline.
+    // A pipeline is construction using a Parabix driver object.
+
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+
+    //  The program will use a file descriptor as an input.
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  from a file descriptor.
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
+
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
+    
+    StreamSet * const u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
+
+    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, BasisBits, u8index);
+
+    StreamSet * const WorkSelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
+    SHOW_STREAM(WorkSelectionMask);
+
+    UTF_Encoder U8_Encoder(8);
+    NFD_BixData NFD_Data(U8_Encoder);
+    
+    StreamSet * const FinalWorkPlacementMask = WorkPlacementMask(P, NFD_Data, BasisBits, WorkSelectionMask);
+
+    StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
+    SHOW_STREAM(NonModifiedMask);
+
+    StreamSet * NonModifiedBasis = nullptr;
+    if (ByteMerging) {
+        NonModifiedBasis = P.CreateStreamSet(1, 8);
+        FilterByMask(P, NonModifiedMask, ByteStream, NonModifiedBasis);
+    } else {
+        NonModifiedBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, NonModifiedMask, BasisBits, NonModifiedBasis);
+        SHOW_BIXNUM(NonModifiedBasis);
+    }
+    
+    StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
+    StreamSet * U21_focus = P.CreateStreamSet(21, 1);
+    if (LateU21) {
+        StreamSet * const WorkingBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
+        SHOW_BIXNUM(WorkingBasis);
+        StreamSet * const WorkingU8index = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<UTF8_index>(WorkingBasis, WorkingU8index);
+        SHOW_STREAM(WorkingU8index);
+        P.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
+        FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
+    } else {
+        P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+        FilterByMask(P, NFD_WorkItems, U21_u8indexed, U21_focus);
+    }
+    SHOW_BIXNUM(U21_u8indexed);
+    SHOW_BIXNUM(U21_focus);
+    
+    StreamSet * NFD_U21_Results = NFD_U21_Pipeline(P, NFD_Data, U21_focus);
+
     StreamSet * const ReorderedBasis = P.CreateStreamSet(8);
-    U21_to_UTF8(P, SortResults[1], ReorderedBasis);
+    U21_to_UTF8(P, NFD_U21_Results, ReorderedBasis);
     SHOW_BIXNUM(ReorderedBasis);
 
     StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
