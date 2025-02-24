@@ -38,7 +38,9 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/unicode/resolve_properties.h>
 #include <string>
+#include <fileselect/file_select.h>
 #include <toolchain/toolchain.h>
+#include <toolchain/fileutil.h>
 #include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
 #include <iostream>
@@ -790,20 +792,18 @@ StreamSet * WorkPlacementMask(PipelineBuilder & P, NFD_BixData & NFD_Data, Strea
     return FinalWorkPlacementMask;
 }
 
-typedef void (*XfrmFunctionType)(uint32_t fd);
+typedef void (*XfrmFunctionType)(char *, size_t);
 
 XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
 
-    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+    auto P = CreatePipeline(driver, Input<char*>{"buffer"}, Input<size_t>{"length"});
+    Scalar * const buffer = P.getInputScalar("buffer");
+    Scalar * const length = P.getInputScalar("length");
 
-    //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
-    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
-    //  from a file descriptor.
-    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
     SHOW_BYTES(ByteStream);
 
     StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
@@ -907,12 +907,12 @@ int main(int argc, char *argv[]) {
     XfrmFunctionType fn;
     fn = generate_pipeline(driver);
     //
-    const int fd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
-    } else {
-        fn(fd);
-        close(fd);
-    }
+    bool useMMap = MMapPreference && canMMap(inputFile);
+    AlignedFileBuffer buf;
+    buf.load(inputFile, useMMap);
+    size_t bytes_read = buf.getBufSize();
+    if (bytes_read <= 0) return 0;
+    fn(buf.getBuf(), buf.getBufSize());
+    buf.release();
     return 0;
 }
