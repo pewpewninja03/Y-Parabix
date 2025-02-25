@@ -38,9 +38,8 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/unicode/resolve_properties.h>
 #include <string>
-#include <fileselect/file_select.h>
-#include <toolchain/toolchain.h>
 #include <toolchain/fileutil.h>
+#include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
 #include <iostream>
@@ -67,6 +66,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 static cl::opt<bool> LateU21("LateU21", cl::desc("Delay conversion to Unicode 21-bit values until after filtering"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<bool> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(false), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -791,13 +791,154 @@ StreamSet * WorkPlacementMask(PipelineBuilder & P, NFD_BixData & NFD_Data, Strea
     SHOW_STREAM(FinalWorkPlacementMask);
     return FinalWorkPlacementMask;
 }
+//#define STAGE1_TO_STDOUT
+#ifdef STAGE1_TO_STDOUT
+typedef void (*Stage1FunctionType)(char *, size_t);
+#else
+typedef void (*Stage1FunctionType)(kernel::StreamSetPtr &, char *, size_t);
+#endif
+
+Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
+    
+    auto P = CreatePipeline(driver,
+#ifndef STAGE1_TO_STDOUT
+                            Output<streamset_t>("WorkingBytes", 1, 8),
+#endif
+                            Input<char*>{"buffer"},
+                            Input<size_t>{"length"}
+                            );
+    Scalar * const buffer = P.getInputScalar("buffer");
+    Scalar * const length = P.getInputScalar("length");
+
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    SHOW_BYTES(ByteStream);
+
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
+    
+    StreamSet * const u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
+    
+    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, BasisBits, u8index);
+    
+    StreamSet * const WorkSelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
+    SHOW_STREAM(WorkSelectionMask);
+    
+    StreamSet * const WorkingBasis = P.CreateStreamSet(8, 1);
+    FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
+    SHOW_BIXNUM(WorkingBasis);
+    
+#ifdef STAGE1_TO_STDOUT
+    StreamSet * const WorkingBytes = P.CreateStreamSet(1, 8);
+#else
+    StreamSet * const WorkingBytes = P.getOutputStreamSet("WorkingBytes");
+#endif
+    P.CreateKernelCall<P2SKernel>(WorkingBasis, WorkingBytes);
+#ifdef STAGE1_TO_STDOUT
+    P.CreateKernelCall<StdOutKernel>(WorkingBytes);
+#endif
+    return P.compile();
+}
+
+#define STAGE2_TO_STDOUT
+#ifdef STAGE2_TO_STDOUT
+typedef void (*Stage2FunctionType)(const kernel::StreamSetPtr & source_buf);
+#else
+typedef void (*Stage2FunctionType)(const StreamSetPtr & source_buf, StreamSetPtr & NFD_buf);
+#endif
+
+
+typedef void (*Stage2FunctionType)(const kernel::StreamSetPtr & source_buf);
+//typedef void (*Stage2FunctionType)(const StreamSetPtr & source_buf, StreamSetPtr & NFD_buf);
+
+Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver) {
+    
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>("WorkingBytes", 1, 8)
+#ifndef STAGE2_TO_STDOUT
+                            ,Output<streamset_t>("NFD_Bytes",  1, 8)
+#endif
+                            );
+    
+    StreamSet * WorkingData = P.getInputStreamSet("WorkingBytes");
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(WorkingData, BasisBits);
+    SHOW_BIXNUM(BasisBits);
+
+    StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+
+    UTF_Encoder U8_Encoder(8);
+    NFD_BixData NFD_Data(U8_Encoder);
+    
+    StreamSet * NFD_U21_Results = NFD_U21_Pipeline(P, NFD_Data, U21_u8indexed);
+    
+    StreamSet * const NFD_Basis = P.CreateStreamSet(8, 1);
+    U21_to_UTF8(P, NFD_U21_Results, NFD_Basis);
+    SHOW_BIXNUM(NFD_Basis);
+    
+#ifdef STAGE2_TO_STDOUT
+    StreamSet * const NFD_Bytes = P.CreateStreamSet(1, 8);
+#else
+    StreamSet * const NFD_Bytes = P.getOutputStreamSet("NFD_Bytes");
+#endif
+    P.CreateKernelCall<P2SKernel>(NFD_Basis, NFD_Bytes);
+#ifdef STAGE2_TO_STDOUT
+    P.CreateKernelCall<StdOutKernel>(NFD_Bytes);
+#endif
+    return P.compile();
+}
+
+/*
+typedef void (*OutputStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, int32_t);
+
+OutputStageFunctionType generate_output_pipeline(CPUDriver & driver) {
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>("SourceMask", 1, 1),
+                            Input<streamset_t>("PlacementMask", 1, 1),
+                            Input<streamset_t>("PlacedData", 1, 8),
+                            Input<uint32_t>("inputFileDecriptor"));
+    StreamSet * SourceMask = P.getInputStreamSet("SourceMask");
+    StreamSet * WorkPlacementMask = P.getInputStreamSet("PlacementMask");
+    StreamSet * PlacedData = P.getInputStreamSet("PlacedData");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    //
+    //  Rereading the bytestream - TODO : pass in a buffer.
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    //
+    //  The following Filter-Spread combination could be integrated
+    //  together into a MoveByMask kernel.
+    StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(WorkPlacementMask, NonModifiedMask);
+    SHOW_STREAM(NonModifiedMask);
+    StreamSet * FilteredBytes = P.CreateStreamSet(1, 8);
+    FilterByMask(P, SourceMask, ByteStream, FilteredBytes);
+    StreamSet * PlacedSourceBytes = P.CreateStreamSet(1, 8);
+    SpreadByMask(P, NonModifiedMask, FilteredBytes, PlacedSourceBytes);
+    //
+    StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
+    if (ByteReplace) {
+        P.CreateKernelCall<ByteReplaceByMask>(WorkPlacementMask, PlacedSourceBytes, PlacedData, OutputBytes);
+    } else {
+        StreamSet * const ReorderedPlaced = P.CreateStreamSet(1, 8);
+        SpreadByMask(P, WorkPlacementMask, ReorderedBytes, ReorderedPlaced);
+        
+        P.CreateKernelCall<ByteCombine>(PlacedSourceBytes, ReorderedPlaced, OutputBytes);
+    }
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
+    return P.compile();
+}
+    
+ */
 
 typedef void (*XfrmFunctionType)(char *, size_t);
 
 XfrmFunctionType generate_pipeline(CPUDriver & driver) {
-    // A Parabix program is build as a set of kernel calls called a pipeline.
-    // A pipeline is construction using a Parabix driver object.
-
     auto P = CreatePipeline(driver, Input<char*>{"buffer"}, Input<size_t>{"length"});
     Scalar * const buffer = P.getInputScalar("buffer");
     Scalar * const length = P.getInputScalar("length");
@@ -899,20 +1040,35 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
 
 int main(int argc, char *argv[]) {
-    //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
-    //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver driver("NFD_function");
-    //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    XfrmFunctionType fn;
-    fn = generate_pipeline(driver);
-    //
     bool useMMap = MMapPreference && canMMap(inputFile);
     AlignedFileBuffer buf;
     buf.load(inputFile, useMMap);
     size_t bytes_read = buf.getBufSize();
     if (bytes_read <= 0) return 0;
-    fn(buf.getBuf(), buf.getBufSize());
+    CPUDriver driver("NFD_function");
+    if (SeparatedPipelineStages) {
+        Stage1FunctionType stage1 = generate_stage1_pipeline(driver);
+#ifdef STAGE1_TO_STDOUT
+        stage1(buf.getBuf(), buf.getBufSize());
+#else
+        kernel::StreamSetPtr Working;
+        stage1(Working, buf.getBuf(), buf.getBufSize());
+#endif
+        Stage2FunctionType stage2 = generate_stage2_pipeline(driver);
+#ifndef STAGE1_TO_STDOUT
+#ifdef STAGE2_TO_STDOUT
+        stage2(Working);
+#else
+        kernel::StreamSetPtr NFD_Bytes;
+        stage2(Working, NFD_Bytes);
+#endif
+#endif
+        //OutputStageFunctionType stage3 = generate_output_stage_pipeline(driver);
+    } else {
+        XfrmFunctionType fn = generate_pipeline(driver);
+        fn(buf.getBuf(), buf.getBufSize());
+    }
     buf.release();
     return 0;
 }
