@@ -977,8 +977,6 @@ ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, Stre
 void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
     BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
-    BasicBlock * packLoopShortCut = b.CreateBasicBlock("packLoopShortCut");
-    BasicBlock * packLoopMain = b.CreateBasicBlock("packLoopMain");
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
     Constant * const sz_ZERO = b.getSize(0);
     Constant * const sz_ONE = b.getSize(1);
@@ -1023,6 +1021,8 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     if (numElements == 1 && numInputElements == 1) {
 
+        BasicBlock * packLoopShortCut = b.CreateBasicBlock("packLoopShortCut");
+        BasicBlock * packLoopMain = b.CreateBasicBlock("packLoopMain");
         b.CreateBr(packLoop);
 
         b.SetInsertPoint(packLoop);
