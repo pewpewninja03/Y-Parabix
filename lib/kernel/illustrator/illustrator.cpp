@@ -583,7 +583,7 @@ inline void displayCapturedData(const size_t blockWidth) const {
                         }
                     } else {
                         auto va = vi, vb = vj;
-                        assert (A[a]->Data != B[b]->Data);
+                        assert (A[a]->Data != B[b]->Data || A[a]->Data == nullptr);
                         if (A[a]->SequenceNum > B[b]->SequenceNum) {
                             std::swap(va, vb);
                         } else {

@@ -802,7 +802,7 @@ Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
     
     auto P = CreatePipeline(driver,
 #ifndef STAGE1_TO_STDOUT
-                            Output<streamset_t>("WorkingBytes", 1, 8),
+                            Output<streamset_t>("WorkingBytes", 1, 8, ReturnedBuffer(1)),
 #endif
                             Input<char*>{"buffer"},
                             Input<size_t>{"length"}
