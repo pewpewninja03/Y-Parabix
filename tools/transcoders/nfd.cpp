@@ -66,7 +66,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 static cl::opt<bool> LateU21("LateU21", cl::desc("Delay conversion to Unicode 21-bit values until after filtering"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(false), cl::cat(NFD_Options));
-static cl::opt<bool> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -749,7 +749,8 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, StreamSet * U8_Basis, St
     return NFD_WorkItems;
 }
 
-StreamSet * WorkPlacementMask(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * SelectionMask) {
+void ComputeWorkPlacement(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * SelectionMask,
+                          StreamSet * WorkPlacementMask) {
     auto u8_insert_ccs = NFD_Data.UTF8_Insertion_BixNumCCs();
     StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(u8_insert_ccs.size());
     P.CreateKernelCall<CharClassesKernel>(u8_insert_ccs, U8_Basis, U8_Insertion_BixNum);
@@ -786,24 +787,18 @@ StreamSet * WorkPlacementMask(PipelineBuilder & P, NFD_BixData & NFD_Data, Strea
     P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
     SHOW_STREAM(WorkExpansionMask);
 
-    StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
-    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, FinalWorkPlacementMask);
-    SHOW_STREAM(FinalWorkPlacementMask);
-    return FinalWorkPlacementMask;
+    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
+    SHOW_STREAM(WorkPlacementMask);
 }
-//#define STAGE1_TO_STDOUT
-#ifdef STAGE1_TO_STDOUT
-typedef void (*Stage1FunctionType)(char *, size_t);
-#else
-typedef void (*Stage1FunctionType)(kernel::StreamSetPtr &, char *, size_t);
-#endif
+
+typedef void (*Stage1FunctionType)(kernel::StreamSetPtr &, kernel::StreamSetPtr &, kernel::StreamSetPtr &, char *, size_t);
 
 Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
     
     auto P = CreatePipeline(driver,
-#ifndef STAGE1_TO_STDOUT
                             Output<streamset_t>("WorkingBytes", 1, 8, ReturnedBuffer(1)),
-#endif
+                            Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("WorkPlacementMask", 1, 1, ReturnedBuffer(1)),
                             Input<char*>{"buffer"},
                             Input<size_t>{"length"}
                             );
@@ -824,47 +819,38 @@ Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
     
     StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, BasisBits, u8index);
     
-    StreamSet * const WorkSelectionMask = P.CreateStreamSet(1, 1);
+    StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
+
+    UTF_Encoder U8_Encoder(8);
+    NFD_BixData NFD_Data(U8_Encoder);
     
+    StreamSet * const FinalWorkPlacementMask = P.getOutputStreamSet("WorkPlacementMask");
+    ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
+    SHOW_STREAM(FinalWorkPlacementMask);
+
     StreamSet * const WorkingBasis = P.CreateStreamSet(8, 1);
     FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
     SHOW_BIXNUM(WorkingBasis);
     
-#ifdef STAGE1_TO_STDOUT
-    StreamSet * const WorkingBytes = P.CreateStreamSet(1, 8);
-#else
     StreamSet * const WorkingBytes = P.getOutputStreamSet("WorkingBytes");
-#endif
     P.CreateKernelCall<P2SKernel>(WorkingBasis, WorkingBytes);
-#ifdef STAGE1_TO_STDOUT
-    P.CreateKernelCall<StdOutKernel>(WorkingBytes);
-#endif
+    if (SeparatedPipelineStages == 1) {
+        P.CreateKernelCall<StdOutKernel>(WorkingBytes);
+    }
     return P.compile();
 }
 
-#define STAGE2_TO_STDOUT
-#ifdef STAGE2_TO_STDOUT
-typedef void (*Stage2FunctionType)(const kernel::StreamSetPtr & source_buf);
-#else
 typedef void (*Stage2FunctionType)(const StreamSetPtr & source_buf, StreamSetPtr & NFD_buf);
-#endif
-
-
-typedef void (*Stage2FunctionType)(const kernel::StreamSetPtr & source_buf);
-//typedef void (*Stage2FunctionType)(const StreamSetPtr & source_buf, StreamSetPtr & NFD_buf);
 
 Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver) {
-    
     auto P = CreatePipeline(driver,
-                            Input<streamset_t>("WorkingBytes", 1, 8)
-#ifndef STAGE2_TO_STDOUT
-                            ,Output<streamset_t>("NFD_Bytes",  1, 8)
-#endif
-                            );
-    
+                            Input<streamset_t>("WorkingBytes", 1, 8),
+                            Output<streamset_t>("NFD_Bytes", 1, 8, ReturnedBuffer(1)));
+
     StreamSet * WorkingData = P.getInputStreamSet("WorkingBytes");
+
     StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
     P.CreateKernelCall<S2PKernel>(WorkingData, BasisBits);
     SHOW_BIXNUM(BasisBits);
@@ -872,69 +858,74 @@ Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver) {
     StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
     P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
+    StreamSet * const WorkingU8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, WorkingU8index);
+    SHOW_STREAM(WorkingU8index);
+
+    StreamSet * const U21_focus = P.CreateStreamSet(21, 1);
+    FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
+
     UTF_Encoder U8_Encoder(8);
     NFD_BixData NFD_Data(U8_Encoder);
-    
-    StreamSet * NFD_U21_Results = NFD_U21_Pipeline(P, NFD_Data, U21_u8indexed);
-    
+
+    StreamSet * NFD_U21_Results = NFD_U21_Pipeline(P, NFD_Data, U21_focus);
+
     StreamSet * const NFD_Basis = P.CreateStreamSet(8, 1);
     U21_to_UTF8(P, NFD_U21_Results, NFD_Basis);
     SHOW_BIXNUM(NFD_Basis);
-    
-#ifdef STAGE2_TO_STDOUT
-    StreamSet * const NFD_Bytes = P.CreateStreamSet(1, 8);
-#else
+
     StreamSet * const NFD_Bytes = P.getOutputStreamSet("NFD_Bytes");
-#endif
     P.CreateKernelCall<P2SKernel>(NFD_Basis, NFD_Bytes);
-#ifdef STAGE2_TO_STDOUT
-    P.CreateKernelCall<StdOutKernel>(NFD_Bytes);
-#endif
+
+    if (SeparatedPipelineStages == 2) {
+        P.CreateKernelCall<StdOutKernel>(WorkingData);
+    }
     return P.compile();
 }
 
-/*
-typedef void (*OutputStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, int32_t);
+
+typedef void (*OutputStageFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, char *, size_t);
 
 OutputStageFunctionType generate_output_pipeline(CPUDriver & driver) {
     auto P = CreatePipeline(driver,
-                            Input<streamset_t>("SourceMask", 1, 1),
-                            Input<streamset_t>("PlacementMask", 1, 1),
-                            Input<streamset_t>("PlacedData", 1, 8),
-                            Input<uint32_t>("inputFileDecriptor"));
-    StreamSet * SourceMask = P.getInputStreamSet("SourceMask");
-    StreamSet * WorkPlacementMask = P.getInputStreamSet("PlacementMask");
-    StreamSet * PlacedData = P.getInputStreamSet("PlacedData");
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
-    //
-    //  Rereading the bytestream - TODO : pass in a buffer.
-    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+                            Input<streamset_t>("WorkingResults", 1, 8),
+                            Input<streamset_t>("WorkSelectionMask", 1, 1),
+                            Input<streamset_t>("WorkPlacementMask", 1, 1),
+                            Input<char*>{"buffer"},
+                            Input<size_t>{"length"});
+    StreamSet * WorkSelectionMask = P.getInputStreamSet("WorkSelectionMask");
+    StreamSet * WorkPlacementMask = P.getInputStreamSet("WorkPlacementMask");
+    StreamSet * WorkingResults = P.getInputStreamSet("WorkingResults");
+    Scalar * const buffer = P.getInputScalar("buffer");
+    Scalar * const length = P.getInputScalar("length");
+
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
     //
     //  The following Filter-Spread combination could be integrated
     //  together into a MoveByMask kernel.
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(WorkPlacementMask, NonModifiedMask);
+    P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
     StreamSet * FilteredBytes = P.CreateStreamSet(1, 8);
-    FilterByMask(P, SourceMask, ByteStream, FilteredBytes);
+    FilterByMask(P, NonModifiedMask, ByteStream, FilteredBytes);
+    StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(WorkPlacementMask, NonModifiedPlacementMask);
     StreamSet * PlacedSourceBytes = P.CreateStreamSet(1, 8);
-    SpreadByMask(P, NonModifiedMask, FilteredBytes, PlacedSourceBytes);
+    SpreadByMask(P, NonModifiedPlacementMask, FilteredBytes, PlacedSourceBytes);
     //
     StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
     if (ByteReplace) {
-        P.CreateKernelCall<ByteReplaceByMask>(WorkPlacementMask, PlacedSourceBytes, PlacedData, OutputBytes);
+        P.CreateKernelCall<ByteReplaceByMask>(WorkPlacementMask, PlacedSourceBytes, WorkingResults, OutputBytes);
     } else {
-        StreamSet * const ReorderedPlaced = P.CreateStreamSet(1, 8);
-        SpreadByMask(P, WorkPlacementMask, ReorderedBytes, ReorderedPlaced);
-        
-        P.CreateKernelCall<ByteCombine>(PlacedSourceBytes, ReorderedPlaced, OutputBytes);
+        StreamSet * PlacedWork = P.CreateStreamSet(1, 8);
+        SpreadByMask(P, WorkPlacementMask, WorkingResults, PlacedWork);
+        //
+        P.CreateKernelCall<ByteCombine>(PlacedSourceBytes, PlacedWork, OutputBytes);
     }
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
     return P.compile();
 }
-    
- */
 
 typedef void (*XfrmFunctionType)(char *, size_t);
 
@@ -963,8 +954,9 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
     UTF_Encoder U8_Encoder(8);
     NFD_BixData NFD_Data(U8_Encoder);
-    
-    StreamSet * const FinalWorkPlacementMask = WorkPlacementMask(P, NFD_Data, BasisBits, WorkSelectionMask);
+
+    StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+    ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
 
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
@@ -1047,24 +1039,23 @@ int main(int argc, char *argv[]) {
     size_t bytes_read = buf.getBufSize();
     if (bytes_read <= 0) return 0;
     CPUDriver driver("NFD_function");
-    if (SeparatedPipelineStages) {
+    if (SeparatedPipelineStages > 0) {
         Stage1FunctionType stage1 = generate_stage1_pipeline(driver);
-#ifdef STAGE1_TO_STDOUT
-        stage1(buf.getBuf(), buf.getBufSize());
-#else
         kernel::StreamSetPtr Working;
-        stage1(Working, buf.getBuf(), buf.getBufSize());
-#endif
-        Stage2FunctionType stage2 = generate_stage2_pipeline(driver);
-#ifndef STAGE1_TO_STDOUT
-#ifdef STAGE2_TO_STDOUT
-        stage2(Working);
-#else
-        kernel::StreamSetPtr NFD_Bytes;
-        stage2(Working, NFD_Bytes);
-#endif
-#endif
-        //OutputStageFunctionType stage3 = generate_output_stage_pipeline(driver);
+        kernel::StreamSetPtr WorkSelection;
+        kernel::StreamSetPtr FinalWorkPlacement;
+        stage1(Working, WorkSelection, FinalWorkPlacement, buf.getBuf(), buf.getBufSize());
+
+        if (SeparatedPipelineStages > 1) {
+            Stage2FunctionType stage2 = generate_stage2_pipeline(driver);
+            kernel::StreamSetPtr NFD_Bytes;
+            stage2(Working, NFD_Bytes);
+
+            if (SeparatedPipelineStages > 2) {
+                OutputStageFunctionType stage3 = generate_output_pipeline(driver);
+                stage3(WorkSelection, FinalWorkPlacement, NFD_Bytes, buf.getBuf(), buf.getBufSize());
+            }
+        }
     } else {
         XfrmFunctionType fn = generate_pipeline(driver);
         fn(buf.getBuf(), buf.getBufSize());
