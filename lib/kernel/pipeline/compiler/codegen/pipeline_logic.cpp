@@ -450,7 +450,12 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
                 expectedSourceOutputSize = b.CreateUMax(eosVal, expectedSourceOutputSize);
             }
         }
-        expectedSourceOutputSize = b.CreateCeilUDiv(expectedSourceOutputSize, b.getSize(b.getBitBlockWidth()));
+        if (expectedSourceOutputSize) {
+            expectedSourceOutputSize = b.CreateMul(expectedSourceOutputSize, expectedNumOfStrides);
+            expectedSourceOutputSize = b.CreateCeilUDiv(expectedSourceOutputSize, b.getSize(b.getBitBlockWidth()));
+        } else {
+            expectedSourceOutputSize = expectedNumOfStrides;
+        }
     }
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
