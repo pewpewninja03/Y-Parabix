@@ -228,7 +228,7 @@ Value * IDISA_Builder::simd_eq(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_Builder::simd_any(unsigned fw, Value * a) {
-    return CreateNot(simd_eq(fw, a, allZeroes()));
+    return CreateNot(simd_eq(fw, a, ConstantVector::getNullValue(a->getType())));
 }
 
 Value * IDISA_Builder::simd_ne(unsigned fw, Value * a, Value * b) {
@@ -515,16 +515,18 @@ Value * IDISA_Builder::simd_srai(unsigned fw, Value * a, unsigned shift) {
 
 Value * IDISA_Builder::simd_sllv(unsigned fw, Value * v, Value * shifts) {
     if (fw >= 8) return CreateShl(fwCast(fw, v), fwCast(fw, shifts));
+    auto vec_width = getVectorBitWidth(v);
+    Value * vecZeroes = ConstantVector::getNullValue(v->getType());
     Value * w = v;
-    IntegerType * const intTy = getIntNTy(mBitBlockWidth);
+    IntegerType * const intTy = getIntNTy(vec_width);
     for (unsigned shft_amt = 1; shft_amt < fw; shft_amt *= 2) {
         APInt bit_in_field(fw, shft_amt);
         // To simulate shift within a fw, we need to mask off the high shft_amt bits of each element.
         Constant * value_mask = Constant::getIntegerValue(intTy,
-                                                          APInt::getSplat(mBitBlockWidth, APInt::getLowBitsSet(fw, fw-shft_amt)));
+                                                          APInt::getSplat(vec_width, APInt::getLowBitsSet(fw, fw-shft_amt)));
         Constant * bit_select = Constant::getIntegerValue(intTy,
-                                                          APInt::getSplat(mBitBlockWidth, bit_in_field));
-        Value * unshifted_field_mask = simd_eq(fw, simd_and(bit_select, shifts), allZeroes());
+                                                          APInt::getSplat(vec_width, bit_in_field));
+        Value * unshifted_field_mask = simd_eq(fw, simd_and(bit_select, shifts), vecZeroes);
         Value * fieldsToShift = simd_and(w, simd_and(value_mask, simd_not(unshifted_field_mask)));
         w = simd_or(simd_and(w, unshifted_field_mask), simd_slli(32, fieldsToShift, shft_amt));
     }
@@ -533,16 +535,18 @@ Value * IDISA_Builder::simd_sllv(unsigned fw, Value * v, Value * shifts) {
 
 Value * IDISA_Builder::simd_srlv(unsigned fw, Value * v, Value * shifts) {
     if (fw >= 8) return CreateLShr(fwCast(fw, v), fwCast(fw, shifts));
+    Value * vecZeroes = ConstantVector::getNullValue(v->getType());
+    auto vec_width = getVectorBitWidth(v);
     Value * w = v;
-    IntegerType * const intTy = getIntNTy(mBitBlockWidth);
+    IntegerType * const intTy = getIntNTy(vec_width);
     for (unsigned shft_amt = 1; shft_amt < fw; shft_amt *= 2) {
         APInt bit_in_field(fw, shft_amt);
         // To simulate shift within a fw, we need to mask off the low shft_amt bits of each element.
         Constant * value_mask = Constant::getIntegerValue(intTy,
-                                                          APInt::getSplat(mBitBlockWidth, APInt::getHighBitsSet(fw, fw-shft_amt)));
+                                                          APInt::getSplat(vec_width, APInt::getHighBitsSet(fw, fw-shft_amt)));
         Constant * bit_select = Constant::getIntegerValue(intTy,
-                                                          APInt::getSplat(mBitBlockWidth, bit_in_field));
-        Value * unshifted_field_mask = simd_eq(fw, simd_and(bit_select, shifts), allZeroes());
+                                                          APInt::getSplat(vec_width, bit_in_field));
+        Value * unshifted_field_mask = simd_eq(fw, simd_and(bit_select, shifts), vecZeroes);
         Value * fieldsToShift = simd_and(w, simd_and(value_mask, simd_not(unshifted_field_mask)));
         w = simd_or(simd_and(w, unshifted_field_mask), simd_srli(32, fieldsToShift, shft_amt));
     }
@@ -605,8 +609,7 @@ Value * IDISA_Builder::simd_pext(unsigned fieldwidth, Value * v, Value * extract
 Value * IDISA_Builder::CreatePextract(Value * v, Value * mask, const Twine Name) {
     Type * Ty = v->getType();
     unsigned width = Ty->getPrimitiveSizeInBits();
-    UnsupportedFieldWidthError(width, "Pextract");
-    //return CreateBitCast(IDISA_Builder::simd_pext(width, fwCast(width, v), fwCast(width, mask)), Ty);
+    return CreateBitCast(IDISA_Builder::simd_pext(width, fwCast(width, v), fwCast(width, mask)), Ty);
 }
 
 Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {
@@ -636,8 +639,7 @@ Value * IDISA_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit
 Value * IDISA_Builder::CreatePdeposit(Value * v, Value * mask, const Twine Name) {
     Type * Ty = v->getType();
     unsigned width = Ty->getPrimitiveSizeInBits();
-    UnsupportedFieldWidthError(width, "Pdeposit");
-    //return CreateBitCast(simd_pdep(width, fwCast(width, v), fwCast(width, mask)), Ty);
+    return CreateBitCast(simd_pdep(width, fwCast(width, v), fwCast(width, mask)), Ty);
 }
 
 Value * IDISA_Builder::simd_popcount(unsigned fw, Value * a) {
@@ -737,7 +739,7 @@ Value * IDISA_Builder::simd_binary(unsigned char truth_table_mask, Value * bit_1
     assert (bit_1->getType() == bit_0->getType());
     switch(truth_table_mask) {
         case 0x00:
-            return allZeroes();
+            return Constant::getNullValue(bit_1->getType());
         case 0x01:
             return CreateNot(CreateOr(bit_1, bit_0));
         case 0x02:
@@ -767,7 +769,7 @@ Value * IDISA_Builder::simd_binary(unsigned char truth_table_mask, Value * bit_1
         case 0x0E:
             return CreateOr(bit_1, bit_0);
         case 0x0F:
-            return allOnes();
+            return Constant::getAllOnesValue(bit_1->getType());
         default: report_fatal_error("simd_binary mask is in wrong format!");
     }
 }
@@ -777,10 +779,10 @@ Value * IDISA_Builder::simd_ternary(unsigned char mask, Value * a, Value * b, Va
     assert (b->getType() == c->getType());
 
     if (mask == 0) {
-        return allZeroes();
+        return Constant::getNullValue(a->getType());
     }
     if (mask == 0xFF) {
-        return allOnes();
+        return Constant::getAllOnesValue(a->getType());
     }
 
     unsigned char not_a_mask = mask & 0x0F;
@@ -948,7 +950,7 @@ Value * IDISA_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
     Value * hi = hsimd_packh(fw, a, b);
     Value * lo = hsimd_packl(fw, a, b);
     Value * bits_that_must_match_sign = simd_if(1, top_bit, lo, hi);
-    Value * sign_mask = simd_srai(fw/2, hi, fw/2 - 1);//simd_ult(fw/2, hi, allZeroes());
+    Value * sign_mask = simd_srai(fw/2, hi, fw/2 - 1);
     Value * safe = simd_eq(fw/2, sign_mask, bits_that_must_match_sign);
     return simd_if(fw/2, safe, lo, simd_eq(1, top_bit, sign_mask));
 }
@@ -956,8 +958,8 @@ Value * IDISA_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
 Value * IDISA_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
     Value * hi = hsimd_packh(fw, a, b);
     Value * lo = hsimd_packl(fw, a, b);
-    Value * high_mask = simd_gt(fw/2, hi, allZeroes());
-    Value * low_mask = simd_ge(fw/2, hi, allZeroes());
+    Value * high_mask = simd_gt(fw/2, hi, ConstantVector::getNullValue(a->getType()));
+    Value * low_mask = simd_ge(fw/2, hi, ConstantVector::getNullValue(a->getType()));
     return simd_and(simd_or(high_mask, lo), low_mask);
 }
 
