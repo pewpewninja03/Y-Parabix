@@ -725,7 +725,7 @@ StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, Stream
     return SortResults[1];
 }
 
-StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, StreamSet * U8_Basis, StreamSet * u8index) {
+StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * u8index) {
     re::RE * dtCanProp = re::makePropertyExpression("dt", "Can");
     dtCanProp = UCD::linkAndResolve(dtCanProp);
     re::Name * dtCanName = re::makeName("dt", "Can");
@@ -793,7 +793,7 @@ void ComputeWorkPlacement(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet
 
 typedef void (*Stage1FunctionType)(kernel::StreamSetPtr &, kernel::StreamSetPtr &, kernel::StreamSetPtr &, char *, size_t);
 
-Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
+Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
     
     auto P = CreatePipeline(driver,
                             Output<streamset_t>("WorkingBytes", 1, 8, ReturnedBuffer(1)),
@@ -817,15 +817,12 @@ Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
     
-    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, BasisBits, u8index);
+    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, NFD_Data, BasisBits, u8index);
     
     StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
 
-    UTF_Encoder U8_Encoder(8);
-    NFD_BixData NFD_Data(U8_Encoder);
-    
     StreamSet * const FinalWorkPlacementMask = P.getOutputStreamSet("WorkPlacementMask");
     ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
     SHOW_STREAM(FinalWorkPlacementMask);
@@ -844,7 +841,7 @@ Stage1FunctionType generate_stage1_pipeline(CPUDriver & driver) {
 
 typedef void (*Stage2FunctionType)(const StreamSetPtr & source_buf, StreamSetPtr & NFD_buf);
 
-Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver) {
+Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
     auto P = CreatePipeline(driver,
                             Input<streamset_t>("WorkingBytes", 1, 8),
                             Output<streamset_t>("NFD_Bytes", 1, 8, ReturnedBuffer(1)));
@@ -865,9 +862,6 @@ Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver) {
     StreamSet * const U21_focus = P.CreateStreamSet(21, 1);
     FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
 
-    UTF_Encoder U8_Encoder(8);
-    NFD_BixData NFD_Data(U8_Encoder);
-
     StreamSet * NFD_U21_Results = NFD_U21_Pipeline(P, NFD_Data, U21_focus);
 
     StreamSet * const NFD_Basis = P.CreateStreamSet(8, 1);
@@ -886,7 +880,7 @@ Stage2FunctionType generate_stage2_pipeline(CPUDriver & driver) {
 
 typedef void (*OutputStageFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, char *, size_t);
 
-OutputStageFunctionType generate_output_pipeline(CPUDriver & driver) {
+OutputStageFunctionType generate_output_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
     auto P = CreatePipeline(driver,
                             Input<streamset_t>("WorkingResults", 1, 8),
                             Input<streamset_t>("WorkSelectionMask", 1, 1),
@@ -929,7 +923,7 @@ OutputStageFunctionType generate_output_pipeline(CPUDriver & driver) {
 
 typedef void (*XfrmFunctionType)(char *, size_t);
 
-XfrmFunctionType generate_pipeline(CPUDriver & driver) {
+XfrmFunctionType generate_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
     auto P = CreatePipeline(driver, Input<char*>{"buffer"}, Input<size_t>{"length"});
     Scalar * const buffer = P.getInputScalar("buffer");
     Scalar * const length = P.getInputScalar("length");
@@ -946,14 +940,11 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
 
-    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, BasisBits, u8index);
+    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, NFD_Data, BasisBits, u8index);
 
     StreamSet * const WorkSelectionMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
-
-    UTF_Encoder U8_Encoder(8);
-    NFD_BixData NFD_Data(U8_Encoder);
 
     StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
     ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
@@ -1038,26 +1029,28 @@ int main(int argc, char *argv[]) {
     buf.load(inputFile, useMMap);
     size_t bytes_read = buf.getBufSize();
     if (bytes_read <= 0) return 0;
+    UTF_Encoder U8_Encoder(8);
+    NFD_BixData NFD_Data(U8_Encoder);
     CPUDriver driver("NFD_function");
     if (SeparatedPipelineStages > 0) {
-        Stage1FunctionType stage1 = generate_stage1_pipeline(driver);
+        Stage1FunctionType stage1 = generate_stage1_pipeline(driver, NFD_Data);
         kernel::StreamSetPtr Working;
         kernel::StreamSetPtr WorkSelection;
         kernel::StreamSetPtr FinalWorkPlacement;
         stage1(Working, WorkSelection, FinalWorkPlacement, buf.getBuf(), buf.getBufSize());
 
         if (SeparatedPipelineStages > 1) {
-            Stage2FunctionType stage2 = generate_stage2_pipeline(driver);
+            Stage2FunctionType stage2 = generate_stage2_pipeline(driver, NFD_Data);
             kernel::StreamSetPtr NFD_Bytes;
             stage2(Working, NFD_Bytes);
 
             if (SeparatedPipelineStages > 2) {
-                OutputStageFunctionType stage3 = generate_output_pipeline(driver);
+                OutputStageFunctionType stage3 = generate_output_pipeline(driver, NFD_Data);
                 stage3(WorkSelection, FinalWorkPlacement, NFD_Bytes, buf.getBuf(), buf.getBufSize());
             }
         }
     } else {
-        XfrmFunctionType fn = generate_pipeline(driver);
+        XfrmFunctionType fn = generate_pipeline(driver, NFD_Data);
         fn(buf.getBuf(), buf.getBufSize());
     }
     buf.release();
