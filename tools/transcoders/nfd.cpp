@@ -38,7 +38,6 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/unicode/resolve_properties.h>
 #include <string>
-#include <toolchain/fileutil.h>
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
@@ -63,6 +62,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
+static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(true), cl::cat(NFD_Options));
 static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
 
@@ -789,29 +789,27 @@ void ComputeWorkPlacement(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet
     SHOW_STREAM(WorkPlacementMask);
 }
 
-void source_input_stage(PipelineBuilder & P, Scalar *const buffer, Scalar *const length, StreamSet * ByteStream, StreamSet * BasisBits) {
+void source_input_stage(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * BasisBits) {
 
-    P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 }
 
-typedef void (*SourceInputFunctionType)(StreamSetPtr &, StreamSetPtr &, char *, size_t);
+typedef void (*SourceInputFunctionType)(StreamSetPtr &, StreamSetPtr &, uint32_t fd);
 
 SourceInputFunctionType source_input_pipeline(CPUDriver & driver) {
     auto P = CreatePipeline(driver,
                             Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
                             Output<streamset_t>("BasisBits", 8, 1, ReturnedBuffer(1)),
-                            Input<char*>{"buffer"},
-                            Input<size_t>{"length"}
+                            Input<uint32_t>("inputFileDecriptor")
                             );
-    Scalar * const buffer = P.getInputScalar("buffer");
-    Scalar * const length = P.getInputScalar("length");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+
     StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
     StreamSet * const BasisBits = P.getOutputStreamSet("BasisBits");
-    SHOW_BIXNUM(BasisBits);
-    source_input_stage(P, buffer, length, ByteStream, BasisBits);
+    source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
     return P.compile();
 }
 
@@ -893,24 +891,38 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
 
     StreamSet * const NonModified = P.CreateStreamSet(1, 8);
     FilterByMask(P, NonModifiedMask, ByteStream, NonModified);
+    SHOW_BYTES(NonModified);
 
     StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<Invert>(FinalWorkPlacementMask, NonModifiedPlacementMask);
+    SHOW_STREAM(NonModifiedPlacementMask);
 
     StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
     SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
 
-    StreamSet * const TransformedBytes = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(TransformedBasis, TransformedBytes);
-
     StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
-    if (ByteReplace) {
-        P.CreateKernelCall<ByteReplaceByMask>(FinalWorkPlacementMask, NonModifiedPlaced, TransformedBytes, OutputBytes);
-    } else {
-        StreamSet * const TransformedPlaced = P.CreateStreamSet(1, 8);
-        SpreadByMask(P, FinalWorkPlacementMask, TransformedBytes, TransformedPlaced);
+    if (ByteMerging) {
+        StreamSet * const TransformedBytes = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<P2SKernel>(TransformedBasis, TransformedBytes);
 
-        P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, TransformedPlaced, OutputBytes);
+        if (ByteReplace) {
+            P.CreateKernelCall<ByteReplaceByMask>(FinalWorkPlacementMask, NonModifiedPlaced, TransformedBytes, OutputBytes);
+        } else {
+            StreamSet * const TransformedPlaced = P.CreateStreamSet(1, 8);
+            SpreadByMask(P, FinalWorkPlacementMask, TransformedBytes, TransformedPlaced);
+
+            P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, TransformedPlaced, OutputBytes);
+        }
+    } else {
+        StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
+        P.CreateKernelCall<S2PKernel>(NonModified, NonModifiedBasis);
+        SHOW_BIXNUM(NonModifiedBasis);
+
+        StreamSet * const OutputBasis = P.CreateStreamSet(8);
+        MergeByMask(P, FinalWorkPlacementMask, TransformedBasis, NonModifiedBasis, OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
+
+        P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
     }
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 }
@@ -933,16 +945,15 @@ OutputAssemblyFunctionType generate_output_pipeline(CPUDriver & driver) {
     return P.compile();
 }
 
-typedef void (*XfrmFunctionType)(char *, size_t);
+typedef void (*XfrmFunctionType)(uint32_t fd);
 
 XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
-    auto P = CreatePipeline(driver, Input<char*>{"buffer"}, Input<size_t>{"length"});
-    Scalar * const buffer = P.getInputScalar("buffer");
-    Scalar * const length = P.getInputScalar("length");
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
-    source_input_stage(P, buffer, length, ByteStream, BasisBits);
+    source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
 
     StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
     StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
@@ -959,11 +970,12 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    bool useMMap = MMapPreference && canMMap(inputFile);
-    AlignedFileBuffer buf;
-    buf.load(inputFile, useMMap);
-    size_t bytes_read = buf.getBufSize();
-    if (bytes_read <= 0) return 0;
+    const int fd = open(inputFile.c_str(), O_RDONLY);
+    if (LLVM_UNLIKELY(fd == -1)) {
+        llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
+        exit(-1);
+    }
+    if (ByteReplace) ByteMerging = true;
     UTF_Encoder U8_Encoder(8);
     NFD_BixData NFD_Data(U8_Encoder);
     CPUDriver driver("NFD_function");
@@ -971,7 +983,8 @@ int main(int argc, char *argv[]) {
         SourceInputFunctionType stage0 = source_input_pipeline(driver);
         kernel::StreamSetPtr ByteStream;
         kernel::StreamSetPtr BasisBits;
-        stage0(BasisBits, ByteStream, buf.getBuf(), buf.getBufSize());
+        stage0(ByteStream, BasisBits, fd);
+        close(fd);
 
         NFD_FilterFunctionType stage1 = NFD_filter_pipeline(driver, NFD_Data);
         kernel::StreamSetPtr WorkSelectionMask;
@@ -991,8 +1004,8 @@ int main(int argc, char *argv[]) {
         }
     } else {
         XfrmFunctionType fn = generate_unitary_pipeline(driver, NFD_Data);
-        fn(buf.getBuf(), buf.getBufSize());
+        fn(fd);
+        close(fd);
     }
-    buf.release();
     return 0;
 }
