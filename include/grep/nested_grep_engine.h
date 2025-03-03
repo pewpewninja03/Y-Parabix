@@ -24,8 +24,11 @@ private:
     GrepRecordBreakKind mGrepRecordBreak;
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
+
     std::vector<GrepFunctionType>   mMainMethod;
     std::vector<kernel::Kernel *>   mNested;
+
+
 
 };
 

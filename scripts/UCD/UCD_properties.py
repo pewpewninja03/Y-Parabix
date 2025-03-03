@@ -420,7 +420,7 @@ class UCD_generator():
 
     def generate_PropertyValueAliases(self):
         f = cformat.open_header_file_for_write('PropertyValueAliases')
-        cformat.write_imports(f, ['<unicode/data/PropertyAliases.h>', "<vector>", "<unordered_map>", "<string>"])
+        cformat.write_imports(f, ['<unicode/data/PropertyAliases.h>', "<cstdint>", "<vector>", "<unordered_map>", "<string>"])
         f.write("namespace UCD {\n")
         #  Generate the aliases for all Binary properties.
         enum_text = cformat.multiline_fill(['N', 'Y'], ',', 12)

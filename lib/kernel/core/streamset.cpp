@@ -66,7 +66,8 @@ uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
 
     const auto memfd = create_memfd();
     if (memfd == -1) {
-        llvm::report_fatal_error("failed to create memfd");
+        std::string msg = "failed to create memfd, errno = " + std::to_string(errno);
+        llvm::report_fatal_error(llvm::StringRef(msg));
     }
 
     if (ftruncate(memfd, size) == -1) {

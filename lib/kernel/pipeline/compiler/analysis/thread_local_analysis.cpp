@@ -213,7 +213,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal()) {
+        if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
             mapping[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
             ++numOfThreadLocalStreamSets;
         }
@@ -252,9 +252,12 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+                    continue;
+                }
 
-                if (bn.isThreadLocal()) {
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
                     // determine the number of bytes this streamset requires per *root kernel* stride
                     const BufferPort & producerRate = mBufferGraph[output];
                     const Binding & outputRate = producerRate.Binding;
@@ -295,7 +298,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                     const auto streamSet = target(output, mBufferGraph);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
+                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j != -1U);
                         assert (remaining[j] > 0);
@@ -305,7 +308,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                     const auto streamSet = source(input, mBufferGraph);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
+                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j != -1U);
                         assert (remaining[j] > 0);
@@ -327,20 +330,43 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
     // Can we quantify it based on the buffer graph order? Currently, we just take
     // the first one.
     const auto intervals = BA.getIntervals(O, rng);
+
+    bool hasThreadLocalInOut = false;
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto i = streamSet - FirstStreamSet;
         BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isThreadLocal()) {
-            const auto j = mapping[i];
-            const auto & interval = intervals[j];
-            bn.BufferStart = interval.lower();
-            assert ((bn.BufferStart % pageSize) == 0);
-            bn.BufferEnd = interval.upper();
-            assert ((bn.BufferEnd % pageSize) == 0);
-            assert (bn.BufferEnd <= requiredMemory);
+            if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+                hasThreadLocalInOut = true;
+            } else {
+                const auto j = mapping[i];
+                const auto & interval = intervals[j];
+                bn.BufferStart = interval.lower();
+                assert ((bn.BufferStart % pageSize) == 0);
+                bn.BufferEnd = interval.upper();
+                assert ((bn.BufferEnd % pageSize) == 0);
+                assert (bn.BufferEnd <= requiredMemory);
+            }
 
         }
     }
+    if (LLVM_UNLIKELY(hasThreadLocalInOut)) {
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            BufferNode & bn = mBufferGraph[streamSet];
+            assert (bn.isInOutRedirect() ^ (in_degree(streamSet, InOutStreamSetReplacement) == 0));
+            if (LLVM_UNLIKELY(bn.isThreadLocal() && bn.isInOutRedirect())) {
+                auto src = streamSet;
+                do {
+                    src = parent(src, InOutStreamSetReplacement);
+                } while (in_degree(src, InOutStreamSetReplacement) != 0);
+                const BufferNode & bs = mBufferGraph[src];
+                bn.BufferStart = bs.BufferStart;
+                bn.BufferEnd = bs.BufferEnd;
+            }
+        }
+    }
+
     RequiredThreadLocalStreamSetMemory = requiredMemory;
 
 }
@@ -352,8 +378,13 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
 
     // update threadlocal status of sources for truncated buffers
 
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        assert (LastStreamSet == PipelineOutput);
+        return;
+    }
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        BufferNode & bn = mBufferGraph[streamSet];
+        const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated())) {
             mNonThreadLocalStreamSets.insert(streamSet);
             unsigned srcStreamSet = 0;
@@ -367,7 +398,7 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
             }
             assert (srcStreamSet);
             const BufferNode & bn = mBufferGraph[srcStreamSet];
-            if (LLVM_UNLIKELY(bn.isConstant())) {
+            if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
                 continue;
             }
 
@@ -380,6 +411,54 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
                     mNonThreadLocalStreamSets.insert(srcStreamSet);
                     break;
                 }
+            }
+        }
+
+        if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
+            continue;
+        }
+
+        const auto producer = parent(streamSet, mBufferGraph);
+        const auto partId = KernelPartitionId[producer];
+
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            if (partId != KernelPartitionId[consumer]) {
+                mNonThreadLocalStreamSets.insert(streamSet);
+                break;
+            }
+        }
+    }
+
+    if (num_edges(InOutStreamSetReplacement) > 0) {
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) >0 && in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
+                auto toCheck = streamSet;
+                bool isNonThreadLocal = false;
+                for (;;) {
+                    assert (FirstStreamSet <= toCheck && toCheck <= LastStreamSet);
+                    if (mNonThreadLocalStreamSets.count(toCheck)) {
+                        isNonThreadLocal = true;
+                        break;
+                    }
+                    if (out_degree(toCheck, InOutStreamSetReplacement) == 0) {
+                        break;
+                    }
+                    toCheck = child(toCheck, InOutStreamSetReplacement);
+                }
+
+                if (isNonThreadLocal) {
+                    auto toUpdate = streamSet;
+                    for (;;) {
+                        assert (FirstStreamSet <= toUpdate && toUpdate <= LastStreamSet);
+                        mNonThreadLocalStreamSets.insert(toUpdate);
+                        if (out_degree(toUpdate, InOutStreamSetReplacement) == 0) {
+                            break;
+                        }
+                        toUpdate = child(toUpdate, InOutStreamSetReplacement);
+                    }
+                }
+
             }
         }
     }
@@ -439,6 +518,7 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
         }
 
     }
+
 }
 
 

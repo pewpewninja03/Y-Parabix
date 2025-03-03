@@ -158,26 +158,26 @@ void Hexify::generatePabloMethod() {
     lo[0] = pb.createSel(insertMask, spreadBasis[4], pb.createAdvance(spreadBasis[0], 1), "lo[0]");
     //  Given these 4 bit streams, a position is in the hex A-F range when its binary code is >= 10.
     PabloAST * hexA_F = bnc.UGE(lo, 10, "hexA_F");
-    //  If a number is in the hexA_F range, the 4 bits of the hexBasis are determined by subtracting 9.
-    BixNum lo1 = bnc.SubModular(lo, 9);
-    std::vector<PabloAST *> hexBasis(8);
+    //  If a number is in the hexA_F range, the low 4 bits are determined by subtracting 9.
+    lo = bnc.Select(hexA_F, bnc.SubModular(lo, 9), lo);
+    //
+    // Now we will extend to 8 bits and insert the appropriate bits of the
+    // ASCII representation.
+    std::vector<PabloAST *> hexBasis = bnc.ZeroExtend(lo, 8);
     // Now compute the high 4 bits of the hexBasis.
-    hexBasis[7] = pb.createZeroes();
+    // High 4 bits are 0x40 for hex A-F, 0x60 for hex a-f, 0x30 for hex 0-9,
+    hexBasis[7] = pb.createZeroes();  // the high bit (bit 7) is always zero for ASCII
     hexBasis[6] = hexA_F;
     if (LowerHex) {
-        hexBasis[5] = pb.createNot(LF);
+        hexBasis[5] = pb.createOnes();
     } else {
         hexBasis[5] = pb.createNot(hexA_F);
     }
     hexBasis[4] = pb.createNot(hexA_F);
-    // High 4 bits are 0x40 for hex A-F, 0x30 for hex 0-9
-    for (unsigned i = 0; i < 4; i++) {
-        hexBasis[i] = pb.createSel(hexA_F, lo1[i], lo[i]);
-    }
-    Var * hexVar = getOutputStreamVar("hexBasis");
-    for (unsigned i = 0; i < 8; i++) {
-        pb.createAssign(pb.createExtract(hexVar, pb.getInteger(i)), pb.createSel(LF, spreadBasis[i], hexBasis[i]));
-    }
+    //
+    // We use the hexBasis at all positions which were not LFs.
+    std::vector<PabloAST *> finalBasis = bnc.Select(LF, spreadBasis, hexBasis);
+    writeOutputStreamSet("hexBasis", finalBasis);
 }
 
 typedef void (*HexLinesFunctionType)(uint32_t fd);

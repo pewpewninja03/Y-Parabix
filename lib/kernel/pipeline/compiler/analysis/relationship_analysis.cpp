@@ -46,9 +46,9 @@ using RedundantStreamSetMap = PipelineAnalysis::RedundantStreamSetMap;
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
-    //TODO: change enum tag to distinguish relationships and streamsets
+//TODO: change enum tag to distinguish relationships and streamsets
 
-    struct RelationshipGraphBuilder {
+struct RelationshipGraphBuilder {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief addProducerRelationships
@@ -268,6 +268,98 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
         }
     }
+
+
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief mapInOutStreamSets
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void mapInOutStreamSets(KernelVertexVec & kernelList) {
+
+
+        assert (!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes));
+        assert (kernelList.size() == mKernels.size());
+
+        const auto n = kernelList.size();
+
+        flat_map<Relationship *, size_t> InOutRemap;
+
+        for (unsigned i = 0; i < n; ++i) {
+            const Kernel * const kernel = mKernels[i].Object;
+
+            const auto vertex = kernelList[i];
+
+            const auto & outputs = kernel->getOutputStreamSetBindings();
+
+            for (unsigned i = 0; i < outputs.size(); ++i) {
+                const Binding & output = outputs[i];
+
+                for (const auto & attr : output.getAttributes()) {
+                    if (LLVM_UNLIKELY(attr.getKind() == AttrId::InOut)) {
+                        // If we discover an output has an InOut attribute, determine the matching input
+                        // port and record the producing kernel of the original streamset. Later, we'll
+                        // annotate the graph to ensure (and enforce) an ordering that does not allow the
+                        // original streamset from being used after it has been modified by this kernel.
+
+                        const auto & inputs = kernel->getInputStreamSetBindings();
+
+                        bool notFound = true;
+                        for (unsigned j = 0; j < inputs.size(); ++j) {
+                            const Binding & input = inputs[j];
+                            if (attr.label().compare(input.getName())==0) {
+
+                                if (LLVM_UNLIKELY(InOutRemap.count(input.getRelationship()) != 0)) {
+                                    SmallVector<char, 256> tmp;
+                                    raw_svector_ostream msg(tmp);
+                                    msg << kernel->getName() << "." << output.getName()
+                                        << " is an InOut value for a streamset that is already an InOut for a prior kernel.";
+                                }
+
+                                InOutRemap.emplace(input.getRelationship(), vertex);
+
+                                notFound = false;
+                                break;
+                            }
+                        }
+
+                        if (notFound) {
+                            SmallVector<char, 256> tmp;
+                            raw_svector_ostream msg(tmp);
+                            msg << kernel->getName() << "." << output.getName()
+                                << " is an InOut that does not refer to an input binding name.";
+                        }
+                    }
+                }
+            }
+
+        }
+
+        if (LLVM_LIKELY(InOutRemap.empty())) return;
+
+
+        for (unsigned i = 0; i < n; ++i) {
+            const Kernel * const kernel = mKernels[i].Object;
+
+            const auto vertex = kernelList[i];
+
+            const auto & inputs = kernel->getInputStreamSetBindings();
+            for (unsigned j = 0; j < inputs.size(); ++j) {
+                const Binding & input = inputs[j];
+                const auto f = InOutRemap.find(input.getRelationship());
+                if (LLVM_UNLIKELY(f != InOutRemap.end())) {
+                    const auto remapKernel = f->second;
+                    if (remapKernel != vertex) {
+                        add_edge(vertex, remapKernel, RelationshipType{ReasonType::OrderingConstraint}, G);
+                    }
+                }
+            }
+        }
+
+
+    }
+
+
+
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief addPopCountKernels
@@ -507,7 +599,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief combineDuplicateKernels
      ** ------------------------------------------------------------------------------------------------------------- */
-    void combineDuplicateKernels(KernelBuilder & /* b */) {
+    void combineDuplicateKernels(KernelVertexVec & kernelList) {
 
         using StreamSetVector = std::vector<std::pair<unsigned, StreamSetPort>>;
         using ScalarVector = std::vector<unsigned>;
@@ -530,11 +622,6 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
                 }
             }
         };
-
-        std::vector<unsigned> kernelList;
-        for (const auto & K : mKernels) {
-            kernelList.push_back(G.addOrFind(RelationshipNode::IsKernel, K.Object));
-        }
 
         std::map<KernelId, unsigned> Ids;
 
@@ -824,7 +911,8 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
     RedundantStreamSetMap &         RedundantStreamSets;
     CommandLineScalarVec            CommandLineScalars;
     TruncatedStreamSetVec           TruncatedStreamSets;
-    };
+
+};
 
 
     RelationshipGraphBuilder B(Relationships, *this);
@@ -868,7 +956,9 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
         const Kernel * const K = mKernels[i].Object;
         B.addConsumerStreamSets(PortType::Input, vertex[i], K->getInputStreamSetBindings(), false);
     }
-
+    if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+        B.mapInOutStreamSets(vertex);
+    }
     for (unsigned i = 0; i < n; ++i) {
         const Kernel * const K = mKernels[i].Object;
         B.addReferenceRelationships(PortType::Input, vertex[i], K->getInputStreamSetBindings());
@@ -908,7 +998,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
     // Pipeline optimizations
     if (LLVM_UNLIKELY(!codegen::EnableIllustrator)) {
-        B.combineDuplicateKernels(b);
+        B.combineDuplicateKernels(vertex);
         B.removeUnusedKernels(p_in, p_out);
     }
 
@@ -1244,6 +1334,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     copy_out_edges(callees, mScalarGraph, RelationshipNode::IsScalar);
 
     transcribe(scalars, mScalarGraph);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

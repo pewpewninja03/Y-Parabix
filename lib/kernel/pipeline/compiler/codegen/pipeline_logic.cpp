@@ -21,6 +21,17 @@ void PipelineCompiler::generateImplicitKernels(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getABIAlignments
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::getABIAlignments(KernelBuilder & b) {
+    auto & DL = b.getModule()->getDataLayout();
+    SizeTyABIAlignment = DL.getABITypeAlign(b.getSizeTy()).value();
+    Int64TyABIAlignment = DL.getABITypeAlign(b.getInt64Ty()).value();
+    PtrTyABIAlignment = DL.getABITypeAlign(b.getVoidPtrTy()).value();
+    Int32TyABIAlignment = DL.getABITypeAlign(b.getInt32Ty()).value();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief addPipelineKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
@@ -169,6 +180,10 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
+        // If this is relative, the processed and produced counts can be computed from the original stream
+        if (LLVM_UNLIKELY(br.isRelative())) {
+            continue;
+        }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {
@@ -181,6 +196,9 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
+        if (LLVM_UNLIKELY(br.isRelative())) {
+            continue;
+        }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {
@@ -290,6 +308,8 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
         return;
     }
 
+    getABIAlignments(b);
+
     initializeScalarValues(b);
 
     initializeKernelAssertions(b);
@@ -381,6 +401,8 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         return;
     }
 
+    getABIAlignments(b);
+
     b.setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
 
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
@@ -443,6 +465,7 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
         assert (FirstKernel == LastKernel);
         return;
     }
+    getABIAlignments(b);
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
@@ -462,6 +485,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Kerne
         assert (FirstKernel == LastKernel);
         return;
     }
+    getABIAlignments(b);
     assert (mTarget->hasThreadLocal());
     Value * allocScale = expectedNumOfStrides;
     if (LLVM_LIKELY(!mIsNestedPipeline)) {
@@ -492,6 +516,7 @@ void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
         assert (FirstKernel == LastKernel);
         return;
     }
+    getABIAlignments(b);
     initializeKernelAssertions(b);
     initializeScalarValues(b);
     if (mIsNestedPipeline) {
@@ -500,6 +525,7 @@ void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
         generateMultiThreadKernelMethod(b);
     }
     resetInternalBufferHandles();
+    SizeTyABIAlignment = 0;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -510,6 +536,7 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
         assert (LastKernel == PipelineInput);
         return;
     }
+    getABIAlignments(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         printOptionalCycleCounter(b);
         #ifdef ENABLE_PAPI
@@ -566,6 +593,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
         return;
     }
 
+    getABIAlignments(b);
     assert (mTarget->hasThreadLocal());
 
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {

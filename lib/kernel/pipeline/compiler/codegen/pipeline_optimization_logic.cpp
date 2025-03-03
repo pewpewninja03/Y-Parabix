@@ -58,9 +58,8 @@ void PipelineCompiler::addOptimizationPasses(KernelBuilder & b, Kernel::Selected
 
     using P = Kernel::OptimizationPass;
 
-    Module * const m = b.getModule();
-
     #ifndef NDEBUG
+    Module * const m = b.getModule();
     SmallVector<char, 256> tmp;
     raw_svector_ostream msg(tmp);
     bool BrokenDebugInfo = false;

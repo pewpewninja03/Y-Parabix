@@ -70,10 +70,11 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
 
                         clEnumVal(DisableCacheAlignedKernelStructs, "Disable cache alignment of kernel state memory."),
 
+                        clEnumVal(DisableInOutAttributes, "Disable In/Out attributes for streamset data buffers."),
+
                         clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
                         clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr."),
                         clEnumVal(ForcePipelineRecompilation, "Disable object cache lookup for any PipelineKernel.")), cl::cat(CodeGenOptions));
-
 
 std::string ShowIROption = OmittedOption;
 static cl::opt<std::string, true> IROutputOption("ShowIR", cl::location(ShowIROption), cl::ValueOptional,

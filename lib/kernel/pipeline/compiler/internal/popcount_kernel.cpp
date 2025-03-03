@@ -293,7 +293,7 @@ PopCountKernel::PopCountKernel(LLVMTypeSystemInterface & ts, const PopCountType 
 PopCountKernel::PopCountKernel(LLVMTypeSystemInterface & ts, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * const negative)
 : MultiBlockKernel(ts, TypeId::PopCountKernel, ".PopCountB" + std::to_string(stepFactor)
 // input streams
-,{Binding{INPUT, input, FixedRate(stepFactor), Add1() }}
+,{Binding{INPUT, input, FixedRate(stepFactor) }}
 // output stream
 ,{Binding{POSITIVE_STREAM, positive, FixedRate() LOOK_BEHIND_ATTR }
  ,Binding{NEGATIVE_STREAM, negative, FixedRate() LOOK_BEHIND_ATTR }}

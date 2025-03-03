@@ -59,6 +59,14 @@ public:
 
     using Relationships = std::vector<const Relationship *>;
 
+    enum class CompilationStatus {
+        Uninitialized = 0
+        , FullyInitialized = 1
+        , StateConstructed = 2
+        , LoadedOrCompiled = 3
+        , UnownedModule = 4
+    };
+
     enum class TypeId {
         SegmentOriented
         , MultiBlock
@@ -263,11 +271,13 @@ public:
     }
 
     LLVM_READNONE bool isStateful() const {
+        assert (mCompilationStatus >= CompilationStatus::StateConstructed);
         return mSharedStateType != nullptr;
     }
 
     LLVM_READNONE bool hasThreadLocal() const {
-        return mThreadLocalStateType  != nullptr;
+        assert (mCompilationStatus >= CompilationStatus::StateConstructed);
+        return mThreadLocalStateType != nullptr;
     }
 
     LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
@@ -407,7 +417,15 @@ public:
     }
 
     bool isGenerated() const {
-        return mModule != nullptr;
+        return (mModule != nullptr);
+    }
+
+    CompilationStatus getCompilationStatus() const {
+        return mCompilationStatus;
+    }
+
+    void setCompilationStatus(const CompilationStatus status) {
+        mCompilationStatus = status;
     }
 
     std::string makeCacheName(KernelBuilder & b);
@@ -555,6 +573,10 @@ protected:
 
     virtual void generateFinalizeMethod(KernelBuilder &) { }
 
+private:
+
+    bool hasInternalScalars(const ScalarType type) const;
+
 protected:
 
     // Constructor
@@ -562,14 +584,16 @@ protected:
            const TypeId typeId, std::string && kernelName,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
-           InternalScalars && internal_scalars);
+           InternalScalars && internal_scalars,
+           CompilationStatus status = CompilationStatus::FullyInitialized);
 
     // Constructor used by pipeline
     Kernel(LLVMTypeSystemInterface & ts,
            const TypeId typeId,
            AttributeSet && attributes,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
-           Bindings &&scalar_inputs, Bindings &&scalar_outputs);
+           Bindings &&scalar_inputs, Bindings &&scalar_outputs,
+           CompilationStatus status = CompilationStatus::Uninitialized);
 
     static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
 
@@ -580,7 +604,7 @@ protected:
     llvm::Module *              mModule = nullptr;
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
-    bool                        mGenerated = false;
+    CompilationStatus           mCompilationStatus;
     Bindings                    mInputStreamSets;
     Bindings                    mOutputStreamSets;
     Bindings                    mInputScalars;

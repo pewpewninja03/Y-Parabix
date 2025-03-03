@@ -118,10 +118,7 @@ void AdjustU8bixnum::generatePabloMethod() {
         p2_adjust_1 = pb.createOr(p2_adjust_1, pb.createAdvance(p2_adjust_1, 1));
         adjusted_bixnum.push_back(pb.createXor(p2_adjust_1, insert_bit1));
     }
-    Var * const adjusted = getOutputStreamVar("adjusted_bixnum");
-    for (unsigned i = 0; i < mBixBits; i++) {
-        pb.createAssign(pb.createExtract(adjusted, pb.getInteger(i)), adjusted_bixnum[i]);
-    }
+    writeOutputStreamSet("adjusted_bixnum", adjusted_bixnum);
 }
 
 class CreateU8delMask : public pablo::PabloKernel {
@@ -443,10 +440,7 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
             basis[u8_bit] = pb.createSel(tgt_prefix4, translated, basis[u8_bit]);
         }
     }
-    Var * translatedVar = getOutputStreamVar("output_basis");
-    for (unsigned i = 0; i < 8; i++) {
-        pb.createAssign(pb.createExtract(translatedVar, pb.getInteger(i)), basis[i]);
-    }
+    writeOutputStreamSet("output_basis", basis);
 }
 
 class ApplyTransform : public pablo::PabloKernel {
@@ -473,15 +467,14 @@ void ApplyTransform::generatePabloMethod() {
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     std::vector<PabloAST *> xfrms = getInputStreamSet("xfrms");
     std::vector<PabloAST *> transformed(basis.size());
-    Var * const out = getOutputStreamVar("output_basis");
     for (unsigned i = 0; i < basis.size(); i++) {
         if (i < xfrms.size()) {
             transformed[i] = pb.createXor(xfrms[i], basis[i]);
         } else {
             transformed[i] = basis[i];
         }
-        pb.createAssign(pb.createExtract(out, pb.getInteger(i)), transformed[i]);
     }
+    writeOutputStreamSet("output_basis", transformed);
 }
 
 typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
@@ -535,7 +528,6 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     SHOW_BIXNUM(OutputBasis);
     StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
     P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    P.CreateKernelCall<StdOutKernel>(OutputBytes);
     return P.compile();
 }
 
@@ -629,7 +621,6 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
     }
     StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
     P.CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-    P.CreateKernelCall<StdOutKernel>(OutputBytes);
     return P.compile();
 }
 

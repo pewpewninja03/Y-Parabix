@@ -5,8 +5,8 @@
 # Licensed under Open Software License 3.0.
 #
 #
-UCD_version_major = 15
-UCD_version_minor = 1
+UCD_version_major = 16
+UCD_version_minor = 0
 UCD_version_point = 0
 UCD_version_string = "%i.%i.%i" % (UCD_version_major, UCD_version_minor, UCD_version_point)
 

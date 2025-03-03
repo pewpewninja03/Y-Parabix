@@ -25,6 +25,7 @@ RelationshipGraph::edge_descriptor PipelineCommonGraphFunctions::getReferenceEdg
         assert (mStreamGraphRef[e].Number == port.Number);
         binding = target(e, mStreamGraphRef);
     }
+
     assert (mStreamGraphRef[binding].Type == RelationshipNode::IsBinding);
     assert (in_degree(binding, mStreamGraphRef) == 2);
 

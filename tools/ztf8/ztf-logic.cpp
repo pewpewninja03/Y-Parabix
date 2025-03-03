@@ -151,7 +151,6 @@ void ZTF_DecodeLengths::generatePabloMethod() {
     std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
     std::vector<PabloAST *> groupStreams(mEncodingScheme.byLength.size());
     PabloAST * ASCII = bnc.ULT(basis, 0x80);
-    Var * groupStreamVar = getOutputStreamVar("groupStreams");
     for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
         LengthGroupInfo groupInfo = mEncodingScheme.byLength[i];
         unsigned lo = groupInfo.lo;
@@ -168,8 +167,8 @@ void ZTF_DecodeLengths::generatePabloMethod() {
         for (unsigned j = 2; j < mEncodingScheme.maxEncodingBytes(); j++) {
             groupStreams[i] = pb.createAnd(pb.createAdvance(groupStreams[i], 1), ASCII);
         }
-        pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), groupStreams[i]);
     }
+    writeOutputStreamSet("groupStreams", groupStreams);
 }
 
 void ZTF_Symbols::generatePabloMethod() {
@@ -360,7 +359,6 @@ void LengthSorter::generatePabloMethod() {
     PabloAST * runFinal = pb.createAnd(run, pb.createNot(pb.createLookahead(run, 1)));
     runFinal = pb.createAnd(runFinal, pb.createNot(overflow));
     std::vector<PabloAST *> groupStreams(mEncodingScheme.byLength.size());
-    Var * groupStreamVar = getOutputStreamVar("groupStreams");
     for (unsigned i = 0; i < mEncodingScheme.byLength.size(); i++) {
         // Run index codes count from 0 on the 2nd byte of a symbol.
         // So the length is 2 more than the bixnum.
@@ -370,6 +368,6 @@ void LengthSorter::generatePabloMethod() {
         unsigned hi = groupInfo.hi;
         std::string groupName = "lengthGroup" + std::to_string(lo) +  "_" + std::to_string(hi);
         groupStreams[i] = pb.createAnd3(bnc.UGE(lengthBixNum, lo - offset), bnc.ULE(lengthBixNum, hi - offset), runFinal, groupName);
-        pb.createAssign(pb.createExtract(groupStreamVar, pb.getInteger(i)), groupStreams[i]);
     }
+    writeOutputStreamSet("groupStreams", groupStreams);
 }

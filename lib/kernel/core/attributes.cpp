@@ -15,6 +15,8 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount.numerator(); break
     #define NAME_RATIO(DEF) \
         case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mAmount.numerator() << '/' << mAmount.denominator(); break
+    #define NAME_LABEL(DEF) \
+        case KindId::DEF : out << BOOST_PP_STRINGIZE(DEF) << mString; break
 
     switch (getKind()) {
         NAME_AMOUNT(LookAhead);
@@ -50,6 +52,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(EmptyWriteOverflow);
         NAME(ExecuteStridesIndividually);
         NAME(Statefree);
+        NAME_LABEL(InOut);
         case KindId::__Count: llvm_unreachable("__Count should not be used.");
     }
     #undef NAME

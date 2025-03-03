@@ -283,14 +283,14 @@ expand3_4Kernel::expand3_4Kernel(LLVMTypeSystemInterface & ts, StreamSet *input,
 radix64Kernel::radix64Kernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
 : BlockOrientedKernel(ts, "radix64",
             {Binding{"expandedStream", input}},
-            {Binding{"radix64stream", output}},
+            {Binding{"radix64stream", output, FixedRate(), InOut("expandedStream")}},
             {}, {}, {}) {
 }
 
 base64Kernel::base64Kernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
 : BlockOrientedKernel(ts, "base64",
 {Binding{"radix64stream", input}},
-{Binding{"base64stream", output, FixedRate(1), RoundUpTo(4)}},
+{Binding{"base64stream", output, FixedRate(1), {RoundUpTo(4), InOut("radix64stream")}}},
 {}, {}, {}) {
 
 }

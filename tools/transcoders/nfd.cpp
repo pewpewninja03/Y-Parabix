@@ -1,8 +1,7 @@
 /*
- *  Copyright (c) 2022 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-
 
 #include <cstdio>
 #include <vector>
@@ -21,10 +20,12 @@
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
+#include <kernel/streamutils/sorting.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
@@ -35,6 +36,7 @@
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
+#include <re/unicode/resolve_properties.h>
 #include <string>
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
@@ -47,6 +49,7 @@
 #include <unicode/data/PropertyObjects.h>
 #include <unicode/data/PropertyObjectTable.h>
 #include <unicode/utf/utf_compiler.h>
+#include <unicode/utf/utf_encoder.h>
 #include <unicode/utf/transchar.h>
 #include <codecvt>
 #include <re/toolchain/toolchain.h>
@@ -59,8 +62,9 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
-static cl::opt<bool> NFD_Full("NFD_Full", cl::desc("Use integrated NFD Full kernel with BixNum division"), cl::init(true), cl::cat(NFD_Options));
-static cl::opt<bool> LDiv("LDiv", cl::desc("Use BixNum division for L indexes"), cl::init(true), cl::cat(NFD_Options));
+static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(true), cl::cat(NFD_Options));
+static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -76,28 +80,48 @@ const unsigned Hangul_TCount = 28;
 const unsigned Hangul_NCount = 588;
 const unsigned Hangul_SCount = 11172;
 
+const unsigned S_Index_bits = 14;
+const unsigned L_Index_bits = 5;
+const unsigned V_Index_bits = 5;
+const unsigned T_Index_bits = 5;
+
 class NFD_BixData : public UCD::NFD_Engine {
 public:
-    NFD_BixData();
+    NFD_BixData(UTF_Encoder & u8_encoder);
     std::vector<re::CC *> NFD_Insertion_BixNumCCs();
-    std::vector<re::CC *> NFD_Hangul_LV_LVT_CCs();
+    std::vector<re::CC *> UTF8_Insertion_BixNumCCs();
+    std::vector<re::CC *> UTF8_Deletion_BixNumCCs();
     unicode::BitTranslationSets NFD_1st_BitXorCCs();
     unicode::BitTranslationSets NFD_2nd_BitCCs();
     unicode::BitTranslationSets NFD_3rd_BitCCs();
     unicode::BitTranslationSets NFD_4th_BitCCs();
 private:
-    std::unordered_map<codepoint_t, unsigned> mNFD_length;
+    UTF_Encoder & mU8_encoder;
+    std::unordered_map<codepoint_t, unsigned> mNFD_expansion;
+    std::unordered_map<codepoint_t, unsigned> mUTF8_expansion;
+    std::unordered_map<codepoint_t, unsigned> mUTF8_deletion;
     unicode::TranslationMap mNFD_CharMap[4];
     UCD::UnicodeSet mHangul_Precomposed_LV;
     UCD::UnicodeSet mHangul_Precomposed_LVT;
 };
 
-NFD_BixData::NFD_BixData() : UCD::NFD_Engine(UCD::DecompositionOptions::NFD) {
+NFD_BixData::NFD_BixData(UTF_Encoder & u8_encoder) :
+    UCD::NFD_Engine(UCD::DecompositionOptions::NFD), mU8_encoder(u8_encoder) {
     auto cps = decompMappingObj->GetExplicitCps();
     for (auto cp : cps) {
         std::u32string decomp;
         NFD_append1(decomp, cp);
-        mNFD_length.emplace(cp, decomp.length());
+        unsigned NFD_expand = decomp.length() - 1;
+        if (NFD_expand > 0) {
+            mNFD_expansion.emplace(cp, NFD_expand);
+        }
+        unsigned UTF8_cp_len = mU8_encoder.encoded_length(cp);
+        unsigned UTF8_nfd_len = mU8_encoder.encoded_length(decomp);
+        if (UTF8_nfd_len < UTF8_cp_len) {
+            mUTF8_deletion.emplace(cp, UTF8_cp_len - UTF8_nfd_len);
+        } else if (UTF8_nfd_len > UTF8_cp_len) {
+            mUTF8_expansion.emplace(cp, UTF8_nfd_len - UTF8_cp_len);
+        }
         for (unsigned i = 0; i < decomp.length(); i++) {
             mNFD_CharMap[i].emplace(cp, decomp[i]);
         }
@@ -112,15 +136,15 @@ NFD_BixData::NFD_BixData() : UCD::NFD_Engine(UCD::DecompositionOptions::NFD) {
 
 std::vector<re::CC *> NFD_BixData::NFD_Insertion_BixNumCCs() {
     unicode::BitTranslationSets BixNumCCs;
-    for (auto p : mNFD_length) {
-        BixNumCCs.push_back(UCD::UnicodeSet());
-        BixNumCCs.push_back(UCD::UnicodeSet());
-        auto insert_amt = p.second - 1;
-        if ((insert_amt & 1) == 1) {
-            BixNumCCs[0].insert(p.first);
-        }
-        if ((insert_amt & 2) == 2) {
-            BixNumCCs[1].insert(p.first);
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    for (auto p : mNFD_expansion) {
+        auto insert_amt = p.second;
+        for (unsigned i = 0; i < BixNumCCs.size(); i++) {
+            unsigned bit = 1u << i;
+            if ((insert_amt & bit) == bit) {
+                BixNumCCs[i].insert(p.first);
+            }
         }
     }
     BixNumCCs[0] = BixNumCCs[0] + mHangul_Precomposed_LV;
@@ -129,9 +153,52 @@ std::vector<re::CC *> NFD_BixData::NFD_Insertion_BixNumCCs() {
             re::makeCC(BixNumCCs[1], &cc::Unicode)};
 }
 
-std::vector<re::CC *> NFD_BixData::NFD_Hangul_LV_LVT_CCs() {
-    return {re::makeCC(mHangul_Precomposed_LV, &cc::Unicode),
-            re::makeCC(mHangul_Precomposed_LVT, &cc::Unicode)};
+std::vector<re::CC *> NFD_BixData::UTF8_Insertion_BixNumCCs() {
+    unicode::BitTranslationSets BixNumCCs;
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    for (auto p : mUTF8_expansion) {
+        auto insert_amt = p.second;
+        for (unsigned i = 0; i < BixNumCCs.size(); i++) {
+            unsigned bit = 1u << i;
+            if ((insert_amt & bit) == bit) {
+                BixNumCCs[i].insert(p.first);
+            }
+        }
+    }
+    // Each LV combination requires 3 additional bytes on decompositon; set bits 0 and 1.
+    BixNumCCs[0] = BixNumCCs[0] + mHangul_Precomposed_LV;
+    BixNumCCs[1] = BixNumCCs[1] + mHangul_Precomposed_LV;
+    // Each LVT combination requires 6 additional bytes on decompositon; set bits 1 and 2.
+    BixNumCCs[1] = BixNumCCs[1] + mHangul_Precomposed_LVT;
+    BixNumCCs[2] = BixNumCCs[2] + mHangul_Precomposed_LVT;
+    return {re::makeCC(BixNumCCs[0], &cc::Unicode),
+        re::makeCC(BixNumCCs[1], &cc::Unicode),
+        re::makeCC(BixNumCCs[2], &cc::Unicode),
+        re::makeCC(BixNumCCs[3], &cc::Unicode)};
+}
+
+//
+// The encoded length of a decomposition is shorter than the
+// original UTF8 length of the codepoint by at most 3, so
+// only two bits are required.
+std::vector<re::CC *> NFD_BixData::UTF8_Deletion_BixNumCCs() {
+    unicode::BitTranslationSets BixNumCCs;
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    BixNumCCs.push_back(UCD::UnicodeSet());
+    for (auto p : mUTF8_deletion) {
+        auto delete_amt = p.second;
+        for (unsigned i = 0; i < BixNumCCs.size(); i++) {
+            unsigned bit = 1u << i;
+            if ((delete_amt & bit) == bit) {
+                BixNumCCs[i].insert(p.first);
+            }
+        }
+    }
+    return {re::makeCC(BixNumCCs[0], &cc::Unicode),
+            re::makeCC(BixNumCCs[1], &cc::Unicode)};
 }
 
 unicode::BitTranslationSets NFD_BixData::NFD_1st_BitXorCCs() {
@@ -232,102 +299,24 @@ void NFD_Translation::generatePabloMethod() {
     }
 }
 
-//
-// A set of five Unicode CCs can be used to determine a 5-bit
-// BixNum representing the L_index value of Hangul precomposed
-// characters.
-std::vector<re::CC *> LIndexBixNumCCs() {
-    std::vector<re::CC *> L_CC(5, re::makeCC(&cc::Unicode));
-    UCD::codepoint_t low_cp = Hangul_SBase;
-    for (unsigned L_index = 0; L_index < Hangul_LCount; L_index++) {
-        UCD::codepoint_t next_base = low_cp + Hangul_NCount;
-        UCD::codepoint_t hi_cp = next_base - 1;
-        for (unsigned bit = 0; bit < 5; bit++) {
-            unsigned bit_val = (L_index >> bit) & 1;
-            if (bit_val == 1) {
-                 L_CC[bit] = re::makeCC(re::makeCC(low_cp, hi_cp, &cc::Unicode), L_CC[bit]);
-            }
-        }
-        low_cp = next_base;
-    }
-    return L_CC;
-}
-
-//
-// A set of five CCs can be used to determine a 5-bit BixNum
-// reprsenting the V_index value of Hangul precomposed characters
-// from a 9-bit VT index value in the range 0 .. Hangul_NCount - 1.
-std::vector<re::CC *> VIndexBixNumCCs() {
-    std::vector<re::CC *> V_CC(5, re::makeCC(&cc::Unicode));
-    unsigned low = 0;
-    for (unsigned V_index = 0; V_index < Hangul_VCount; V_index++) {
-        unsigned next_base = low + Hangul_TCount;
-        unsigned hi = next_base - 1;
-        for (unsigned bit = 0; bit < 5; bit++) {
-            unsigned bit_val = (V_index >> bit) & 1;
-            if (bit_val == 1) {
-                V_CC[bit] = re::makeCC(re::makeCC(low, hi), V_CC[bit]);
-            }
-        }
-        low = next_base;
-    }
-    return V_CC;
-}
-
-class Hangul_S_Index : public pablo::PabloKernel {
+class LVT_Indexes : public pablo::PabloKernel {
 public:
-    Hangul_S_Index(LLVMTypeSystemInterface & ts,
-                      StreamSet * Basis, StreamSet * S_index);
+    LVT_Indexes(LLVMTypeSystemInterface & ts,
+                StreamSet * U21_Basis, StreamSet * LIndex, StreamSet * VIndex, StreamSet * TIndex);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_S_Index::Hangul_S_Index (LLVMTypeSystemInterface & ts,
-                                      StreamSet * Basis, StreamSet * S_index)
-: PabloKernel(ts, "Hangul_S_Index" + std::to_string(Basis->getNumElements()) + "x1",
-// inputs
-{Binding{"basis", Basis}},
-// output
-{Binding{"S_index", S_index}}) {
-}
-
-// The S_index will have up to 14 significant bits.
-const unsigned S_Index_bits = 14;
-void Hangul_S_Index::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    BixNumCompiler bnc(pb);
-    BixNum ZeroBasis(basis.size(), pb.createZeroes());
-    PabloAST * Hangul_precomposed = pb.createAnd(bnc.UGE(basis, Hangul_SBase), bnc.ULT(basis, Hangul_SBase + Hangul_SCount));
-    BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul_SBase), ZeroBasis);
-    Var * S_out = getOutputStreamVar("S_index");
-    for (unsigned i = 0; i < S_Index_bits; i++) {
-        pb.createAssign(pb.createExtract(S_out, pb.getInteger(i)), S_Index[i]);
-    }
-}
-
-class Hangul_LVT : public pablo::PabloKernel {
-public:
-    Hangul_LVT(LLVMTypeSystemInterface & ts,
-                      StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index);
-protected:
-    void generatePabloMethod() override;
-};
-
-Hangul_LVT::Hangul_LVT (LLVMTypeSystemInterface & ts,
-                                      StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index)
-: PabloKernel(ts, "Hangul_LVT" + std::to_string(Basis->getNumElements()) + "x1",
+LVT_Indexes::LVT_Indexes (LLVMTypeSystemInterface & ts,
+                          StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index)
+: PabloKernel(ts, "Hangul::LVT_Indexes21x1",
 // inputs
 {Binding{"basis", Basis}},
 // output
     {Binding{"L_index", L_index}, Binding{"V_index", V_index}, Binding{"T_index", T_index}}) {
 }
 
-const unsigned L_Index_bits = 5;
-const unsigned V_Index_bits = 5;
-const unsigned T_Index_bits = 5;
-
-void Hangul_LVT::generatePabloMethod() {
+void LVT_Indexes::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     BixNumCompiler bnc0(pb);
@@ -370,42 +359,41 @@ void Hangul_LVT::generatePabloMethod() {
     for (unsigned i = 0; i < T_Index_bits; i++) {
         nested.createAssign(T_indexVar[i], T_index[i]);
     }
-
-    Var * L_out = getOutputStreamVar("L_index");
-    for (unsigned i = 0; i < L_Index_bits; i++) {
-        pb.createAssign(pb.createExtract(L_out, pb.getInteger(i)), L_indexVar[i]);
-    }
-    Var * V_out = getOutputStreamVar("V_index");
-    for (unsigned i = 0; i < V_Index_bits; i++) {
-        pb.createAssign(pb.createExtract(V_out, pb.getInteger(i)), V_indexVar[i]);
-    }
-    Var * T_out = getOutputStreamVar("T_index");
-    for (unsigned i = 0; i < T_Index_bits; i++) {
-        pb.createAssign(pb.createExtract(T_out, pb.getInteger(i)), T_indexVar[i]);
-    }
+    writeOutputStreamSet("L_index", L_indexVar);
+    writeOutputStreamSet("V_index", V_indexVar);
+    writeOutputStreamSet("T_index", T_indexVar);
 }
 
-class Hangul_NFD_Full : public pablo::PabloKernel {
+class LVT2NFD : public pablo::PabloKernel {
 public:
-    Hangul_NFD_Full(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * NFD_Basis);
+    LVT2NFD(LLVMTypeSystemInterface & ts,
+               StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index,
+               StreamSet * NFD_Basis);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_NFD_Full::Hangul_NFD_Full(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * NFD_Basis)
-: PabloKernel(ts, "Hangul_NFD_Full" + std::to_string(Basis->getNumElements()) + "x1",
+LVT2NFD::LVT2NFD (LLVMTypeSystemInterface & ts,
+                        StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index,
+                        StreamSet * NFD_Basis)
+: PabloKernel(ts, "Hangul::LVT2NFD_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
-{Binding{"basis", Basis}},
+{Binding{"basis", Basis},
+    Binding{"L_index", L_index},
+    Binding{"V_index", V_index},
+    Binding{"T_index", T_index}},
 // output
 {Binding{"NFD_Basis", NFD_Basis}}) {
 }
 
-void Hangul_NFD_Full::generatePabloMethod() {
+void LVT2NFD::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
+    std::vector<PabloAST *> V_index = getInputStreamSet("V_index");
+    std::vector<PabloAST *> T_index = getInputStreamSet("T_index");
     BixNumCompiler bnc0(pb);
     PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul_SBase), bnc0.ULT(basis, Hangul_SBase + Hangul_SCount));
-    BixNum ZeroBasis(basis.size(), pb.createZeroes());
     // Set up Vars to receive the generated basis values.
     std::vector<Var *> basisVar(21);
     for (unsigned i = 0; i < 21; i++) {
@@ -414,16 +402,6 @@ void Hangul_NFD_Full::generatePabloMethod() {
     auto nested = pb.createScope();
     pb.createIf(Hangul_precomposed, nested);
     BixNumCompiler bnc(nested);
-
-    BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul_SBase), ZeroBasis);
-    S_Index = bnc.Truncate(S_Index, S_Index_bits);
-    BixNum LV_index;
-    BixNum T_index;
-    bnc.Div(S_Index, Hangul_TCount, LV_index, T_index);
-    LV_index = bnc.Truncate(LV_index, L_Index_bits + V_Index_bits);
-    BixNum L_index;
-    BixNum V_index;
-    bnc.Div(LV_index, Hangul_VCount, L_index, V_index);
     BixNum LPart = bnc.ZeroExtend(L_index, 21);
     // The LPart will be encoded at the original precomposed position.
     LPart = bnc.AddModular(LPart, Hangul_LBase);
@@ -435,11 +413,12 @@ void Hangul_NFD_Full::generatePabloMethod() {
     BixNum VPart = bnc.ZeroExtend(V_index, 21);
     VPart = bnc.AddModular(VPart, Hangul_VBase);
     // The T Part, if it exists is two positions after the opening
-    // L Part.  A T Part only exists for LVT initials.
-    PabloAST * T_position = nested.createAdvance(nested.createAnd(Hangul_precomposed, bnc.NEQ(T_index, 0)), 2);
+    // L Part.  A T Part only exists for LVT initials (T != 0).
+    PabloAST * T_position = nested.createAdvance(Hangul_precomposed, 2);
     for (unsigned i = 0; i < T_Index_bits; i++) {
         T_index[i] = nested.createAdvance(T_index[i], 2);
     }
+    T_position = nested.createAnd(T_position, bnc.NEQ(T_index, 0));
     BixNum TPart = bnc.ZeroExtend(T_index, 21);
     TPart = bnc.AddModular(TPart, Hangul_TBase);
     for (unsigned i = 0; i < 21; i++) {
@@ -448,164 +427,8 @@ void Hangul_NFD_Full::generatePabloMethod() {
         bit = nested.createSel(T_position, TPart[i], bit);
         nested.createAssign(basisVar[i], bit);
     }
-    Var * NFD_Basis_Var = getOutputStreamVar("NFD_Basis");
-    for (unsigned i = 0; i < 21; i++) {
-        pb.createAssign(pb.createExtract(NFD_Basis_Var, pb.getInteger(i)), basisVar[i]);
-    }
+    writeOutputStreamSet("NFD_Basis", basisVar);
 }
-
-class Hangul_VT_Indices : public pablo::PabloKernel {
-public:
-    Hangul_VT_Indices(LLVMTypeSystemInterface & ts,
-                      StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-                      StreamSet * V_index, StreamSet * T_index);
-protected:
-    void generatePabloMethod() override;
-};
-
-Hangul_VT_Indices::Hangul_VT_Indices (LLVMTypeSystemInterface & ts,
-                                      StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-                                      StreamSet * V_index, StreamSet * T_index)
-: PabloKernel(ts, "Hangul_VT_indices_" + std::to_string(Basis->getNumElements()) + "x1",
-// inputs
-{Binding{"basis", Basis},
-    Binding{"LV_LVT", LV_LVT},
-    Binding{"L_index", L_index}},
-// output
-{Binding{"V_index", V_index}, Binding{"T_index", T_index}}) {
-}
-
-void Hangul_VT_Indices::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> LV_LVT = getInputStreamSet("LV_LVT");
-    std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
-    PabloAST * precomposed = pb.createOr(LV_LVT[0], LV_LVT[1]);
-    // Set up Vars to receive the V_index and T_index values.
-    std::vector<Var *> V_indexVar(5);
-    for (unsigned i = 0; i < 5; i++) {
-        V_indexVar[i] = pb.createVar("V_index" + std::to_string(i), pb.createZeroes());
-    }
-    std::vector<Var *> T_indexVar(5);
-    for (unsigned i = 0; i < 5; i++) {
-        T_indexVar[i] = pb.createVar("T_index" + std::to_string(i), pb.createZeroes());
-    }
-
-    auto nested = pb.createScope();
-    pb.createIf(precomposed, nested);
-    BixNumCompiler bnc(nested);
-
-    //
-    // For each distinct Hangul L prefix, there is a block of
-    // Hangul_NCount entries.  The relative offset of the block
-    // (offset from Hangul_SBase) is L_index * Hangul_NCount.
-    // The offset will have up to 14 significant bits.
-    //
-    BixNum rel_offset = bnc.ZeroExtend(L_index, 14);
-    rel_offset = bnc.MulModular(rel_offset, Hangul_NCount);
-    //
-    // Compute the VT index as the index within the block of
-    // Hangul_NCount entries.
-    BixNum basis_offset = bnc.SubModular(basis, Hangul_SBase);
-    BixNum VT_index = bnc.SubModular(basis_offset, rel_offset);
-    VT_index = bnc.Truncate(VT_index, 10);  // Only 10 bits needed.
-    //
-    // Given the VT_index value as a basis, we can compute
-    // the V_index from a set of five CCs.
-    std::vector<re::CC *> V_CCs = VIndexBixNumCCs();
-    cc::Parabix_CC_Compiler ccc(VT_index);
-    std::vector<PabloAST *> V_index(5);
-    for (unsigned i = 0; i < 5; i++) {
-        V_index[i] = ccc.compileCC(V_CCs[i], nested);
-        nested.createAssign(V_indexVar[i], V_index[i]);
-    }
-    BixNum V_offset = bnc.ZeroExtend(V_index, 10);
-    V_offset = bnc.MulModular(V_index, Hangul_TCount);
-    BixNum T_index = bnc.SubModular(VT_index, V_offset);
-    // Only 5 significant bits
-    for (unsigned i = 0; i < 5; i++) {
-        nested.createAssign(T_indexVar[i], T_index[i]);
-    }
-    //
-    Var * V_out = getOutputStreamVar("V_index");
-    for (unsigned i = 0; i < 5; i++) {
-        pb.createAssign(pb.createExtract(V_out, pb.getInteger(i)), V_indexVar[i]);
-    }
-    Var * T_out = getOutputStreamVar("T_index");
-    for (unsigned i = 0; i < 5; i++) {
-        pb.createAssign(pb.createExtract(T_out, pb.getInteger(i)), T_indexVar[i]);
-    }
-}
-
-class Hangul_NFD : public pablo::PabloKernel {
-public:
-    Hangul_NFD(LLVMTypeSystemInterface & ts,
-               StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-               StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis);
-protected:
-    void generatePabloMethod() override;
-};
-
-Hangul_NFD::Hangul_NFD (LLVMTypeSystemInterface & ts,
-                        StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-                        StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis)
-: PabloKernel(ts, "Hangul_NFD_" + std::to_string(Basis->getNumElements()) + "x1",
-// inputs
-{Binding{"basis", Basis},
-    Binding{"L_index", L_index},
-    Binding{"LV_LVT", LV_LVT},
-    Binding{"V_index", V_index},
-    Binding{"T_index", T_index}},
-// output
-{Binding{"NFD_Basis", NFD_Basis}}) {
-}
-
-void Hangul_NFD::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> LV_LVT = getInputStreamSet("LV_LVT");
-    std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
-    std::vector<PabloAST *> V_index = getInputStreamSet("V_index");
-    std::vector<PabloAST *> T_index = getInputStreamSet("T_index");
-    PabloAST * Hangul_L = pb.createOr(LV_LVT[0], LV_LVT[1]);
-    // Set up Vars to receive the generated basis values.
-    std::vector<Var *> basisVar(21);
-    for (unsigned i = 0; i < 21; i++) {
-        basisVar[i] = pb.createVar("basisVar" + std::to_string(i), basis[i]);
-    }
-    auto nested = pb.createScope();
-    pb.createIf(Hangul_L, nested);
-    BixNumCompiler bnc(nested);
-    BixNum LPart = bnc.ZeroExtend(L_index, 21);
-    // The LPart will be encoded at the original precomposed position.
-    LPart = bnc.AddModular(LPart, Hangul_LBase);
-    // The V Part, when it exists, is one position after the opening L Part.
-    PabloAST * V_position = nested.createAdvance(Hangul_L, 1);
-    for (unsigned i = 0; i < V_Index_bits; i++) {
-        V_index[i] = nested.createAdvance(V_index[i], 1);
-    }
-    BixNum VPart = bnc.ZeroExtend(V_index, 21);
-    VPart = bnc.AddModular(VPart, Hangul_VBase);
-    // The T Part, if it exists is two positions after the opening
-    // L Part.  A T Part only exists for LVT initials.
-    PabloAST * T_position = nested.createAdvance(LV_LVT[1], 2);
-    for (unsigned i = 0; i < T_Index_bits; i++) {
-        T_index[i] = nested.createAdvance(T_index[i], 2);
-    }
-    BixNum TPart = bnc.ZeroExtend(T_index, 21);
-    TPart = bnc.AddModular(TPart, Hangul_TBase);
-    for (unsigned i = 0; i < 21; i++) {
-        PabloAST * bit = nested.createSel(Hangul_L, LPart[i], basis[i]);
-        bit = nested.createSel(V_position, VPart[i], bit);
-        bit = nested.createSel(T_position, TPart[i], bit);
-        nested.createAssign(basisVar[i], bit);
-    }
-    Var * NFD_Basis_Var = getOutputStreamVar("NFD_Basis");
-    for (unsigned i = 0; i < 21; i++) {
-        pb.createAssign(pb.createExtract(NFD_Basis_Var, pb.getInteger(i)), basisVar[i]);
-    }
-}
-
 
 //
 //   CCC_Check computes two bitstreams:
@@ -648,7 +471,7 @@ void CCC_Check::generatePabloMethod() {
     PabloAST * ZeroCCC_ahead = bnc.EQ(CCC_ahead, 0);
     PabloAST * violation = pb.createAnd(bnc.UGT(CCC, CCC_ahead), pb.createNot(ZeroCCC_ahead));
     PabloAST * seqEnd = pb.createAnd(ZeroCCC_ahead, pb.createNot(ZeroCCC));
-    PabloAST * violationInSeq = pb.createAdvanceThenScanTo(violation, seqEnd);
+    PabloAST * violationInSeq = pb.createAnd(pb.createMatchStar(violation, pb.createNot(ZeroCCC)), seqEnd);
     PabloAST * seqStart = pb.createAnd3(ZeroCCC, pb.createNot(ZeroCCC_ahead), bnc.NEQ(CCC_ahead2, 0));
     pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_SeqMarks"), pb.getInteger(0)), pb.createOr(seqStart, seqEnd));
     pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_Violation"), pb.getInteger(0)), violationInSeq);
@@ -674,176 +497,513 @@ void CCC_Violation_Sequence::generatePabloMethod() {
     PabloAST * ViolationStarts = getInputStreamSet("ViolationStarts")[0];
     PabloAST * CCC_SeqMarks = getInputStreamSet("CCC_SeqMarks")[0];
     PabloAST * interior = pb.createMatchStar(pb.createAdvance(ViolationStarts, 1), pb.createNot(CCC_SeqMarks));
-    PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), Violation_Seq);
+    //PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), interior);
 }
 
-typedef void (*XfrmFunctionType)(uint32_t fd);
+//
+//  NFD_Focus identifies UTF0-8 stream positions that potentially play
+//  a role in either expansion or reordering during NFD decomposition.
+//  These positions include all characters whose Unicode decomposition
+//  type is Canonical, all characters whose combining class is nonzero
+//  (and hence reorderable), as well as any nonreorderable starter following
+//  either of these  (to ensure that such sequences
+//  are separated).  NFD_Focus relies on inputs u8index marking the last
+//  position of each UTF-8 byte sequence,  DT_Can marking the last position
+//  of each character having dt=Can, and CCC_0 marking the initial position
+//  of each character that is not reorderable.
+//
+class NFD_Focus : public pablo::PabloKernel {
+public:
+    NFD_Focus(LLVMTypeSystemInterface & ts, StreamSet * u8index, StreamSet * DT_Can, StreamSet * CCC_0, StreamSet * mayChangeOnNFD);
+protected:
+    void generatePabloMethod() override;
+};
 
-XfrmFunctionType generate_pipeline(CPUDriver & driver) {
-    // A Parabix program is build as a set of kernel calls called a pipeline.
-    // A pipeline is construction using a Parabix driver object.
+NFD_Focus::NFD_Focus(LLVMTypeSystemInterface & ts, StreamSet * u8index, StreamSet * DT_Can, StreamSet * CCC_0, StreamSet * mayChangeOnNFD)
+: PabloKernel(ts, "NFD_Focus",
+// inputs
+{Binding{"u8index", u8index}, Binding{"DT_Can", DT_Can}, Binding{"CCC_0", CCC_0}},
+// output
+{Binding{"mayChangeOnNFD", mayChangeOnNFD}}) {
+}
 
-    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+void NFD_Focus::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * u8index = getInputStreamSet("u8index")[0];
+    PabloAST * DT_Can = getInputStreamSet("DT_Can")[0];
+    PabloAST * CCC_0_final = getInputStreamSet("CCC_0")[0];
+    PabloAST * CCC_Nonzero_final = pb.createAnd(u8index, pb.createNot(CCC_0_final));
+    PabloAST * CanOrNZ_follow = pb.createAdvanceThenScanThru(pb.createOr(DT_Can, CCC_Nonzero_final), pb.createNot(u8index));
+    PabloAST * focus = pb.createOr3(CanOrNZ_follow, DT_Can, CCC_Nonzero_final);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("mayChangeOnNFD"), pb.getInteger(0)), focus);
+}
 
-    //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
-    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
-    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
-    //  from a file descriptor.
-    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    SHOW_BYTES(ByteStream);
+class NFD_DepositMask : public pablo::PabloKernel {
+public:
+    NFD_DepositMask(LLVMTypeSystemInterface & ts, StreamSet * U8_SpreadMask, StreamSet * SelectedFinalPositionMask, StreamSet * DepositMask);
+protected:
+    void generatePabloMethod() override;
+};
 
-    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    SHOW_BIXNUM(BasisBits);
+NFD_DepositMask::NFD_DepositMask(LLVMTypeSystemInterface & ts, StreamSet * U8_SpreadMask, StreamSet * SelectedFinalPositionMask, StreamSet * DepositMask)
+: PabloKernel(ts, "NFD_DepositMask",
+// inputs
+{Binding{"U8_SpreadMask", U8_SpreadMask}, Binding{"SelectedFinalPositionMask", SelectedFinalPositionMask}},
+// output
+{Binding{"DepositMask", DepositMask}}) {
+}
 
-    StreamSet * u8index = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
-    SHOW_STREAM(u8index);
+void NFD_DepositMask::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * U8_SpreadMask = getInputStreamSet("U8_SpreadMask")[0];
+    PabloAST * SelectedFinalPositionMask = getInputStreamSet("SelectedFinalPositionMask")[0];
+    PabloAST * DepositMask = pb.createOr(SelectedFinalPositionMask, pb.createNot(U8_SpreadMask));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("DepositMask"), pb.getInteger(0)), DepositMask);
+}
 
-    StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+class FinalSelection : public pablo::PabloKernel {
+public:
+    FinalSelection(LLVMTypeSystemInterface & ts, StreamSet * SelectMask, StreamSet * Source1, StreamSet * Source2, StreamSet * Output);
+protected:
+    void generatePabloMethod() override;
+};
 
-    StreamSet * U21 = P.CreateStreamSet(21, 1);
-    FilterByMask(P, u8index, U21_u8indexed, U21);
-    SHOW_BIXNUM(U21);
+FinalSelection::FinalSelection(LLVMTypeSystemInterface & ts, StreamSet * SelectMask, StreamSet * Source1, StreamSet * Source2, StreamSet * Output)
+: PabloKernel(ts, "FinalSelection" + Source1->shapeString(),
+// inputs
+{Binding{"SelectMask", SelectMask}, Binding{"Source1", Source1}, Binding{"Source2", Source2}},
+// output
+{Binding{"Output", Output}}) {
+}
 
-    NFD_BixData NFD_Data;
-    auto insert_ccs = NFD_Data.NFD_Insertion_BixNumCCs();
+class Invert : public PabloKernel {
+public:
+    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(ts, "Invert",
+                      {Binding{"mask", mask}},
+                      {Binding{"inverted", inverted}}) {}
+protected:
+    void generatePabloMethod() override;
+};
 
-    StreamSet * Insertion_BixNum = P.CreateStreamSet(insert_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Insertion_BixNum);
-    SHOW_BIXNUM(Insertion_BixNum);
+void Invert::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * mask = getInputStreamSet("mask")[0];
+    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
+    Var * outVar = getOutputStreamVar("inverted");
+    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
+}
 
-    StreamSet * SpreadMask = InsertionSpreadMask(P, Insertion_BixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(SpreadMask);
+class OrCombine : public PabloKernel {
+public:
+    OrCombine(LLVMTypeSystemInterface & ts, StreamSet * s1, StreamSet * s2, StreamSet * combined)
+        : PabloKernel(ts, "OrCombine",
+                      {Binding{"s1", s1}, Binding{"s2", s2}},
+                      {Binding{"combined", combined}}) {}
+protected:
+    void generatePabloMethod() override;
+};
 
-    StreamSet * ExpandedBasis = P.CreateStreamSet(21, 1);
-    SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
-    SHOW_BIXNUM(ExpandedBasis);
+void OrCombine::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * s1 = getInputStreamSet("s1")[0];
+    PabloAST * s2 = getInputStreamSet("s2")[0];
+    PabloAST * combined = pb.createOr(s1, s2);
+    Var * outVar = getOutputStreamVar("combined");
+    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), combined);
+}
 
-    StreamSet * Hangul_NFD_Basis = P.CreateStreamSet(21, 1);
-    if (NFD_Full) {
-        P.CreateKernelCall<Hangul_NFD_Full>(ExpandedBasis, Hangul_NFD_Basis);
-    } else {
-        StreamSet * LIndexBixNum = P.CreateStreamSet(L_Index_bits);
-        StreamSet * VIndexBixNum = P.CreateStreamSet(V_Index_bits);
-        StreamSet * TIndexBixNum = P.CreateStreamSet(T_Index_bits);
-
-        auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
-
-        StreamSet * LV_LVT =  P.CreateStreamSet(LV_LVT_ccs.size());
-        P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
-        SHOW_BIXNUM(LV_LVT);
-
-        if (LDiv) {
-            P.CreateKernelCall<Hangul_LVT>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
-        } else {
-            auto Lindex_ccs = LIndexBixNumCCs();
-            P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
-            P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
-        }
-        SHOW_BIXNUM(LIndexBixNum);
-        SHOW_BIXNUM(VIndexBixNum);
-        SHOW_BIXNUM(TIndexBixNum);
-
-        P.CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
+void FinalSelection::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * SelectMask = getInputStreamSet("SelectMask")[0];
+    std::vector<PabloAST *> Source1 = getInputStreamSet("Source1");
+    std::vector<PabloAST *> Source2 = getInputStreamSet("Source2");
+    std::vector<PabloAST *> Output(Source1.size());
+    for (unsigned i = 0; i < Source1.size(); i++) {
+        Output[i] = pb.createSel(SelectMask, Source1[i], Source2[i]);
     }
+    writeOutputStreamSet("Output", Output);
+}
+
+class CreateU8_FilterMask : public pablo::PabloKernel {
+public:
+    CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mBixBits;
+};
+
+CreateU8_FilterMask::CreateU8_FilterMask (LLVMTypeSystemInterface & ts,
+                                StreamSet * DeletionBixNum,
+                                StreamSet * DelMask)
+: PabloKernel(ts, "u8_delmask@-1_" + DeletionBixNum->shapeString(),
+// inputs
+{Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
+// output
+{Binding{"selection_mask", DelMask}}),
+    mBixBits(DeletionBixNum->getNumElements()) {
+}
+
+void CreateU8_FilterMask::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    Var * deletion_bixnum = getInputStreamVar("deletion_bixnum");
+    Var * del_bixnum0 = pb.createExtract(deletion_bixnum, pb.getInteger(0));
+    // Deletion and insertion bixnums are calculated at the final position of
+    // a UTF-8 sequence.   Deletion masks will preserve this position.
+    //
+    PabloAST * del_mask = pb.createLookahead(del_bixnum0, 1);
+    if (mBixBits == 2) {
+        Var * del_bixnum1 = pb.createExtract(deletion_bixnum, pb.getInteger(1));
+        // Mark two positions for deletion.
+        del_mask = pb.createOr3(del_mask, pb.createLookahead(del_bixnum1, 1), pb.createLookahead(del_bixnum1, 2));
+        // If both del_bixnum0 and del_bixnum1 are 1, then 3 positions must be deleted.
+        del_mask = pb.createOr(del_mask, pb.createAnd(pb.createLookahead(del_bixnum0, 3), pb.createLookahead(del_bixnum1, 3)));
+    }
+    PabloAST * selected = pb.createInFile(pb.createNot(del_mask));
+    Var * const selection_mask = getOutputStreamVar("selection_mask");
+    pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
+}
+
+
+StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U21_Basis) {
+    // Now we have a Unicode-indexed representation of all significant
+    // sequences for NFD processing.
+    // Expand to make room for decompositions.
+    auto insert_ccs = NFD_Data.NFD_Insertion_BixNumCCs();
+    StreamSet * const U21_Insertion_BixNum = P.CreateStreamSet(insert_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21_Basis, U21_Insertion_BixNum);
+    SHOW_BIXNUM(U21_Insertion_BixNum);
+
+    StreamSet * const U21_SpreadMask = InsertionSpreadMask(P, U21_Insertion_BixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(U21_SpreadMask);
+
+    StreamSet * const U21_ExpandedBasis = P.CreateStreamSet(21, 1);
+    SpreadByMask(P, U21_SpreadMask, U21_Basis, U21_ExpandedBasis);
+    SHOW_BIXNUM(U21_ExpandedBasis);
+
+    //  The Hangul decomposition algorithm calculates replacements for LV and
+    //  LVT characters using calculations based on three 5-bit indexes for
+    //  the L, V and T characters.
+    StreamSet * const LIndexBixNum = P.CreateStreamSet(L_Index_bits);
+    StreamSet * const VIndexBixNum = P.CreateStreamSet(V_Index_bits);
+    StreamSet * const TIndexBixNum = P.CreateStreamSet(T_Index_bits);
+    P.CreateKernelCall<LVT_Indexes>(U21_ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+    SHOW_BIXNUM(LIndexBixNum);
+    SHOW_BIXNUM(VIndexBixNum);
+    SHOW_BIXNUM(TIndexBixNum);
+
+    // Given the L, V and T indexes, the replacements for LV and LVT characters
+    // can be calculated to determine the correct 21-bit representations at
+    // <L, V> and <L, V, T> positions.
+    StreamSet * const Hangul_NFD_Basis = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<LVT2NFD>(U21_ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
     SHOW_BIXNUM(Hangul_NFD_Basis);
 
-    StreamSet * NFD_Basis = P.CreateStreamSet(21, 1);
+    StreamSet * const NFD_Basis = P.CreateStreamSet(21, 1);
     P.CreateKernelCall<NFD_Translation>(NFD_Data, Hangul_NFD_Basis, NFD_Basis);
     SHOW_BIXNUM(NFD_Basis);
 
     UCD::EnumeratedPropertyObject * enumObj = llvm::cast<UCD::EnumeratedPropertyObject>(getPropertyObject(UCD::ccc));
-    StreamSet * CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+    StreamSet * const CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
     P.CreateKernelCall<UnicodePropertyBasis>(enumObj, NFD_Basis, CCC_Basis);
     SHOW_BIXNUM(CCC_Basis);
 
-    StreamSet * CCC_SeqMarks = P.CreateStreamSet(1, 1);
-    StreamSet * CCC_Violation = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CCC_Check>(CCC_Basis, CCC_SeqMarks, CCC_Violation);
-    SHOW_STREAM(CCC_SeqMarks);
-    SHOW_STREAM(CCC_Violation);
+    StreamSet * const CCC_NonZero = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<bixnum::NEQ_immediate>(CCC_Basis, 0, CCC_NonZero);
+    SHOW_STREAM(CCC_NonZero);
 
-    StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
-    FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
+    StreamSets ToSort = {CCC_Basis, NFD_Basis};
 
-    StreamSet * ViolationsByMarkStart = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ShiftBack>(ViolationsByMarkEnd, ViolationsByMarkStart, 1);
+    StreamSets SortResults = BitonicSortRuns(P, 8, CCC_NonZero, ToSort);
+    SHOW_BIXNUM(SortResults[0]);
+    SHOW_BIXNUM(SortResults[1]);
 
-    StreamSet * CCC_Violation_Start = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, CCC_SeqMarks, ViolationsByMarkStart, CCC_Violation_Start);
-    SHOW_STREAM(CCC_Violation_Start);
+    return SortResults[1];
+}
 
-    StreamSet * Violation_Seq = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CCC_Violation_Sequence>(CCC_Violation_Start, CCC_SeqMarks, Violation_Seq);
-    SHOW_STREAM(Violation_Seq);
+StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * u8index) {
+    re::RE * dtCanProp = re::makePropertyExpression("dt", "Can");
+    dtCanProp = UCD::linkAndResolve(dtCanProp);
+    re::Name * dtCanName = re::makeName("dt", "Can");
+    dtCanName->setDefinition(dtCanProp);
+    StreamSet * const DT_Can = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(dtCanName, U8_Basis, DT_Can);
+    SHOW_STREAM(DT_Can);
 
-    StreamSet * const OutputBasis = P.CreateStreamSet(8);
-    U21_to_UTF8(P, NFD_Basis, OutputBasis);
+    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+    re::Name * CCC0_Name = re::makeName("CCC", "NR");
+    CCC0_Name->setDefinition(CCC0_Prop);
+    StreamSet * const CCC_0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, U8_Basis, CCC_0);//, BitMovementMode::LookAhead);
+    SHOW_STREAM(CCC_0);
 
-    StreamSet * u8index2 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UTF8_index>(OutputBasis, u8index2);
-    SHOW_STREAM(u8index2);
+    StreamSet * const NFD_WorkItems = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<NFD_Focus>(u8index, DT_Can, CCC_0, NFD_WorkItems);
+    SHOW_STREAM(NFD_WorkItems);
 
-    StreamSet * U8_Violation_Marks = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, u8index2, Violation_Seq, U8_Violation_Marks);
+    return NFD_WorkItems;
+}
 
-    StreamSet * U8_ViolationSeq = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<U8Spans>(U8_Violation_Marks, u8index2, U8_ViolationSeq);
-    SHOW_STREAM(U8_ViolationSeq);
+void ComputeWorkPlacement(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * SelectionMask,
+                          StreamSet * WorkPlacementMask) {
+    auto u8_insert_ccs = NFD_Data.UTF8_Insertion_BixNumCCs();
+    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(u8_insert_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(u8_insert_ccs, U8_Basis, U8_Insertion_BixNum);
+    SHOW_BIXNUM(U8_Insertion_BixNum);
 
-    StreamSet * Violation_Basis = P.CreateStreamSet(8);
-    FilterByMask(P, U8_ViolationSeq, OutputBasis, Violation_Basis);
-    SHOW_BIXNUM(Violation_Basis);
+    auto u8_deletion_ccs = NFD_Data.UTF8_Deletion_BixNumCCs();
+    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(u8_deletion_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(u8_deletion_ccs, U8_Basis, U8_Deletion_BixNum);
+    SHOW_BIXNUM(U8_Deletion_BixNum);
 
-    StreamSet * Violation_CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
-    P.CreateKernelCall<UnicodePropertyBasis>(enumObj, Violation_Basis, Violation_CCC_Basis);
-    SHOW_BIXNUM(Violation_CCC_Basis);
+    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
+    SHOW_STREAM(U8_FilterMask);
 
-    StreamSet * ViolationSeqBytes = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(Violation_Basis, ViolationSeqBytes);
-    SHOW_BYTES(ViolationSeqBytes);
+    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(U8_SpreadMask);
 
-    StreamSet * ViolationCCCBytes = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(Violation_CCC_Basis, ViolationCCCBytes);
-    SHOW_BYTES(ViolationCCCBytes);
+    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
 
-/*  TO DO */
-//  StreamSet * ReorderedBytes = P.CreateStreamSet(1, 8);
-//  P.CreateKernelCall<CanonicalReordering>(ViolationSeqBytes, ViolationCCCBytes, ReorderedBytes);
+    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
+    SHOW_STREAM(ExpandedFilterMask);
 
-//  StreamSet * ReorderedStream = P.CreateStreamSet(1, 8);
-//  SpreadByMask(P, U8_ViolationSeq, ReorderedBytes, ReorderedStream);
+    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
+    SHOW_STREAM(U8_PostSpreadFilterMask);
 
-    StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, U8_SpreadMask, SelectionMask, WorkSpreadMask);
+    SHOW_STREAM(WorkSpreadMask);
 
-//  StreamSet * ReorderedOutput = P.CreateStreamSet(1, 8);
-//  P.CreateKernelCall<StreamsBlend>(U8_ViolationSeq, OutputBytes, ReorderedBytes, ReorderedOutput);
+    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
+    SHOW_STREAM(WorkExpansionMask);
 
-//  P.CreateKernelCall<StdOutKernel>(ReorderedBytes);
+    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
+    SHOW_STREAM(WorkPlacementMask);
+}
+
+void source_input_stage(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * BasisBits) {
+
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
+}
+
+typedef void (*SourceInputFunctionType)(StreamSetPtr &, StreamSetPtr &, uint32_t fd);
+
+SourceInputFunctionType source_input_pipeline(CPUDriver & driver) {
+    auto P = CreatePipeline(driver,
+                            Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
+                            Output<streamset_t>("BasisBits", 8, 1, ReturnedBuffer(1)),
+                            Input<uint32_t>("inputFileDecriptor")
+                            );
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+
+    StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
+    StreamSet * const BasisBits = P.getOutputStreamSet("BasisBits");
+    source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
+    return P.compile();
+}
+
+void NFD_FilterStage(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * WorkingBasis) {
+
+    StreamSet * const u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
+    
+    StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, NFD_Data, BasisBits, u8index);
+    
+    P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
+    SHOW_STREAM(WorkSelectionMask);
+
+    ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
+    SHOW_STREAM(FinalWorkPlacementMask);
+
+    FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
+    SHOW_BIXNUM(WorkingBasis);
+}
+
+typedef void (*NFD_FilterFunctionType)(const StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, StreamSetPtr &);
+
+NFD_FilterFunctionType NFD_filter_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>("BasisBits", 8, 1),
+                            Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("FinalWorkPlacementMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("WorkingBasis", 8, 1, ReturnedBuffer(1))
+                            );
+    StreamSet * const BasisBits = P.getInputStreamSet("BasisBits");
+    StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
+    StreamSet * const FinalWorkPlacementMask = P.getOutputStreamSet("FinalWorkPlacementMask");
+    StreamSet * const WorkingBasis = P.getOutputStreamSet("WorkingBasis");
+
+    NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+    return P.compile();
+}
+
+void NFD_Transform_Stage(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * WorkingBasis, StreamSet * TransformedBasis) {
+
+    StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
+    SHOW_BIXNUM(U21_u8indexed);
+
+    StreamSet * const WorkingU8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(WorkingBasis, WorkingU8index);
+    SHOW_STREAM(WorkingU8index);
+
+    StreamSet * const U21_focus = P.CreateStreamSet(21, 1);
+    FilterByMask(P, WorkingU8index, U21_u8indexed, U21_focus);
+    SHOW_BIXNUM(U21_focus);
+
+    StreamSet * NFD_U21_Results = NFD_U21_Pipeline(P, NFD_Data, U21_focus);
+
+    U21_to_UTF8(P, NFD_U21_Results, TransformedBasis);
+    SHOW_BIXNUM(TransformedBasis);
+}
+
+typedef void (*NFD_TransformFunctionType)(const StreamSetPtr &, StreamSetPtr &);
+
+NFD_TransformFunctionType NFD_transform_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>("WorkingBasis", 8, 1),
+                            Output<streamset_t>("TransformedBasis", 8, 1, ReturnedBuffer(1))
+                            );
+    StreamSet * const WorkingBasis = P.getInputStreamSet("WorkingBasis");
+    StreamSet * const TransformedBasis = P.getOutputStreamSet("TransformedBasis");
+
+    NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
+    return P.compile();
+}
+
+void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * ByteStream, StreamSet * TransformedBasis) {
+
+    StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
+    SHOW_STREAM(NonModifiedMask);
+
+    StreamSet * const NonModified = P.CreateStreamSet(1, 8);
+    FilterByMask(P, NonModifiedMask, ByteStream, NonModified);
+    SHOW_BYTES(NonModified);
+
+    StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(FinalWorkPlacementMask, NonModifiedPlacementMask);
+    SHOW_STREAM(NonModifiedPlacementMask);
+
+    StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
+    SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
+
+    StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
+    if (ByteMerging) {
+        StreamSet * const TransformedBytes = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<P2SKernel>(TransformedBasis, TransformedBytes);
+
+        if (ByteReplace) {
+            P.CreateKernelCall<ByteReplaceByMask>(FinalWorkPlacementMask, NonModifiedPlaced, TransformedBytes, OutputBytes);
+        } else {
+            StreamSet * const TransformedPlaced = P.CreateStreamSet(1, 8);
+            SpreadByMask(P, FinalWorkPlacementMask, TransformedBytes, TransformedPlaced);
+
+            P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, TransformedPlaced, OutputBytes);
+        }
+    } else {
+        StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
+        P.CreateKernelCall<S2PKernel>(NonModified, NonModifiedBasis);
+        SHOW_BIXNUM(NonModifiedBasis);
+
+        StreamSet * const OutputBasis = P.CreateStreamSet(8);
+        MergeByMask(P, FinalWorkPlacementMask, TransformedBasis, NonModifiedBasis, OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
+
+        P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    }
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
+}
 
+typedef void (*OutputAssemblyFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
+
+OutputAssemblyFunctionType generate_output_pipeline(CPUDriver & driver) {
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>("WorkSelectionMask", 1, 1),
+                            Input<streamset_t>("FinalWorkPlacementMask", 1, 1),
+                            Input<streamset_t>("ByteStream", 1, 8),
+                            Input<streamset_t>("TransformedBasis", 8, 1)
+                            );
+    StreamSet * const WorkSelectionMask = P.getInputStreamSet("WorkSelectionMask");
+    StreamSet * const FinalWorkPlacementMask = P.getInputStreamSet("FinalWorkPlacementMask");
+    StreamSet * const ByteStream = P.getInputStreamSet("ByteStream");
+    StreamSet * const TransformedBasis = P.getInputStreamSet("TransformedBasis");
+
+    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+    return P.compile();
+}
+
+typedef void (*XfrmFunctionType)(uint32_t fd);
+
+XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
+    source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
+
+    StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+    StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+    StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
+    NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+
+    StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+    NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
+
+    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
     return P.compile();
 }
 
 
 int main(int argc, char *argv[]) {
-    //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
-    //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver driver("NFD_function");
-    //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    XfrmFunctionType fn;
-    fn = generate_pipeline(driver);
-    //
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
+        exit(-1);
+    }
+    if (ByteReplace) ByteMerging = true;
+    UTF_Encoder U8_Encoder(8);
+    NFD_BixData NFD_Data(U8_Encoder);
+    CPUDriver driver("NFD_function");
+    if (SeparatedPipelineStages > 0) {
+        SourceInputFunctionType stage0 = source_input_pipeline(driver);
+        kernel::StreamSetPtr ByteStream;
+        kernel::StreamSetPtr BasisBits;
+        stage0(ByteStream, BasisBits, fd);
+        close(fd);
+
+        NFD_FilterFunctionType stage1 = NFD_filter_pipeline(driver, NFD_Data);
+        kernel::StreamSetPtr WorkSelectionMask;
+        kernel::StreamSetPtr FinalWorkPlacementMask;
+        kernel::StreamSetPtr WorkingBasis;
+        stage1(BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+
+        if (SeparatedPipelineStages > 1) {
+            NFD_TransformFunctionType stage2 = NFD_transform_pipeline(driver, NFD_Data);
+            kernel::StreamSetPtr TransformedBasis;
+            stage2(WorkingBasis, TransformedBasis);
+
+            if (SeparatedPipelineStages > 2) {
+                OutputAssemblyFunctionType stage3 = generate_output_pipeline(driver);
+                stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+            }
+        }
     } else {
+        XfrmFunctionType fn = generate_unitary_pipeline(driver, NFD_Data);
         fn(fd);
         close(fd);
     }

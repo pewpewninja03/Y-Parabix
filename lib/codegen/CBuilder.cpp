@@ -1533,7 +1533,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
         Value * alignmentOffset = CreateURem(CreatePtrToInt(Ptr, intPtrTy), align);
-        CreateAssertZero(alignmentOffset, "CreateAlignedLoad: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
+        CreateAssertZero(alignmentOffset, "CreateAlignedLoad: pointer " + Name + " (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
     LoadInst * LI = CreateLoad(type, Ptr, Name);
     LI->setAlignment(AlignType{Align});

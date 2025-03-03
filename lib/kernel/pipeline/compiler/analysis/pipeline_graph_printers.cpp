@@ -533,6 +533,11 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                 print_rational(rate.getUpperBound());
                 out << ")";
                 break;
+            case RateId::Relative:
+                out << "R(" << rate.getReference() << ',';
+                print_rational(rate.getUpperBound());
+                out << ")";
+                break;
             default: llvm_unreachable("unknown or unhandled rate type in buffer graph");
         }
         // out << " {G" << pd.GlobalPortId << ",L" << pd.LocalPortId << '}';

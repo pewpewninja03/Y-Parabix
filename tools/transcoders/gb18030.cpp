@@ -58,7 +58,9 @@ static cl::opt<GBerrorMode> GBerrorOption(cl::desc("Treatment of erroneous GB 18
                                           cl::cat(gb18030Options), cl::init(GBerrorMode::Abort));
 
 static cl::opt<unsigned> ReplacementCharacter("replacement-character", cl::desc("Codepoint value of the character used to replace any unmapped or invalid input sequence."), cl::init(0xFFFD), cl::cat(gb18030Options));
+static cl::opt<bool> OutputEditing("output-editing", cl::desc("Use output editing for in-out streams."), cl::init(false), cl::cat(gb18030Options));
 static cl::opt<std::string> OutputEncoding("encoding", cl::desc("Output encoding (default: UTF-8)"), cl::init("UTF-8"), cl::cat(gb18030Options));
+
 
 // Parse GB 10830 encoded data to identify 1-, 2- and 4-byte sequences,
 // as well as to check that sequences are well-formed.  The following
@@ -341,11 +343,11 @@ GB_18030_DoubleByteRangeKernel::GB_18030_DoubleByteRangeKernel
  StreamSet * GB_2byte, StreamSet * gb15_index, StreamSet * u16_in,
  StreamSet * u16_out,
  unsigned rangeBase, unsigned rangeBits)
-: PabloKernel(ts, "GB_18030_DoubleByteRangeKernel" + std::to_string(rangeBase) + "-" + std::to_string(rangeBase + (1 << rangeBits) - 1),
+: PabloKernel(ts, "GB_18030_DoubleByteRangeKernel" + std::to_string(rangeBase) + "-" + std::to_string(rangeBase + (1 << rangeBits) - 1) + (OutputEditing ? "editing" : ""),
               // input
 {Binding{"GB_2byte", GB_2byte}, Binding{"gb15_index", gb15_index}, Binding{"u16_in", u16_in}},
               // output
-{Binding{"u16_out", u16_out}}), mRangeBase(rangeBase), mRangeBits(rangeBits) {
+{Binding{"u16_out", u16_out, FixedRate(), InOut("u16_in")}}), mRangeBase(rangeBase), mRangeBits(rangeBits) {
 }
 
 void GB_18030_DoubleByteRangeKernel::generatePabloMethod() {
@@ -383,11 +385,15 @@ void GB_18030_DoubleByteRangeKernel::generatePabloMethod() {
     PabloBuilder nb = pb.createScope();
     tableCompiler.compileSubTable(nb, mRangeBase, inRange);
     pb.createIf(inRange, nb);
-
-
     Var * const u16_out = getOutputStreamVar("u16_out");
-    for (unsigned i = 0; i < 16; i++) {
-        pb.createAssign(pb.createExtract(u16_out, pb.getInteger(i)), u16[i]);
+    if (OutputEditing && !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes)) {
+        for (unsigned i = 0; i < 16; i++) {
+            nb.createAssign(nb.createExtract(u16_out, nb.getInteger(i)), u16[i]);
+        }
+    } else {
+        for (unsigned i = 0; i < 16; i++) {
+            pb.createAssign(pb.createExtract(u16_out, pb.getInteger(i)), u16[i]);
+        }
     }
 }
 

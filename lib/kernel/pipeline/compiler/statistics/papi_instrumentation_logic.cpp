@@ -1,4 +1,4 @@
-﻿#ifdef ENABLE_PAPI
+﻿#if 1 // def ENABLE_PAPI
 
 #include "../pipeline_compiler.hpp"
 #include <papi.h>
@@ -137,7 +137,7 @@ void PipelineCompiler::setupPAPIOnCurrentThread(KernelBuilder & b) {
     Constant * nil = Constant::getNullValue(papiCounterArrayTy);
     for (unsigned i = 0; i < NUM_OF_PAPI_COUNTERS; ++i) {
         Value * ptr = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
-        b.CreateStore(nil, ptr);
+        b.CreateAlignedStore(nil, ptr, PtrTyABIAlignment);
         PAPIEventCounterArray[i] = ptr;
     }
     PAPITempMeasurementArray = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
@@ -169,6 +169,8 @@ void PipelineCompiler::startPAPIMeasurement(KernelBuilder & b, const std::initia
 
         ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
         IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b.getContext());
+        auto & DL = b.getModule()->getDataLayout();
+        const auto papiCounterAlign = DL.getABITypeAlign(papiCounterTy).value();
 
         SmallVector<Value *, 4> i32_VAL(NumOfPAPIEvents, nullptr);
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
@@ -182,14 +184,14 @@ void PipelineCompiler::startPAPIMeasurement(KernelBuilder & b, const std::initia
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
             offset[1] = i32_VAL[i];
             Value * const ptr = b.CreateGEP(papiCounterArrayTy, PAPIEventCounterArray[first], offset);
-            counterVal[i] = b.CreateLoad(papiCounterTy, ptr);
+            counterVal[i] = b.CreateAlignedLoad(papiCounterTy, ptr, papiCounterAlign);
         }
 
         do {
             for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
                 offset[1] = i32_VAL[i];
                 Value * const ptr = b.CreateGEP(papiCounterArrayTy, PAPIEventCounterArray[*counter], offset);
-                b.CreateStore(counterVal[i], ptr);
+                b.CreateAlignedStore(counterVal[i], ptr, papiCounterAlign);
             }
         } while (++counter != measurementType.end());
 
@@ -215,6 +217,9 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const
         Type * const counterArrayTy = eventCounterSumty->getArrayElementType();
         assert (counterArrayTy->isArrayTy());
         IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b.getContext());
+        auto & DL = b.getModule()->getDataLayout();
+        const auto papiCounterAlign = DL.getABITypeAlign(papiCounterTy).value();
+
         Constant * i32_ZERO = b.getInt32(0);
 
         FixedArray<Value *, 2> from;
@@ -226,15 +231,15 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const
 
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
             from[1] = b.getInt32(i);
-            Value * const beforeVal = b.CreateLoad(papiCounterTy, b.CreateGEP(counterArrayTy, PAPIEventCounterArray[measurementType], from));
-            Value * const afterVal = b.CreateLoad(papiCounterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
+            Value * const beforeVal = b.CreateAlignedLoad(papiCounterTy, b.CreateGEP(counterArrayTy, PAPIEventCounterArray[measurementType], from), papiCounterAlign);
+            Value * const afterVal = b.CreateAlignedLoad(papiCounterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from), papiCounterAlign);
             Value * const diff = b.CreateSub(afterVal, beforeVal);
             update[2] = from[1];
             Value * const ptr = b.CreateGEP(eventCounterSumty, eventCounterSumArray, update);
-            Value * const curr = b.CreateLoad(papiCounterTy, ptr);
+            Value * const curr = b.CreateAlignedLoad(papiCounterTy, ptr, papiCounterAlign);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b.CreateAdd(curr, diff);
-            b.CreateStore(updatedVal, ptr);
+            b.CreateAlignedStore(updatedVal, ptr, papiCounterAlign);
         }
 
     }
@@ -258,6 +263,8 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const
         std::tie(eventCounterSumArray, eventCounterSumty) = b.getScalarFieldPtr(prefix + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
         Type * const counterArrayTy = eventCounterSumty->getArrayElementType();
         IntegerType * const papiCounterTy = TypeBuilder<papi_counter_t, false>::get(b.getContext());
+        auto & DL = b.getModule()->getDataLayout();
+        const auto papiCounterAlign = DL.getABITypeAlign(papiCounterTy).value();
 
         Constant * i32_ZERO = b.getInt32(0);
 
@@ -272,18 +279,18 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const
 
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
             from[1] = b.getInt32(i);
-            Value * const beforeVal = b.CreateLoad(papiCounterTy, b.CreateGEP(counterArrayTy, array, from));
-            Value * const afterVal = b.CreateLoad(papiCounterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
+            Value * const beforeVal = b.CreateAlignedLoad(papiCounterTy, b.CreateGEP(counterArrayTy, array, from), papiCounterAlign);
+            Value * const afterVal = b.CreateAlignedLoad(papiCounterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from), papiCounterAlign);
 
             b.CreateAssert(b.CreateICmpULE(beforeVal, afterVal), "%s.papi%" PRIu64 " or %" PRIu64 ".%" PRIu64 " : %" PRIu64 ", %" PRIu64, mCurrentKernelName, b.getSize(ifTrue), b.getSize(ifFalse), b.getSize(i), beforeVal, afterVal);
 
             Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
             update[2] = from[1];
             Value * const ptr = b.CreateGEP(eventCounterSumty, eventCounterSumArray, update);
-            Value * const curr = b.CreateLoad(papiCounterTy, ptr);
+            Value * const curr = b.CreateAlignedLoad(papiCounterTy, ptr, papiCounterAlign);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b.CreateAdd(curr, diff);
-            b.CreateStore(updatedVal, ptr);
+            b.CreateAlignedStore(updatedVal, ptr papiCounterAlign);
         }
     }
 }
@@ -301,6 +308,8 @@ void PipelineCompiler::recordTotalPAPIMeasurement(KernelBuilder & b) const {
 
         Type * const counterTy = counterArrayTy->getArrayElementType();
         assert (counterTy->isIntegerTy());
+        auto & DL = b.getModule()->getDataLayout();
+        const auto papiCounterAlign = DL.getABITypeAlign(counterTy).value();
 
         Constant * const i32_ZERO = b.getInt32(0);
 
@@ -309,17 +318,17 @@ void PipelineCompiler::recordTotalPAPIMeasurement(KernelBuilder & b) const {
 
         for (unsigned i = 0; i < NumOfPAPIEvents; ++i) {
             from[1] = b.getInt32(i);
-            Value * const beforeVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPIEventCounterArray[PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME], from));
-            Value * const afterVal = b.CreateLoad(counterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from));
+            Value * const beforeVal = b.CreateAlignedLoad(counterTy, b.CreateGEP(counterArrayTy, PAPIEventCounterArray[PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME], from), papiCounterAlign);
+            Value * const afterVal = b.CreateAlignedLoad(counterTy, b.CreateGEP(counterArrayTy, PAPITempMeasurementArray, from), papiCounterAlign);
 
             b.CreateAssert(b.CreateICmpULE(beforeVal, afterVal), "total");
 
             Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
             Value * const ptr = b.CreateGEP(counterArrayTy, eventCounterSumArray, from);
-            Value * const curr = b.CreateLoad(counterTy, ptr);
+            Value * const curr = b.CreateAlignedLoad(counterTy, ptr, papiCounterAlign);
             assert (curr->getType() == diff->getType());
             Value * const updatedVal = b.CreateAdd(curr, diff);
-            b.CreateStore(updatedVal, ptr);
+            b.CreateAlignedStore(updatedVal, ptr, papiCounterAlign);
         }
     }
 }
@@ -333,8 +342,11 @@ void PipelineCompiler::stopPAPIOnCurrentThread(KernelBuilder & b) const {
         Module * m = b.getModule();
         Value * eventSetPtr; Type * eventSetTy;
         std::tie(eventSetPtr, eventSetTy) =  b.getScalarFieldPtr(STATISTICS_PAPI_EVENT_SET);
+        auto & DL = b.getModule()->getDataLayout();
+        const auto align = DL.getABITypeAlign(eventSetTy).value();
+
         FixedArray<Value *, 1> args1;
-        args1[0] = b.CreateLoad(eventSetTy, eventSetPtr);
+        args1[0] = b.CreateAlignedLoad(eventSetTy, eventSetPtr, align);
         Function * fCleanUp = m->getFunction("PAPI_cleanup_eventset");
         b.CreateCall(fCleanUp, args1);
         Function * fDestroy = m->getFunction("PAPI_destroy_eventset");
@@ -724,7 +736,7 @@ void PipelineCompiler::printPAPIReportIfRequested(KernelBuilder & b) {
 
         } else {
 
-            DataLayout dl(b.getModule());
+            auto & dl = b.getModule()->getDataLayout();
 
             std::vector<Constant *> kernelNames;
             for (auto i = FirstKernel; i <= LastKernel; ++i) {
@@ -748,7 +760,7 @@ void PipelineCompiler::printPAPIReportIfRequested(KernelBuilder & b) {
                 Value * base; Type * ty;
                 std::tie(base, ty) = b.getScalarFieldPtr(makeKernelName(i) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX);
                 indices[1] = b.getInt32(i - FirstKernel);
-                b.CreateStore(b.CreatePointerCast(base, counterPtrTy), b.CreateGEP(arTy, pointerArray, indices));
+                b.CreateAlignedStore(b.CreatePointerCast(base, counterPtrTy), b.CreateGEP(arTy, pointerArray, indices), PtrTyABIAlignment);
             }
 
             Function * const reportPrinter = b.getModule()->getFunction("__print_pipeline_PAPI_report");

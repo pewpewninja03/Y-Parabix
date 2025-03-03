@@ -81,6 +81,9 @@ public:
         return mInputs.size();
     }
 
+    // Write a vector of <Var *> or <PabloAST *> to a named output binding.
+    template <class T> void writeOutputStreamSet(const std::string & name, std::vector<T *> s);
+
     Var * getOutputStreamVar(const std::string & name);
 
     Var * getOutputScalarVar(const std::string & name);

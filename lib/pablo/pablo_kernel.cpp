@@ -77,6 +77,18 @@ std::vector<PabloAST *> PabloKernel::getInputStreamSet(const std::string & name)
     return inputSet;
 }
 
+template void PabloKernel::writeOutputStreamSet(const std::string & name, std::vector<Var *> s);
+template void PabloKernel::writeOutputStreamSet(const std::string & name, std::vector<PabloAST *> s);
+
+template <class T> void PabloKernel::writeOutputStreamSet(const std::string & name, std::vector<T *> s) {
+    const auto port = mPabloCompiler->getStreamPort(name);
+    assert (port.Type == PortType::Output);
+    Var * outputVar = mOutputs[port.Number];
+    for (unsigned i = 0; i < s.size(); i++) {
+        mEntryScope->createAssign(mEntryScope->createExtract(outputVar, mEntryScope->getInteger(i)), s[i]);
+    }
+}
+
 Var * PabloKernel::getOutputStreamVar(const std::string & name) {
     const auto port = mPabloCompiler->getStreamPort(name);
     assert (port.Type == PortType::Output);

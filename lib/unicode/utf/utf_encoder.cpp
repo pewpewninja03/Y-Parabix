@@ -21,6 +21,14 @@ unsigned UTF_Encoder::encoded_length(codepoint_t cp) {
     } else return 1;
 }
 
+unsigned UTF_Encoder::encoded_length(std::u32string s) {
+    unsigned slgth = 0;
+    for (size_t i = 0; i < s.size(); i++) {
+        slgth += encoded_length(s[i]);
+    }
+    return slgth;
+}
+
 codepoint_t UTF_Encoder::max_codepoint_of_length(unsigned length) {
     if (mCodeUnitBits == 8) {
         if (length == 1) return 0x7F;

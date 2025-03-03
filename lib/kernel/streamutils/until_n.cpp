@@ -91,7 +91,9 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     localIndex->addIncoming(ZERO, strideLoop);
     Value * const blockIndex = b.CreateAdd(baseBlockIndex, localIndex);
     Value * inputValue = b.loadInputStreamBlock("bits", ZERO, blockIndex);
-    b.storeOutputStreamBlock("uptoN", ZERO, blockIndex, inputValue);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+        b.storeOutputStreamBlock("uptoN", ZERO, blockIndex, inputValue);
+    }
     Value * const inputPackValue = b.simd_any(packSize, inputValue);
     Value * iteratorMask = b.CreateZExtOrTrunc(b.hsimd_signmask(packSize, inputPackValue), sizeTy);
     iteratorMask = b.CreateShl(iteratorMask, b.CreateMul(localIndex, PACKS_PER_BLOCK));
@@ -162,20 +164,18 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     // If we've found the n-th bit, end the segment after clearing the markers
     b.SetInsertPoint(foundNthBit);
     b.setScalarField("observed", N);
-
-
     Value * const packPosition = b.CreateZExtOrTrunc(b.CreateCountForwardZeroes(remainingBits), sizeTy);
     Value * const basePosition = b.CreateMul(packOffset, PACK_SIZE);
     Value * const blockOffset = b.CreateOr(basePosition, packPosition);
     Value * const priorProducedItemCount = b.getProducedItemCount("uptoN");
-
-    if ((mMode == Mode::ZeroAfterN) || (mMode == Mode::TerminateAtN)) {
-        Value * const inputValue2 = b.loadInputStreamBlock("bits", ZERO, blockIndex2);
-        Value * const mask = b.bitblock_mask_to(blockOffset, true);
-        Value * const maskedInputValue = b.CreateAnd(inputValue2, mask, "untilNmasked");
-        b.storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+        if ((mMode == Mode::ZeroAfterN) || (mMode == Mode::TerminateAtN)) {
+            Value * const inputValue2 = b.loadInputStreamBlock("bits", ZERO, blockIndex2);
+            Value * const mask = b.bitblock_mask_to(blockOffset, true);
+            Value * const maskedInputValue = b.CreateAnd(inputValue2, mask, "untilNmasked");
+            b.storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
+        }
     }
-
     const auto log2BlockWidth = floor_log2(b.getBitBlockWidth());
     Value * positionOfNthItem = nullptr;
     if ((mMode == Mode::TerminateAtN) || (mMode == Mode::ReportAcceptedLengthAtAndBeforeN)) {
@@ -205,7 +205,6 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     b.SetInsertPoint(nextStride);
     blocksRemaining->addIncoming(b.CreateSub(blocksRemaining, MAXIMUM_BLOCKS_PER_ITERATION), nextStride);
     baseBlockIndex->addIncoming(b.CreateAdd(baseBlockIndex, MAXIMUM_BLOCKS_PER_ITERATION), nextStride);
-//    Value * const availableBits = b.getAvailableItemCount("bits");
     Value * const done = b.CreateICmpULE(blocksRemaining, MAXIMUM_BLOCKS_PER_ITERATION);
     b.CreateLikelyCondBr(done, segmentDone, strideLoop);
 
@@ -230,7 +229,7 @@ UntilNkernel::UntilNkernel(LLVMTypeSystemInterface & ts, Scalar * N, StreamSet *
 }(),
 {Binding{"bits", Markers}},
 // outputs
-{Binding{"uptoN", FirstN}},
+{Binding{"uptoN", FirstN, FixedRate(), InOut("bits")}},
 // input scalar
 {Binding{"N", N}}, {},
 // internal state

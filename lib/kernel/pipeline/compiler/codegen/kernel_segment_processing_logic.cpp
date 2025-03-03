@@ -361,7 +361,8 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto port = mBufferGraph[e].Port;
+        const auto & br = mBufferGraph[e];
+        const auto port = br.Port;
         assert (mProducedItemCount[port]);
         mAlreadyProducedPhi[port]->addIncoming(mProducedItemCount[port], exitBlockAfterLoopAgainTest);
         if (mAlreadyProducedDeferredPhi[port]) {
@@ -607,7 +608,8 @@ void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(KernelBuilder & b
     const auto prefix = makeKernelName(mKernelId);
     IntegerType * const sizeTy = b.getSizeTy();
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto port = mBufferGraph[e].Port;
+        const BufferPort & br = mBufferGraph[e];
+        const auto port = br.Port;
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b.CreatePHI(sizeTy, 2, prefix + "_producedAtJumpPhi");
     }
@@ -709,7 +711,8 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
         mPotentialSegmentLengthAtLoopExitPhi->addIncoming(b.getSize(0), exitBlock);
     }
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto port = mBufferGraph[e].Port;
+        const auto & br = mBufferGraph[e];
+        const auto port = br.Port;
         mUpdatedProcessedPhi[port]->addIncoming(mAlreadyProcessedPhi[port], exitBlock);
         if (mAlreadyProcessedDeferredPhi[port]) {
             mUpdatedProcessedDeferredPhi[port]->addIncoming(mAlreadyProcessedDeferredPhi[port], exitBlock);
@@ -717,7 +720,8 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto port = mBufferGraph[e].Port;
+        const auto & br = mBufferGraph[e];
+        const auto port = br.Port;
         mUpdatedProducedPhi[port]->addIncoming(mAlreadyProducedPhi[port], exitBlock);
         if (mAlreadyProducedDeferredPhi[port]) {
             mUpdatedProducedDeferredPhi[port]->addIncoming(mAlreadyProducedDeferredPhi[port], exitBlock);
@@ -737,6 +741,9 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
     if (mKernelJumpToNextUsefulPartition) {
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto & br = mBufferGraph[e];
+            if (LLVM_UNLIKELY(br.isRelative())) {
+                continue;
+            }
             const auto port = br.Port;
             Value * produced = nullptr;
             if (LLVM_UNLIKELY(br.isDeferred())) {

@@ -349,7 +349,7 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * const accumulator = b.getScalarField("accumulator_address");
     Value * const avail = b.getAvailableItemCount("InputStream");
     Value * fileCount = b.CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator});
-    Value * maxFileNum = b.CreateSub(fileCount, b.getInt32(1));
+    Value * maxFileNum = b.CreateSub(fileCount, b.getSize(1));
     Value * const initialLineStart = b.getProcessedItemCount("InputStream");
     Value * initialLineNum = nullptr;
     Value * lineCountArrayBlockPtr = nullptr;
@@ -385,7 +385,7 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * batchFileNum = b.getScalarField("batchFileNum");
     Value * inFinalFile = b.CreateICmpEQ(batchFileNum, maxFileNum);
     Value * availableLimit = b.getAvailableItemCount("matchResult");
-    Value * nextFileNum = b.CreateAdd(batchFileNum, b.getInt32(1));
+    Value * nextFileNum = b.CreateAdd(batchFileNum, b.getSize(1));
     Value * fileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
     Value * pendingLimit = b.CreateSelect(inFinalFile, availableLimit, fileLimit);
 
@@ -534,10 +534,10 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
         b.CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
     
-    nextFileNum = b.CreateAdd(batchFileNum, b.getInt32(1));
+    nextFileNum = b.CreateAdd(batchFileNum, b.getSize(1));
     b.setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b.CreateICmpEQ(nextFileNum, maxFileNum);
-    Value * nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getInt32(1)))});
+    Value * nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getSize(1)))});
     Value * limit = b.CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b.setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b.CreateICmpUGE(matchStart, limit);
@@ -614,10 +614,10 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     } else {
         b.CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
-    nextFileNum = b.CreateAdd(batchFileNum, b.getInt32(1));
+    nextFileNum = b.CreateAdd(batchFileNum, b.getSize(1));
     b.setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b.CreateICmpEQ(nextFileNum, maxFileNum);
-    nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getInt32(1)))});
+    nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getSize(1)))});
     limit = b.CreateSelect(inFinalFile, strideLimit, nextFileLimit);
     b.setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b.CreateICmpUGT(strideLimit, limit);
@@ -666,7 +666,7 @@ ScanBatchKernel::ScanBatchKernel(LLVMTypeSystemInterface & ts, StreamSet * const
 // output scalars
 {},
 // kernel state
-{InternalScalar{ts.getSizeTy(), "LineNum"}, InternalScalar{ts.getInt32Ty(), "batchFileNum"}, InternalScalar{ts.getSizeTy(), "pendingFileLimit"}}) {
+{InternalScalar{ts.getSizeTy(), "LineNum"}, InternalScalar{ts.getSizeTy(), "batchFileNum"}, InternalScalar{ts.getSizeTy(), "pendingFileLimit"}}) {
     addAttribute(SideEffecting());
     setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
@@ -953,7 +953,7 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     Value * const initialPos = b.getProcessedItemCount("matchResult");
     Value * const accumulator = b.getScalarField("accumulator_address");
-    Value * maxFileNum = b.CreateSub(b.CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b.getInt32(1));
+    Value * maxFileNum = b.CreateSub(b.CreateCall(getFileCount->getFunctionType(), getFileCount, {accumulator}), b.getSize(1));
     Value * initialLineNum = nullptr;
     Value * lineCountArrayBlockPtr = nullptr;
     Value * lineCountArrayWordPtr = nullptr;
@@ -989,7 +989,7 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     Value * batchFileNum = b.getScalarField("batchFileNum");
     Value * inFinalFile = b.CreateICmpEQ(batchFileNum, maxFileNum);
     Value * availableLimit = b.getAvailableItemCount("matchResult");
-    Value * nextFileNum = b.CreateAdd(batchFileNum, b.getInt32(1));
+    Value * nextFileNum = b.CreateAdd(batchFileNum, b.getSize(1));
     Value * fileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, nextFileNum)});
     Value * pendingLimit = b.CreateSelect(inFinalFile, availableLimit, fileLimit);
     b.setScalarField("pendingFileLimit", pendingLimit);
@@ -1121,10 +1121,10 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         b.CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
 
-    nextFileNum = b.CreateAdd(batchFileNum, b.getInt32(1));
+    nextFileNum = b.CreateAdd(batchFileNum, b.getSize(1));
     b.setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b.CreateICmpEQ(nextFileNum, maxFileNum);
-    Value * nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getInt32(1)))});
+    Value * nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getSize(1)))});
     Value * limit = b.CreateSelect(inFinalFile, availableLimit, nextFileLimit);
     b.setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b.CreateICmpUGT(matchEndPos, limit);
@@ -1198,10 +1198,10 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     } else {
         b.CreateCall(setBatchLineNumber->getFunctionType(), setBatchLineNumber, {accumulator, batchFileNum, sz_ZERO});
     }
-    nextFileNum = b.CreateAdd(batchFileNum, b.getInt32(1));
+    nextFileNum = b.CreateAdd(batchFileNum, b.getSize(1));
     b.setScalarField("batchFileNum", nextFileNum);
     inFinalFile = b.CreateICmpEQ(nextFileNum, maxFileNum);
-    nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getInt32(1)))});
+    nextFileLimit = b.CreateCall(getFileStartPos->getFunctionType(), getFileStartPos, {accumulator, b.CreateSelect(inFinalFile, maxFileNum, b.CreateAdd(nextFileNum, b.getSize(1)))});
     limit = b.CreateSelect(inFinalFile, strideLimit, nextFileLimit);
     b.setScalarField("pendingFileLimit", limit);
     beyondFileEnd = b.CreateICmpUGT(strideLimit, limit);
@@ -1234,7 +1234,7 @@ BatchCoordinatesKernel::BatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
 // output scalars
 {},
 // kernel state
-{InternalScalar{ts.getInt32Ty(), "batchFileNum"},
+{InternalScalar{ts.getSizeTy(), "batchFileNum"},
     InternalScalar{ts.getSizeTy(), "pendingFileLimit"},
     //InternalScalar{b.getSizeTy(), "pendingFileStartLine"},
     InternalScalar{ts.getSizeTy(), "pendingLineNum"}}) {

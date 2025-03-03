@@ -122,7 +122,7 @@ void UTF16assembly::generatePabloMethod() {
     PabloAST * surrogate2 = pb.createAdvance(surrogate1, 1);
     PabloAST * surrogate = pb.createOr(surrogate1, surrogate2, "u16_surrogate");
 
-    PabloAST * u16[16];
+    std::vector<PabloAST *> u16(16);
     for (unsigned i = 0; i < 6; i++) {
         u16[i] = pb.createSel(mask_lo, u16bits9_0[i], u16bits15_10[i]);
     }
@@ -136,8 +136,5 @@ void UTF16assembly::generatePabloMethod() {
     u16[12] = pb.createOr(u16bits15_10[2], surrogate);
     u16[11] = pb.createOr(u16bits15_10[1], surrogate);
     u16[10] = pb.createSel(surrogate, surrogate2, u16bits15_10[0]);
-
-    for (unsigned i = 0; i < 16; i++) {
-        pb.createAssign(pb.createExtract(getOutputStreamVar("u16basis"), pb.getInteger(i)), u16[i]);
-    }
+    writeOutputStreamSet("u16basis", u16);
 }

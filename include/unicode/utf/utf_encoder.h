@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <unicode/core/unicode_set.h>
+#include <string>
 
 using codepoint_t = UCD::codepoint_t;
 
@@ -11,6 +12,7 @@ class UTF_Encoder {
 public:
     UTF_Encoder(unsigned bits = 8);
     unsigned encoded_length(codepoint_t cp);
+    unsigned encoded_length(std::u32string s);
     codepoint_t max_codepoint_of_length(unsigned lgth);
     bool isLowCodePointAfterNthCodeUnit(codepoint_t cp, unsigned n);
     bool isHighCodePointAfterNthCodeUnit(codepoint_t cp, unsigned n);

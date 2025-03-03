@@ -22,7 +22,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         auto id = streamSet;
 
         const BufferNode & bn = mBufferGraph[id];
-        if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned()) {
+        if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || in_degree(id, InOutStreamSetReplacement) != 0) {
             continue;
         }
 
@@ -61,6 +61,19 @@ void PipelineAnalysis::makeConsumerGraph() {
             const BufferPort & input = mBufferGraph[ce];
             add_edge(id, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
+
+
+        auto check = streamSet;
+        while (out_degree(check, InOutStreamSetReplacement) > 0)  {
+            check = child(check, InOutStreamSetReplacement);
+            for (const auto ce : make_iterator_range(out_edges(check, mBufferGraph))) {
+                const auto consumer = target(ce, mBufferGraph);
+                const BufferPort & input = mBufferGraph[ce];
+                add_edge(id, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+            }
+        }
+
+
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {

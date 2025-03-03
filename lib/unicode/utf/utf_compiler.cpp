@@ -174,9 +174,16 @@ Range CC_Set_Range(CC_List ccs) {
 }
 
 void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
-    re::CC * rangeCC = re::makeCC(r.lo, r.hi, &Unicode);
-    for (unsigned i = 0; i < ccs.size(); i++) {
-        in_range[i] = re::intersectCC(ccs[i], rangeCC);
+    if (r.hi < r.lo) {
+        re::CC * const emptySet = re::makeCC(&Unicode);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            in_range[i] = emptySet;
+        }
+    } else {
+        re::CC * const rangeCC = re::makeCC(r.lo, r.hi, &Unicode);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            in_range[i] = re::intersectCC(ccs[i], rangeCC);
+        }
     }
 }
 
@@ -440,7 +447,7 @@ void U21_Compiler::compile(Target_List targets, CC_List ccs) {
         PabloAST * e6 = mPB.createOr3(e2, e3, e4);
         PabloAST * nonASCII = mPB.createOr(e5, e6);
         EnclosingInfo ASCII_info(ASCII_Range, mPB.createNot(nonASCII));
-        ASCII_compiler.compile(ccs, ASCII_info);
+        ASCII_compiler.compile(ASCII_ccs, ASCII_info);
         auto nested = mPB.createScope();
         PabloAST * test = combineAnd(mMask, nonASCII, mPB);
         mPB.createIf(test, nested);

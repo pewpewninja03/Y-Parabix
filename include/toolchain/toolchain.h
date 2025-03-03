@@ -53,6 +53,7 @@ enum DebugFlags {
     DisableIndirectBranch,
     DisableThreadLocalStreamSets,
     DisableCacheAlignedKernelStructs,
+    DisableInOutAttributes,
     PrintPipelineGraph,
     PrintKernelSizes,
     ForcePipelineRecompilation,

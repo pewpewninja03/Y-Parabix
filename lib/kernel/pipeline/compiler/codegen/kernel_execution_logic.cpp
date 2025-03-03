@@ -1,4 +1,4 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -28,9 +28,9 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
         const auto prefix = makeKernelName(mKernelId);
         Value * const intSegNoPtr = b.getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX).first;
-        mInternallySynchronizedSubsegmentNumber = b.CreateLoad(b.getSizeTy(), intSegNoPtr);
+        mInternallySynchronizedSubsegmentNumber = b.CreateAlignedLoad(b.getSizeTy(), intSegNoPtr, SizeTyABIAlignment);
         Value * const nextSegNo = b.CreateAdd(mInternallySynchronizedSubsegmentNumber, b.getSize(1));
-        b.CreateStore(nextSegNo, intSegNoPtr);
+        b.CreateAlignedStore(nextSegNo, intSegNoPtr, SizeTyABIAlignment);
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "# " + prefix + " executing subsegment number %" PRIu64, mInternallySynchronizedSubsegmentNumber);
         #endif
@@ -121,6 +121,8 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
         outerProcessedPhis.resize(indeg);
         outerProcessedDeferredPhis.resize(indeg);
+
+        //bool hasRelativeInput = false;
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
@@ -318,7 +320,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
                     // Normally when a kernel terminates early, we just read the values in the termination block. Since we may need that
                     // value here, however, read it here.
                     if (mKernelCanTerminateEarly && isCountableType(mReturnedProducedItemCountPtr[br.Port], getOutputBinding(br.Port))) {
-                        Value * finalItemCount = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[br.Port]);
+                        Value * finalItemCount = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[br.Port], SizeTyABIAlignment);
                         Value * const isFinal = b.CreateICmpNE(mTerminatedExplicitly, b.getSize(0));
                         produced = b.CreateSelect(isFinal, finalItemCount, produced);
                     }
@@ -398,21 +400,20 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
     auto addItemCountArg = [&](const BufferPort & port,
                                const bool forceAddressability,
-                               Value * const itemCount) {
-        const Binding & binding = port.Binding;
-        const ProcessingRate & rate = binding.getRate();
+                               Value * const itemCount) -> Value * {
 
-        Value * ptr = nullptr;
-        if (LLVM_UNLIKELY(rate.isRelative())) {
-            return ptr;
+        if (LLVM_UNLIKELY(port.isRelative())) {
+            return nullptr;
         }
+        const Binding & binding = port.Binding;
+        Value * ptr = nullptr;
         if (forceAddressability || isAddressable(binding)) {
             if (LLVM_UNLIKELY(numOfAddressableItemCount == mAddressableItemCountPtr.size())) {
                 auto aic = b.CreateAllocaAtEntryPoint(b.getSizeTy());
                 mAddressableItemCountPtr.push_back(aic);
             }
             ptr = mAddressableItemCountPtr[numOfAddressableItemCount++];
-            b.CreateStore(itemCount, ptr);
+            b.CreateAlignedStore(itemCount, ptr, SizeTyABIAlignment);
             addNextArg(ptr);
         } else if (isCountable(binding)) {
             addNextArg(itemCount);
@@ -457,18 +458,21 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         const StreamSetPort inputPort{PortType::Input, i};
         const auto port = getInput(mKernelId, inputPort);
         const BufferPort & rt = mBufferGraph[port];
+
         assert (rt.Port.Number == inputPort.Number);
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
             Value * processed = nullptr;
+
             if (rt.isDeferred()) {
-                processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
+                processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
             } else {
-                processed = mCurrentProcessedItemCountPhi[inputPort];
+                processed = mCurrentProcessedItemCountPhi[rt.Port];
             }
             assert (processed);
 
             Value * const addr = mInputVirtualBaseAddressPhi[inputPort]; assert (addr);
             #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, inputPort) + "_processed = %" PRIu64, processed);
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
             #endif
             addNextArg(b.CreatePointerCast(addr, voidPtrTy));
@@ -509,7 +513,14 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         const auto streamSet = target(port, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         const StreamSetBuffer * const buffer = bn.Buffer;
-        Value * produced = mCurrentProducedItemCountPhi[rt.Port];
+
+        Value * produced = nullptr;
+        if (rt.isDeferred()) {
+            produced = mCurrentProducedDeferredItemCountPhi[rt.Port];
+        } else {
+            produced = mCurrentProducedItemCountPhi[rt.Port];
+        }
+        assert (produced);
 
         if (LLVM_UNLIKELY(rt.isShared())) {
             addNextArg(b.CreatePointerCast(buffer->getHandle(), voidPtrTy));
@@ -520,15 +531,18 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             }
             Value * ptr = mVirtualBaseAddressPtr[numOfVirtualBaseAddresses++];
             ptr = b.CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
-            b.CreateStore(buffer->getBaseAddress(b), ptr);
+            b.CreateAlignedStore(buffer->getBaseAddress(b), ptr, PtrTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b));
             #endif
             addNextArg(b.CreatePointerCast(ptr, voidPtrPtrTy));
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
         } else {
+
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
             #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
             #endif
             addNextArg(b.CreatePointerCast(vba, voidPtrTy));
@@ -609,7 +623,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
             assert (input.isDeferred() ^ (mCurrentProcessedDeferredItemCountPhi[inputPort] == nullptr));
             if (mCurrentProcessedDeferredItemCountPhi[inputPort]) {
                 assert (mReturnedProcessedItemCountPtr[inputPort]);
-                mProcessedDeferredItemCount[inputPort] = b.CreateLoad(b.getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
+                mProcessedDeferredItemCount[inputPort] = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProcessedItemCountPtr[inputPort], SizeTyABIAlignment);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, inputPort);
                 debugPrint(b, prefix + "_processed_deferred' = %" PRIu64, mProcessedDeferredItemCount[inputPort]);
@@ -634,7 +648,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
             }
         } else if (rate.isBounded() || rate.isUnknown()) {
             assert (mReturnedProcessedItemCountPtr[inputPort]);
-            processed = b.CreateLoad(b.getSizeTy(), mReturnedProcessedItemCountPtr[inputPort]);
+            processed = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProcessedItemCountPtr[inputPort], SizeTyABIAlignment);
         } else {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -660,7 +674,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
             assert (output.isDeferred() ^ (mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr));
             if (mCurrentProducedDeferredItemCountPhi[outputPort]) {
                 assert (mReturnedProducedItemCountPtr[outputPort]);
-                mProducedDeferredItemCount[outputPort] = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
+                mProducedDeferredItemCount[outputPort] = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort], SizeTyABIAlignment);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, outputPort);
                 debugPrint(b, prefix + "_produced_deferred' = %" PRIu64, mProcessedDeferredItemCount[outputPort]);
@@ -685,21 +699,26 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
             }
         } else if (rate.isBounded() || rate.isUnknown()) {
             assert (mReturnedProducedItemCountPtr[outputPort]);
-            produced = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
+            produced = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort], SizeTyABIAlignment);
         } else if (rate.isRelative()) {
-            auto getRefPort = [&] () {
-                const auto refPort = getReference(outputPort);
-                if (LLVM_LIKELY(refPort.Type == PortType::Input)) {
-                    return getInput(mKernelId, refPort);
-                } else {
-                    return getOutput(mKernelId, refPort);
+            const auto refPort = getReference(outputPort);
+            Value * itemCount = nullptr;
+            Value * deferredItemCount = nullptr;
+            if (LLVM_LIKELY(refPort.Type == PortType::Input)) {
+                itemCount = mProcessedItemCount[refPort];
+                if (mProcessedDeferredItemCount[refPort]) {
+                    deferredItemCount = mProcessedDeferredItemCount[refPort];
                 }
-            };
-            const BufferPort & ref = mBufferGraph[getRefPort()];
-            if (mProducedDeferredItemCount[ref.Port]) {
-                mProducedDeferredItemCount[outputPort] = b.CreateMulRational(mProducedDeferredItemCount[ref.Port], rate.getRate());
+            } else {
+                itemCount = mProducedItemCount[refPort];
+                if (mProducedDeferredItemCount[refPort]) {
+                    deferredItemCount = mProducedDeferredItemCount[refPort];
+                }
             }
-            produced = b.CreateMulRational(mProducedItemCount[ref.Port], rate.getRate());
+            if (deferredItemCount) {
+                mProducedDeferredItemCount[outputPort] = b.CreateMulRational(deferredItemCount, rate.getRate());
+            }
+            produced = b.CreateMulRational(itemCount, rate.getRate());
         } else {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -751,13 +770,13 @@ void PipelineCompiler::writeInternalProcessedAndProducedItemCounts(KernelBuilder
     for (unsigned i = 0; i < numOfInputs; ++i) {
         const auto inputPort = StreamSetPort{PortType::Input, i};
         Value * const ic = atTermination ? mProcessedItemCountAtTerminationPhi[inputPort] : mProcessedItemCount[inputPort];
-        b.CreateStore(ic, mProcessedItemCountPtr[inputPort]);
+        b.CreateAlignedStore(ic, mProcessedItemCountPtr[inputPort], SizeTyABIAlignment);
     }
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto outputPort = StreamSetPort{PortType::Output, i};
         Value * const ic = atTermination ? mProducedAtTermination[outputPort] : mProducedItemCount[outputPort];
-        b.CreateStore(ic, mProducedItemCountPtr[outputPort]);
+        b.CreateAlignedStore(ic, mProducedItemCountPtr[outputPort], SizeTyABIAlignment);
     }
 
 }

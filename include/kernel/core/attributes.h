@@ -165,6 +165,11 @@ struct Attribute {
         // This attribute will inform the pipeline an overflow is needed but will not
         // actually be used w.r.t. useful data.
 
+        InOut,
+
+        // Instructs the pipeline that a kernel will modify an input to produce an output
+        // and that the original output streamset will no longer be available.
+
         Expandable, /// NOT DONE
 
         // Indicates that the number of stream sets in this buffer can increase.
@@ -335,6 +340,10 @@ struct Attribute {
         return mAmount;
     }
 
+    llvm::StringRef label() const {
+        return mString;
+    }
+
     bool operator == (const Attribute & other) const {
         return mKind == other.mKind && mAmount == other.mAmount;
     }
@@ -347,27 +356,16 @@ struct Attribute {
 
     Attribute(const KindId kind, const size_t a = 0, const size_t b = 1) : mKind(kind), mAmount(a, b) { }
 
+    Attribute(const KindId kind, llvm::StringRef string) : mKind(kind), mString(string) { }
+
 private:
 
     const KindId    mKind;
+    union {
     Rational        mAmount;
+    llvm::StringRef mString;
+    };
 };
-
-#if 0
-
-struct IntegerAttribute : public Attribute {
-    IntegerAttribute(const KindId kind, const unsigned k) : Attribute(kind, 0), mValue(k) { }
-private:
-    const unsigned mValue;
-};
-
-struct StringAttribute : public Attribute {
-    StringAttribute(const KindId kind, const llvm::StringRef k) : Attribute(kind, 0), mValue(k) { }
-private:
-    const std::string mValue;
-};
-
-#endif
 
 struct AttributeSet : public std::vector<Attribute> {
 
@@ -548,5 +546,10 @@ inline Attribute Statefree() {
 inline Attribute InternallyGenerated() {
     return Attribute(Attribute::KindId::InternallyGenerated, 0);
 }
+
+inline Attribute InOut(llvm::StringRef name) {
+    return Attribute(Attribute::KindId::InOut, name);
+}
+
 
 }

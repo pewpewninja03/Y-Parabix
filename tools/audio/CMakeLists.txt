@@ -12,7 +12,6 @@ DEPS
     kernel.io
     kernel.pipeline
     kernel.util
-    util
     toolchain
     audio
 )
@@ -26,7 +25,6 @@ DEPS
     kernel.io
     kernel.pipeline
     kernel.util
-    util
     toolchain
     audio
 )
@@ -40,7 +38,6 @@ DEPS
     kernel.io
     kernel.pipeline
     kernel.util
-    util
     toolchain
     audio
 )

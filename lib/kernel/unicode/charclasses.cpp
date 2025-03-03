@@ -42,16 +42,22 @@ std::string makeSignature(const StreamSet * const basis, std::vector<re::CC *> &
     return tmp;
 }
 
-CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: CharClassesKernel(ts, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
+CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, 
+                                     std::vector<re::CC *> ccs,
+                                     StreamSet * BasisBits,
+                                     StreamSet * CharClasses,
+                                     BitMovementMode mode)
+: CharClassesKernel(ts, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses, mode) {
 
 }
 
-CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: PabloKernel(ts, "cc_" + getStringHash(signature)
+CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses, BitMovementMode mode)
+: PabloKernel(ts, "cc_" + getStringHash(signature) + UTF::kernelAnnotation() +
+              pablo::BitMovementMode_string(mode)
 , {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
-, mSignature(signature) {
+, mSignature(signature)
+, mBitMovement(mode) {
 
 }
 
@@ -63,7 +69,7 @@ void CharClassesKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     unsigned n = mCCs.size();
 
-    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb, mBitMovement);
     std::vector<Var *> mpx;
     for (unsigned i = 0; i < n; i++) {
         mpx.push_back(pb.createVar("mpx_basis" + std::to_string(i), pb.createZeroes()));

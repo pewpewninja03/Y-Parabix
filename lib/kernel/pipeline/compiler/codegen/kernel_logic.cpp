@@ -15,7 +15,7 @@ void PipelineCompiler::setActiveKernel(KernelBuilder & b, const unsigned kernelI
         Value * handle = b.getScalarFieldPtr(makeKernelName(kernelId)).first;
         if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {
             PointerType * pty = mKernel->getSharedStateType()->getPointerTo();
-            handle = b.CreateLoad(pty, handle);
+            handle = b.CreateAlignedLoad(pty, handle, PtrTyABIAlignment);
         }
         mKernelSharedHandle = handle;
     }
@@ -162,7 +162,7 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(KernelBuilder & b, const unsig
         if (LLVM_UNLIKELY(CheckAssertions)) {
             b.CreateAssert(handle, "null handle load");
         }
-        handle = b.CreateLoad(localStateTy->getPointerTo(), handle);
+        handle = b.CreateAlignedLoad(localStateTy->getPointerTo(), handle, PtrTyABIAlignment);
     }
     assert (handle->getType()->isPointerTy());
     return handle;

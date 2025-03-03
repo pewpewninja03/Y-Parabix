@@ -5,7 +5,7 @@
 #pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
-#include <pablo/pablo_toolchain.h>  // for PabloKernel
+#include <pablo/pablo_toolchain.h>
 
 namespace re { class Name; }
 namespace UCD { class EnumeratedPropertyObject; }

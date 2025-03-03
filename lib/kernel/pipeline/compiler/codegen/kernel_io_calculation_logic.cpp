@@ -372,7 +372,9 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
 
-    Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
+    Value * processed = mCurrentProcessedItemCountPhi[port.Port];
+
+    Value * const strideLength = calculateStrideLength(b, port, processed, mStrideStepSize, "hasSufficient");
 
     const auto prefix = makeBufferName(mKernelId, inputPort);
 
@@ -798,7 +800,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.isThreadLocal() || bn.isUnowned() || bn.isTruncated() || bn.hasZeroElementsOrWidth()) {
+    if (bn.isThreadLocal() || bn.isUnowned() || bn.isInOutRedirect() || bn.isTruncated() || bn.hasZeroElementsOrWidth()) {
         return;
     }
 
@@ -838,12 +840,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
         // delete any old buffer if one exists
         Type * bufTy;
         std::tie(priorBufferPtr, bufTy) = getScalarFieldPtr(b, prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
-        Value * const priorBuffer = b.CreateLoad(bufTy, priorBufferPtr); // <- threadlocal
+        Value * const priorBuffer = b.CreateAlignedLoad(bufTy, priorBufferPtr, PtrTyABIAlignment); // <- threadlocal
         Type * intTy;
         std::tie(priorCapacityPtr, intTy) = getScalarFieldPtr(b, prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
-        Value * const priorCapacity = b.CreateLoad(intTy, priorCapacityPtr);
+        assert (intTy == b.getSizeTy());
+        Value * const priorCapacity = b.CreateAlignedLoad(intTy, priorCapacityPtr, SizeTyABIAlignment);
         buffer->destroyBuffer(b, priorBuffer, priorCapacity);
-        b.CreateStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr);
+        b.CreateAlignedStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr, PtrTyABIAlignment);
     }
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
@@ -852,9 +855,16 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     // we can proceed.
 
     // TODO: can we determine which locks will always dominate another?
-    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
-        acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+
+    if (LLVM_LIKELY(bn.LockId == 0)) {
+        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+            assert (!mIsIOProcessThread);
+            acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+        }
+    } else {
+        assert (bn.LockId > mKernelId);
+        const auto lockType = mIsStatelessKernel.test(bn.LockId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLockWithTimingInstrumentation(b, bn.LockId, lockType, mSegNo);
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
@@ -905,8 +915,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
             recordBufferExpansionHistory(b, streamSet, bn, port, buffer);
         }
         if (isMultithreaded()) {
-            b.CreateStore(priorBuffer, priorBufferPtr);
-            b.CreateStore(priorCapacity, priorCapacityPtr);
+            b.CreateAlignedStore(priorBuffer, priorBufferPtr, PtrTyABIAlignment);
+            b.CreateAlignedStore(priorCapacity, priorCapacityPtr, SizeTyABIAlignment);
         } else {
             buffer->destroyBuffer(b, priorBuffer, priorCapacity);
         }
@@ -1020,6 +1030,11 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * const avail = mLocallyAvailableItems[id];
+        writable = b.CreateSaturatingSub(avail, produced);
+    } else if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+        const auto src = parent(streamSet, InOutStreamSetReplacement);
+        assert (FirstStreamSet <= src && src <= LastStreamSet);
+        Value * const avail = mLocallyAvailableItems[src];
         writable = b.CreateSaturatingSub(avail, produced);
     } else {
 
@@ -1298,7 +1313,8 @@ Value * PipelineCompiler::getInputStrideLength(KernelBuilder & b, const BufferPo
     if (mFirstInputStrideLength[inputPort.Port]) {
         return mFirstInputStrideLength[inputPort.Port];
     } else {
-        Value * const strideLength = calculateStrideLength(b, inputPort, mCurrentProcessedItemCountPhi[inputPort.Port], nullptr, location);
+        Value * processed = mCurrentProcessedItemCountPhi[inputPort.Port];
+        Value * const strideLength = calculateStrideLength(b, inputPort, processed, nullptr, location);
         mFirstInputStrideLength[inputPort.Port] = strideLength;
         return strideLength;
     }
@@ -1308,10 +1324,12 @@ Value * PipelineCompiler::getInputStrideLength(KernelBuilder & b, const BufferPo
  * @brief getOutputStrideLength
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getOutputStrideLength(KernelBuilder & b, const BufferPort & outputPort, const StringRef location) {
+
     if (mFirstOutputStrideLength[outputPort.Port]) {
         return mFirstOutputStrideLength[outputPort.Port];
     } else {
-        Value * const strideLength = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], nullptr, location);
+        Value * produced = mCurrentProducedItemCountPhi[outputPort.Port];
+        Value * const strideLength = calculateStrideLength(b, outputPort, produced, nullptr, location);
         mFirstOutputStrideLength[outputPort.Port] = strideLength;
         return strideLength;
     }
@@ -1399,7 +1417,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
-    Value * current = b.CreateLoad(b.getSizeTy(), currentPtr);
+    Value * current = b.CreateAlignedLoad(b.getSizeTy(), currentPtr, SizeTyABIAlignment);
 
     #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
     debugPrint(b, "  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
@@ -1513,7 +1531,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     Value * const pos = b.CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
     Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
-    Value * const requiredItems = b.CreateLoad(b.getSizeTy(), ptr);
+    Value * const requiredItems = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     Value * const notEnough = b.CreateICmpUGT(requiredItems, sourceItemCount);
 
     Value * const notDone = b.CreateICmpNE(strideIndex, sz_ZERO);
@@ -1570,46 +1588,48 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
     // "final" value but since the PopCountKernel is unaware of the step factor, the pipeline becomes
     // responsible for splat-ing this value to the appropriate slots.
 
+    if (LLVM_LIKELY(out_degree(mKernelId, mPartialSumStepFactorGraph) == 0)) {
+        return;
+    }
 
+    ConstantInt * const sz_ZERO = b.getSize(0);
+    ConstantInt * const sz_ONE = b.getSize(1);
+
+    const auto bw = b.getBitBlockWidth();
+    const auto fw = b.getSizeTy()->getIntegerBitWidth();
+    assert ((bw % fw) == 0 && bw >= fw);
+    const auto stepsPerBlock = bw / fw;
+
+    ConstantInt * const sz_stepsPerBlock = b.getSize(stepsPerBlock);
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mPartialSumStepFactorGraph))) {
 
         const auto streamSet = target(e, mPartialSumStepFactorGraph);
         const auto output = in_edge(streamSet, mBufferGraph);
         const BufferPort & outputPort = mBufferGraph[output];
+
+        Value * const initial = mInitiallyProducedItemCount[streamSet];
         Value * const produced = mProducedAtTermination[outputPort.Port];
+
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        // TODO: if all of the consumers of this streamset belong to the same partition as
-        // the producer, we probably don't need to splat it to increase it.
-
-        //if (bn.isNonThreadLocal()) {
-
-        const auto bw = b.getBitBlockWidth();
-        const auto fw = b.getSizeTy()->getIntegerBitWidth();
-        assert ((bw % fw) == 0 && bw >= fw);
-        const auto stepsPerBlock = bw / fw;
-        const auto spanLength = bn.PartialSumSpanLength;
-
-        ConstantInt * const sz_stepsPerBlock = b.getSize(stepsPerBlock);
-        ConstantInt * const sz_ONE = b.getSize(1);
-        Value * const index = b.CreateSaturatingSub(produced, sz_ONE);
-        Value * const start = b.CreateRoundDown(index, sz_stepsPerBlock);
         StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
         VectorType * const vecTy = b.fwVectorType(fw);
         PointerType * const vecPtrTy = vecTy->getPointerTo();
 
-        ConstantInt * const sz_ZERO = b.getSize(0);
-
+        const auto spanLength = bn.PartialSumSpanLength;
+        // If we produced no items but invoked the popcount kernel, it will have left the sum
+        // in the stream[produced] position. This is the only safe position to read as we may
+        // have executed a final block with 0 input items.
+        Value * const unchanged = b.CreateICmpEQ(produced, initial);
+        Value * index = b.CreateSelect(unchanged, produced, b.CreateSub(produced, sz_ONE));
+        Value * const start = b.CreateRoundDown(index, sz_stepsPerBlock);
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
         Value * const vecAddr = b.CreatePointerCast(addr, vecPtrTy);
         Value * const baseValue = b.CreateBlockAlignedLoad(vecTy, vecAddr);
-
         Value * const offset = b.CreateURem(index, sz_stepsPerBlock);
         Value * const total = b.CreateExtractElement(baseValue, offset);
         Value * const splat = b.simd_fill(fw, total);
-
-
         Value * const mask = b.mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
         Value * const maskedSplat = b.CreateAnd(splat, mask);
         Value * const mergedValue = b.CreateOr(baseValue, maskedSplat);
@@ -1655,7 +1675,8 @@ Value * PipelineCompiler::calculateStrideLength(KernelBuilder & b, const BufferP
         const auto refPort = getReference(port.Port);
         const auto refInput = getInput(mKernelId, refPort);
         const BufferPort & ref = mBufferGraph[refInput];
-        Value * const baseRate = calculateStrideLength(b, ref, previouslyTransferred, strideIndex, location);
+        Value * itemCount = b.CreateUDivRational(previouslyTransferred, rate.getRate());
+        Value * const baseRate = calculateStrideLength(b, ref, itemCount, strideIndex, location);
         return b.CreateMulRational(baseRate, rate.getRate());
     }
     llvm_unreachable("unexpected rate type");
@@ -1681,17 +1702,10 @@ Value * PipelineCompiler::calculateNumOfLinearItems(KernelBuilder & b, const Buf
         }
         return getPartialSumItemCount(b, port, priorItemCount, linearStrides, location);
     } else if (rate.isRelative()) {
-        auto getRefPort = [&] () {
-            const auto refPort = getReference(port.Port);
-            if (LLVM_LIKELY(refPort.Type == PortType::Input)) {
-                return getInput(mKernelId, refPort);
-            } else {
-                return getOutput(mKernelId, refPort);
-            }
-        };
-        const BufferPort & ref = mBufferGraph[getRefPort()];
-        Value * const baseCount = calculateNumOfLinearItems(b, ref, linearStrides, location);
-        return b.CreateMulRational(baseCount, rate.getRate());
+        const auto refPort = getReference(port.Port);
+        const auto refInput = getInput(mKernelId, refPort);
+        const BufferPort & ref = mBufferGraph[refInput];
+        return calculateNumOfLinearItems(b, ref, linearStrides, location);
     }
     llvm_unreachable("unexpected rate type");
 }

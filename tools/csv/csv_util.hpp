@@ -180,10 +180,7 @@ void FieldNumberingKernel::generatePabloMethod() {
     increment[0] = recordMarks;   //  Add 1 at record positions
     increment[1] = pb.createNot(recordMarks);  // Add 2 at field mark positions.
     BixNum fieldNumbering = bnc.AddFull(separatorNum, increment);
-    Var * fieldBixNum = getOutputStreamVar("FieldBixNum");
-    for (unsigned i = 0; i < mNumberingBits; i++) {
-        pb.createAssign(pb.createExtract(fieldBixNum, i), fieldNumbering[i]);
-    }
+    writeOutputStreamSet("FieldBixNum", fieldNumbering);
 }
 
 class CSV_Char_Replacement : public PabloKernel {
@@ -212,11 +209,7 @@ void CSV_Char_Replacement::generatePabloMethod() {
     translated_basis[5] = pb.createXor(basis[5], quoteEscape);
     translated_basis[6] = pb.createXor(basis[6], quoteEscape);
     translated_basis[7] = basis[7];
-
-    Var * translatedVar = getOutputStreamVar("translatedBasis");
-    for (unsigned i = 0; i < 8; i++) {
-        pb.createAssign(pb.createExtract(translatedVar, pb.getInteger(i)), translated_basis[i]);
-    }
+    writeOutputStreamSet("translatedBasis", translated_basis);
 }
 
 class AddFieldSuffix : public PabloKernel {

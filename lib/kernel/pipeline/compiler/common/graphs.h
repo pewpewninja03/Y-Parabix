@@ -272,6 +272,7 @@ enum BufferType : unsigned {
     , Returned = 8
     , Truncated = 16
     , CrossThreaded = 32
+    , InOutRedirect = 64
     // ------------------
     , HasIllustratedStreamset = 512
     , StartsNestedSynchronizationRegion = 1024
@@ -310,6 +311,7 @@ struct BufferNode {
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
+    unsigned LockId = 0;
 
 
     bool permitSlidingWindow() const {
@@ -348,6 +350,11 @@ struct BufferNode {
         return (Type & BufferType::CrossThreaded) != 0;
     }
 
+    bool isInOutRedirect() const {
+        return (Type & BufferType::InOutRedirect) != 0;
+    }
+
+
     bool startsNestedSynchronizationRegion() const {
         return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;
     }
@@ -369,7 +376,7 @@ struct BufferNode {
     }
 
     bool isDeallocatable() const {
-        return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isReturned());
+        return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isInOutRedirect() || isReturned());
     }
 };
 
@@ -378,11 +385,12 @@ enum BufferPortType : unsigned {
     IsFixed = 2,
     IsZeroExtended = 4,
     IsDeferred = 8,
-    IsShared = 16,
-    IsManaged = 32,
-    CanModifySegmentLength = 64,
-    IsCrossThreaded = 128,
-    Illustrated = 256
+    IsRelative = 16,
+    IsShared = 32,
+    IsManaged = 64,
+    CanModifySegmentLength = 128,
+    IsCrossThreaded = 256,
+    Illustrated = 512
 };
 
 struct BufferPort {
@@ -425,6 +433,10 @@ struct BufferPort {
 
     bool isDeferred() const {
         return (Flags & BufferPortType::IsDeferred) != 0;
+    }
+
+    bool isRelative() const {
+        return (Flags & BufferPortType::IsRelative) != 0;
     }
 
     bool isShared() const {
@@ -643,6 +655,7 @@ using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property
 
 using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsigned>;
 
+using InOutGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
 }
 

@@ -109,7 +109,7 @@ namespace audio
         : MultiBlockKernel(b, "SplitKernel_" + std::to_string(inputStreams->getNumElements()) + "_" + std::to_string(bitsPerSample),
                            {Binding{"inputStreams", inputStreams}},
                            {Binding{"outputStreams", outputStreams}}, {}, {}, {}),
-          numInputStreams(inputStreams->getNumElements()), bitsPerSample(bitsPerSample) {}
+        bitsPerSample(bitsPerSample), numInputStreams(inputStreams->getNumElements()) {}
 
     void SplitKernel::generateMultiBlockLogic(KernelBuilder &b, Value *const numOfStrides)
     {

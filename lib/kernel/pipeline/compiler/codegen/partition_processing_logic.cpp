@@ -357,6 +357,8 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
     BasicBlock * const exitPoint = b.GetInsertBlock();
 
     for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+        const BufferPort & br = mBufferGraph[e];
+
         const auto streamSet = target(e, mBufferGraph);
 
         // When jumping out of a partition to some subsequent one, we may have to
@@ -370,7 +372,6 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
 
         const auto k = streamSet - FirstStreamSet;
 
-        const BufferPort & br = mBufferGraph[e];
         // Select/load the appropriate produced item count
         PHINode * const prodPhi = mPartitionProducedItemCountPhi[targetPartitionId][k];
         if (prodPhi) {
@@ -395,14 +396,23 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
                     }
                 }
             } else { // if (kernel > mKernelId) {
-                const auto prefix = makeBufferName(kernel, br.Port);
+                StreamSetPort port;
+                if (br.isRelative()) {
+                    port = getReference(kernel, br.Port);
+                } else {
+                    port = br.Port;
+                }
+                const auto prefix = makeBufferName(kernel, port);
                 Value * ptr = nullptr;
                 if (LLVM_UNLIKELY(br.isDeferred() && !fromKernelEntryBlock)) {
                     ptr = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX).first;
                 } else {
                     ptr = b.getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
                 }
-                produced = b.CreateLoad(b.getSizeTy(), ptr);
+                produced = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
+                if (br.isRelative()) {
+                    produced = b.CreateMulRational(produced, br.getRate().getRate());
+                }
             }
 
             assert (isFromCurrentFunction(b, produced, false));

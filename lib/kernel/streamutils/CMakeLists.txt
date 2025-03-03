@@ -12,6 +12,7 @@ SRC
     pdep_kernel.cpp
     run_index.cpp
     sentinel.cpp
+    sorting.cpp
     stream_select.cpp
     stream_shift.cpp
     streams_merge.cpp

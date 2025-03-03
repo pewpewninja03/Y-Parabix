@@ -114,21 +114,21 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
                 Value * const memoryForSegment = b.CreateMul(mThreadLocalScalingFactor, b.getSize(maxMemory));
                 BasicBlock * const expandThreadLocalMemory = b.CreateBasicBlock();
                 BasicBlock * const afterExpansion = b.CreateBasicBlock();
-                Value * const currentMem = b.CreateLoad(b.getSizeTy(), mThreadLocalMemorySizePtr);
+                Value * const currentMem = b.CreateAlignedLoad(b.getSizeTy(), mThreadLocalMemorySizePtr, SizeTyABIAlignment);
                 Value * const needsExpansion = b.CreateICmpUGT(memoryForSegment, currentMem);
                 b.CreateCondBr(needsExpansion, expandThreadLocalMemory, afterExpansion);
 
                 b.SetInsertPoint(expandThreadLocalMemory);
 
-                b.CreateFree(b.CreateLoad(threadLocalTy, threadLocalPtr));
+                b.CreateFree(b.CreateAlignedLoad(threadLocalTy, threadLocalPtr, PtrTyABIAlignment));
                 // At minimum, we want to double the required space to minimize future reallocs
                 Value * expanded = b.CreateRoundUp(memoryForSegment, currentMem);
-                b.CreateStore(expanded, mThreadLocalMemorySizePtr);
+                b.CreateAlignedStore(expanded, mThreadLocalMemorySizePtr, SizeTyABIAlignment);
                 #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                 expanded = b.CreateMul(expanded, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
                 #endif
                 Value * const base = b.CreatePageAlignedMalloc(expanded);
-                b.CreateStore(base, threadLocalPtr);
+                b.CreateAlignedStore(base, threadLocalPtr, PtrTyABIAlignment);
                 b.CreateBr(afterExpansion);
 
                 b.SetInsertPoint(afterExpansion);
@@ -142,7 +142,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
             mThreadLocalScalingFactor = mExpectedNumOfStridesMultiplier;
         }
         if (maxMemory > 0) {
-            mThreadLocalStreamSetBaseAddress = b.CreateLoad(threadLocalTy, threadLocalPtr);
+            mThreadLocalStreamSetBaseAddress = b.CreateAlignedLoad(threadLocalTy, threadLocalPtr, PtrTyABIAlignment);
         } else {
             mThreadLocalStreamSetBaseAddress = nullptr;
             mThreadLocalScalingFactor = nullptr;

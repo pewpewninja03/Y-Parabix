@@ -53,20 +53,20 @@ public:
     virtual ~MatchAccumulator() {}
     virtual void accumulate_match(const size_t lineNum, char * line_start, char * line_end) = 0;
     virtual void finalize_match(char * buffer_end) {}  // default: no op
-    virtual unsigned getFileCount() {return 1;}  // default: return 1 for single file
-    virtual size_t getFileStartPos(unsigned fileNo) {return 0;}
-    virtual void setBatchLineNumber(unsigned fileNo, size_t batchLine) {}  // default: no op
+    virtual size_t getFileCount() {return 1;}  // default: return 1 for single file
+    virtual size_t getFileStartPos(size_t fileNo) {return 0;}
+    virtual void setBatchLineNumber(size_t fileNo, size_t batchLine) {}  // default: no op
 };
 
 extern "C" void accumulate_match_wrapper(MatchAccumulator * accum_addr, const size_t lineNum, char * line_start, char * line_end);
 
 extern "C" void finalize_match_wrapper(MatchAccumulator * accum_addr, char * buffer_end);
 
-extern "C" unsigned get_file_count_wrapper(MatchAccumulator * accum_addr);
+extern "C" size_t get_file_count_wrapper(MatchAccumulator * accum_addr);
 
-extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator * accum_addr, unsigned fileNo);
+extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator * accum_addr, size_t fileNo);
 
-extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, unsigned fileNo, size_t batchLine);
+extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, size_t fileNo, size_t batchLine);
 
 class EmitMatch;
 
@@ -169,6 +169,7 @@ protected:
     NullCharMode mNullMode;
     BaseDriver & mGrepDriver;
     GrepFunctionType mMainMethod;
+    size_t mBatchSize;
     GrepBatchFunctionType mBatchMethod;
 
     std::atomic<unsigned> mNextFileToGrep;
@@ -218,9 +219,9 @@ public:
     void finalize_match(char * buffer_end) override;
     void setFileLabel(std::string fileLabel);
     void setStringStream(std::ostringstream * s);
-    unsigned getFileCount() override;
-    size_t getFileStartPos(unsigned fileNo) override;
-    void setBatchLineNumber(unsigned fileNo, size_t batchLine) override;
+    size_t getFileCount() override;
+    size_t getFileStartPos(size_t fileNo) override;
+    void setBatchLineNumber(size_t fileNo, size_t batchLine) override;
 protected:
     bool mShowFileNames;
     bool mShowLineNumbers;

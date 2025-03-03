@@ -31,6 +31,10 @@ int MatchCoordinateBlocks;
 static cl::opt<int, true> OptMatchCoordinateBlocks("match-coordinates", cl::location(MatchCoordinateBlocks),
                                                    cl::desc("Enable experimental MatchCoordinates kernels with a given number of blocks per stride"), cl::init(0));
 
+int FileBatchSegments;
+static cl::opt<int, true> OptFileBatchSegments("file-batch-segments", cl::location(FileBatchSegments),
+                                                   cl::desc("Max total size (as a multiple of segment size) for processing small files as a batch"), cl::init(4));
+
 unsigned ByteCClimit;
 static cl::opt<unsigned, true> OptByteCClimit("byte-CC-limit", cl::location(ByteCClimit),
                                               cl::desc("Max number of CCs for byte CC pipeline."), cl::init(DefaultByteCClimit));
@@ -48,9 +52,4 @@ static cl::opt<bool, true> OptUseByteFilterByMask("UseByteFilterByMask", cl::loc
 bool UseNestedColourizationPipeline;
 static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),
                                          cl::desc("Use a nested pipeline for colourization."), cl::init(true));
-
-
-bool NoOSFileCaching;
-static cl::opt<bool, true> OptNoOSCaching("disable-file-caching", cl::location(NoOSFileCaching),
-                                         cl::desc("Disable OS file caching."), cl::init(false));
 }
