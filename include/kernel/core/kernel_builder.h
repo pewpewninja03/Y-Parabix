@@ -137,6 +137,8 @@ public:
 
     void setCapacity(const llvm::StringRef name, llvm::Value * capacity);
 
+    void reserveCapacity(const llvm::StringRef name, llvm::Value * capacity);
+
     // internal state
 
     llvm::Value * getNumOfStrides() const noexcept;

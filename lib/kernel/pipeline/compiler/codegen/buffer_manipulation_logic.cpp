@@ -125,7 +125,7 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & 
             Value * const blockIndex = b.CreateLShr(processed, LOG_2_BLOCK_WIDTH);
 
             // allocateLocalZeroExtensionSpace guarantees this will be large enough to satisfy the kernel
-            ExternalBuffer tmp(0, b, binding.getType(), true, buffer->getAddressSpace());
+            ExternalBuffer tmp(0, b, binding.getType(), buffer->getAddressSpace());
             Value * zeroExtension = b.CreatePointerCast(zeroExtensionSpace, bufferType);
             Value * addr = tmp.getStreamBlockPtr(b, zeroExtension, ZERO, b.CreateNeg(blockIndex));
             addr = b.CreatePointerCast(addr, bufferType);
@@ -327,7 +327,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
 
             Type * const singleElementStreamSetTy = ArrayType::get(FixedVectorType::get(IntegerType::get(C, itemWidth), static_cast<unsigned>(0)), 1);
-            ExternalBuffer tmp(0, b, singleElementStreamSetTy, true, 0);
+            ExternalBuffer tmp(0, b, singleElementStreamSetTy, 0);
             PointerType * const bufferPtrTy = tmp.getPointerType();
 
             Value * const inputAddress = b.CreatePointerCast(inputBuffer, bufferPtrTy);

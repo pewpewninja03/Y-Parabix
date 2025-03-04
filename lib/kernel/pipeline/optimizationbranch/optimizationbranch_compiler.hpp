@@ -349,7 +349,7 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(KernelBuilder & b) {
     mStreamSetInputBuffers.resize(numOfInputStreams);
     for (unsigned i = 0; i < numOfInputStreams; ++i) {
         const Binding & input = mInputStreamSets[i];
-        mStreamSetInputBuffers[i].reset(new ExternalBuffer(i, b, input.getType(), true, 0));
+        mStreamSetInputBuffers[i].reset(new ExternalBuffer(i, b, input.getType(), 0));
     }
 
     mStreamSetOutputBuffers.clear();
@@ -367,7 +367,7 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(KernelBuilder & b) {
             const auto bufferSize = ceiling(ub);
             buffer = new DynamicBuffer(i + numOfInputStreams, b, output.getType(), bufferSize,  0, true, 0);
         } else {
-            buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), true, 0);
+            buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
         }
         mStreamSetOutputBuffers[i].reset(buffer);
     }

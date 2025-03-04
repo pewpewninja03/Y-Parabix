@@ -278,8 +278,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
             default:
                 return false;
         }
-
-        if (p.isDeferred() || p.LookBehind) {
+        if (p.isDeferred() || p.isManaged() || p.LookBehind > 0) {
             return false;
         }
     }

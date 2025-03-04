@@ -298,6 +298,20 @@ void KernelBuilder::setCapacity(const StringRef name, Value * capacity) {
     COMPILER->getStreamSetBuffer(name)->setCapacity(*this, capacity);
 }
 
+void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
+    const auto port = COMPILER->getStreamPort(name);
+    if (LLVM_LIKELY(port.Type == PortType::Output)) {
+        StreamSetBuffer * const buffer = COMPILER->getOutputStreamSetBuffer(port.Number);
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            Value * const producedItemPtr = COMPILER->getProducedOutputItemsPtr(port.Number);
+            Value * const producedItems = CreateAlignedLoad(getSizeTy(), producedItemPtr, sizeof(size_t));
+            Value * const consumedItems = COMPILER->getConsumedOutputItems(port.Number);
+            cast<ManagedDynamicBuffer>(buffer)->expandBuffer(*this, producedItems, consumedItems, capacity);
+            return;
+        }
+    }
+    report_fatal_error("Cannot call reserveCapacity on streamset " + name + ": is not a managed output streamset");
+}
 
 Value * KernelBuilder::getAvailableItemCount(const StringRef name) const noexcept {
     return COMPILER->getAvailableInputItems(name);

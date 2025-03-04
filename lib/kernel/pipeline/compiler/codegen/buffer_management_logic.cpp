@@ -209,10 +209,8 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
                         if (scaleFactor > 0) {
 
                             size_t capacity = 1;
-                            if (isa<DynamicBuffer>(buffer)) {
+                            if (isa<DynamicBuffer>(buffer) || isa<ManagedDynamicBuffer>(buffer)) {
                                 capacity = cast<DynamicBuffer>(buffer)->getInitialCapacity();
-                            } else if (isa<MMapedBuffer>(buffer)) {
-                                capacity = cast<MMapedBuffer>(buffer)->getInitialCapacity();
                             }
                             multiplier = b.CreateRoundUp(expectedSourceOutputSize, expectedNumOfStrides);
                             Value * value = b.CreateCeilUDivRational(multiplier, capacity);
@@ -835,7 +833,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
 
     Value * const addr = buffer->getVirtualBasePtr(b, baseAddress, position);
     if (prefetch) {
-        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+        ExternalBuffer tmp(0, b, buffer->getBaseType(), buffer->getAddressSpace());
         Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
         Value * const blockIndex = b.CreateLShr(position, LOG_2_BLOCK_WIDTH);
         Value * const prefetchAddr = tmp.getStreamBlockPtr(b, addr, b.getSize(0), blockIndex);

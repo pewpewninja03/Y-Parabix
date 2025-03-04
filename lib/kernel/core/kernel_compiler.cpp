@@ -144,6 +144,7 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     auto const oc = b.getCompiler();
     b.setCompiler(this);
     b.linkAllNecessaryExternalFunctions();
+    StreamSetBuffer::linkFunctions(b);
     constructStreamSetBuffers(b);
     #ifndef NDEBUG
     for (const auto & buffer : mStreamSetInputBuffers) {
@@ -444,14 +445,28 @@ void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
     mStreamSetInputBuffers.resize(numOfInputStreams);
     for (unsigned i = 0; i < numOfInputStreams; ++i) {
         const Binding & input = mInputStreamSets[i];
-        mStreamSetInputBuffers[i].reset(new ExternalBuffer(i, b, input.getType(), true, 0));
+        mStreamSetInputBuffers[i].reset(new ExternalBuffer(i, b, input.getType(), 0));
     }
     mStreamSetOutputBuffers.clear();
     const auto numOfOutputStreams = mOutputStreamSets.size();
     mStreamSetOutputBuffers.resize(numOfOutputStreams);
     for (unsigned i = 0; i < numOfOutputStreams; ++i) {
         const Binding & output = mOutputStreamSets[i];
-        mStreamSetOutputBuffers[i].reset(new ExternalBuffer(i + numOfInputStreams, b, output.getType(), true, 0));
+
+        StreamSetBuffer * buffer = nullptr;
+        if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
+            Rational R{mTarget->getStride(), b.getBitBlockWidth()};
+            const auto & ub = output.getRate().getUpperBound();
+            if (ub.numerator() > 0) {
+                R *= ub;
+            }
+            assert (R.numerator() > 0);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), R.numerator(), 0);
+        } else {
+            buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
+        }
+
+        mStreamSetOutputBuffers[i].reset(buffer);
     }
 }
 
@@ -633,6 +648,7 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilde
  * @brief callAllocateSharedInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelBuilder & b) {
+    // NOTE: the kernel compiler must call this AFTER initialization
     if (LLVM_UNLIKELY(mTarget->allocatesInternalStreamSets())) {
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getAllocateSharedInternalStreamSetsFunction(b);
@@ -650,7 +666,7 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelB
         }
         Value * const expectedNumOfStrides = nextArg();
         initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
-        initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+        initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars, expectedNumOfStrides);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
         b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
@@ -900,6 +916,9 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
 
     const auto canTerminate = canSetTerminateSignal();
 
+
+    size_t managedStreamSetCount = 0;
+
     for (unsigned i = 0; i < numOfOutputs; i++) {
 
         /// ----------------------------------------------------
@@ -928,6 +947,17 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
             assert (isa<ExternalBuffer>(buffer));
+        }
+        if (isManaged) {
+            assert (mThreadLocalHandle);
+            assert (managedStreamSetCount < mTarget->getThreadLocalStateType()->getStructNumElements());
+            assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(managedStreamSetCount) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+            FixedArray<Value *, 3> indices;
+            indices[0] = b.getInt32(0);
+            indices[1] = b.getInt32(0);
+            indices[2] = b.getInt32(managedStreamSetCount++);
+            Value * const tlh = b.CreateGEP(mTarget->getThreadLocalStateType(), mThreadLocalHandle, indices);
+            cast<ManagedDynamicBuffer>(buffer)->setThreadLocalHandle(tlh);
         }
 
         /// ----------------------------------------------------
@@ -963,6 +993,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         /// writable / consumed item count
         /// ----------------------------------------------------
         Value * writable = nullptr;
+        assert (isa<ManagedDynamicBuffer>(buffer) == isManaged);
         if (isShared || isLocal) {
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
@@ -1225,6 +1256,28 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder 
         mThreadLocalHandle = nextArg();
         initializeScalarMap(b, InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars);
         mTarget->generateFinalizeThreadLocalMethod(b);
+
+
+        size_t numOfManagedBuffers = 0;
+        BEGIN_SCOPED_REGION
+        const auto n = mOutputStreamSets.size();
+        for (size_t i = 0; i < n; ++i) {
+            const auto & buffer = mStreamSetOutputBuffers[i];
+            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
+            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+                StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
+                StructType * const streamSetTy = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
+                assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) == streamSetTy);
+                FixedArray<Value *, 3> indices;
+                indices[0] = b.getInt32(0);
+                indices[1] = b.getInt32(0);
+                indices[2] = b.getInt32(numOfManagedBuffers++);
+                Value * const threadLocalStreamSetPtr = b.CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
+                cast<ManagedDynamicBuffer>(buffer.get())->freePendingDeletion(b, threadLocalStreamSetPtr);
+            }
+        }
+        END_SCOPED_REGION
+
         b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
     }
@@ -1350,6 +1403,19 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     bool hasThreadLocalAccum = false;
 
+    size_t numOfManagedBuffers = 0;
+    BEGIN_SCOPED_REGION
+    const auto n = mOutputStreamSets.size();
+    for (size_t i = 0; i < n; ++i) {
+        const auto & buffer = mStreamSetOutputBuffers[i];
+        assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
+        if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            ++numOfManagedBuffers;
+            threadLocalGroups.insert(0);
+        }
+    }
+    END_SCOPED_REGION
+
     for (const auto & scalar : mInternalScalars) {
         assert (scalar.getValueType());
         switch (scalar.getScalarType()) {
@@ -1371,6 +1437,14 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     std::vector<unsigned> sharedIndex(sharedGroups.size() + 2, 0);
     std::vector<unsigned> threadLocalIndex(threadLocalGroups.size(), 0);
+
+    // Kernel managed buffers require both the struct for the buffer itself and a thread local pointer
+    // for the last "deallocated" memory chunk. A thread can only be confident that there are no other
+    // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
+    // Thus each managed buffer has an implicit thread local state that is passed in.
+    if (LLVM_UNLIKELY(numOfManagedBuffers)) {
+        threadLocalIndex[0] = numOfManagedBuffers;
+    }
 
     BasicBlock * combineToMainThreadLocal = nullptr;
 
@@ -1400,11 +1474,13 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     for (const auto & binding : mInternalScalars) {
         Value * scalar = nullptr;
         Type * scalarType = nullptr;
+
         auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
             const auto f = groups.find(binding.getGroup());
             assert (f != groups.end());
             return std::distance(groups.begin(), f);
         };
+
 
         switch (binding.getScalarType()) {
             case ScalarType::Internal:
@@ -1603,7 +1679,7 @@ void KernelCompiler::initializeIOBindingMap() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeOwnedBufferHandles
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions /* options */) {
+void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions /* options */, Value * const expectedNumOfStrides) {
     const auto numOfOutputs = getNumOfStreamOutputs();
     for (unsigned i = 0; i < numOfOutputs; i++) {
         const Binding & output = mOutputStreamSets[i];
@@ -1614,6 +1690,16 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
+            assert (isa<ManagedDynamicBuffer>(buffer) == isManaged);
+            if (LLVM_UNLIKELY(isManaged && expectedNumOfStrides)) {
+                Rational R{mTarget->getStride(), b.getBitBlockWidth()};
+                const auto & ub = output.getRate().getUpperBound();
+                if (ub.numerator() > 0) {
+                    R *= ub;
+                }
+                Value * const bufferScale = b.CreateCeilUMulRational(expectedNumOfStrides, R);
+                buffer->allocateBuffer(b, bufferScale);
+            }
         }
     }
 }

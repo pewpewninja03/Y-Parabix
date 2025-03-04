@@ -59,7 +59,7 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isLocalBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ bool Kernel::isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool &returned) {
+/* static */ bool Kernel::isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned) {
     // NOTE: if this function is modified, fix the PipelineCompiler to match it.
     for (const auto & attr : output.getAttributes()) {
         switch (attr.getKind()) {
@@ -75,8 +75,26 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
             default: break;
         }
     }
-    return shared | managed | returned | output.getRate().isUnknown();
+    if (LLVM_UNLIKELY(output.getRate().isUnknown())) {
+        managed = true;
+    }
+    return shared | managed | returned;
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isManagedBuffer
+ ** ------------------------------------------------------------------------------------------------------------- */
+/* static */ bool Kernel::isManagedBuffer(const Binding & output) {
+    for (const auto & attr : output.getAttributes()) {
+        switch (attr.getKind()) {
+            // case AttrId::SharedManagedBuffer:
+            case AttrId::ManagedBuffer:
+                return true;
+            default: break;
+        }
+    }
+    return output.getRate().isUnknown();
+};
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief requiresExplicitPartialFinalStride
@@ -349,6 +367,18 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             flat_set<unsigned> sharedGroups;
             flat_set<unsigned> threadLocalGroups;
 
+            size_t numOfManagedBuffers = 0;
+
+            for (const Binding & output : mOutputStreamSets) {
+                if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
+                    ++numOfManagedBuffers;
+                }
+            }
+
+            if (numOfManagedBuffers) {
+                threadLocalGroups.insert(0);
+            }
+
             for (const auto & scalar : mInternalScalars) {
                 assert (scalar.getValueType());
                 switch (scalar.getScalarType()) {
@@ -367,6 +397,13 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
             std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+
+            // Kernel managed buffers require both the struct for the buffer itself and a thread local pointer
+            // for the last "deallocated" memory chunk. A thread can only be confident that there are no other
+            // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
+            if (numOfManagedBuffers) {
+                threadLocal[0].assign(numOfManagedBuffers, ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+            }
 
             for (const auto & scalar : mInputScalars) {
                 assert (scalar.getType());
@@ -725,6 +762,12 @@ Function * Kernel::addInitializeThreadLocalDeclaration(KernelBuilder & b) const 
  * @brief hasInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 bool Kernel::allocatesInternalStreamSets() const {
+    // TODO: store flag for this?
+    for (const Binding & output : mOutputStreamSets) {
+        if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -793,7 +836,7 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
  * @brief generateAllocateSharedInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & /* b */, Value * /* expectedNumOfStrides */) {
-    report_fatal_error("Kernel::generateAllocateSharedInternalStreamSetsMethod is not handled yet");
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -952,6 +995,8 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         } else {
             fields.push_back(voidPtrTy);
         }
+
+        assert (!isManaged || hasThreadLocal());
 
         //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 

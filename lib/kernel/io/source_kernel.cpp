@@ -174,14 +174,9 @@ void MMapSourceKernel::linkExternalMethods(KernelBuilder & b) {
 
 /// READ SOURCE KERNEL
 
-constexpr char __MAKE_CIRCULAR_BUFFER[] = "__make_circular_buffer";
-constexpr char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
-
 void ReadSourceKernel::generatLinkExternalFunctions(KernelBuilder & b) {
     b.LinkFunction("read", read);
     b.LinkFunction("file_size", file_size);
-    b.LinkFunction(__MAKE_CIRCULAR_BUFFER, make_circular_buffer);
-    b.LinkFunction(__DESTROY_CIRCULAR_BUFFER, destroy_circular_buffer);
 }
 
 template <typename IntTy>
@@ -191,22 +186,7 @@ inline IntTy round_up_to(const IntTy x, const IntTy y) {
 }
 
 void ReadSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
-    const auto codeUnitSize = codeUnitWidth / 8;
-    const auto pageSize = getPageSize();
-    const auto minSize = stride * 4 * codeUnitSize;
-    const auto desiredSize = round_up_to(minSize, pageSize);
-    ConstantInt * const bufferBytes = b.getSize(desiredSize);
-    PointerType * const codeUnitPtrTy = b.getIntNTy(codeUnitWidth)->getPointerTo();
-    FixedArray<Value *, 2> makeArgs;
-    makeArgs[0] = bufferBytes;
-    makeArgs[1] = b.getSize(0);
-    Function * makeBuffer = b.getModule()->getFunction(__MAKE_CIRCULAR_BUFFER); assert (makeBuffer);
-    Value * const buffer = b.CreatePointerCast(b.CreateCall(makeBuffer, makeArgs), codeUnitPtrTy);
-    b.setBaseAddress("sourceBuffer", buffer);
-    b.setScalarField("buffer", buffer);
-    ConstantInt * const bufferItems = b.getSize(desiredSize / codeUnitSize);
-    b.setScalarField("effectiveCapacity", bufferItems);
-    b.setCapacity("sourceBuffer", bufferItems);
+
 }
 
 void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
@@ -217,9 +197,6 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
                         "Internal error: %s.numOfStrides cannot be 0", b.GetString("ReadSource"));
     }
 
-    BasicBlock * const entryBB = b.GetInsertBlock();
-    BasicBlock * const expandAndCopyBack = b.CreateBasicBlock("ExpandAndCopyBack");
-    BasicBlock * const afterCopyBackOrExpand = b.CreateBasicBlock("AfterCopyBackOrExpand");
     BasicBlock * const readData = b.CreateBasicBlock("ReadData");
     BasicBlock * const readIncomplete = b.CreateBasicBlock("readIncomplete");
     BasicBlock * const setTermination = b.CreateBasicBlock("SetTermination");
@@ -228,91 +205,25 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
     Value * const segmentItems = b.CreateMul(numOfStrides, b.getSize(stride));
     ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
     Type * codeUnitTy = b.getIntNTy(codeUnitWidth);
-    Value * const segmentBytes = b.CreateMul(segmentItems, codeUnitBytes);
-
-    // Can we append to our existing buffer without impacting any subsequent kernel?
-    Value * const produced = b.getProducedItemCount("sourceBuffer");
-    Value * const itemsPending = b.CreateAdd(produced, segmentItems);
-    Value * const baseBuffer = b.getScalarField("buffer");
-    Value * const fd = b.getScalarField("fileDescriptor");
-
-    Value * const effectiveCapacity = b.getScalarField("effectiveCapacity");
 
     IntegerType * const sizeTy = b.getSizeTy();
 
-    Value * const consumedItems = b.getConsumedItemCount("sourceBuffer");
-    Value * const requiredCapacity = b.CreateSub(itemsPending, consumedItems);
+    // Can we append to our existing buffer without impacting any subsequent kernel?
+    b.reserveCapacity("sourceBuffer", segmentItems);
 
-    Value * const permitted = b.CreateICmpULT(requiredCapacity, effectiveCapacity);
-    b.CreateLikelyCondBr(permitted, afterCopyBackOrExpand, expandAndCopyBack);
-
-    // Otherwise, allocate a buffer with twice the capacity and copy the unconsumed data back into it
-    b.SetInsertPoint(expandAndCopyBack);
-
-    Value * const expandedCapacity = b.CreateRoundUp(requiredCapacity, effectiveCapacity);
-    Value * const expandedBytes = b.CreateMul(expandedCapacity, codeUnitBytes);
-
-    Module * m = b.getModule();
-    FixedArray<Value *, 2> makeArgs;
-    makeArgs[0] = expandedBytes;
-    makeArgs[1] = b.getSize(0);
-    Function * makeBuffer = m->getFunction(__MAKE_CIRCULAR_BUFFER); assert (makeBuffer);
-    Value * expandedBuffer = b.CreatePointerCast(b.CreateCall(makeBuffer, makeArgs), codeUnitTy->getPointerTo());
-
-    // TODO: this isn't totally safe as it relies on the assumption that doubling the size of the buffer
-    // is enough to ensure that all consumers will finish processing the prior buffer by the point we
-    // re-enter this branch. What we need is a list of prior buffers and free them only if the consumed
-    // count indicates they are past the last item produced in that particular prior buffer.
-
-    Value * const priorBuffer = b.getScalarField("ancillaryBuffer");
-    Value * const priorCapacity = b.getScalarField("ancillaryCapacity");
-    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER); assert (makeBuffer);
-    FixedArray<Value *, 3> destroyArgs;
-    destroyArgs[0] = b.CreatePointerCast(priorBuffer, b.getInt8PtrTy());
-    destroyArgs[1] = b.CreateMul(priorCapacity, codeUnitBytes);
-    destroyArgs[2] = b.getSize(0);
-    b.CreateCall(destroyBuffer, destroyArgs);
-
-    b.setScalarField("ancillaryBuffer", baseBuffer);
-    b.setScalarField("ancillaryCapacity", effectiveCapacity);
-
-    Value * newBufferOffset = b.CreateURem(consumedItems, expandedCapacity);
-    Value * const toCopyPtr = b.CreateInBoundsGEP(codeUnitTy, expandedBuffer, newBufferOffset);
-
-    Value * const oldBufferOffset = b.CreateURem(consumedItems, effectiveCapacity);
-    Value * const unreadDataPtr = b.CreateInBoundsGEP(codeUnitTy, baseBuffer, oldBufferOffset);
-
-    Value * const unreadItems = b.CreateSub(produced, consumedItems);
-    Value * const remainingBytes = b.CreateMul(unreadItems, codeUnitBytes);
-
-    b.CreateMemCpy(toCopyPtr, unreadDataPtr, remainingBytes, 1);
-
-    b.setScalarField("buffer", expandedBuffer);
-    b.setScalarField("effectiveCapacity", expandedCapacity);
-
-    b.CreateBr(afterCopyBackOrExpand);
-
-    b.SetInsertPoint(afterCopyBackOrExpand);
-    PHINode * const bufferPhi = b.CreatePHI(unreadDataPtr->getType(), 2);
-    bufferPhi->addIncoming(baseBuffer, entryBB);
-    bufferPhi->addIncoming(expandedBuffer, expandAndCopyBack);
-    PHINode * const capacityPhi = b.CreatePHI(sizeTy, 2);
-    capacityPhi->addIncoming(effectiveCapacity, entryBB);
-    capacityPhi->addIncoming(expandedCapacity, expandAndCopyBack);
-
-    Value * consumedOffset = b.CreateSub(b.CreateURem(consumedItems, capacityPhi), consumedItems);
-    Value * const newBaseAddress = b.CreateInBoundsGEP(codeUnitTy, bufferPhi, consumedOffset);
-    b.setBaseAddress("sourceBuffer", newBaseAddress);
-
+    Value * const segmentBytes = b.CreateMul(segmentItems, codeUnitBytes);
+    Value * const fd = b.getScalarField("fileDescriptor");
+    Value * const produced = b.getProducedItemCount("sourceBuffer");
+    BasicBlock * const entryBlock = b.GetInsertBlock();
     b.CreateBr(readData);
 
     // Regardless of whether we're simply appending data or had to allocate a new buffer, read a new page
     // of data into the input source buffer. This may involve multiple read calls.
     b.SetInsertPoint(readData);
     PHINode * const bytesToRead = b.CreatePHI(sizeTy, 2);
-    bytesToRead->addIncoming(segmentBytes, afterCopyBackOrExpand);
+    bytesToRead->addIncoming(segmentBytes, entryBlock);
     PHINode * const producedSoFar = b.CreatePHI(sizeTy, 2);
-    producedSoFar->addIncoming(produced, afterCopyBackOrExpand);
+    producedSoFar->addIncoming(produced, entryBlock);
 
     Value * const sourceBuffer = b.CreatePointerCast(b.getRawOutputPointer("sourceBuffer", producedSoFar), b.getInt8PtrTy());
 
@@ -343,6 +254,7 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
 
     // ... set the termination signal.
     b.SetInsertPoint(setTermination);
+    Value * const itemsPending = b.CreateAdd(produced, segmentItems);
     Value * const bytesToZero = b.CreateMul(b.CreateSub(itemsPending, itemsBuffered), codeUnitBytes);
     b.CreateMemZero(b.getRawOutputPointer("sourceBuffer", itemsBuffered), bytesToZero);
     b.setScalarField("fileItems", itemsBuffered);
@@ -361,29 +273,29 @@ Value * ReadSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b, co
 }
 
 void ReadSourceKernel::freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth) {
-    Module * m = b.getModule();
-    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
-    Value * const buffer = b.getScalarField("buffer");
-    Value * const capacity = b.getScalarField("effectiveCapacity");
-    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
-    FixedArray<Value *, 3> destroyArgs;
-    destroyArgs[0] = b.CreatePointerCast(buffer, b.getInt8PtrTy());
-    destroyArgs[1] = b.CreateMul(capacity, codeUnitBytes);
-    destroyArgs[2] = b.getSize(0);
-    b.CreateCall(destroyBuffer, destroyArgs);
+//    Module * m = b.getModule();
+//    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
+//    Value * const buffer = b.getScalarField("buffer");
+//    Value * const capacity = b.getScalarField("effectiveCapacity");
+//    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
+//    FixedArray<Value *, 3> destroyArgs;
+//    destroyArgs[0] = b.CreatePointerCast(buffer, b.getInt8PtrTy());
+//    destroyArgs[1] = b.CreateMul(capacity, codeUnitBytes);
+//    destroyArgs[2] = b.getSize(0);
+//    b.CreateCall(destroyBuffer, destroyArgs);
 }
 
 void ReadSourceKernel::finalizeThreadLocalMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
-    Module * m = b.getModule();
-    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
-    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
-    FixedArray<Value *, 3> destroyArgs;
-    Value * const priorBuffer = b.getScalarField("ancillaryBuffer");
-    Value * const priorCapacity = b.getScalarField("ancillaryCapacity");
-    destroyArgs[0] = b.CreatePointerCast(priorBuffer, b.getInt8PtrTy());
-    destroyArgs[1] = b.CreateMul(priorCapacity, codeUnitBytes);
-    destroyArgs[2] = b.getSize(0);
-    b.CreateCall(destroyBuffer, destroyArgs);
+//    Module * m = b.getModule();
+//    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
+//    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
+//    FixedArray<Value *, 3> destroyArgs;
+//    Value * const priorBuffer = b.getScalarField("ancillaryBuffer");
+//    Value * const priorCapacity = b.getScalarField("ancillaryCapacity");
+//    destroyArgs[0] = b.CreatePointerCast(priorBuffer, b.getInt8PtrTy());
+//    destroyArgs[1] = b.CreateMul(priorCapacity, codeUnitBytes);
+//    destroyArgs[2] = b.getSize(0);
+//    b.CreateCall(destroyBuffer, destroyArgs);
 }
 
 void ReadSourceKernel::linkExternalMethods(KernelBuilder & b) {

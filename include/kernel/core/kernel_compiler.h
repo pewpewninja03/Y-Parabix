@@ -346,7 +346,7 @@ private:
 
     void initializeIOBindingMap();
 
-    void initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions options);
+    void initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions options, llvm::Value * expectedNumOfStrides = nullptr);
 
 protected:
 

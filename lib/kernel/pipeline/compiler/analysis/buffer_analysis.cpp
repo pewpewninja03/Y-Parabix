@@ -801,7 +801,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
             if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
-                buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
+                buffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
             } else { // is internal buffer
 
                 // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.

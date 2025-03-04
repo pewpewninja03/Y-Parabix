@@ -139,7 +139,6 @@ void CPUDriver::generateUncachedKernels() {
     // mapping is known.
 
     mCachedKernel.reserve(mUncachedKernel.size());
-
     for (unsigned i = 0; i < mUncachedKernel.size(); ++i) {
         auto & kernel = mUncachedKernel[i];
         NamedRegionTimer T(kernel->getSignature(), kernel->getName(),

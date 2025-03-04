@@ -423,7 +423,9 @@ public:
     template <typename ExternalFunctionType>
     void link(std::string name, ExternalFunctionType & functionPtr);
 
-    static bool isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned);
+    LLVM_READNONE static bool isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned);
+
+    LLVM_READNONE static bool isManagedBuffer(const Binding & output);
 
     LLVM_READNONE bool canSetTerminateSignal() const;
 
