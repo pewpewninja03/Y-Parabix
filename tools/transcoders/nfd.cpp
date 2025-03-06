@@ -794,14 +794,15 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
         SHOW_STREAM(CCC_SeqMarks);
         SHOW_STREAM(CCC_Violation);
 
-        StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
-        FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
-        SHOW_STREAM(ViolationsByMarkEnd);
-
         StreamSet * CCC_Violation_Start = P.CreateStreamSet(1, 1);
         if (UseIndexedShiftBack) {
-            P.CreateKernelCall<IndexedShiftBack>(CCC_SeqMarks, ViolationsByMarkEnd, CCC_Violation_Start);
+            P.CreateKernelCall<IndexedShiftBack>(CCC_SeqMarks, CCC_Violation, CCC_Violation_Start);
+            SHOW_STREAM(CCC_Violation_Start);
         } else {
+            StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
+            FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
+            SHOW_STREAM(ViolationsByMarkEnd);
+            
             StreamSet * ViolationsByMarkStart = P.CreateStreamSet(1, 1);
             P.CreateKernelCall<ShiftBack>(ViolationsByMarkEnd, ViolationsByMarkStart, 1);
             SHOW_STREAM(ViolationsByMarkStart);
