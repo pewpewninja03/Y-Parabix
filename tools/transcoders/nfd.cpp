@@ -802,11 +802,11 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
             StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
             FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
             SHOW_STREAM(ViolationsByMarkEnd);
-            
+
             StreamSet * ViolationsByMarkStart = P.CreateStreamSet(1, 1);
             P.CreateKernelCall<ShiftBack>(ViolationsByMarkEnd, ViolationsByMarkStart, 1);
             SHOW_STREAM(ViolationsByMarkStart);
-            
+
             SpreadByMask(P, CCC_SeqMarks, ViolationsByMarkStart, CCC_Violation_Start);
             SHOW_STREAM(CCC_Violation_Start);
         }
@@ -900,9 +900,9 @@ void NFD_FilterStage(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * Ba
     StreamSet * const u8index = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
-    
+
     StreamSet * NFD_WorkItems = DetermineNFD_WorkItems(P, NFD_Data, BasisBits, u8index);
-    
+
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
 
