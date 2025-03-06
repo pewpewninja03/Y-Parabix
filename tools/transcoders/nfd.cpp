@@ -12,7 +12,8 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <pablo/codegenstate.h>
-#include <pablo/pe_zeroes.h>        // for Zeroes
+#include <pablo/pe_ones.h>
+#include <pablo/pe_zeroes.h>
 #include <pablo/bixnum/bixnum.h>
 #include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
@@ -65,6 +66,8 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(true), cl::cat(NFD_Options));
 static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
+static cl::opt<bool> FilterViolations("FilterViolations", cl::desc("Only include reorderable sequences in work items if they are misordered or start with a decomposable character"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<bool> UseIndexedShiftBack("IndexedShiftBack", cl::desc("Use IndexedShiftBack in place of Filter/Spread combination"), cl::init(false), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -429,29 +432,50 @@ void LVT2NFD::generatePabloMethod() {
     }
     writeOutputStreamSet("NFD_Basis", basisVar);
 }
+class Mark_EOF : public pablo::PabloKernel {
+public:
+    Mark_EOF(LLVMTypeSystemInterface & ts, StreamSet * u8index, StreamSet * EOF_mark);
+protected:
+    void generatePabloMethod() override;
+};
+
+Mark_EOF::Mark_EOF (LLVMTypeSystemInterface & ts, StreamSet * u8index, StreamSet * EOF_mark)
+: PabloKernel(ts, "Mark_EOF",
+// inputs
+{Binding{"u8index", u8index}},
+// output
+{Binding{"EOF_mark", EOF_mark}}) {
+}
+
+void Mark_EOF::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("EOF_mark"), pb.getInteger(0)), EOFbit);
+}
 
 //
-//   CCC_Check computes two bitstreams:
-//   (1)  Marking all positions with violations of combining class ordering,
-//        marked at the first position of a misordered pair.
-//   (2)  A streamset marking the beginning and end of a sequence consisting
-//        of a non-combining character (CCC = 0) followed by two or more
-//        combining characters (note that a sequence having a single combining
-//        character can never be out of order).
+//  Given a canonical combining class (CCC) basis stream and the u8final index stream,
+//  identify starts and ends of reorderable character sequences and determine any
+//  violations of canonical combining class (CCC) order within these sequences.
+//  The positions of non-reorderable characters (CCC=0) as well as start of file
+//  and one past end of file are consider to identify potential starts and ends.
+//  Any violation within a sequences is marked at the sequence end position
+//  (that is, at the next non-reorderable character or one past EOF).
+//
 //
 class CCC_Check : public pablo::PabloKernel {
 public:
-    CCC_Check(LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * CCC_SeqMarks, StreamSet * CCC_Violation);
+    CCC_Check(LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * u8index, StreamSet * EOF_mark, StreamSet * CCC_SeqMarks, StreamSet * CCC_Violation);
 protected:
     void generatePabloMethod() override;
 private:
     unsigned mCCC_basis_size;
 };
 
-CCC_Check::CCC_Check (LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * CCC_SeqMarks, StreamSet * CCC_Violation)
-: PabloKernel(ts, "CCC_Check",
+CCC_Check::CCC_Check (LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * u8index, StreamSet * EOF_mark, StreamSet * CCC_SeqMarks, StreamSet * CCC_Violation)
+: PabloKernel(ts, "CCC_Check_u8",
 // inputs
-{Binding{"CCC_Basis", CCC_Basis, FixedRate(1), LookAhead(2)}},
+{Binding{"CCC_Basis", CCC_Basis}, Binding{"u8index", u8index}, Binding{"EOF_mark", EOF_mark, FixedRate(), LookAhead(1)}},
 // output
 {Binding{"CCC_SeqMarks", CCC_SeqMarks}, Binding{"CCC_Violation", CCC_Violation}}),
 mCCC_basis_size(CCC_Basis->getNumElements()) {
@@ -460,45 +484,66 @@ mCCC_basis_size(CCC_Basis->getNumElements()) {
 void CCC_Check::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     BixNum CCC = getInputStreamSet("CCC_Basis");
+    PabloAST * u8index = getInputStreamSet("u8index")[0];
+    PabloAST * EOF_mark = getInputStreamSet("EOF_mark")[0];
+    BixNumCompiler bnc0(pb);
+    PabloAST * ZeroCCC = pb.createAnd(bnc0.EQ(CCC, 0), u8index);
+    PabloAST * NonZeroCCC = pb.createAnd(pb.createNot(ZeroCCC), u8index);
+    auto nested = pb.createScope();
+    Var * first_and_last_char = pb.createVar("first_and_last_char", pb.createZeroes());
+    Var * violation_mark = pb.createVar("violation_mark", pb.createZeroes());
+    pb.createIf(NonZeroCCC, nested);
+    //
+    PabloAST * startOfFile = nested.createNot(nested.createAdvance(nested.createOnes(), 1));
+    PabloAST * firstChar = nested.createScanTo(startOfFile, u8index);
+    BixNumCompiler bnc(nested);
+    BixNum CCC_advanced(mCCC_basis_size);
     BixNum CCC_ahead(mCCC_basis_size);
-    BixNum CCC_ahead2(mCCC_basis_size);
     for (unsigned i = 0; i < mCCC_basis_size; i++) {
-        CCC_ahead[i] = pb.createLookahead(CCC[i], 1);
-        CCC_ahead2[i] = pb.createLookahead(CCC[i], 2);
+        CCC_advanced[i] = nested.createIndexedAdvance(CCC[i], u8index, 1);
     }
-    BixNumCompiler bnc(pb);
-    PabloAST * ZeroCCC = bnc.EQ(CCC, 0);
-    PabloAST * ZeroCCC_ahead = bnc.EQ(CCC_ahead, 0);
-    PabloAST * violation = pb.createAnd(bnc.UGT(CCC, CCC_ahead), pb.createNot(ZeroCCC_ahead));
-    PabloAST * seqEnd = pb.createAnd(ZeroCCC_ahead, pb.createNot(ZeroCCC));
-    PabloAST * violationInSeq = pb.createAnd(pb.createMatchStar(violation, pb.createNot(ZeroCCC)), seqEnd);
-    PabloAST * seqStart = pb.createAnd3(ZeroCCC, pb.createNot(ZeroCCC_ahead), bnc.NEQ(CCC_ahead2, 0));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_SeqMarks"), pb.getInteger(0)), pb.createOr(seqStart, seqEnd));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_Violation"), pb.getInteger(0)), violationInSeq);
+    PabloAST * lastChar = nested.createLookahead(EOF_mark, 1);
+    nested.createAssign(first_and_last_char, nested.createOr(firstChar, lastChar));
+    PabloAST * violation = nested.createAnd(bnc.UGT(CCC_advanced, CCC), NonZeroCCC);
+    PabloAST * infill = nested.createInFile(nested.createNot(u8index));
+    PabloAST * seqEnd = nested.createOr(ZeroCCC, lastChar);
+    PabloAST * seqFill = nested.createOr(infill, nested.createNot(seqEnd));
+    PabloAST * violation_end = nested.createAnd(nested.createMatchStar(violation, seqFill), seqEnd);
+    nested.createAssign(violation_mark, violation_end);
+    PabloAST * seqMarks = pb.createOr(ZeroCCC, first_and_last_char);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_SeqMarks"), pb.getInteger(0)), seqMarks);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_Violation"), pb.getInteger(0)), violation_mark);
 }
 
-class CCC_Violation_Sequence : public pablo::PabloKernel {
+class NFD_Narrow_Focus : public pablo::PabloKernel {
 public:
-    CCC_Violation_Sequence(LLVMTypeSystemInterface & ts, StreamSet * ViolationStarts, StreamSet * CCC_SeqMarks, StreamSet * Violation_Seq);
+    NFD_Narrow_Focus(LLVMTypeSystemInterface & ts,
+                     StreamSet * u8index, StreamSet * DT_Can, StreamSet * ViolationStarts, StreamSet * CCC_SeqMarks,
+                     StreamSet * mayChangeOnNFD);
 protected:
     void generatePabloMethod() override;
 };
 
-CCC_Violation_Sequence::CCC_Violation_Sequence(LLVMTypeSystemInterface & ts, StreamSet * ViolationStarts, StreamSet * CCC_SeqMarks, StreamSet * Violation_Seq)
-: PabloKernel(ts, "CCC_Violation_Sequence",
+NFD_Narrow_Focus::NFD_Narrow_Focus(LLVMTypeSystemInterface & ts,
+                                   StreamSet * u8index, StreamSet * DT_Can, StreamSet * ViolationStarts, StreamSet * CCC_SeqMarks,
+                                   StreamSet * mayChangeOnNFD)
+: PabloKernel(ts, "NFD_Narrow_Focus",
 // inputs
-{Binding{"ViolationStarts", ViolationStarts}, Binding{"CCC_SeqMarks", CCC_SeqMarks}},
+{Binding{"u8index", u8index}, Binding{"DT_Can", DT_Can}, Binding{"ViolationStarts", ViolationStarts}, Binding{"CCC_SeqMarks", CCC_SeqMarks}},
 // output
-{Binding{"Violation_Seq", Violation_Seq}}) {
+{Binding{"mayChangeOnNFD", mayChangeOnNFD}}) {
 }
 
-void CCC_Violation_Sequence::generatePabloMethod() {
+void NFD_Narrow_Focus::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
+    PabloAST * u8index = getInputStreamSet("u8index")[0];
+    PabloAST * DT_Can = getInputStreamSet("DT_Can")[0];
     PabloAST * ViolationStarts = getInputStreamSet("ViolationStarts")[0];
     PabloAST * CCC_SeqMarks = getInputStreamSet("CCC_SeqMarks")[0];
-    PabloAST * interior = pb.createMatchStar(pb.createAdvance(ViolationStarts, 1), pb.createNot(CCC_SeqMarks));
-    //PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), interior);
+    PabloAST * WorkSeqStarts = pb.createOr(DT_Can, ViolationStarts);
+    PabloAST * interior = pb.createMatchStar(pb.createAdvance(WorkSeqStarts, 1), pb.createNot(CCC_SeqMarks));
+    PabloAST * work_items = pb.createOr(WorkSeqStarts, pb.createAnd(interior, u8index));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("mayChangeOnNFD"), pb.getInteger(0)), work_items);
 }
 
 //
@@ -732,18 +777,54 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
     P.CreateKernelCall<UnicodePropertyKernelBuilder>(dtCanName, U8_Basis, DT_Can);
     SHOW_STREAM(DT_Can);
 
-    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
-    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
-    re::Name * CCC0_Name = re::makeName("CCC", "NR");
-    CCC0_Name->setDefinition(CCC0_Prop);
-    StreamSet * const CCC_0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, U8_Basis, CCC_0);//, BitMovementMode::LookAhead);
-    SHOW_STREAM(CCC_0);
-
     StreamSet * const NFD_WorkItems = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<NFD_Focus>(u8index, DT_Can, CCC_0, NFD_WorkItems);
-    SHOW_STREAM(NFD_WorkItems);
+    if (FilterViolations) {
+        UCD::EnumeratedPropertyObject * enumObj = llvm::cast<UCD::EnumeratedPropertyObject>(getPropertyObject(UCD::ccc));
+        StreamSet * CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+        P.CreateKernelCall<UnicodePropertyBasis>(enumObj, U8_Basis, CCC_Basis);
+        SHOW_BIXNUM(CCC_Basis);
 
+        StreamSet * EOF_mark = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<Mark_EOF>(u8index, EOF_mark);
+        SHOW_STREAM(EOF_mark);
+
+        StreamSet * CCC_SeqMarks = P.CreateStreamSet(1, 1);
+        StreamSet * CCC_Violation = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<CCC_Check>(CCC_Basis, u8index, EOF_mark, CCC_SeqMarks, CCC_Violation);
+        SHOW_STREAM(CCC_SeqMarks);
+        SHOW_STREAM(CCC_Violation);
+
+        StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
+        FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
+        SHOW_STREAM(ViolationsByMarkEnd);
+
+        StreamSet * CCC_Violation_Start = P.CreateStreamSet(1, 1);
+        if (UseIndexedShiftBack) {
+            P.CreateKernelCall<IndexedShiftBack>(CCC_SeqMarks, ViolationsByMarkEnd, CCC_Violation_Start);
+        } else {
+            StreamSet * ViolationsByMarkStart = P.CreateStreamSet(1, 1);
+            P.CreateKernelCall<ShiftBack>(ViolationsByMarkEnd, ViolationsByMarkStart, 1);
+            SHOW_STREAM(ViolationsByMarkStart);
+            
+            SpreadByMask(P, CCC_SeqMarks, ViolationsByMarkStart, CCC_Violation_Start);
+            SHOW_STREAM(CCC_Violation_Start);
+        }
+
+        P.CreateKernelCall<NFD_Narrow_Focus>(u8index, DT_Can, CCC_Violation_Start, CCC_SeqMarks, NFD_WorkItems);
+        SHOW_STREAM(NFD_WorkItems);
+
+    } else {
+        re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+        CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+        re::Name * CCC0_Name = re::makeName("CCC", "NR");
+        CCC0_Name->setDefinition(CCC0_Prop);
+        StreamSet * const CCC_0 = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, U8_Basis, CCC_0);//, BitMovementMode::LookAhead);
+        SHOW_STREAM(CCC_0);
+
+        P.CreateKernelCall<NFD_Focus>(u8index, DT_Can, CCC_0, NFD_WorkItems);
+        SHOW_STREAM(NFD_WorkItems);
+    }
     return NFD_WorkItems;
 }
 
@@ -976,6 +1057,7 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
     if (ByteReplace) ByteMerging = true;
+    if (UseIndexedShiftBack) FilterViolations = true;
     UTF_Encoder U8_Encoder(8);
     NFD_BixData NFD_Data(U8_Encoder);
     CPUDriver driver("NFD_function");
