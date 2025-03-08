@@ -225,7 +225,7 @@ void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b
     Value * const isProgressedFarEnough = b.CreateICmpULT(mSegNo, min);
     Value * isTerminated = nullptr;
     if (mIsIOProcessThread) {
-        isTerminated = b.CreateIsNotNull(b.CreateLoad(b.getSizeTy(), terminatedPtr, true));
+        isTerminated = b.CreateIsNotNull(b.CreateAlignedLoad(b.getSizeTy(), terminatedPtr, SizeTyABIAlignment, true));
     } else {
         isTerminated = b.CreateIsNotNull(readTerminationSignal(b, kernelId));
     }
@@ -252,9 +252,10 @@ Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b) {
     Value * ptr; Type * ty;
     std::tie(ptr, ty) = getScalarFieldPtr(b,
         NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(mKernelId));
+    assert (ty == b.getSizeTy());
     const auto prefix = makeKernelName(mKernelId);
-    LoadInst * const nextSegNo = b.CreateLoad(ty, ptr,  prefix + "_nextSegNo");
-    b.CreateStore(b.CreateAdd(nextSegNo, b.getSize(1)), ptr);
+    LoadInst * const nextSegNo = b.CreateAlignedLoad(ty, ptr, SizeTyABIAlignment,  prefix + "_nextSegNo");
+    b.CreateAlignedStore(b.CreateAdd(nextSegNo, b.getSize(1)), ptr, SizeTyABIAlignment);
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + ": obtained %" PRIu64 "-th next segment number %" PRIu64,
                b.getSize(mKernelId), nextSegNo);

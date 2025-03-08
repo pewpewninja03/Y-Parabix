@@ -67,10 +67,11 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b, Bas
         b.CreateBasicBlock(prefix + "_hasSufficientZeroExtendSpace", insertBefore);
 
     auto zeSpaceRef = b.getScalarFieldPtr(ZERO_EXTENDED_SPACE);
-    Value * const currentSpace = b.CreateLoad(zeSpaceRef.second, zeSpaceRef.first);
+    assert (zeSpaceRef.second == b.getSizeTy());
+    Value * const currentSpace = b.CreateAlignedLoad(zeSpaceRef.second, zeSpaceRef.first, SizeTyABIAlignment);
 
     auto zeBufferRef = b.getScalarFieldPtr(ZERO_EXTENDED_BUFFER);
-    Value * const currentBuffer = b.CreateLoad(zeBufferRef.second, zeBufferRef.first);
+    Value * const currentBuffer = b.CreateAlignedLoad(zeBufferRef.second, zeBufferRef.first, PtrTyABIAlignment);
 
     requiredSpace = b.CreateRoundUp(requiredSpace, b.getSize(b.getCacheAlignment()));
 
@@ -82,8 +83,8 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b, Bas
     b.CreateFree(currentBuffer);
     Value * const newBuffer = b.CreatePageAlignedMalloc(requiredSpace);
     b.CreateMemZero(newBuffer, requiredSpace, b.getCacheAlignment());
-    b.CreateStore(requiredSpace, zeSpaceRef.first);
-    b.CreateStore(newBuffer, zeBufferRef.first);
+    b.CreateAlignedStore(requiredSpace, zeSpaceRef.first, SizeTyABIAlignment);
+    b.CreateAlignedStore(newBuffer, zeBufferRef.first, PtrTyABIAlignment);
     b.CreateBr(hasSufficientZeroExtendSpace);
 
     b.SetInsertPoint(hasSufficientZeroExtendSpace);
@@ -353,11 +354,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             offset[0] = i32_ZERO;
             offset[1] = i32_ZERO;
             Value * const mallocedPtr = b.CreateGEP(truncTy, bufferStorage, offset);
-            Value * const existingBuffer = b.CreateLoad(int8PtrTy, mallocedPtr);
+            Value * const existingBuffer = b.CreateAlignedLoad(int8PtrTy, mallocedPtr, PtrTyABIAlignment);
             offset[1] = i32_ONE;
             Value * const mallocedSizePtr = b.CreateGEP(truncTy, bufferStorage, offset);
 
-            Value * const existingSize = b.CreateLoad(sizeTy, mallocedSizePtr);
+            Value * const existingSize = b.CreateAlignedLoad(sizeTy, mallocedSizePtr, SizeTyABIAlignment);
             Value * const needsRealloc = b.CreateICmpUGT(mallocBytes, existingSize);
             b.CreateCondBr(needsRealloc, allocateNewBuffer, allocateNewBufferExit);
 
@@ -365,8 +366,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             Value * const allocedBytes = b.CreateRoundUpRational(mallocBytes, getPageSize());
             b.CreateFree(existingBuffer);
             Value * const newBuffer = b.CreateAlignedMalloc(allocedBytes, blockSize);
-            b.CreateStore(newBuffer, mallocedPtr);
-            b.CreateStore(allocedBytes, mallocedSizePtr);
+            b.CreateAlignedStore(newBuffer, mallocedPtr, PtrTyABIAlignment);
+            b.CreateAlignedStore(allocedBytes, mallocedSizePtr, SizeTyABIAlignment);
 
             b.CreateBr(allocateNewBufferExit);
 
@@ -500,7 +501,7 @@ void PipelineCompiler::freeZeroedInputBuffers(KernelBuilder & b) {
         // free any truncated input buffers
         for (size_t i = 0; i < n; ++i) {
             offset[1] = b.getInt32(i);
-            Value * ptr = b.CreateLoad(b.getInt8PtrTy(), b.CreateGEP(traceArTy, base, offset));
+            Value * ptr = b.CreateAlignedLoad(b.getInt8PtrTy(), b.CreateGEP(traceArTy, base, offset), PtrTyABIAlignment);
             b.CreateFree(ptr);
         }
     }

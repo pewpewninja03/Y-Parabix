@@ -128,9 +128,9 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
 
     IntegerType * sizeTy = b.getSizeTy();
     if (mUseDynamicMultithreading && isSynchronizationCounter(type)) {
-        Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
+        Value * const cur = b.CreateAlignedLoad(sizeTy, mAccumulatedSynchronizationTimePtr, SizeTyABIAlignment);
         Value * const accum = b.CreateAdd(cur, duration);
-        b.CreateStore(accum, mAccumulatedSynchronizationTimePtr);
+        b.CreateAlignedStore(accum, mAccumulatedSynchronizationTimePtr, SizeTyABIAlignment);
     }
 
     if (EnableCycleCounter) {
@@ -141,24 +141,24 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
         index[0] = b.getInt32(0);
         index[1] = b.getInt32(type);
         Value * const sumCounterPtr = b.CreateGEP(ty, ptr, index);
-        Value * const sumRunningCount = b.CreateLoad(sizeTy, sumCounterPtr);
+        Value * const sumRunningCount = b.CreateAlignedLoad(sizeTy, sumCounterPtr, SizeTyABIAlignment);
         Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
-        b.CreateStore(sumUpdatedCount, sumCounterPtr);
+        b.CreateAlignedStore(sumUpdatedCount, sumCounterPtr, SizeTyABIAlignment);
 
         if (type == CycleCounter::TOTAL_TIME) {
             index[1] = b.getInt32(SQ_SUM_TOTAL_TIME);
             Value * const sqSumCounterPtr = b.CreateGEP(ty, ptr, index);
-            Value * const sqSumRunningCount = b.CreateLoad(sizeTy, sqSumCounterPtr);
+            Value * const sqSumRunningCount = b.CreateAlignedLoad(sizeTy, sqSumCounterPtr, SizeTyABIAlignment);
             Value * sqDuration = b.CreateZExt(duration, sqSumRunningCount->getType());
             sqDuration = b.CreateMul(sqDuration, sqDuration);
             Value * const sqSumUpdatedCount = b.CreateAdd(sqSumRunningCount, sqDuration);
-            b.CreateStore(sqSumUpdatedCount, sqSumCounterPtr);
+            b.CreateAlignedStore(sqSumUpdatedCount, sqSumCounterPtr, SizeTyABIAlignment);
             if (mIsPartitionRoot) {
                 index[1] = b.getInt32(NUM_OF_INVOCATIONS);
                 Value * const invokePtr = b.CreateGEP(ty, ptr, index);
-                Value * const invoked = b.CreateLoad(sizeTy, invokePtr);
+                Value * const invoked = b.CreateAlignedLoad(sizeTy, invokePtr, SizeTyABIAlignment);
                 Value * const invoked2 = b.CreateAdd(invoked, b.getSize(1));
-                b.CreateStore(invoked2, invokePtr);
+                b.CreateAlignedStore(invoked2, invokePtr, SizeTyABIAlignment);
             }
         }
     }
@@ -186,9 +186,9 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
     index[1] = b.getInt32(ifFalse);
     Value * const sumCounterPtrB = b.CreateGEP(ty, ptr, index);
     Value * const sumCounterPtr = b.CreateSelect(cond, sumCounterPtrA, sumCounterPtrB);
-    Value * const sumRunningCount = b.CreateLoad(b.getSizeTy(), sumCounterPtr);
+    Value * const sumRunningCount = b.CreateAlignedLoad(b.getSizeTy(), sumCounterPtr, SizeTyABIAlignment);
     Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
-    b.CreateStore(sumUpdatedCount, sumCounterPtr);
+    b.CreateAlignedStore(sumUpdatedCount, sumCounterPtr, SizeTyABIAlignment);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -202,8 +202,8 @@ void PipelineCompiler::updateTotalCycleCounterTime(KernelBuilder & b) const {
     // total is thread local but gets summed at the end; no need to worry about
     // multiple threads updating it.
     Value * const ptr = getScalarFieldPtr(b, STATISTICS_CYCLE_COUNT_TOTAL).first;
-    Value * const updated = b.CreateAdd(b.CreateLoad(b.getSizeTy(), ptr), duration);
-    b.CreateStore(updated, ptr);
+    Value * const updated = b.CreateAdd(b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment), duration);
+    b.CreateAlignedStore(updated, ptr, SizeTyABIAlignment);
 }
 
 
@@ -514,7 +514,7 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
 
             assert (k < REQ_INTEGERS);
             Value * const itemsPtr = b.CreateGEP(b.getInt64Ty(), values, b.getInt32(k++));
-            b.CreateStore(items, itemsPtr);
+            b.CreateAlignedStore(items, itemsPtr, Int64TyABIAlignment);
             Value * cycleCountPtr; Type * cycleCountTy;
 
             std::tie(cycleCountPtr, cycleCountTy) = b.getScalarFieldPtr(prefix + STATISTICS_CYCLE_COUNT_SUFFIX);
@@ -524,24 +524,24 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
                 if (isRoot || j != PARTITION_JUMP_SYNCHRONIZATION) {
                     assert (cycleCountTy->getStructElementType(j)->isIntegerTy());
                     index[1] = b.getInt32(j);
-                    sumCycles = b.CreateLoad(int64Ty, b.CreateGEP(cycleCountTy, cycleCountPtr, index));
+                    sumCycles = b.CreateAlignedLoad(int64Ty, b.CreateGEP(cycleCountTy, cycleCountPtr, index), Int64TyABIAlignment);
                 } else {
                     assert (cycleCountTy->getStructElementType(j)->isEmptyTy());
                 }
                 assert (k < REQ_INTEGERS);
-                b.CreateStore(sumCycles, b.CreateGEP(int64Ty, values, b.getInt32(k++)));
+                b.CreateAlignedStore(sumCycles, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment);
             }
 
             if (isRoot) {
                 assert (cycleCountTy->getStructElementType(NUM_OF_INVOCATIONS)->isIntegerTy());
                 index[1] = b.getInt32(NUM_OF_INVOCATIONS);
-                currentN = b.CreateLoad(b.getInt64Ty(), b.CreateGEP(cycleCountTy, cycleCountPtr, index));
+                currentN = b.CreateAlignedLoad(b.getInt64Ty(), b.CreateGEP(cycleCountTy, cycleCountPtr, index), Int64TyABIAlignment);
             } else {
                 assert (cycleCountTy->getStructElementType(NUM_OF_INVOCATIONS)->isEmptyTy());
             }
             assert (currentN);
             assert (k < REQ_INTEGERS);
-            b.CreateStore(currentN, b.CreateGEP(int64Ty, values, b.getInt32(k++)));
+            b.CreateAlignedStore(currentN, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment);
             assert ((k % (NUM_OF_KERNEL_CYCLE_COUNTERS + 1)) == 0);
         }
 
@@ -550,29 +550,29 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
         std::tie(cycleCountPtr, cycleCountTy) = b.getScalarFieldPtr(prefix + STATISTICS_CYCLE_COUNT_SUFFIX);
 
         Value * const reportedItems = (baseItemCount == nullptr) ? INT64_ZERO : baseItemCount;
-        b.CreateStore(reportedItems, b.CreateGEP(int64Ty, values, b.getInt32(k++)));
+        b.CreateAlignedStore(reportedItems, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment);
 
-        b.CreateStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // KERNEL_SYNCHRONIZATION
+        b.CreateAlignedStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // KERNEL_SYNCHRONIZATION
 
         assert (cycleCountTy->getStructElementType(PARTITION_JUMP_SYNCHRONIZATION)->isIntegerTy());
         index[1] = b.getInt32(PARTITION_JUMP_SYNCHRONIZATION);
-        Value * sumCycles = b.CreateLoad(int64Ty, b.CreateGEP(cycleCountTy, cycleCountPtr, index));
+        Value * sumCycles = b.CreateAlignedLoad(int64Ty, b.CreateGEP(cycleCountTy, cycleCountPtr, index), Int64TyABIAlignment);
 
-        b.CreateStore(sumCycles, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // PARTITION_JUMP_SYNCHRONIZATION
+        b.CreateAlignedStore(sumCycles, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // PARTITION_JUMP_SYNCHRONIZATION
 
-        b.CreateStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // BUFFER_EXPANSION
+        b.CreateAlignedStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // BUFFER_EXPANSION
 
-        b.CreateStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // BUFFER_COPY
+        b.CreateAlignedStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // BUFFER_COPY
 
-        b.CreateStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // KERNEL_EXECUTION
+        b.CreateAlignedStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // KERNEL_EXECUTION
 
         Value * const total = b.getScalarField(STATISTICS_CYCLE_COUNT_TOTAL);
 
-        b.CreateStore(total, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // TOTAL_TIME
+        b.CreateAlignedStore(total, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // TOTAL_TIME
 
-        b.CreateStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // SQ_SUM_TOTAL_TIME
+        b.CreateAlignedStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // SQ_SUM_TOTAL_TIME
 
-        b.CreateStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++))); // NUM_OF_INVOCATIONS
+        b.CreateAlignedStore(INT64_ZERO, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment); // NUM_OF_INVOCATIONS
 
         assert (k == REQ_INTEGERS);
 
@@ -599,9 +599,9 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort p
         const auto prefix = makeBufferName(mKernelId, port);
         Value * counterPtr; Type * ty;
         std::tie(counterPtr, ty) = b.getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
-        Value * const runningCount = b.CreateLoad(ty, counterPtr);
+        Value * const runningCount = b.CreateAlignedLoad(ty, counterPtr, Int64TyABIAlignment);
         Value * const updatedCount = b.CreateAdd(runningCount, b.getSize(1));
-        b.CreateStore(updatedCount, counterPtr);
+        b.CreateAlignedStore(updatedCount, counterPtr, Int64TyABIAlignment);
     }
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
 
@@ -616,13 +616,13 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort p
         IntegerType * sizeTy = b.getSizeTy();
 
         Value * const traceLogArrayField = b.CreateGEP(ty, historyPtr, {ZERO, ZERO});
-        Value * const traceLogArray = b.CreateLoad(sizeTy->getPointerTo(), traceLogArrayField);
+        Value * const traceLogArray = b.CreateAlignedLoad(sizeTy->getPointerTo(), traceLogArrayField, PtrTyABIAlignment);
 
         Value * const traceLogCountField = b.CreateGEP(ty, historyPtr, {ZERO, ONE});
-        Value * const traceLogCount = b.CreateLoad(sizeTy, traceLogCountField);
+        Value * const traceLogCount = b.CreateAlignedLoad(sizeTy, traceLogCountField, SizeTyABIAlignment);
 
         Value * const traceLogCapacityField = b.CreateGEP(ty, historyPtr, {ZERO, TWO});
-        Value * const traceLogCapacity = b.CreateLoad(sizeTy, traceLogCapacityField);
+        Value * const traceLogCapacity = b.CreateAlignedLoad(sizeTy, traceLogCapacityField, SizeTyABIAlignment);
 
         BasicBlock * const expandHistory = b.CreateBasicBlock(prefix + "_expandHistory", mKernelLoopCall);
         BasicBlock * const recordExpansion = b.CreateBasicBlock(prefix + "_recordExpansion", mKernelLoopCall);
@@ -638,8 +638,8 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort p
         Value * const newCapacity = b.CreateUMax(b.CreateShl(traceLogCapacity, SZ_ONE), SZ_MIN_SIZE);
         Value * const expandedLogArray = b.CreateRealloc(b.getSizeTy(), traceLogArray, newCapacity);
         assert (expandedLogArray->getType() == traceLogArray->getType());
-        b.CreateStore(expandedLogArray, traceLogArrayField);
-        b.CreateStore(newCapacity, traceLogCapacityField);
+        b.CreateAlignedStore(expandedLogArray, traceLogArrayField, PtrTyABIAlignment);
+        b.CreateAlignedStore(newCapacity, traceLogCapacityField, SizeTyABIAlignment);
         BasicBlock * const branchExitBlock = b.GetInsertBlock();
         b.CreateBr(recordExpansion);
 
@@ -647,8 +647,8 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort p
         PHINode * const logArray = b.CreatePHI(traceLogArray->getType(), 2);
         logArray->addIncoming(traceLogArray, entryBlock);
         logArray->addIncoming(expandedLogArray, branchExitBlock);
-        b.CreateStore(b.CreateAdd(traceLogCount, b.getSize(1)), traceLogCountField);
-        b.CreateStore(mSegNo, b.CreateGEP(sizeTy, logArray, traceLogCount));
+        b.CreateAlignedStore(b.CreateAdd(traceLogCount, b.getSize(1)), traceLogCountField, SizeTyABIAlignment);
+        b.CreateAlignedStore(mSegNo, b.CreateGEP(sizeTy, logArray, traceLogCount), SizeTyABIAlignment);
     }
 
 }
@@ -960,8 +960,8 @@ has_ports:
                     Value * historyPtr; Type * historyTy;
                     std::tie(historyPtr, historyTy) = b.getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
                     assert (j < fieldCount);
-                    traceLogArray[j] = b.CreateLoad(sizePtrTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ZERO}));
-                    traceLengthArray[j] = b.CreateLoad(sizeTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ONE}));
+                    traceLogArray[j] = b.CreateAlignedLoad(sizePtrTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ZERO}), PtrTyABIAlignment);
+                    traceLengthArray[j] = b.CreateAlignedLoad(sizeTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ONE}), SizeTyABIAlignment);
                     j++;
                 }
             }
@@ -972,8 +972,8 @@ has_ports:
                     Value * historyPtr; Type * historyTy;
                     std::tie(historyPtr, historyTy) = b.getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX);
                     assert (j < fieldCount);
-                    traceLogArray[j] = b.CreateLoad(sizePtrTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ZERO}));
-                    traceLengthArray[j] = b.CreateLoad(sizeTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ONE}));
+                    traceLogArray[j] = b.CreateAlignedLoad(sizePtrTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ZERO}), PtrTyABIAlignment);
+                    traceLengthArray[j] = b.CreateAlignedLoad(sizeTy, b.CreateGEP(historyTy, historyPtr, {ZERO, ONE}), SizeTyABIAlignment);
                     j++;
                 }
             }
@@ -1027,7 +1027,7 @@ has_ports:
             b.CreateLikelyCondBr(notEndOfTrace, check, next);
 
             b.SetInsertPoint(check);
-            Value * const nextSegNo = b.CreateLoad(sizeTy, b.CreateGEP(sizeTy, traceLogArray[i], currentIndex[i]));
+            Value * const nextSegNo = b.CreateAlignedLoad(sizeTy, b.CreateGEP(sizeTy, traceLogArray[i], currentIndex[i]), SizeTyABIAlignment);
             b.CreateCondBr(b.CreateICmpEQ(segNo, nextSegNo), update, next);
 
             b.SetInsertPoint(update);
@@ -1148,11 +1148,11 @@ void PipelineCompiler::initializeBufferExpansionHistory(KernelBuilder & b) const
 
                 Value * const entryData = b.CreatePageAlignedMalloc(entryTy, SZ_ONE);
                 // fill in the struct
-                b.CreateStore(entryData, b.CreateGEP(traceTy, traceData, {ZERO, ZERO}));
-                b.CreateStore(SZ_ONE, b.CreateGEP(traceTy, traceData, {ZERO, ONE}));
+                b.CreateAlignedStore(entryData, b.CreateGEP(traceTy, traceData, {ZERO, ZERO}), PtrTyABIAlignment);
+                b.CreateAlignedStore(SZ_ONE, b.CreateGEP(traceTy, traceData, {ZERO, ONE}), SizeTyABIAlignment);
                 // then the initial record
-                b.CreateStore(SZ_ZERO, b.CreateGEP(entryTy, entryData, {ZERO, ZERO}));
-                b.CreateStore(buffer->getInternalCapacity(b), b.CreateGEP(entryTy, entryData, {ZERO, ONE}));
+                b.CreateAlignedStore(SZ_ZERO, b.CreateGEP(entryTy, entryData, {ZERO, ZERO}), SizeTyABIAlignment);
+                b.CreateAlignedStore(buffer->getInternalCapacity(b), b.CreateGEP(entryTy, entryData, {ZERO, ONE}), SizeTyABIAlignment);
 
                 unsigned sizeTyWidth = b.getSizeTy()->getIntegerBitWidth() / 8;
                 Constant * const length = b.getSize(sizeTyWidth * (n - 2));
@@ -1192,29 +1192,29 @@ void PipelineCompiler::recordBufferExpansionHistory(KernelBuilder & b,
     Type * const entryTy = ArrayType::get(sizeTy, numOfConsumers + 3);
 
     Value * const traceLogArrayField = b.CreateGEP(traceDataTy, traceData, {ZERO, ZERO});
-    Value * entryArray = b.CreateLoad(entryTy->getPointerTo(), traceLogArrayField);
+    Value * entryArray = b.CreateAlignedLoad(entryTy->getPointerTo(), traceLogArrayField, PtrTyABIAlignment);
 
     Value * const traceLogCountField = b.CreateGEP(traceDataTy, traceData, {ZERO, ONE});
-    Value * const traceIndex = b.CreateLoad(sizeTy, traceLogCountField);
+    Value * const traceIndex = b.CreateAlignedLoad(sizeTy, traceLogCountField, SizeTyABIAlignment);
     Value * const traceCount = b.CreateAdd(traceIndex, b.getSize(1));
 
     entryArray = b.CreateRealloc(entryTy, entryArray, traceCount);
-    b.CreateStore(entryArray, traceLogArrayField);
-    b.CreateStore(traceCount, traceLogCountField);
+    b.CreateAlignedStore(entryArray, traceLogArrayField, PtrTyABIAlignment);
+    b.CreateAlignedStore(traceCount, traceLogCountField, SizeTyABIAlignment);
 
     FixedArray<Value *, 2> indices;
     indices[0] = traceIndex;
 
     // segment num  0
     indices[1] = ZERO;
-    b.CreateStore(mSegNo, b.CreateGEP(entryTy, entryArray, indices));
+    b.CreateAlignedStore(mSegNo, b.CreateGEP(entryTy, entryArray, indices), SizeTyABIAlignment);
     // new capacity 1
     indices[1] = ONE;
-    b.CreateStore(buffer->getInternalCapacity(b), b.CreateGEP(entryTy, entryArray, indices));
+    b.CreateAlignedStore(buffer->getInternalCapacity(b), b.CreateGEP(entryTy, entryArray, indices), SizeTyABIAlignment);
     // produced item count 2
     indices[1] = TWO;
     Value * const produced = mCurrentProducedItemCountPhi[outputPort];
-    b.CreateStore(produced, b.CreateGEP(entryTy, entryArray, indices));
+    b.CreateAlignedStore(produced, b.CreateGEP(entryTy, entryArray, indices), SizeTyABIAlignment);
 
     // consumer processed item count [3,n)
     if (LLVM_LIKELY(!bn.isReturned())) {
@@ -1377,10 +1377,10 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                     const auto numOfConsumers = std::max(out_degree(buffer, mConsumerGraph), 1UL);
 
                     Type * const arrayTy = ArrayType::get(sizeTy, numOfConsumers + 3);
-                    Value * const entryArray = b.CreateLoad(arrayTy->getPointerTo(), traceArrayField);
+                    Value * const entryArray = b.CreateAlignedLoad(arrayTy->getPointerTo(), traceArrayField, PtrTyABIAlignment);
 
                     Value * const traceCountField = b.CreateGEP(traceTy, traceData, {ZERO, ONE});
-                    Value * const traceCount = b.CreateLoad(sizeTy, traceCountField);
+                    Value * const traceCount = b.CreateAlignedLoad(sizeTy, traceCountField, SizeTyABIAlignment);
 
                     BasicBlock * const outputEntry = b.GetInsertBlock();
                     BasicBlock * const outputLoop = b.CreateBasicBlock(prefix + "_bufferExpansionReportLoop");
@@ -1404,11 +1404,11 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                     Value * const openingBar = b.CreateSelect(onlyEntry, doubleBar, singleBar);
 
                     Value * const segmentNumField = b.CreateGEP(arrayTy, entryArray, {index, ZERO});
-                    Value * const segmentNum = b.CreateLoad(sizeTy, segmentNumField);
+                    Value * const segmentNum = b.CreateAlignedLoad(sizeTy, segmentNumField, SizeTyABIAlignment);
                     expansionArgs[7] = segmentNum;
 
                     Value * const newBufferSizeField = b.CreateGEP(arrayTy, entryArray, {index, ONE});
-                    Value * const newBufferSize = b.CreateLoad(sizeTy, newBufferSizeField);
+                    Value * const newBufferSize = b.CreateAlignedLoad(sizeTy, newBufferSizeField, SizeTyABIAlignment);
                     expansionArgs[8] = newBufferSize;
 
                     b.CreateCall(fTy, Dprintf, expansionArgs);
@@ -1433,7 +1433,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                     itemCountArgs[5] = expansionArgs[4];
                     itemCountArgs[6] = expansionArgs[5];
                     Value * const producedField = b.CreateGEP(arrayTy, entryArray, {index, TWO});
-                    itemCountArgs[7] = b.CreateLoad(sizeTy, producedField);
+                    itemCountArgs[7] = b.CreateAlignedLoad(sizeTy, producedField, SizeTyABIAlignment);
 
                     b.CreateCall(fTy, Dprintf, itemCountArgs);
                     itemCountArgs[4] = b.getInt8('I');
@@ -1447,7 +1447,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                         itemCountArgs[6] = b.GetString(binding.getName());
                         const auto k = c.Index + 2; assert (k > 2);
                         Value * const processedField = b.CreateGEP(arrayTy, entryArray, {index, b.getInt32(k)});
-                        itemCountArgs[7] = b.CreateLoad(sizeTy, processedField);
+                        itemCountArgs[7] = b.CreateAlignedLoad(sizeTy, processedField, SizeTyABIAlignment);
                         b.CreateCall(fTy, Dprintf, itemCountArgs);
                     }
 
@@ -1498,10 +1498,10 @@ void PipelineCompiler::initializeStridesPerSegment(KernelBuilder & b) const {
         Value * const traceDataArray = b.CreatePageAlignedMalloc(traceLogTy, SZ_DEFAULT_CAPACITY);
 
         // fill in the struct
-        b.CreateStore(MAX_INT, b.CreateGEP(traceDataTy, traceData, {ZERO, ZERO})); // "last" num of strides
-        b.CreateStore(traceDataArray, b.CreateGEP(traceDataTy, traceData, {ZERO, ONE})); // trace log
-        b.CreateStore(SZ_ZERO, b.CreateGEP(traceDataTy, traceData, {ZERO, TWO})); // trace length
-        b.CreateStore(SZ_DEFAULT_CAPACITY, b.CreateGEP(traceDataTy, traceData, {ZERO, THREE})); // trace capacity
+        b.CreateAlignedStore(MAX_INT, b.CreateGEP(traceDataTy, traceData, {ZERO, ZERO}), SizeTyABIAlignment); // "last" num of strides
+        b.CreateAlignedStore(traceDataArray, b.CreateGEP(traceDataTy, traceData, {ZERO, ONE}), PtrTyABIAlignment); // trace log
+        b.CreateAlignedStore(SZ_ZERO, b.CreateGEP(traceDataTy, traceData, {ZERO, TWO}), SizeTyABIAlignment); // trace length
+        b.CreateAlignedStore(SZ_DEFAULT_CAPACITY, b.CreateGEP(traceDataTy, traceData, {ZERO, THREE}), SizeTyABIAlignment); // trace capacity
     }
 
 }
@@ -1562,7 +1562,7 @@ void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned
             Constant * const THREE = b.getInt32(3);
 
             Value * const lastNumOfStridesField = b.CreateGEP(traceTy, traceData, {ZERO, ZERO});
-            Value * const lastNumOfStrides = b.CreateLoad(sizeTy, lastNumOfStridesField);
+            Value * const lastNumOfStrides = b.CreateAlignedLoad(sizeTy, lastNumOfStridesField, SizeTyABIAlignment);
             Value * const changed = b.CreateICmpNE(lastNumOfStrides, numOfStrides);
             b.CreateCondBr(changed, update, exit);
 
@@ -1571,12 +1571,12 @@ void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned
             assert (traceLogField->getType()->isPointerTy());
             Type * const recordStructTy = ArrayType::get(sizeTy, 2);
             Type * const recordStructPtrTy = recordStructTy->getPointerTo();
-            Value * const traceLog = b.CreateLoad(recordStructPtrTy, traceLogField);
+            Value * const traceLog = b.CreateAlignedLoad(recordStructPtrTy, traceLogField, PtrTyABIAlignment);
             Value * const traceLengthField = b.CreateGEP(traceTy, traceData, {ZERO, TWO});
-            Value * const traceLength = b.CreateLoad(sizeTy, traceLengthField);
+            Value * const traceLength = b.CreateAlignedLoad(sizeTy, traceLengthField, SizeTyABIAlignment);
             Value * const traceCapacityField = b.CreateGEP(traceTy, traceData, {ZERO, THREE});
             assert (traceCapacityField->getType()->isPointerTy());
-            Value * const traceCapacity = b.CreateLoad(sizeTy, traceCapacityField);
+            Value * const traceCapacity = b.CreateAlignedLoad(sizeTy, traceCapacityField, SizeTyABIAlignment);
             Value * const hasSpace = b.CreateICmpNE(traceLength, traceCapacity);
             b.CreateLikelyCondBr(hasSpace, write, expand);
 
@@ -1585,17 +1585,17 @@ void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned
             assert (traceLog->getType()->isPointerTy());
             Value * const expandedtraceLog = b.CreateRealloc(recordStructTy, traceLog, nextTraceCapacity);
             assert (expandedtraceLog->getType() == traceLog->getType());
-            b.CreateStore(expandedtraceLog, traceLogField);
-            b.CreateStore(nextTraceCapacity, traceCapacityField);
+            b.CreateAlignedStore(expandedtraceLog, traceLogField, PtrTyABIAlignment);
+            b.CreateAlignedStore(nextTraceCapacity, traceCapacityField, SizeTyABIAlignment);
             b.CreateBr(write);
 
             b.SetInsertPoint(write);
             PHINode * const traceLogPhi = b.CreatePHI(recordStructPtrTy, 2);
             traceLogPhi->addIncoming(traceLog, update);
             traceLogPhi->addIncoming(expandedtraceLog, expand);
-            b.CreateStore(segNo, b.CreateGEP(recordStructTy, traceLogPhi, {traceLength , ZERO}));
-            b.CreateStore(numOfStrides, b.CreateGEP(recordStructTy, traceLogPhi, {traceLength , ONE}));
-            b.CreateStore(numOfStrides, lastNumOfStridesField);
+            b.CreateAlignedStore(segNo, b.CreateGEP(recordStructTy, traceLogPhi, {traceLength , ZERO}), SizeTyABIAlignment);
+            b.CreateAlignedStore(numOfStrides, b.CreateGEP(recordStructTy, traceLogPhi, {traceLength , ONE}), SizeTyABIAlignment);
+            b.CreateAlignedStore(numOfStrides, lastNumOfStridesField, SizeTyABIAlignment);
             Value * const newTraceLength = b.CreateAdd(traceLength, b.getSize(1));
             b.CreateStore(newTraceLength, traceLengthField);
 
@@ -1714,8 +1714,8 @@ void PipelineCompiler::printOptionalStridesPerSegment(KernelBuilder & b) const {
             const auto prefix = makeKernelName(partitionRootIds[i]);
             Value * traceData; Type * traceTy;
             std::tie(traceData, traceTy) = b.getScalarFieldPtr(prefix + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX);
-            traceLogArray[i] = b.CreateLoad(recordStructPtrTy, b.CreateGEP(traceTy, traceData, {ZERO, ONE}));
-            traceLengthArray[i] = b.CreateLoad(sizeTy, b.CreateGEP(traceTy, traceData, {ZERO, TWO}));
+            traceLogArray[i] = b.CreateAlignedLoad(recordStructPtrTy, b.CreateGEP(traceTy, traceData, {ZERO, ONE}), PtrTyABIAlignment);
+            traceLengthArray[i] = b.CreateAlignedLoad(sizeTy, b.CreateGEP(traceTy, traceData, {ZERO, TWO}), SizeTyABIAlignment);
         }
 
         // Start printing the data lines
@@ -1750,11 +1750,11 @@ void PipelineCompiler::printOptionalStridesPerSegment(KernelBuilder & b) const {
             b.CreateLikelyCondBr(notEndOfTrace, check, next);
 
             b.SetInsertPoint(check);
-            Value * const nextSegNo = b.CreateLoad(sizeTy, b.CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ZERO }));
+            Value * const nextSegNo = b.CreateAlignedLoad(sizeTy, b.CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ZERO }), SizeTyABIAlignment);
             b.CreateCondBr(b.CreateICmpEQ(segNo, nextSegNo), update, next);
 
             b.SetInsertPoint(update);
-            Value * const numOfStrides = b.CreateLoad(sizeTy, b.CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ONE }));
+            Value * const numOfStrides = b.CreateAlignedLoad(sizeTy, b.CreateGEP(recordStructTy, traceLogArray[i], { currentIndex[i], ONE }), SizeTyABIAlignment);
             Value * const currentIndex1 = b.CreateAdd(currentIndex[i], SZ_ONE);
             b.CreateBr(next);
 
@@ -1976,7 +1976,7 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
         offset[0] = i32_ZERO;
         offset[1] = i32_ZERO;
 
-        Value * const chunkStart = b.CreateLoad(sizeTy, b.CreateGEP(logChunkTy, currentLog, offset));
+        Value * const chunkStart = b.CreateAlignedLoad(sizeTy, b.CreateGEP(logChunkTy, currentLog, offset), SizeTyABIAlignment);
         Value * const canFit = b.CreateICmpULT(segNo, b.CreateAdd(chunkStart, CHUNK_LENGTH));
         b.CreateCondBr(canFit, writeLogEntry, allocateNewLogChunk);
 
@@ -1984,10 +1984,10 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
         Value * const m = b.CreateAdd(b.CreateMul(N, CHUNK_LENGTH), b.getSize(1));
         Value * const sizeLength = b.CreateAdd(b.CreateMul(m, b.getSize(sizeTySize)), b.getSize(voidPtrTySize));
         Value * const newLog = b.CreatePointerCast(b.CreatePageAlignedMalloc(sizeLength), logChunkPtrTy);
-        b.CreateStore(b.CreateSub(segNo, segIndex), b.CreateGEP(logChunkTy, newLog, offset));
+        b.CreateAlignedStore(b.CreateSub(segNo, segIndex), b.CreateGEP(logChunkTy, newLog, offset), SizeTyABIAlignment);
         offset[1] = i32_ONE;
-        b.CreateStore(currentLog, b.CreateGEP(logChunkTy, newLog, offset));
-        b.CreateStore(newLog, logChunkPtrPtr);
+        b.CreateAlignedStore(currentLog, b.CreateGEP(logChunkTy, newLog, offset), PtrTyABIAlignment);
+        b.CreateAlignedStore(newLog, logChunkPtrPtr, PtrTyABIAlignment);
         b.CreateBr(writeLogEntry);
 
         ConstantInt * const sz_ZERO = b.getSize(0);
@@ -2000,7 +2000,9 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
         PHINode * const logPhi = b.CreatePHI(logChunkPtrTy, 2);
         logPhi->addIncoming(currentLog, checkLogOffset);
         logPhi->addIncoming(newLog, allocateNewLogChunk);
-        Value * const val = b.CreateLoad(sizeTy, currentArray, indexPhi);
+
+        Value * const inputPtr = b.CreateGEP(sizeTy->getPointerTo(), currentArray, indexPhi);
+        Value * const val = b.CreateAlignedLoad(sizeTy, inputPtr, SizeTyABIAlignment);
 
         FixedArray<Value *, 3> offset3;
         offset3[0] = i32_ZERO;
@@ -2010,7 +2012,7 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
         Value * const arrayPtr = b.CreateGEP(logChunkTy, logPhi, offset3);
         assert (arrayPtr->getType() == sizePtrTy);
 
-        b.CreateStore(val, arrayPtr);
+        b.CreateAlignedStore(val, arrayPtr, SizeTyABIAlignment);
         Value * const nextIndex = b.CreateAdd(indexPhi, sz_ONE);
         indexPhi->addIncoming(nextIndex, writeLogEntry);
         logPhi->addIncoming(logPhi, writeLogEntry);
@@ -2034,7 +2036,7 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
         const BufferPort & out = mBufferGraph[e];
         const auto i = out.Port.Number;
         Value * const delta = b.CreateSub(current[i], prior[i]);
-        b.CreateStore(delta, b.CreateGEP(sizeTy, array, b.getInt32(i)));
+        b.CreateAlignedStore(delta, b.CreateGEP(sizeTy, array, b.getInt32(i)), SizeTyABIAlignment);
     }
     args[3] = array;
     b.CreateCall(logFunc, args);
@@ -2190,12 +2192,12 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
         PHINode * current = b.CreatePHI(logChunkPtrTy, 2);
         current->addIncoming(traceLogArray[i], entry);
         offset[1] = i32_ZERO;
-        Value * const chunkStart = b.CreateLoad(sizeTy, b.CreateGEP(traceLogType[i], current, offset));
+        Value * const chunkStart = b.CreateAlignedLoad(sizeTy, b.CreateGEP(traceLogType[i], current, offset), SizeTyABIAlignment);
         Value * const A = b.CreateICmpULE(chunkStart, baseSegNoPhi);
         Value * const B = b.CreateICmpULT(baseSegNoPhi, b.CreateAdd(chunkStart, CHUNK_LENGTH));
         Value * const found = b.CreateAnd(A, B);
         offset[1] = i32_ONE;
-        Value * const nextChunkPtr = b.CreateLoad(logChunkPtrTy, b.CreateGEP(traceLogType[i], current, offset));
+        Value * const nextChunkPtr = b.CreateAlignedLoad(logChunkPtrTy, b.CreateGEP(traceLogType[i], current, offset), PtrTyABIAlignment);
         Value * const noMore = b.CreateICmpEQ(nextChunkPtr, nullPtr);
         current->addIncoming(nextChunkPtr, loop);
         currentChunk[i] = b.CreateSelect(noMore, nullPtr, current);
@@ -2245,7 +2247,7 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
 
             Value * const ptr2 = b.CreateGEP(traceLogType[i]->getStructElementType(2), ptr, dataValOffset);
 
-            dataVal[j] = b.CreateLoad(sizeTy, ptr2);
+            dataVal[j] = b.CreateAlignedLoad(sizeTy, ptr2, SizeTyABIAlignment);
         }
         b.CreateBr(printLogEntryLoopNextKernel);
 
@@ -2309,7 +2311,7 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
         b.SetInsertPoint(freeLoop);
         PHINode * logArray = b.CreatePHI(traceLogPtrTy, 2);
         logArray->addIncoming(traceLogArray[i], entry);
-        Value * const nextArray = b.CreateLoad(traceLogPtrTy, b.CreateGEP(traceLogType[i], logArray, offset));
+        Value * const nextArray = b.CreateAlignedLoad(traceLogPtrTy, b.CreateGEP(traceLogType[i], logArray, offset), PtrTyABIAlignment);
         b.CreateFree(logArray);
         logArray->addIncoming(nextArray, freeLoop);
         b.CreateLikelyCondBr(b.CreateICmpNE(nextArray, nil), freeLoop, freeExit);
@@ -2326,7 +2328,7 @@ Value * PipelineCompiler::getMaxSegmentNumber(KernelBuilder & b) const {
     auto getKernelSegNo = [&](const size_t kernelId) {
         const auto type = isDataParallel(kernelId) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const ptr = getSynchronizationLockPtrForKernel(b, kernelId, type);
-        return b.CreateLoad(b.getSizeTy(), ptr);
+        return b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     };
     const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
     Value * segNo = getKernelSegNo(firstComputeKernel);

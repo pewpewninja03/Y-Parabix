@@ -107,6 +107,7 @@ DEPS
     pablo
     pablo.bixnum
     kernel.basis
+    kernel.bitwise
     kernel.io
     kernel.pipeline
     kernel.streamutils
@@ -120,6 +121,23 @@ NAME
     hangul-nfd
 SRC
     hangul-nfd.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    re.cc
+    toolchain
+    grep
+)
+
+parabix_add_executable(
+NAME
+    hangul-nfc
+SRC
+    hangul-nfc.cpp
 DEPS
     pablo
     pablo.bixnum

@@ -100,7 +100,8 @@ void PipelineCompiler::bindFamilyInitializationArguments(KernelBuilder & b, ArgI
                 if (LLVM_UNLIKELY(CheckAssertions)) {
                     b.CreateAssert(value, "family parameter (%s) was given a null value", b.GetString(name));
                 }
-                b.CreateStore(value, ptr.first);
+                const auto align = b.getModule()->getDataLayout().getABITypeAlign(ptr.second).value();
+                b.CreateAlignedStore(value, ptr.first, align);
             };
 
             if (LLVM_LIKELY((D.CaptureFlags & FamilyScalarData::CaptureSharedStateObject) != 0)) {
@@ -193,7 +194,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(KernelBuilder & b, const 
     }
     Value * const retVal = b.CreateCall(fty, func, args);
     if (isKernelFamilyCall(mKernelId)) {
-        b.CreateStore(b.CreatePointerCast(retVal, b.getVoidPtrTy()), threadLocal);
+        b.CreateAlignedStore(b.CreatePointerCast(retVal, b.getVoidPtrTy()), threadLocal, PtrTyABIAlignment);
     }
 }
 

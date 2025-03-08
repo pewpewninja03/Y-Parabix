@@ -1,8 +1,7 @@
 /*
- *  Copyright (c) 2022 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-
 
 #include <cstdio>
 #include <vector>
@@ -21,10 +20,12 @@
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
+#include <kernel/streamutils/sorting.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
@@ -74,11 +75,15 @@ const unsigned Hangul_TCount = 28;
 const unsigned Hangul_NCount = 588;
 const unsigned Hangul_SCount = 11172;
 
+const unsigned S_Index_bits = 14;
+const unsigned L_Index_bits = 5;
+const unsigned V_Index_bits = 5;
+const unsigned T_Index_bits = 5;
+
 class NFD_BixData : public UCD::NFD_Engine {
 public:
     NFD_BixData();
     std::vector<re::CC *> NFD_Insertion_BixNumCCs();
-    std::vector<re::CC *> NFD_Hangul_LV_LVT_CCs();
     unicode::BitTranslationSets NFD_1st_BitXorCCs();
     unicode::BitTranslationSets NFD_2nd_BitCCs();
     unicode::BitTranslationSets NFD_3rd_BitCCs();
@@ -125,11 +130,6 @@ std::vector<re::CC *> NFD_BixData::NFD_Insertion_BixNumCCs() {
     BixNumCCs[1] = BixNumCCs[1] + mHangul_Precomposed_LVT;
     return {re::makeCC(BixNumCCs[0], &cc::Unicode),
             re::makeCC(BixNumCCs[1], &cc::Unicode)};
-}
-
-std::vector<re::CC *> NFD_BixData::NFD_Hangul_LV_LVT_CCs() {
-    return {re::makeCC(mHangul_Precomposed_LV, &cc::Unicode),
-            re::makeCC(mHangul_Precomposed_LVT, &cc::Unicode)};
 }
 
 unicode::BitTranslationSets NFD_BixData::NFD_1st_BitXorCCs() {
@@ -230,191 +230,136 @@ void NFD_Translation::generatePabloMethod() {
     }
 }
 
-//
-// A set of five Unicode CCs can be used to determine a 5-bit
-// BixNum representing the L_index value of Hangul precomposed
-// characters.
-std::vector<re::CC *> LIndexBixNumCCs() {
-    std::vector<re::CC *> L_CC(5, re::makeCC(&cc::Unicode));
-    UCD::codepoint_t low_cp = Hangul_SBase;
-    for (unsigned L_index = 0; L_index < Hangul_LCount; L_index++) {
-        UCD::codepoint_t next_base = low_cp + Hangul_NCount;
-        UCD::codepoint_t hi_cp = next_base - 1;
-        for (unsigned bit = 0; bit < 5; bit++) {
-            unsigned bit_val = (L_index >> bit) & 1;
-            if (bit_val == 1) {
-                 L_CC[bit] = re::makeCC(re::makeCC(low_cp, hi_cp, &cc::Unicode), L_CC[bit]);
-            }
-        }
-        low_cp = next_base;
-    }
-    return L_CC;
-}
-
-//
-// A set of five CCs can be used to determine a 5-bit BixNum
-// reprsenting the V_index value of Hangul precomposed characters
-// from a 9-bit VT index value in the range 0 .. Hangul_NCount - 1.
-std::vector<re::CC *> VIndexBixNumCCs() {
-    std::vector<re::CC *> V_CC(5, re::makeCC(&cc::Unicode));
-    unsigned low = 0;
-    for (unsigned V_index = 0; V_index < Hangul_VCount; V_index++) {
-        unsigned next_base = low + Hangul_TCount;
-        unsigned hi = next_base - 1;
-        for (unsigned bit = 0; bit < 5; bit++) {
-            unsigned bit_val = (V_index >> bit) & 1;
-            if (bit_val == 1) {
-                V_CC[bit] = re::makeCC(re::makeCC(low, hi), V_CC[bit]);
-            }
-        }
-        low = next_base;
-    }
-    return V_CC;
-}
-
-class Hangul_VT_Indices : public pablo::PabloKernel {
+class LVT_Indexes : public pablo::PabloKernel {
 public:
-    Hangul_VT_Indices(LLVMTypeSystemInterface & ts,
-                      StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-                      StreamSet * V_index, StreamSet * T_index);
+    LVT_Indexes(LLVMTypeSystemInterface & ts,
+                StreamSet * U21_Basis, StreamSet * LIndex, StreamSet * VIndex, StreamSet * TIndex);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_VT_Indices::Hangul_VT_Indices (LLVMTypeSystemInterface & ts,
-                                      StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-                                      StreamSet * V_index, StreamSet * T_index)
-: PabloKernel(ts, "Hangul_VT_indices_" + std::to_string(Basis->getNumElements()) + "x1",
+LVT_Indexes::LVT_Indexes (LLVMTypeSystemInterface & ts,
+                          StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index)
+: PabloKernel(ts, "Hangul::LVT_Indexes21x1",
 // inputs
-{Binding{"basis", Basis},
-    Binding{"LV_LVT", LV_LVT},
-    Binding{"L_index", L_index}},
+{Binding{"basis", Basis}},
 // output
-{Binding{"V_index", V_index}, Binding{"T_index", T_index}}) {
+    {Binding{"L_index", L_index}, Binding{"V_index", V_index}, Binding{"T_index", T_index}}) {
 }
 
-void Hangul_VT_Indices::generatePabloMethod() {
+void LVT_Indexes::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> LV_LVT = getInputStreamSet("LV_LVT");
-    std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
-    PabloAST * precomposed = pb.createOr(LV_LVT[0], LV_LVT[1]);
-    // Set up Vars to receive the V_index and T_index values.
-    std::vector<Var *> V_indexVar(5);
-    for (unsigned i = 0; i < 5; i++) {
-        V_indexVar[i] = pb.createVar("V_index" + std::to_string(i), pb.createZeroes());
+    BixNumCompiler bnc0(pb);
+    PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul_SBase), bnc0.ULT(basis, Hangul_SBase + Hangul_SCount));
+    BixNum ZeroBasis(basis.size(), pb.createZeroes());
+
+    std::vector<Var *> L_indexVar(L_Index_bits);
+    for (unsigned i = 0; i < L_Index_bits; i++) {
+        L_indexVar[i] = pb.createVar("L_var" + std::to_string(i), pb.createZeroes());
     }
-    std::vector<Var *> T_indexVar(5);
-    for (unsigned i = 0; i < 5; i++) {
-        T_indexVar[i] = pb.createVar("T_index" + std::to_string(i), pb.createZeroes());
+    std::vector<Var *> V_indexVar(V_Index_bits);
+    for (unsigned i = 0; i < V_Index_bits; i++) {
+        V_indexVar[i] = pb.createVar("V_var" + std::to_string(i), pb.createZeroes());
+    }
+    std::vector<Var *> T_indexVar(T_Index_bits);
+    for (unsigned i = 0; i < T_Index_bits; i++) {
+        T_indexVar[i] = pb.createVar("T_var" + std::to_string(i), pb.createZeroes());
     }
 
     auto nested = pb.createScope();
-    pb.createIf(precomposed, nested);
+    pb.createIf(Hangul_precomposed, nested);
     BixNumCompiler bnc(nested);
 
-    //
-    // For each distinct Hangul L prefix, there is a block of
-    // Hangul_NCount entries.  The relative offset of the block
-    // (offset from Hangul_SBase) is L_index * Hangul_NCount.
-    // The offset will have up to 14 significant bits.
-    //
-    BixNum rel_offset = bnc.ZeroExtend(L_index, 14);
-    rel_offset = bnc.MulModular(rel_offset, Hangul_NCount);
-    //
-    // Compute the VT index as the index within the block of
-    // Hangul_NCount entries.
-    BixNum basis_offset = bnc.SubModular(basis, Hangul_SBase);
-    BixNum VT_index = bnc.SubModular(basis_offset, rel_offset);
-    VT_index = bnc.Truncate(VT_index, 10);  // Only 10 bits needed.
-    //
-    // Given the VT_index value as a basis, we can compute
-    // the V_index from a set of five CCs.
-    std::vector<re::CC *> V_CCs = VIndexBixNumCCs();
-    cc::Parabix_CC_Compiler ccc(VT_index);
-    std::vector<PabloAST *> V_index(5);
-    for (unsigned i = 0; i < 5; i++) {
-        V_index[i] = ccc.compileCC(V_CCs[i], nested);
+    BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul_SBase), ZeroBasis);
+    S_Index = bnc.Truncate(S_Index, S_Index_bits);
+    BixNum LV_index;
+    BixNum T_index;
+    bnc.Div(S_Index, Hangul_TCount, LV_index, T_index);
+    LV_index = bnc.Truncate(LV_index, L_Index_bits + V_Index_bits);
+    BixNum L_index;
+    BixNum V_index;
+    bnc.Div(LV_index, Hangul_VCount, L_index, V_index);
+    
+    for (unsigned i = 0; i < L_Index_bits; i++) {
+        nested.createAssign(L_indexVar[i], L_index[i]);
+    }
+    for (unsigned i = 0; i < V_Index_bits; i++) {
         nested.createAssign(V_indexVar[i], V_index[i]);
     }
-    BixNum V_offset = bnc.ZeroExtend(V_index, 10);
-    V_offset = bnc.MulModular(V_index, Hangul_TCount);
-    BixNum T_index = bnc.SubModular(VT_index, V_offset);
-    // Only 5 significant bits
-    for (unsigned i = 0; i < 5; i++) {
+    for (unsigned i = 0; i < T_Index_bits; i++) {
         nested.createAssign(T_indexVar[i], T_index[i]);
     }
-    //
+    writeOutputStreamSet("L_index", L_indexVar);
     writeOutputStreamSet("V_index", V_indexVar);
     writeOutputStreamSet("T_index", T_indexVar);
 }
 
-class Hangul_NFD : public pablo::PabloKernel {
+class LVT2NFD : public pablo::PabloKernel {
 public:
-    Hangul_NFD(LLVMTypeSystemInterface & ts,
-               StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-               StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis);
+    LVT2NFD(LLVMTypeSystemInterface & ts,
+               StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index,
+               StreamSet * NFD_Basis);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_NFD::Hangul_NFD (LLVMTypeSystemInterface & ts,
-                        StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
-                        StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis)
-: PabloKernel(ts, "Hangul_NFD_" + std::to_string(Basis->getNumElements()) + "x1",
+LVT2NFD::LVT2NFD (LLVMTypeSystemInterface & ts,
+                        StreamSet * Basis, StreamSet * L_index, StreamSet * V_index, StreamSet * T_index,
+                        StreamSet * NFD_Basis)
+: PabloKernel(ts, "Hangul::LVT2NFD_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis},
     Binding{"L_index", L_index},
-    Binding{"LV_LVT", LV_LVT},
     Binding{"V_index", V_index},
     Binding{"T_index", T_index}},
 // output
 {Binding{"NFD_Basis", NFD_Basis}}) {
 }
 
-void Hangul_NFD::generatePabloMethod() {
+void LVT2NFD::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> LV_LVT = getInputStreamSet("LV_LVT");
     std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
     std::vector<PabloAST *> V_index = getInputStreamSet("V_index");
     std::vector<PabloAST *> T_index = getInputStreamSet("T_index");
-    PabloAST * Hangul_L = pb.createOr(LV_LVT[0], LV_LVT[1]);
+    BixNumCompiler bnc0(pb);
+    PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul_SBase), bnc0.ULT(basis, Hangul_SBase + Hangul_SCount));
     // Set up Vars to receive the generated basis values.
     std::vector<Var *> basisVar(21);
     for (unsigned i = 0; i < 21; i++) {
         basisVar[i] = pb.createVar("basisVar" + std::to_string(i), basis[i]);
     }
     auto nested = pb.createScope();
-    pb.createIf(Hangul_L, nested);
+    pb.createIf(Hangul_precomposed, nested);
     BixNumCompiler bnc(nested);
     BixNum LPart = bnc.ZeroExtend(L_index, 21);
     // The LPart will be encoded at the original precomposed position.
     LPart = bnc.AddModular(LPart, Hangul_LBase);
     // The V Part, when it exists, is one position after the opening L Part.
-    PabloAST * V_position = nested.createAdvance(Hangul_L, 1);
-    for (unsigned i = 0; i < 5; i++) {
+    PabloAST * V_position = nested.createAdvance(Hangul_precomposed, 1);
+    for (unsigned i = 0; i < V_Index_bits; i++) {
         V_index[i] = nested.createAdvance(V_index[i], 1);
     }
     BixNum VPart = bnc.ZeroExtend(V_index, 21);
     VPart = bnc.AddModular(VPart, Hangul_VBase);
     // The T Part, if it exists is two positions after the opening
-    // L Part.  A T Part only exists for LVT initials.
-    PabloAST * T_position = nested.createAdvance(LV_LVT[1], 2);
-    for (unsigned i = 0; i < 5; i++) {
+    // L Part.  A T Part only exists for LVT initials (T != 0).
+    PabloAST * T_position = nested.createAdvance(Hangul_precomposed, 2);
+    for (unsigned i = 0; i < T_Index_bits; i++) {
         T_index[i] = nested.createAdvance(T_index[i], 2);
     }
+    T_position = nested.createAnd(T_position, bnc.NEQ(T_index, 0));
     BixNum TPart = bnc.ZeroExtend(T_index, 21);
     TPart = bnc.AddModular(TPart, Hangul_TBase);
     for (unsigned i = 0; i < 21; i++) {
-        PabloAST * bit = nested.createSel(Hangul_L, LPart[i], basis[i]);
+        PabloAST * bit = nested.createSel(Hangul_precomposed, LPart[i], basis[i]);
         bit = nested.createSel(V_position, VPart[i], bit);
         bit = nested.createSel(T_position, TPart[i], bit);
         nested.createAssign(basisVar[i], bit);
     }
     writeOutputStreamSet("NFD_Basis", basisVar);
 }
-
 
 //
 //   CCC_Check computes two bitstreams:
@@ -457,7 +402,7 @@ void CCC_Check::generatePabloMethod() {
     PabloAST * ZeroCCC_ahead = bnc.EQ(CCC_ahead, 0);
     PabloAST * violation = pb.createAnd(bnc.UGT(CCC, CCC_ahead), pb.createNot(ZeroCCC_ahead));
     PabloAST * seqEnd = pb.createAnd(ZeroCCC_ahead, pb.createNot(ZeroCCC));
-    PabloAST * violationInSeq = pb.createAdvanceThenScanTo(violation, seqEnd);
+    PabloAST * violationInSeq = pb.createAnd(pb.createMatchStar(violation, pb.createNot(ZeroCCC)), seqEnd);
     PabloAST * seqStart = pb.createAnd3(ZeroCCC, pb.createNot(ZeroCCC_ahead), bnc.NEQ(CCC_ahead2, 0));
     pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_SeqMarks"), pb.getInteger(0)), pb.createOr(seqStart, seqEnd));
     pb.createAssign(pb.createExtract(getOutputStreamVar("CCC_Violation"), pb.getInteger(0)), violationInSeq);
@@ -483,8 +428,8 @@ void CCC_Violation_Sequence::generatePabloMethod() {
     PabloAST * ViolationStarts = getInputStreamSet("ViolationStarts")[0];
     PabloAST * CCC_SeqMarks = getInputStreamSet("CCC_SeqMarks")[0];
     PabloAST * interior = pb.createMatchStar(pb.createAdvance(ViolationStarts, 1), pb.createNot(CCC_SeqMarks));
-    PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), Violation_Seq);
+    //PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), interior);
 }
 
 typedef void (*XfrmFunctionType)(uint32_t fd);
@@ -532,25 +477,22 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
-    auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
-
-    StreamSet * LV_LVT =  P.CreateStreamSet(LV_LVT_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
-    SHOW_BIXNUM(LV_LVT);
-
-    auto Lindex_ccs = LIndexBixNumCCs();
-    StreamSet * LIndexBixNum = P.CreateStreamSet(Lindex_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
+    //  The Hangul decomposition algorithm calculates replacements for LV and
+    //  LVT characters using calculations based on three 5-bit indexes for
+    //  the L, V and T characters.
+    StreamSet * LIndexBixNum = P.CreateStreamSet(L_Index_bits);
+    StreamSet * VIndexBixNum = P.CreateStreamSet(V_Index_bits);
+    StreamSet * TIndexBixNum = P.CreateStreamSet(T_Index_bits);
+    P.CreateKernelCall<LVT_Indexes>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
     SHOW_BIXNUM(LIndexBixNum);
-
-    StreamSet * VIndexBixNum = P.CreateStreamSet(5);
-    StreamSet * TIndexBixNum = P.CreateStreamSet(5);
-    P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
     SHOW_BIXNUM(VIndexBixNum);
     SHOW_BIXNUM(TIndexBixNum);
 
+    // Given the L, V and T indexes, the replacements for LV and LVT characters
+    // can be calculated to determine the correct 21-bit representations at
+    // <L, V> and <L, V, T> positions.
     StreamSet * Hangul_NFD_Basis = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
+    P.CreateKernelCall<LVT2NFD>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
     SHOW_BIXNUM(Hangul_NFD_Basis);
 
     StreamSet * NFD_Basis = P.CreateStreamSet(21, 1);
@@ -562,28 +504,18 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<UnicodePropertyBasis>(enumObj, NFD_Basis, CCC_Basis);
     SHOW_BIXNUM(CCC_Basis);
 
-    StreamSet * CCC_SeqMarks = P.CreateStreamSet(1, 1);
-    StreamSet * CCC_Violation = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CCC_Check>(CCC_Basis, CCC_SeqMarks, CCC_Violation);
-    SHOW_STREAM(CCC_SeqMarks);
-    SHOW_STREAM(CCC_Violation);
+    StreamSet * CCC_NonZero = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<bixnum::NEQ_immediate>(CCC_Basis, 0, CCC_NonZero);
+    SHOW_STREAM(CCC_NonZero);
 
-    StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
-    FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
+    StreamSets ToSort = {CCC_Basis, NFD_Basis};
 
-    StreamSet * ViolationsByMarkStart = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ShiftBack>(ViolationsByMarkEnd, ViolationsByMarkStart, 1);
-
-    StreamSet * CCC_Violation_Start = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, CCC_SeqMarks, ViolationsByMarkStart, CCC_Violation_Start);
-    SHOW_STREAM(CCC_Violation_Start);
-
-    StreamSet * Violation_Seq = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CCC_Violation_Sequence>(CCC_Violation_Start, CCC_SeqMarks, Violation_Seq);
-    SHOW_STREAM(Violation_Seq);
+    StreamSets SortResults = BitonicSortRuns(P, 8, CCC_NonZero, ToSort);
+    SHOW_BIXNUM(SortResults[0]);
+    SHOW_BIXNUM(SortResults[1]);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
-    U21_to_UTF8(P, NFD_Basis, OutputBasis);
+    U21_to_UTF8(P, SortResults[1], OutputBasis);
 
     SHOW_BIXNUM(OutputBasis);
 

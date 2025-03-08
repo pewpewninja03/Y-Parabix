@@ -124,11 +124,21 @@ public:
 
     StreamSet * getInputStreamSet(const llvm::StringRef name);
 
+    unsigned getNumOfStreamInputs() const {
+        assert (mTarget);
+        return mTarget->getNumOfStreamInputs();
+    }
+
     StreamSet * getOutputStreamSet(const unsigned i) {
         return static_cast<StreamSet *>(mTarget->mOutputStreamSets[i].getRelationship());
     }
 
     StreamSet * getOutputStreamSet(const llvm::StringRef name);
+
+    unsigned getNumOfStreamOutputs() const {
+        assert (mTarget);
+        return mTarget->getNumOfStreamOutputs();
+    }
 
     Scalar * getInputScalar(const unsigned i) {
         return static_cast<Scalar *>(mTarget->mInputScalars[i].getRelationship());

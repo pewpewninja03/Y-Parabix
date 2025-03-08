@@ -18,7 +18,10 @@ parabix_add_module(
 NAME
     toolchain
 SRC
+    fileutil.cpp
     toolchain.cpp
+DEPS
+    ${Boost_LIBRARIES}
 )
 
 if (ARTIFACT_TYPE STREQUAL "Shared")

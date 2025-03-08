@@ -367,7 +367,6 @@ public:
     void checkIfKernelIsAlreadyTerminated(KernelBuilder & b);
     void checkPropagatedTerminationSignals(KernelBuilder & b);
     Value * readTerminationSignal(KernelBuilder & b, const unsigned kernelId) const;
-    ScalarRef getKernelTerminationSignalPtr(KernelBuilder & b, const unsigned kernelId) const;
     void writeTerminationSignal(KernelBuilder & b, const unsigned kernelId, Value * const signal) const;
     Value * hasPipelineTerminated(KernelBuilder & b);
     void signalAbnormalTermination(KernelBuilder & b);
@@ -596,6 +595,8 @@ public:
     bool isDataParallel(const size_t kernel) const;
     bool hasPrincipalInputRate() const;
 
+    void getABIAlignments(KernelBuilder & b);
+
 protected:
 
     CompilerAllocator                           mAllocator;
@@ -611,6 +612,11 @@ protected:
     const bool                                  mUsesIllustrator;
 
     const LengthAssertions &                    mLengthAssertions;
+
+    unsigned                                    SizeTyABIAlignment = 0;
+    unsigned                                    Int64TyABIAlignment = 0;
+    unsigned                                    PtrTyABIAlignment = 0;
+    unsigned                                    Int32TyABIAlignment = 0;
 
     // analysis state
     static constexpr unsigned                   PipelineInput = 0;

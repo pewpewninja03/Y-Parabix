@@ -1065,7 +1065,7 @@ Unterminated</datafile>
 <grepcase regexp="\P{lc=@slc@}" datafile="../All_good" greplines="272"/>
 
 
-<grepcase regexp="\p{name=/AIRPLANE/}" datafile="../All_good" flags="-c -enable-object-cache=0 -thread-num=2" greplines="9958 126660 126661 126662 126663 126664 126665 126666"/>
+<grepcase regexp="\p{name=/AIRPLANE/}" datafile="../All_good" greplines="9958 116182 116183 116184 126660 126661 126662 126663 126664 126665 126666"/>
 <!-- Test case for non-UTF8 byte mode when implemented.
 <grepcase regexp="\xc4[\x80-\x85]" datafile="../All_good" greplines="224 225 226 227 228 229"/>
 -->

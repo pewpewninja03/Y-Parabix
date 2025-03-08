@@ -163,7 +163,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
             Constant * const ZERO = b.getInt32(0);
             ptr = b.CreateInBoundsGEP(consumedRef.second, ptr, { ZERO, ZERO } );
         }
-        itemCount = b.CreateLoad(b.getSizeTy(), ptr, true);
+        itemCount = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment, true);
     }
     assert (itemCount);
     return itemCount;
@@ -209,12 +209,12 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(KernelBuilder & b) {
             const auto id = getTruncatedStreamSetSourceId(streamSet);
             if (out_degree(id, mConsumerGraph) > 0) {
                 Value * const transConsumedPtr = getScalarFieldPtr(b, TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id)).first;
-                Value * const prior = b.CreateLoad(b.getSizeTy(), transConsumedPtr);
+                Value * const prior = b.CreateAlignedLoad(b.getSizeTy(), transConsumedPtr, SizeTyABIAlignment);
                 const auto output = in_edge(streamSet, mBufferGraph);
                 const auto producer = source(output, mBufferGraph);
                 const auto prodPrefix = makeBufferName(producer, mBufferGraph[output].Port);
                 Value * const minConsumed = b.CreateUMin(prior, processed, prodPrefix + "_minConsumed");
-                b.CreateStore(minConsumed, transConsumedPtr);
+                b.CreateAlignedStore(minConsumed, transConsumedPtr, SizeTyABIAlignment);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto consPrefix = makeBufferName(mKernelId, port);
                 debugPrint(b, consPrefix + "_consumed = %" PRIu64 " -> " + prodPrefix + "_consumed' = %" PRIu64, prior, minConsumed);
@@ -271,7 +271,7 @@ void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t stre
     // current consumed value; rather than load the old consumed
     // value at the point of production and incur a potential cache
     // miss penalty, just load it here.
-    Value * const prior = b.CreateLoad(b.getSizeTy(), ptr);
+    Value * const prior = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     Value * const skipped = b.CreateIsNull(consumed);
     consumed = b.CreateSelect(skipped, prior, consumed);
 
@@ -289,7 +289,7 @@ void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t stre
 
     }
 
-    b.CreateStore(consumed, ptr);
+    b.CreateAlignedStore(consumed, ptr, SizeTyABIAlignment);
 
 }
 
@@ -301,7 +301,7 @@ void PipelineCompiler::updateExternalConsumedItemCounts(KernelBuilder & b) {
         const auto streamSet = target(input, mBufferGraph);
         Value * const consumed = readConsumedItemCount(b, streamSet);
         const BufferPort & inputPort = mBufferGraph[input];
-        b.CreateStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number));
+        b.CreateAlignedStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number), SizeTyABIAlignment);
     }
 }
 
@@ -317,7 +317,7 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(KernelBui
             if (consumer >= mKernelId) { // && consumer <= targetKernelId
                 const auto name = TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet);
                 Value * const transConsumedPtr = getScalarFieldPtr(b, name).first;
-                b.CreateStore(b.getSize(0), transConsumedPtr);
+                b.CreateAlignedStore(b.getSize(0), transConsumedPtr, SizeTyABIAlignment);
                 break;
             }
         }

@@ -347,8 +347,24 @@ void BixNumCompiler::Div(BixNum dividend, unsigned divisor,
     if (divisor == 0) {
         llvm::report_fatal_error("BixNum division by 0.");
     }
+    if (divisor == 1) {
+        quotient = dividend;
+        remainder = BixNum(1, mPB.createZeroes());
+        return;
+    }
     unsigned dividend_bits = dividend.size();
     unsigned divisor_bits = floor_log2(divisor)+1;
+    if (dividend_bits < divisor_bits) {
+        quotient = BixNum(dividend_bits, mPB.createZeroes());
+        remainder = Create(divisor);
+        return;
+    }
+    if ((divisor & 1) == 0) {
+        // Optimization for dividing by 2 (and powers of 2 by recursion).
+        Div(HighBits(dividend, dividend_bits - 1), divisor/2, quotient, remainder);
+        remainder.insert(remainder.begin(), dividend[0]);
+        return;
+    }
     BixNum Q(dividend_bits, mPB.createZeroes());
     BixNum R(divisor_bits, mPB.createZeroes());
     for (int i = dividend_bits - 1 ; i >= 0; i--) {

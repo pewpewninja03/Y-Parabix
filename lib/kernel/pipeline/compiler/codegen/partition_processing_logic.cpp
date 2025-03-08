@@ -409,7 +409,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
                 } else {
                     ptr = b.getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
                 }
-                produced = b.CreateLoad(b.getSizeTy(), ptr);
+                produced = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
                 if (br.isRelative()) {
                     produced = b.CreateMulRational(produced, br.getRate().getRate());
                 }

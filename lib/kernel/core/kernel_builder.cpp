@@ -49,7 +49,8 @@ KernelBuilder::ScalarRef KernelBuilder::getScalarFieldPtr(const StringRef fieldN
 Value * KernelBuilder::getScalarField(const StringRef fieldName) {
     Type * ty; Value * ptr;
     std::tie(ptr, ty) = getScalarFieldPtr(fieldName);
-    return CreateAlignedLoad(ty, ptr, getTypeSize(getModule()->getDataLayout(), ty), fieldName);
+    auto & DL = getModule()->getDataLayout();
+    return CreateAlignedLoad(ty, ptr, DL.getABITypeAlign(ty).value(), fieldName);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -58,7 +59,8 @@ Value * KernelBuilder::getScalarField(const StringRef fieldName) {
 void KernelBuilder::setScalarField(const StringRef fieldName, Value * const value) {
     auto sf = getScalarFieldPtr(fieldName);
     assert (value->getType() == sf.second);
-    CreateAlignedStore(value, sf.first, getTypeSize(getModule()->getDataLayout(), value->getType()));
+    auto & DL = getModule()->getDataLayout();
+    CreateAlignedStore(value, sf.first, DL.getABITypeAlign(sf.second).value());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

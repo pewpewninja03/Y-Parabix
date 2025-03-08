@@ -106,6 +106,7 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(kernel::KernelBuilder
             errs() << "Already compiled: " << moduleId << KERNEL_FILE_EXTENSION << "\n";
         }        
         kernel->setModule(f->second);
+        kernel->setCompilationStatus(kernel::Kernel::CompilationStatus::UnownedModule);
         return CacheObjectResult::COMPILED;
     }
 

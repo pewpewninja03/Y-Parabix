@@ -80,7 +80,10 @@ uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
 
     const auto memfd = create_memfd();
     if (memfd == -1) {
-        report_fatal_error("failed to create memfd");
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream msg(tmp);
+        msg << "failed to create memfd (" << (size_t)errno << ')';
+        llvm::report_fatal_error(msg.str());
     }
 
     if (ftruncate(memfd, size) == -1) {
@@ -895,6 +898,7 @@ void DynamicBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress
 }
 
 void DynamicBuffer::setBaseAddress(kernel::KernelBuilder & /* b */, Value * /* addr */) const {
+    assert (false);
     unsupported("setBaseAddress", "Dynamic");
 }
 

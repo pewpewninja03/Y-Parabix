@@ -302,7 +302,7 @@ void PipelineCompiler::freeHistogramProperties(KernelBuilder & b) {
                 offset[0] = b.getInt32(0);
                 offset[1] = b.getInt32(2);
 
-                Value * const first = b.CreateLoad(voidPtrTy, b.CreateGEP(listTy, root, offset));
+                Value * const first = b.CreateAlignedLoad(voidPtrTy, b.CreateGEP(listTy, root, offset), PtrTyABIAlignment);
                 Value * const nil = ConstantPointerNull::get(voidPtrTy);
 
                 b.CreateCondBr(b.CreateICmpNE(first, nil), freeLoop, freeExit);
@@ -311,7 +311,7 @@ void PipelineCompiler::freeHistogramProperties(KernelBuilder & b) {
                 PHINode * const current = b.CreatePHI(voidPtrTy, 2);
                 current->addIncoming(first, entry);
                 Value * const currentList = b.CreatePointerCast(current, listPtrTy);
-                Value * const next = b.CreateLoad(voidPtrTy, b.CreateGEP(listTy, currentList, offset));
+                Value * const next = b.CreateAlignedLoad(voidPtrTy, b.CreateGEP(listTy, currentList, offset), PtrTyABIAlignment);
                 b.CreateFree(currentList);
                 current->addIncoming(next, freeLoop);
                 b.CreateCondBr(b.CreateICmpNE(next, nil), freeLoop, freeExit);
@@ -427,13 +427,13 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             offset[1] = i32_TWO;
 
             Value * const currentEntryPtr = b.CreateGEP(listTy, lastEntry, offset);
-            Value * const currentEntry = b.CreateLoad(listPtrTy, currentEntryPtr);
+            Value * const currentEntry = b.CreateAlignedLoad(listPtrTy, currentEntryPtr, PtrTyABIAlignment);
             Value * const noMore = b.CreateICmpEQ(currentEntry, ConstantPointerNull::get(listPtrTy));
             b.CreateCondBr(noMore, insertNewEntry, checkForUpdateOrInsert);
 
             b.SetInsertPoint(checkForUpdateOrInsert);
             offset[1] = i32_ZERO;
-            Value * const currentItemCount = b.CreateLoad(i64Ty, b.CreateGEP(listTy, currentEntry, offset));
+            Value * const currentItemCount = b.CreateAlignedLoad(i64Ty, b.CreateGEP(listTy, currentEntry, offset), PtrTyABIAlignment);
             if (LLVM_UNLIKELY(CheckAssertions)) {
                 Value * const valid = b.CreateICmpULT(lastItemCount, currentItemCount);
                 b.CreateAssert(valid, "Histogram history error: last position (%" PRIu64
@@ -450,12 +450,12 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             Value * const size = b.getTypeSize(listTy);
             Value * const newEntry = b.CreatePointerCast(b.CreateAlignedMalloc(size, sizeof(uint64_t)), listPtrTy);
             offset[1] = i32_ZERO;
-            b.CreateStore(itemCount, b.CreateGEP(listTy, newEntry, offset));
+            b.CreateAlignedStore(itemCount, b.CreateGEP(listTy, newEntry, offset), SizeTyABIAlignment);
             offset[1] = i32_ONE;
-            b.CreateStore(i64_ONE, b.CreateGEP(listTy, newEntry, offset));
+            b.CreateAlignedStore(i64_ONE, b.CreateGEP(listTy, newEntry, offset), Int64TyABIAlignment);
             offset[1] = i32_TWO;
-            b.CreateStore(b.CreatePointerCast(currentEntry, voidPtrTy), b.CreateGEP(listTy, newEntry, offset));
-            b.CreateStore(b.CreatePointerCast(newEntry, voidPtrTy), b.CreateGEP(listTy, lastEntry, offset));
+            b.CreateAlignedStore(b.CreatePointerCast(currentEntry, voidPtrTy), b.CreateGEP(listTy, newEntry, offset), PtrTyABIAlignment);
+            b.CreateAlignedStore(b.CreatePointerCast(newEntry, voidPtrTy), b.CreateGEP(listTy, lastEntry, offset), PtrTyABIAlignment);
             b.CreateRetVoid();
 
             b.SetInsertPoint(updateEntry);
@@ -464,8 +464,8 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             entryToUpdate->addIncoming(firstEntry, entry);
             offset[1] = i32_ONE;
             Value * const ptr = b.CreateGEP(listTy, entryToUpdate, offset);
-            Value * const val = b.CreateAdd(b.CreateLoad(i64Ty, ptr), i64_ONE);
-            b.CreateStore(val, ptr);
+            Value * const val = b.CreateAdd(b.CreateAlignedLoad(i64Ty, ptr, Int64TyABIAlignment), i64_ONE);
+            b.CreateAlignedStore(val, ptr, Int64TyABIAlignment);
             b.CreateRetVoid();
 
             b.restoreIP(ip);
@@ -531,7 +531,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
                 args[0] = sz_ZERO;
                 args[1] = diff;
                 Value * const toInc = b.CreateGEP(type, base, args);
-                b.CreateStore(b.CreateAdd(b.CreateLoad(i64Ty, toInc), sz_ONE), toInc);
+                b.CreateStore(b.CreateAdd(b.CreateAlignedLoad(i64Ty, toInc, Int64TyABIAlignment), sz_ONE), toInc);
             } else {
                 recordDynamicEntry(base, diff, type);
             }
@@ -691,14 +691,14 @@ void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportTy
         FixedArray<Value *, 2> offset;
         offset[0] = b.getInt32(index++);
         offset[1] = i32_ZERO;
-        b.CreateStore(b.getInt32(kernelId), b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(b.getInt32(kernelId), b.CreateGEP(hkdTy, kernelData, offset), Int32TyABIAlignment);
         offset[1] = i32_ONE;
-        b.CreateStore(b.getInt32(numOfPorts), b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(b.getInt32(numOfPorts), b.CreateGEP(hkdTy, kernelData, offset), Int32TyABIAlignment);
         offset[1] = i32_TWO;
-        b.CreateStore(b.GetString(getKernel(kernelId)->getName()), b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(b.GetString(getKernel(kernelId)->getName()), b.CreateGEP(hkdTy, kernelData, offset), PtrTyABIAlignment);
         Value * const portData = b.CreateAlignedMalloc(hpdTy, b.getSize(numOfPorts), 0, b.getCacheAlignment());
         offset[1] = i32_THREE;
-        b.CreateStore(portData, b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(portData, b.CreateGEP(hkdTy, kernelData, offset), PtrTyABIAlignment);
 
         unsigned portIndex = 0;
 
@@ -720,11 +720,11 @@ void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportTy
 
             offset[0] = b.getInt32(portIndex++);
             offset[1] = i32_ZERO;
-            b.CreateStore(b.getInt32((unsigned)br.Port.Type), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.getInt32((unsigned)br.Port.Type), b.CreateGEP(hpdTy, portData, offset), Int32TyABIAlignment);
             offset[1] = i32_ONE;
-            b.CreateStore(b.getInt32(br.Port.Number), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.getInt32(br.Port.Number), b.CreateGEP(hpdTy, portData, offset), Int32TyABIAlignment);
             offset[1] = i32_TWO;
-            b.CreateStore(b.GetString(bind.getName()), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.GetString(bind.getName()), b.CreateGEP(hpdTy, portData, offset), PtrTyABIAlignment);
 
             const auto prefix = makeBufferName(kernelId, br.Port);
 
@@ -741,10 +741,10 @@ void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportTy
             }
 
             offset[1] = i32_THREE;
-            b.CreateStore(b.getInt64(maxSize), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.getInt64(maxSize), b.CreateGEP(hpdTy, portData, offset), Int64TyABIAlignment);
 
             offset[1] = i32_FOUR;
-            b.CreateStore(b.CreatePointerCast(data, voidPtrTy), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.CreatePointerCast(data, voidPtrTy), b.CreateGEP(hpdTy, portData, offset), PtrTyABIAlignment);
 
         };
 
@@ -807,7 +807,7 @@ free_port_data:
         FixedArray<Value *, 2> offset;
         offset[0] = b.getInt32(index++);
         offset[1] = i32_THREE;
-        b.CreateFree(b.CreateLoad(hpdTy->getPointerTo(), b.CreateGEP(hkdTy, kernelData, offset)));
+        b.CreateFree(b.CreateAlignedLoad(hpdTy->getPointerTo(), b.CreateGEP(hkdTy, kernelData, offset), PtrTyABIAlignment));
     }
     b.CreateFree(kernelData);
 

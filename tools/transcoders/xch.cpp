@@ -528,7 +528,6 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     SHOW_BIXNUM(OutputBasis);
     StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
     P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    P.CreateKernelCall<StdOutKernel>(OutputBytes);
     return P.compile();
 }
 
@@ -622,7 +621,6 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
     }
     StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
     P.CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-    P.CreateKernelCall<StdOutKernel>(OutputBytes);
     return P.compile();
 }
 

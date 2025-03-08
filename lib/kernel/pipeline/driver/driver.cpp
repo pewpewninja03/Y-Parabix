@@ -93,7 +93,7 @@ Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcep
  ** ------------------------------------------------------------------------------------------------------------- */
 void BaseDriver::addKernel(not_null<Kernel *> kernel) {
 
-    if (LLVM_UNLIKELY(kernel->isGenerated())) {
+    if (LLVM_UNLIKELY(kernel->getCompilationStatus() > Kernel::CompilationStatus::FullyInitialized)) {
         return;
     }
 

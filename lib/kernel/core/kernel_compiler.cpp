@@ -141,6 +141,8 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     // NOTE: make sure to keep and reset the original compiler here. A kernel could generate new kernels and
     // reuse the same KernelBuilder to do so; this could result in unexpected behaviour if the this function
     // exits without restoring the original compiler state.
+    assert (mTarget->getCompilationStatus() == Kernel::CompilationStatus::FullyInitialized);
+    assert (mTarget->getModule() == b.getModule());
     auto const oc = b.getCompiler();
     b.setCompiler(this);
     b.linkAllNecessaryExternalFunctions();
@@ -158,6 +160,7 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     addBaseInternalProperties(b);
     mTarget->addInternalProperties(b);
     mTarget->constructStateTypes(b);
+    assert (mTarget->getCompilationStatus() == Kernel::CompilationStatus::StateConstructed);
     mTarget->addKernelDeclarations(b);
     callGenerateInitializeMethod(b);
     if (LLVM_UNLIKELY(mStreamSetInputBuffers.empty())) {
@@ -440,6 +443,7 @@ inline void CPUDriver::preparePassManager() {
  * @brief constructStreamSetBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
+
     mStreamSetInputBuffers.clear();
     const auto numOfInputStreams = mInputStreamSets.size();
     mStreamSetInputBuffers.resize(numOfInputStreams);
@@ -942,22 +946,24 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             Value * handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX).first;
             buffer->setHandle(handle);
         } else {
+            assert (isa<ExternalBuffer>(buffer));
             Value * const virtualBaseAddress = b.CreatePointerCast(nextArg(), buffer->getPointerType());
             Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
-            assert (isa<ExternalBuffer>(buffer));
         }
         if (isManaged) {
             assert (mThreadLocalHandle);
             assert (managedStreamSetCount < mTarget->getThreadLocalStateType()->getStructNumElements());
             assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(managedStreamSetCount) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+            assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(managedStreamSetCount + 1)->isEmptyTy());
             FixedArray<Value *, 3> indices;
             indices[0] = b.getInt32(0);
             indices[1] = b.getInt32(0);
-            indices[2] = b.getInt32(managedStreamSetCount++);
+            indices[2] = b.getInt32(managedStreamSetCount);
             Value * const tlh = b.CreateGEP(mTarget->getThreadLocalStateType(), mThreadLocalHandle, indices);
             cast<ManagedDynamicBuffer>(buffer)->setThreadLocalHandle(tlh);
+            managedStreamSetCount += 2;
         }
 
         /// ----------------------------------------------------
@@ -1365,8 +1371,7 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
         assert (!stateType->isOpaque());
         assert (stateType->isSized());
         const auto n = stateType->getStructNumElements();
-        assert ((n % 2) == 0);
-        for (unsigned i = 0; i < n; i += 2) {
+        for (unsigned i = 0; i < n; ++i) {
             assert (isa<StructType>(stateType->getStructElementType(i)));
         }
         return true;
@@ -1443,7 +1448,7 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
     // Thus each managed buffer has an implicit thread local state that is passed in.
     if (LLVM_UNLIKELY(numOfManagedBuffers)) {
-        threadLocalIndex[0] = numOfManagedBuffers;
+        threadLocalIndex[0] = numOfManagedBuffers * 2;
     }
 
     BasicBlock * combineToMainThreadLocal = nullptr;
@@ -1453,15 +1458,15 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     }
 
     auto enumerate = [&](const Bindings & bindings, const unsigned groupId) {
-        indices[1] = b.getInt32(groupId * 2);
+        indices[1] = b.getInt32(groupId);
         auto & k = sharedIndex[groupId];
         for (const auto & binding : bindings) {
             assert (sharedTy);
-            assert ((groupId * 2) < sharedTy->getStructNumElements());
-            assert (k < sharedTy->getStructElementType(groupId * 2)->getStructNumElements());
-            assert (sharedTy->getStructElementType(groupId * 2)->getStructElementType(k) == binding.getType());
-            Type * actualType = sharedTy->getStructElementType(groupId * 2)->getStructElementType(k);
-            indices[2] = b.getInt32(k++);
+            assert ((groupId) < sharedTy->getStructNumElements());
+            assert (k < sharedTy->getStructElementType(groupId)->getStructNumElements());
+            assert (sharedTy->getStructElementType(groupId)->getStructElementType(k) == binding.getType());
+            Type * actualType = sharedTy->getStructElementType(groupId)->getStructElementType(k);
+            indices[2] = b.getInt32(k); k += 2;
             Value * const scalar = b.CreateGEP(sharedTy, mSharedHandle, indices);
             addToScalarFieldMap(binding.getName(), scalar, binding.getType(), actualType);
         }
@@ -1487,13 +1492,13 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
                 assert (mSharedHandle);
                 BEGIN_SCOPED_REGION
                 const auto j = getGroupIndex(sharedGroups) + 1;
-                indices[1] = b.getInt32(j * 2);
+                indices[1] = b.getInt32(j);
                 auto & k = sharedIndex[j];
-                assert ((j * 2) < sharedTy->getStructNumElements());
-                assert (k < sharedTy->getStructElementType(j * 2)->getStructNumElements());
-                scalarType = sharedTy->getStructElementType(j * 2)->getStructElementType(k);
+                assert ((j) < sharedTy->getStructNumElements());
+                assert (k < sharedTy->getStructElementType(j)->getStructNumElements());
+                scalarType = sharedTy->getStructElementType(j)->getStructElementType(k);
                 assert (scalarType == binding.getValueType());
-                indices[2] = b.getInt32(k++);
+                indices[2] = b.getInt32(k); k += 2;
                 scalar = b.CreateGEP(sharedTy, mSharedHandle, indices);
                 END_SCOPED_REGION
                 break;
@@ -1502,13 +1507,13 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
                 assert (mThreadLocalHandle);
                 BEGIN_SCOPED_REGION
                 const auto j = getGroupIndex(threadLocalGroups);
-                indices[1] = b.getInt32(j * 2);
+                indices[1] = b.getInt32(j);
                 auto & k = threadLocalIndex[j];
-                assert ((j * 2) < threadLocalTy->getStructNumElements());
-                assert (k < threadLocalTy->getStructElementType(j * 2)->getStructNumElements());
-                scalarType = threadLocalTy->getStructElementType(j * 2)->getStructElementType(k);
+                assert ((j) < threadLocalTy->getStructNumElements());
+                assert (k < threadLocalTy->getStructElementType(j)->getStructNumElements());
+                scalarType = threadLocalTy->getStructElementType(j)->getStructElementType(k);
                 assert (scalarType == binding.getValueType());
-                indices[2] = b.getInt32(k++);
+                indices[2] = b.getInt32(k); k += 2;
                 scalar = b.CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
 
                 if (LLVM_UNLIKELY(options == InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars)) {
@@ -1690,8 +1695,9 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
-            assert (isa<ManagedDynamicBuffer>(buffer) == isManaged);
-            if (LLVM_UNLIKELY(isManaged && expectedNumOfStrides)) {
+            assert (isManaged == Kernel::isManagedBuffer(output));
+            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(output));
+            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer) && expectedNumOfStrides)) {
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};
                 const auto & ub = output.getRate().getUpperBound();
                 if (ub.numerator() > 0) {
@@ -1866,6 +1872,8 @@ KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(KernelBui
         }
     }
 
+
+
     for (; i < count; ++i) {
         const InternalScalar & scalar = mInternalScalars[i];
         if (scalar.getScalarType() == ScalarType::ThreadLocal) {
@@ -1878,13 +1886,17 @@ KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(KernelBui
     const auto f = threadLocalGroups.find(groupIndex);
     const auto groupPos = std::distance(threadLocalGroups.begin(), f);
 
+    assert (groupPos < threadLocalTy->getStructNumElements());
+    assert ((scalarIndex * 2) < threadLocalTy->getStructElementType(groupPos)->getStructNumElements());
+
+
     FixedArray<Value *, 3> indices;
     indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(groupPos * 2);
-    indices[2] = b.getInt32(scalarIndex);
+    indices[1] = b.getInt32(groupPos);
+    indices[2] = b.getInt32(scalarIndex * 2);
 
     Value * ptr = b.CreateGEP(threadLocalTy, handle, indices); assert (ptr);
-    Type * ty = threadLocalTy->getStructElementType(groupPos * 2)->getStructElementType(scalarIndex);
+    Type * ty = threadLocalTy->getStructElementType(groupPos)->getStructElementType(scalarIndex * 2);
     return ScalarRef{ptr, ty};
 
 }

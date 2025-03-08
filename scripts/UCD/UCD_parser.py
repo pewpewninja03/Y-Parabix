@@ -478,3 +478,34 @@ def parse_CaseFolding_txt(property_object_map):
     property_object_map['cf'].finalizeProperty()
     return fold_map
 
+
+def parseCodepointString(cpstr):
+    s=""
+    for cp in [int(x, 16) for x in cpstr.split(' ')]:
+        s += chr(cp)
+    print(cpstr)
+    print(s)
+    return s
+
+Normalization_part_skip = re.compile("^@.*$")
+Normalization_txt_regexp = re.compile("^([A-F0-9 ]*);([A-F0-9 ]*);([A-F0-9 ]*);([A-F0-9 ]*);([A-F0-9 ]*);(.*)$")
+def parse_NormalizationTest_txt():
+    source = []
+    srcNFC = []
+    srcNFD = []
+    srcNFKC = []
+    srcNFKD = []
+    fold_map = {}
+    f = open(UCD_config.UCD_src_dir + "/" + 'NormalizationTest.txt')
+    lines = f.readlines()
+    for t in lines:
+        if UCD_skip.match(t): continue  # skip comment and blank lines
+        if Normalization_part_skip.match(t): continue  # skip comment and blank lines
+        m = Normalization_txt_regexp.match(t)
+        if not m: raise Exception("Unknown syntax: %s" % t)
+        source.append(parseCodepointString(m.group(1)))
+        srcNFC.append(parseCodepointString(m.group(2)))
+        srcNFD.append(parseCodepointString(m.group(3)))
+        srcNFKC.append(parseCodepointString(m.group(4)))
+        srcNFKD.append(parseCodepointString(m.group(5)))
+    return (source, srcNFC, srcNFD, srcNFKC, srcNFKD)

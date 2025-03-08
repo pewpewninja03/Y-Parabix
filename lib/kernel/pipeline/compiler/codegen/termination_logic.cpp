@@ -266,7 +266,8 @@ Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigne
     assert (HasTerminationSignal.test(kernelId));
     const auto name = TERMINATION_PREFIX + std::to_string(kernelId);
     auto ref = b.getScalarFieldPtr(name);
-    return b.CreateLoad(ref.second, ref.first, true, name);
+    assert (ref.second == b.getSizeTy());
+    return b.CreateAlignedLoad(b.getSizeTy(), ref.first, SizeTyABIAlignment, true, name);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -275,15 +276,7 @@ Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigne
 void PipelineCompiler::writeTerminationSignal(KernelBuilder & b, const unsigned kernelId, Value * const signal) const {
     assert (HasTerminationSignal.test(kernelId));
     Value * const ptr = b.getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId)).first;
-    b.CreateStore(signal, ptr, true);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getTerminationSignalPtr
- ** ------------------------------------------------------------------------------------------------------------- */
-KernelBuilder::ScalarRef PipelineCompiler::getKernelTerminationSignalPtr(KernelBuilder & b, const unsigned kernelId) const {
-    assert (HasTerminationSignal.test(kernelId));
-    return b.getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId));
+    b.CreateAlignedStore(signal, ptr, SizeTyABIAlignment, true);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -301,7 +294,7 @@ void PipelineCompiler::readCountableItemCountsAfterAbnormalTermination(KernelBui
         const StreamSetPort port (PortType::Output, i);
         finalProduced[i] = mProducedItemCount[port];
         if (isCountableType(mReturnedProducedItemCountPtr[port], getOutputBinding(port))) {
-            finalProduced[i] = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[port]);
+            finalProduced[i] = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[port], SizeTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, port) +
                        "_producedAfterAbnormalTermination = %" PRIu64, finalProduced[i]);
