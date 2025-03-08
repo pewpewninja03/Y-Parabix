@@ -112,13 +112,13 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
 }
 
 BitonicCompareStep::BitonicCompareStep(LLVMTypeSystemInterface & ts, unsigned distance, unsigned region_size,
-                                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks, StreamSet * Debug)
+                                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks)
 : PabloKernel(ts, "BitonicCompareStep<" + std::to_string(region_size) + "," + std::to_string(distance) + ">" +
               SeqIndex->shapeString() + "_" + Basis->shapeString(),
 // inputs
 {Binding{"Runs", Runs}, Binding{"SeqIndex", SeqIndex}, Binding{"Basis", Basis}},
 // output
-{Binding{"SwapMarks", SwapMarks}, Binding{"Debug", Debug}}), mCompareDistance(distance), mRegionSize(region_size) {
+{Binding{"SwapMarks", SwapMarks}}), mCompareDistance(distance), mRegionSize(region_size) {
 }
 
 void BitonicCompareStep::generatePabloMethod() {
@@ -133,36 +133,30 @@ void BitonicCompareStep::generatePabloMethod() {
     // Comparison distance is mCompareDistance = 1 << N.
     // Input is divided into groups of size 1 << (N + 2) (group size 4, for N = 0).
     // Each input group is split into 2 subgroups of size (1 << (N + 1)) (size 2 for N = 0)
-    BixNumCompiler bnc0(pb);
-    PabloAST * DistN = bnc0.UGE(SeqIndex, mCompareDistance, "DistN");
-    // If no instance has sequential index reaching the comparison distance,
-    // there will be nothing to compare.
-    auto nested = pb.createScope();
-    pb.createIf(DistN, nested);
-    BixNumCompiler bnc(nested);
+    BixNumCompiler bnc(pb);
     BixNum Forward_Basis(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
-        Forward_Basis[i] = nested.createAdvance(Basis[i], advance_amt, "Fwd_basis" + std::to_string(i));
+        Forward_Basis[i] = pb.createAdvance(Basis[i], advance_amt, "Fwd_basis" + std::to_string(i));
     }
     // Identify the separate regions.
     unsigned bit_identifying_hi_region = ceil_log2(mRegionSize);
-    PabloAST * descending_regions = nested.createZeroes();
+    PabloAST * descending_regions = pb.createZeroes();
     if (SeqIndex.size() > bit_identifying_hi_region) {
         descending_regions = SeqIndex[bit_identifying_hi_region];
     }
     unsigned bit_identifying_subgroup_hi_elements = ceil_log2(mCompareDistance);
     PabloAST * hi_elements_in_comparisons = SeqIndex[bit_identifying_subgroup_hi_elements];
     PabloAST * gt_forward = bnc.UGT(Forward_Basis, Basis, "gt_forward");
-    PabloAST * compare = nested.createXor(gt_forward, descending_regions, "compare");
+    PabloAST * compare = pb.createXor(gt_forward, descending_regions, "compare");
     // Negation of > is <=, exclude the = case.
-    compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis), "compare3");
-    PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_comparisons);
+    compare = pb.createAnd(compare, bnc.NEQ(Forward_Basis, Basis), "compare3");
+    PabloAST * swap_mark = pb.createAnd(compare, hi_elements_in_comparisons);
     PabloAST * consecutiveRuns = Runs;
     for (unsigned i = 1; i < mCompareDistance; i*=2) {
-        consecutiveRuns = nested.createAnd(consecutiveRuns, nested.createAdvance(consecutiveRuns, i));
+        consecutiveRuns = pb.createAnd(consecutiveRuns, pb.createAdvance(consecutiveRuns, i));
     }
-    swap_mark = nested.createAnd(swap_mark, consecutiveRuns);
-    nested.createAssign(SwapVar, swap_mark);
+    swap_mark = pb.createAnd(swap_mark, consecutiveRuns);
+    pb.createAssign(SwapVar, swap_mark);
     pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
 }
 
@@ -297,10 +291,10 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
         PartiallySorted = ToSort;
     }
 
-    StreamSet * Debug = P.CreateStreamSet(1, 1);
+    //StreamSet * Debug = P.CreateStreamSet(1, 1);
     StreamSet * SwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, Runs, SeqIndex, PartiallySorted[0], SwapMarks, Debug);
-    SHOW_STREAM(Debug);
+    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, Runs, SeqIndex, PartiallySorted[0], SwapMarks);
+    //SHOW_STREAM(Debug);
     SHOW_STREAM(SwapMarks);
 
     StreamSets Sorted(ToSort.size());
@@ -320,10 +314,8 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
 StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * Runs, StreamSet * RunIndex, StreamSets & ToMerge) {
     
     StreamSet * MergeSwapMarks = P.CreateStreamSet(1, 1);
-    StreamSet * Debug = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, Runs, RunIndex, ToMerge[0], MergeSwapMarks, Debug);
+    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, Runs, RunIndex, ToMerge[0], MergeSwapMarks);
     SHOW_STREAM(MergeSwapMarks);
-    SHOW_STREAM(Debug);
 
     StreamSets Merged(ToMerge.size());
     for (unsigned i = 0; i < ToMerge.size(); i++) {
