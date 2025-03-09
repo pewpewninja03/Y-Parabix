@@ -59,18 +59,18 @@ void IndexedAdvance::generatePabloMethod() {
     }
 }
 
+const unsigned BITS_PER_BYTE = 8;
+const unsigned SIZE_T_BITS = sizeof(size_t) * BITS_PER_BYTE;
+
 IndexedShiftBack::IndexedShiftBack(LLVMTypeSystemInterface & ts, StreamSet * index, StreamSet * markers, StreamSet * shifted)
     : MultiBlockKernel(ts, "IndexedShiftBack" + markers->shapeString(),
 // inputs
 {Binding{"indexStream", index}, Binding{"markerStream", markers}},
 // outputs
 {Binding{"shiftResults", shifted, FixedRate(1), Deferred()}},
-{}, {}, {}) { 
-        //setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS)
+{}, {}, {}), mNumMarkerStreams(markers->getNumElements()) {
+        //setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     }
-
-const unsigned BITS_PER_BYTE = 8;
-const unsigned SIZE_T_BITS = sizeof(size_t) * BITS_PER_BYTE;
 
 struct ScanWordParameters {
     unsigned width;
@@ -138,9 +138,9 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     strideNo->addIncoming(sz_ZERO, entryBlock);
     PHINode * const confirmedOutputPosition = b.CreatePHI(sizeTy, 2);
     confirmedOutputPosition->addIncoming(initialOutputPos, entryBlock);
-    Value * stridePos = b.CreateAdd(initialInputPos, b.CreateMul(strideNo, sz_STRIDE));
-    Value * strideBlockOffset = b.CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
-    Value * nextStrideNo = b.CreateAdd(strideNo, sz_ONE);
+    Value * const stridePos = b.CreateAdd(initialInputPos, b.CreateMul(strideNo, sz_STRIDE));
+    Value * const strideBlockOffset = b.CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
+    Value * const nextStrideNo = b.CreateAdd(strideNo, sz_ONE);
     //b.CallPrintInt("stridePos", stridePos);
 
     b.CreateBr(stridePrecomputation);
@@ -149,30 +149,36 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     // marker stream:  lowMarkerMask is 1 iff there is a marker one bit at the lowest
     //                 index position in the scanword
     b.SetInsertPoint(stridePrecomputation);
-    PHINode * const indexMaskAccum = b.CreatePHI(sizeTy, 2);
-    indexMaskAccum->addIncoming(sz_ZERO, stridePrologue);
-    PHINode * const lowMarkerMaskAccum = b.CreatePHI(sizeTy, 2);
-    lowMarkerMaskAccum->addIncoming(sz_ZERO, stridePrologue);
     PHINode * const blockNo = b.CreatePHI(sizeTy, 2);
     blockNo->addIncoming(sz_ZERO, stridePrologue);
+    PHINode * const indexMaskAccum = b.CreatePHI(sizeTy, 2);
+    indexMaskAccum->addIncoming(sz_ZERO, stridePrologue);
+    std::vector<PHINode *> lowMarkerMaskAccum(mNumMarkerStreams);
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        lowMarkerMaskAccum[i] = b.CreatePHI(sizeTy, 2);
+        lowMarkerMaskAccum[i]->addIncoming(sz_ZERO, stridePrologue);
+    }
 
-    Value * inputBlockOffset = b.CreateAdd(strideBlockOffset, blockNo);
-    Value * indexBitBlock = b.loadInputStreamBlock("indexStream", sz_ZERO, inputBlockOffset);
-    Value * markerBitBlock = b.loadInputStreamBlock("markerStream", sz_ZERO, inputBlockOffset);
+    Value * const inputBlockOffset = b.CreateAdd(strideBlockOffset, blockNo);
+    Value * const nextBlockNo = b.CreateAdd(blockNo, sz_ONE);
+    Value * const indexBitBlock = b.loadInputStreamBlock("indexStream", sz_ZERO, inputBlockOffset);
     //b.CallPrintRegister("indexBitBlock", indexBitBlock);
-    //b.CallPrintRegister("markerBitBlock", markerBitBlock);
     Value * const anyIndex = b.simd_any(sw.width, indexBitBlock);
     Value * const lowIndex = b.simd_and(indexBitBlock, b.simd_sub(sw.width, b.allZeroes(), indexBitBlock));
-    Value * const lowMarker = b.simd_any(sw.width, b.simd_and(lowIndex, markerBitBlock));
-    Value * indexWord = b.CreateZExt(b.hsimd_signmask(sw.width, anyIndex), sizeTy);
-    Value * lowMarkerWord = b.CreateZExt(b.hsimd_signmask(sw.width, lowMarker), sizeTy);
-    Value * scanWordPos = b.CreateMul(blockNo, sw.WORDS_PER_BLOCK);
-    Value * indexMask = b.CreateOr(indexMaskAccum, b.CreateShl(indexWord, scanWordPos), "indexMask");
-    Value * lowMarkerMask = b.CreateOr(lowMarkerMaskAccum, b.CreateShl(lowMarkerWord, scanWordPos), "lowMarkerMask");
-    Value * const nextBlockNo = b.CreateAdd(blockNo, sz_ONE);
-
+    Value * const indexWord = b.CreateZExt(b.hsimd_signmask(sw.width, anyIndex), sizeTy);
+    Value * const scanWordPos = b.CreateMul(blockNo, sw.WORDS_PER_BLOCK);
+    Value * const indexMask = b.CreateOr(indexMaskAccum, b.CreateShl(indexWord, scanWordPos), "indexMask");
+    std::vector<Value *> lowMarkerMask(mNumMarkerStreams);
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        Value * const markerBitBlock = b.loadInputStreamBlock("markerStream", b.getSize(i), inputBlockOffset);
+        //b.CallPrintRegister("markerBitBlock", markerBitBlock);
+        Value * const lowMarker = b.simd_any(sw.width, b.simd_and(lowIndex, markerBitBlock));
+        Value * const lowMarkerWord = b.CreateZExt(b.hsimd_signmask(sw.width, lowMarker), sizeTy);
+        Value * const lowMarkerShl = b.CreateShl(lowMarkerWord, scanWordPos);
+        lowMarkerMask[i] = b.CreateOr(lowMarkerMaskAccum[i], lowMarkerShl, "lowMarkerMask" + std::to_string(i));
+        lowMarkerMaskAccum[i]->addIncoming(lowMarkerMask[i], stridePrecomputation);
+    }
     indexMaskAccum->addIncoming(indexMask, stridePrecomputation);
-    lowMarkerMaskAccum->addIncoming(lowMarkerMask, stridePrecomputation);
     blockNo->addIncoming(nextBlockNo, stridePrecomputation);
     b.CreateCondBr(b.CreateICmpNE(nextBlockNo, sz_BLOCKS_PER_STRIDE), stridePrecomputation, strideMasksReady);
 
@@ -182,99 +188,108 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     b.CreateUnlikelyCondBr(b.CreateIsNull(indexMask), emptyStride, nonemptyStride);
 
     b.SetInsertPoint(nonemptyStride);
+    Value * const outputOffset = b.CreateAnd(confirmedOutputPosition, b.getSize(b.getBitBlockWidth() - 1));
+    // Position of the prior index bit within its block.
+    Value * const bitPosition = b.bitblock_set_bit(outputOffset);
+    Value * const priorOutputBlock = b.CreateUDiv(confirmedOutputPosition, sz_BLOCKWIDTH);
+    Value * const outputBlockOffset = b.CreateSub(priorOutputBlock, initialOutputBlock);
     //  Find the low markers of nonempty scan words.
-    //b.CallPrintInt("indexMask", indexMask);
-    //b.CallPrintInt("lowMarkerMask", lowMarkerMask);
-    Value * extractedLowMarkers = b.CreatePextract(lowMarkerMask, indexMask);
-    //  The low markers are shifted back to be deposited with the prior
-    //  nonempty scanword.
-    Value * shiftBackLowMarkers = b.CreateLShr(extractedLowMarkers, sz_ONE);
-    Value * highMarkerMask = b.CreatePdeposit(shiftBackLowMarkers, indexMask);
-    //b.CallPrintInt("shiftBackLowMarkers", shiftBackLowMarkers);
-    //
-    //  If there is a marker at the lowest index position in this stride,
-    //  extract it to deposit at the recorded previous output position, if any.
-    Value * lowIndexPositionMarker = b.CreateTrunc(extractedLowMarkers, b.getInt1Ty());
-    Value * outputOffset = b.CreateAnd(confirmedOutputPosition, b.getSize(b.getBitBlockWidth() - 1));
-    Value * bitPosition = b.bitblock_set_bit(outputOffset);
-    Value * bitToUpdate = b.CreateSelect(lowIndexPositionMarker, bitPosition, b.allZeroes());
-    Value * priorOutputBlock = b.CreateUDiv(confirmedOutputPosition, sz_BLOCKWIDTH);
-    //b.CallPrintInt("priorOutputBlock", priorOutputBlock);
-    Value * outputBlockOffset = b.CreateSub(priorOutputBlock, initialOutputBlock);
-    Value * priorWrittenPtr = b.getOutputStreamBlockPtr("shiftResults", sz_ZERO, outputBlockOffset);
-    Value * priorWritten = b.CreateBlockAlignedLoad(blockTy, priorWrittenPtr);
-    Value * updated = b.simd_or(bitToUpdate, priorWritten);
-    Value * inputBlock = b.CreateAdd(initialInputBlock, strideBlockOffset);
-    Value * catchupBlocks = b.CreateSub(inputBlock, priorOutputBlock);
-    //b.CallPrintInt("catchupBlocks", catchupBlocks);
+    std::vector<Value *> highMarkerMask(mNumMarkerStreams);
+    std::vector<Value *> updated(mNumMarkerStreams);
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        Value * const extractedLowMarkers = b.CreatePextract(lowMarkerMask[i], indexMask);
+        //  The low markers are shifted back to be deposited with the prior
+        //  nonempty scanword.
+        Value * const shiftBackLowMarkers = b.CreateLShr(extractedLowMarkers, sz_ONE);
+        highMarkerMask[i] = b.CreatePdeposit(shiftBackLowMarkers, indexMask);
+        //b.CallPrintInt("shiftBackLowMarkers", shiftBackLowMarkers);
+        //b.CallPrintInt("highMarkerMask[i]", highMarkerMask[i]);
+        //
+        //  If there is a marker at the lowest index position in this stride,
+        //  extract it to deposit at the recorded previous output position, if any.
+        Value * const lowIndexPositionMarker = b.CreateTrunc(extractedLowMarkers, b.getInt1Ty());
+        Value * const bitToUpdate = b.CreateSelect(lowIndexPositionMarker, bitPosition, b.allZeroes());
+        Value * const priorWrittenPtr = b.getOutputStreamBlockPtr("shiftResults", b.getSize(i), outputBlockOffset);
+        Value * const priorWritten = b.CreateBlockAlignedLoad(blockTy, priorWrittenPtr);
+        updated[i] = b.simd_or(bitToUpdate, priorWritten);
+    }
+    Value * const inputBlock = b.CreateAdd(initialInputBlock, strideBlockOffset);
+    Value * const catchupBlocks = b.CreateSub(inputBlock, priorOutputBlock);
     b.CreateCondBr(b.CreateIsNotNull(catchupBlocks), outputCatchupLoop, strideLoop);
 
     b.SetInsertPoint(outputCatchupLoop);
     PHINode * const catchUpBlockNo = b.CreatePHI(sizeTy, 2);
     catchUpBlockNo->addIncoming(sz_ZERO, nonemptyStride);
-    PHINode * const blockToWrite = b.CreatePHI(blockTy, 2);
-    blockToWrite->addIncoming(updated, nonemptyStride);
-
-    Value * outputBlockNo = b.CreateAdd(outputBlockOffset, catchUpBlockNo);
-    b.storeOutputStreamBlock("shiftResults", sz_ZERO, outputBlockNo, blockToWrite);
-    Value * nextCatchupBlock = b.CreateAdd(catchUpBlockNo, sz_ONE);
-    //b.CallPrintInt("nextCatchupBlock", nextCatchupBlock);
+    std::vector<PHINode *> blockToWrite(mNumMarkerStreams);
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        blockToWrite[i] = b.CreatePHI(blockTy, 2);
+        blockToWrite[i]->addIncoming(updated[i], nonemptyStride);
+    }
+    Value * const outputBlockNo = b.CreateAdd(outputBlockOffset, catchUpBlockNo);
+    Value * const nextCatchupBlock = b.CreateAdd(catchUpBlockNo, sz_ONE);
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        b.storeOutputStreamBlock("shiftResults", b.getSize(i), outputBlockNo, blockToWrite[i]);
+        blockToWrite[i]->addIncoming(b.allZeroes(), outputCatchupLoop);
+    }
     catchUpBlockNo->addIncoming(nextCatchupBlock, outputCatchupLoop);
-    blockToWrite->addIncoming(b.allZeroes(), outputCatchupLoop);
     b.CreateCondBr(b.CreateICmpNE(nextCatchupBlock, catchupBlocks), outputCatchupLoop, strideLoop);
 
     b.SetInsertPoint(strideLoop);
     PHINode * const blkNo = b.CreatePHI(sizeTy, 3);
     blkNo->addIncoming(sz_ZERO, nonemptyStride);
     blkNo->addIncoming(sz_ZERO, outputCatchupLoop);
-    PHINode * const highMarkerPhi = b.CreatePHI(sizeTy, 3);
-    highMarkerPhi->addIncoming(highMarkerMask, nonemptyStride);
-    highMarkerPhi->addIncoming(highMarkerMask, outputCatchupLoop);
+    std::vector<PHINode *> highMarkerPhi(mNumMarkerStreams);
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        highMarkerPhi[i] = b.CreatePHI(sizeTy, 3);
+        highMarkerPhi[i]->addIncoming(highMarkerMask[i], nonemptyStride);
+        highMarkerPhi[i]->addIncoming(highMarkerMask[i], outputCatchupLoop);
+    }
 
-    Value * inputBlockNo = b.CreateAdd(strideBlockOffset, blkNo);
+    Value * const inputBlockNo = b.CreateAdd(strideBlockOffset, blkNo);
+    Value * const nextBlkNo = b.CreateAdd(blkNo, sz_ONE);
+    Value * const outputBlock = b.CreateAdd(inputBlockNo, producedBlockOffset);
     Value * const indexBlock = b.loadInputStreamBlock("indexStream", sz_ZERO, inputBlockNo);
     Value * const indexBitCount = b.simd_popcount(sw.width, indexBitBlock);
-    Value * markerBlock = b.loadInputStreamBlock("markerStream", sz_ZERO, inputBlockNo);
-    //  Pack the existing markers of each scanword corresponding to index positions.
-    Value * packedMarkers = b.simd_pext(sw.width, markerBlock, indexBlock);
-    //b.CallPrintRegister("packedMarkers", packedMarkers);
-    //  Identify the scanwords in this block that will receive new high markers.
-    Value * newHighMarkerGroup = b.CreateTrunc(highMarkerPhi, b.getIntNTy(b.getBitBlockWidth()/sw.width));
-    // Align the new high markers in their scanwords.
-    Value * spreadHighMarkers = b.esimd_bitspread(sw.width, newHighMarkerGroup);
-    //b.CallPrintRegister("spreadHighMarkers", spreadHighMarkers);
-    // Move them into position
-    Value * packedHighIndexPosition = b.simd_sub(sw.width, indexBitCount, b.simd_fill(sw.width, b.CreateZExtOrTrunc(sz_ONE, sw.Ty)));
-    Value * newMarkersInPackedPosition = b.simd_sllv(sw.width, spreadHighMarkers, packedHighIndexPosition);
-    //b.CallPrintRegister("newMarkersInPackedPosition", newMarkersInPackedPosition);
-    Value * newPackedMarkers = b.simd_or(b.simd_srli(sw.width, packedMarkers, 1), newMarkersInPackedPosition);
-    //b.CallPrintRegister("newPackedMarkers", newPackedMarkers);
-    Value * shiftedMarkers = b.simd_pdep(sw.width, newPackedMarkers, indexBlock);
-    //b.CallPrintRegister("shiftedMarkers", shiftedMarkers);
-    Value * outputBlock = b.CreateAdd(inputBlockNo, producedBlockOffset);
-    b.storeOutputStreamBlock("shiftResults", sz_ZERO, outputBlock, shiftedMarkers);
-    
-    // Update loop control variables.
-    Value * const nextBlkNo = b.CreateAdd(blkNo, sz_ONE);
+    Value * const packedHighIndexPosition = b.simd_sub(sw.width, indexBitCount, b.simd_fill(sw.width, b.CreateZExtOrTrunc(sz_ONE, sw.Ty)));
+    for (unsigned i = 0; i < mNumMarkerStreams; i++) {
+        Value * const markerBlock = b.loadInputStreamBlock("markerStream", b.getSize(i), inputBlockNo);
+        //b.CallPrintRegister("markerBlock", markerBlock);
+        //  Pack the existing markers of each scanword corresponding to index positions.
+        Value * const packedMarkers = b.simd_pext(sw.width, markerBlock, indexBlock);
+        //b.CallPrintRegister("packedMarkers", packedMarkers);
+        //  Identify the scanwords in this block that will receive new high markers.
+        Value * const newHighMarkerGroup = b.CreateTrunc(highMarkerPhi[i], b.getIntNTy(b.getBitBlockWidth()/sw.width));
+        // Align the new high markers in their scanwords.
+        Value * const spreadHighMarkers = b.esimd_bitspread(sw.width, newHighMarkerGroup);
+        //b.CallPrintRegister("spreadHighMarkers", spreadHighMarkers);
+        // Move them into position
+        Value * const newMarkersInPackedPosition = b.simd_sllv(sw.width, spreadHighMarkers, packedHighIndexPosition);
+        //b.CallPrintRegister("newMarkersInPackedPosition", newMarkersInPackedPosition);
+        Value * const newPackedMarkers = b.simd_or(b.simd_srli(sw.width, packedMarkers, 1), newMarkersInPackedPosition);
+        //b.CallPrintRegister("newPackedMarkers", newPackedMarkers);
+        Value * const shiftedMarkers = b.simd_pdep(sw.width, newPackedMarkers, indexBlock);
+        //b.CallPrintRegister("shiftedMarkers", shiftedMarkers);
+        b.storeOutputStreamBlock("shiftResults", b.getSize(i), outputBlock, shiftedMarkers);
+        Value * const nextHighMarkerPhi = b.CreateLShr(highMarkerPhi[i], sw.WORDS_PER_BLOCK);
+        highMarkerPhi[i]->addIncoming(nextHighMarkerPhi, strideLoop);
+    }
     blkNo->addIncoming(nextBlkNo, strideLoop);
-    Value * nextHighMarkerPhi = b.CreateLShr(highMarkerPhi, sw.WORDS_PER_BLOCK);
-    highMarkerPhi->addIncoming(nextHighMarkerPhi, strideLoop);
     b.CreateCondBr(b.CreateICmpNE(nextBlkNo, sz_BLOCKS_PER_STRIDE), strideLoop, strideFinalize);
 
     b.SetInsertPoint(strideFinalize);
     //  Determining the producedItemCount == the position prior to the last index bit
-    Value * indexWordBasePtr = b.getInputStreamBlockPtr("indexStream", sz_ZERO, strideBlockOffset);
-    indexWordBasePtr = b.CreateBitCast(indexWordBasePtr, sw.pointerTy);
+    Value * const indexStreamPtr = b.getInputStreamBlockPtr("indexStream", sz_ZERO, strideBlockOffset);
+    Value * const indexWordBasePtr = b.CreateBitCast(indexStreamPtr, sw.pointerTy);
     //
     // Make sure that we are counting zeroes confined to the index width.
     Value * emptyWordsAtEnd = b.CreateCountReverseZeroes(b.CreateTrunc(indexMask, b.getIntNTy(sw.indexWidth)));
     emptyWordsAtEnd = b.CreateZExtOrTrunc(emptyWordsAtEnd, sizeTy);
-    Value * finalNonEmptyWordIndex = b.CreateSub(b.getSize(b.getBitBlockWidth()/sw.width - 1), emptyWordsAtEnd);
-    Value * lastIndexWord = b.CreateLoad(sw.Ty, b.CreateGEP(sw.Ty, indexWordBasePtr, finalNonEmptyWordIndex));
-    Value * emptyPosnsAtEnd = b.CreateZExtOrTrunc(b.CreateCountReverseZeroes(lastIndexWord), sizeTy);
-    Value * posInWord = b.CreateSub(b.getSize(sw.width - 1), emptyPosnsAtEnd);
-    Value * posInStride = b.CreateAdd(b.CreateMul(finalNonEmptyWordIndex, sw.WIDTH), posInWord);
-    Value * finalIndexPosition = b.CreateAdd(stridePos, posInStride);
+    Value * const finalNonEmptyWordIndex = b.CreateSub(b.getSize(b.getBitBlockWidth()/sw.width - 1), emptyWordsAtEnd);
+    Value * const lastIndexWord = b.CreateLoad(sw.Ty, b.CreateGEP(sw.Ty, indexWordBasePtr, finalNonEmptyWordIndex));
+    Value * const emptyPosnsAtEnd = b.CreateZExtOrTrunc(b.CreateCountReverseZeroes(lastIndexWord), sizeTy);
+    Value * const posInWord = b.CreateSub(b.getSize(sw.width - 1), emptyPosnsAtEnd);
+    Value * const posInStride = b.CreateAdd(b.CreateMul(finalNonEmptyWordIndex, sw.WIDTH), posInWord);
+    Value * const finalIndexPosition = b.CreateAdd(stridePos, posInStride);
     
     strideNo->addIncoming(nextStrideNo, strideFinalize);
     confirmedOutputPosition->addIncoming(finalIndexPosition, strideFinalize);
@@ -289,7 +304,7 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     PHINode * const producedItemPosition = b.CreatePHI(sizeTy, 2);
     producedItemPosition->addIncoming(finalIndexPosition, strideFinalize);
     producedItemPosition->addIncoming(confirmedOutputPosition, emptyStride);
-    //b.CallPrintInt("ISB produced items", producedItemPosition);
+    ////b.CallPrintInt("ISB produced items", producedItemPosition);
     b.setProducedItemCount("shiftResults", producedItemPosition);
 }
 
