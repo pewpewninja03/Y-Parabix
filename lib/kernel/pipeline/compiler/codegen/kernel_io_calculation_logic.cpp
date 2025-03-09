@@ -878,6 +878,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     if (buffer->isLinear()) {
 
+        assert (!isa<ManagedDynamicBuffer>(buffer));
+
         BasicBlock * expand = nullptr;
 
         if (isa<DynamicBuffer>(buffer)) {

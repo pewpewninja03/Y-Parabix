@@ -141,6 +141,7 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     Value * stridePos = b.CreateAdd(initialInputPos, b.CreateMul(strideNo, sz_STRIDE));
     Value * strideBlockOffset = b.CreateMul(strideNo, sz_BLOCKS_PER_STRIDE);
     Value * nextStrideNo = b.CreateAdd(strideNo, sz_ONE);
+    //b.CallPrintInt("stridePos", stridePos);
 
     b.CreateBr(stridePrecomputation);
     // Precompute scanword masks.  For each scanword of the given stream:
@@ -198,14 +199,15 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     Value * bitPosition = b.bitblock_set_bit(outputOffset);
     Value * bitToUpdate = b.CreateSelect(lowIndexPositionMarker, bitPosition, b.allZeroes());
     Value * priorOutputBlock = b.CreateUDiv(confirmedOutputPosition, sz_BLOCKWIDTH);
+    //b.CallPrintInt("priorOutputBlock", priorOutputBlock);
     Value * outputBlockOffset = b.CreateSub(priorOutputBlock, initialOutputBlock);
     Value * priorWrittenPtr = b.getOutputStreamBlockPtr("shiftResults", sz_ZERO, outputBlockOffset);
     Value * priorWritten = b.CreateBlockAlignedLoad(blockTy, priorWrittenPtr);
     Value * updated = b.simd_or(bitToUpdate, priorWritten);
     Value * inputBlock = b.CreateAdd(initialInputBlock, strideBlockOffset);
     Value * catchupBlocks = b.CreateSub(inputBlock, priorOutputBlock);
-
-    b.CreateCondBr(b.CreateICmpULE(priorOutputBlock, inputBlock), outputCatchupLoop, strideLoop);
+    //b.CallPrintInt("catchupBlocks", catchupBlocks);
+    b.CreateCondBr(b.CreateIsNotNull(catchupBlocks), outputCatchupLoop, strideLoop);
 
     b.SetInsertPoint(outputCatchupLoop);
     PHINode * const catchUpBlockNo = b.CreatePHI(sizeTy, 2);
@@ -216,10 +218,10 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     Value * outputBlockNo = b.CreateAdd(outputBlockOffset, catchUpBlockNo);
     b.storeOutputStreamBlock("shiftResults", sz_ZERO, outputBlockNo, blockToWrite);
     Value * nextCatchupBlock = b.CreateAdd(catchUpBlockNo, sz_ONE);
-
+    //b.CallPrintInt("nextCatchupBlock", nextCatchupBlock);
     catchUpBlockNo->addIncoming(nextCatchupBlock, outputCatchupLoop);
     blockToWrite->addIncoming(b.allZeroes(), outputCatchupLoop);
-    b.CreateCondBr(b.CreateICmpNE(outputBlockNo, catchupBlocks), outputCatchupLoop, strideLoop);
+    b.CreateCondBr(b.CreateICmpNE(nextCatchupBlock, catchupBlocks), outputCatchupLoop, strideLoop);
 
     b.SetInsertPoint(strideLoop);
     PHINode * const blkNo = b.CreatePHI(sizeTy, 3);
@@ -287,6 +289,7 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     PHINode * const producedItemPosition = b.CreatePHI(sizeTy, 2);
     producedItemPosition->addIncoming(finalIndexPosition, strideFinalize);
     producedItemPosition->addIncoming(confirmedOutputPosition, emptyStride);
+    //b.CallPrintInt("ISB produced items", producedItemPosition);
     b.setProducedItemCount("shiftResults", producedItemPosition);
 }
 

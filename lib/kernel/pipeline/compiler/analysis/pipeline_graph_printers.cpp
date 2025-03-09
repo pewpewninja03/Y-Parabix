@@ -255,6 +255,8 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                     out << 'S'; break;
                 case BufferId::DynamicBuffer:
                     out << 'D'; break;
+                case BufferId::ManagedDynamicBuffer:
+                    out << 'M'; break;
                 case BufferId::ExternalBuffer:
                     assert (bn.isExternal() || bn.isThreadLocal() || bn.isUnowned());
                     break;
@@ -301,6 +303,9 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                     break;
                 case BufferId::DynamicBuffer:
                     out << cast<DynamicBuffer>(buffer)->getInitialCapacity();
+                    break;
+                case BufferId::ManagedDynamicBuffer:
+                    out << cast<ManagedDynamicBuffer>(buffer)->getInitialCapacity();
                     break;
                 case BufferId::RepeatingBuffer:
                 case BufferId::ExternalBuffer:

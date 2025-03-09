@@ -1577,9 +1577,13 @@ void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * con
         b.CreateStore(baseAddress, initialField);
         b.CreateStore(capacity, effCapacityField);
 
+        b.CallPrintInt("allocp", baseAddress);
+        b.CallPrintInt("allocc", capacityBytes);
+
         b.CreateBr(exit);
 
         b.SetInsertPoint(exit);
+
         b.CreateRetVoid();
 
         b.restoreIP(ip);
@@ -1614,8 +1618,6 @@ void ManagedDynamicBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * base
     destroyArgs[2] = b.getSize(0);
     b.CreateCall(b.getModule()->getFunction(__DESTROY_CIRCULAR_BUFFER), destroyArgs);
 }
-
-
 
 Value * ManagedDynamicBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
     assert (getHandle());
@@ -1710,9 +1712,7 @@ void ManagedDynamicBuffer::freePendingDeletion(kernel::KernelBuilder & b, llvm::
     indices[1] = b.getInt32(PriorCapacity);
     Value * ptr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
     Value * capacity = b.CreateAlignedLoad(sizeTy, ptr, dl.getABITypeAlign(sizeTy).value());
-    destroyArgs[1] = b.CreateMul(b.getTypeSize(mType), capacity);
-    destroyArgs[2] = b.getSize(0);
-    b.CreateCall(b.getModule()->getFunction(__DESTROY_CIRCULAR_BUFFER), destroyArgs);
+    destroyBuffer(b, ptr, capacity);
 }
 
 llvm::Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
@@ -1847,8 +1847,6 @@ llvm::Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * prod
         Value * expandedCapacity = b.CreateRoundUp(requiredChunks, initialCapacity);
         expandedCapacity = b.CreateRoundUpRational(expandedCapacity, stridesPerPage);
 
-        b.CallPrintInt("expandedCapacity", expandedCapacity);
-
         ConstantInt * const sz_TypeSize = b.getSize(typeSize);
 
         Value * expandedBytes = b.CreateMul(expandedCapacity, sz_TypeSize);
@@ -1919,12 +1917,7 @@ llvm::Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * prod
         pendingDeleteCapacityPhi->addIncoming(priorCapacity, expandInternalBuffer);
         pendingDeleteCapacityPhi->addIncoming(sz_ZERO, checkPendingDeletion);
 
-        Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER); assert (makeBuffer);
-        FixedArray<Value *, 3> destroyArgs;
-        destroyArgs[0] = b.CreatePointerCast(toDeleteBufferPhi, b.getInt8PtrTy());
-        destroyArgs[1] = b.CreateMul(toDeleteCapacityPhi, sz_TypeSize);
-        destroyArgs[2] = sz_ZERO;
-        b.CreateCall(destroyBuffer, destroyArgs);
+        destroyBuffer(b, toDeleteBufferPhi, toDeleteCapacityPhi);
 
         b.CreateBr(afterExpandInternalBuffer);
 

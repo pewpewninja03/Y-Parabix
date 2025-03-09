@@ -81,6 +81,17 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
                                 ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
 
 
+
+class ByteCombine final : public MultiBlockKernel {
+public:
+    ByteCombine(LLVMTypeSystemInterface & ts,
+                StreamSet * const byteStream1,
+                StreamSet * const byteStream2,
+                StreamSet * const outputBytes);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfBlocks) override;
+};
+
 /* The following kernels are used by SpreadByMask internally. */
 
 class StreamExpandKernel final : public MultiBlockKernel {
@@ -180,6 +191,13 @@ private:
 class ByteSpreadByMaskKernel final : public MultiBlockKernel {
 public:
     ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const output, Scalar * streamOffset = nullptr);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+};
+
+class ByteReplaceByMask final : public MultiBlockKernel {
+public:
+    ByteReplaceByMask(LLVMTypeSystemInterface & b, StreamSet * mask, StreamSet * ToFill, StreamSet * Filler, StreamSet * Filled);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };

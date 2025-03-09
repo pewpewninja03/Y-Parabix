@@ -753,10 +753,7 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
 
     const auto f = P.compile();
 
-    uint32_t result = 0;
-    f(&result);
-
-    if (result != 0 || optVerbose) {
+    if (optVerbose) {
 
         if (useNestedTest) {
 
@@ -791,6 +788,56 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
         }
 
         llvm::errs() << "] -- ";
+//        if (result == 0) {
+//            llvm::errs() << "success";
+//        } else {
+//            llvm::errs() << "failed";
+//        }
+//        llvm::errs() << '\n';
+    }
+
+    uint32_t result = 0;
+    f(&result);
+
+    if (result != 0 && !optVerbose) {
+
+        if (useNestedTest) {
+
+            llvm::errs() << "NESTED ";
+            bool called = false;
+            if (useFamilyCall[0]) {
+                llvm::errs() << "OUTER ";
+                called = true;
+            }
+            if (useNestedTest > 1 && useFamilyCall[1]) {
+                llvm::errs() << "INNER ";
+                called = true;
+            }
+            if (called) {
+                llvm::errs() << "FAMILY CALL ";
+            }
+        }
+
+        llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength << " : ";
+
+        char joiner = '[';
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            auto & vec = pattern[i];
+            llvm::errs() << joiner;
+            joiner = '{';
+            for (unsigned j = 0; j < patternLength; ++j) {
+                llvm::errs() << joiner << vec[j];
+                joiner = ',';
+            }
+            llvm::errs() << '}';
+        }
+
+        llvm::errs() << "] -- ";
+    }
+
+    if (result != 0 || optVerbose) {
+
         if (result == 0) {
             llvm::errs() << "success";
         } else {

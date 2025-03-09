@@ -414,6 +414,10 @@ public:
         mThreadLocalHandle = handle;
     }
 
+    size_t getInitialCapacity() const {
+        return mInitialCapacity;
+    }
+
 private:
 
     const size_t    mInitialCapacity;
