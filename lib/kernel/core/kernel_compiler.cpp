@@ -484,11 +484,8 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
         const Binding & output = mOutputStreamSets[i];
         Type * const handleTy = mStreamSetOutputBuffers[i]->getHandleType(b);
         assert (handleTy && !handleTy->isPointerTy());
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
-        if (LLVM_UNLIKELY(isLocal)) {
+        const auto isLocal = Kernel::isLocalBuffer(output);
+        if (LLVM_UNLIKELY(isLocal.any())) {
             mTarget->addInternalScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
         } else {
             mTarget->addNonPersistentScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
@@ -931,15 +928,12 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         StreamSetBuffer * const buffer = mStreamSetOutputBuffers[i].get();
 
         const Binding & output = mOutputStreamSets[i];
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal =  Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
-        if (LLVM_UNLIKELY(isShared)) {
+        const auto isLocal =  Kernel::isLocalBuffer(output);
+        if (LLVM_UNLIKELY(isLocal.isShared())) {
             Value * const handle = nextArg();
             assert (isa<DynamicBuffer>(buffer));
             buffer->setHandle(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
-        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             mUpdatableOutputBaseVirtualAddressPtr[i] = nextArg();
@@ -952,7 +946,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
         }
-        if (isManaged) {
+        if (isLocal.isManaged()) {
             assert (mThreadLocalHandle);
             assert (managedStreamSetCount < mTarget->getThreadLocalStateType()->getStructNumElements());
             assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(managedStreamSetCount) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
@@ -999,8 +993,8 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         /// writable / consumed item count
         /// ----------------------------------------------------
         Value * writable = nullptr;
-        assert (isa<ManagedDynamicBuffer>(buffer) == isManaged);
-        if (isShared || isLocal) {
+        assert (isa<ManagedDynamicBuffer>(buffer) == isLocal.isManaged());
+        if (isLocal.any()) {
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
             mConsumedOutputItems[i] = consumed;
@@ -1124,16 +1118,12 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         const auto & buffer = mStreamSetOutputBuffers[i];
         const Binding & output = mOutputStreamSets[i];
-
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
+        const auto isLocal = Kernel::isLocalBuffer(output);
 
         Value * handle = nullptr;
-        if (LLVM_UNLIKELY(isShared)) {            
+        if (LLVM_UNLIKELY(isLocal.isShared())) {
             handle = b.CreatePointerCast(buffer->getHandle(), voidPtrTy);
-        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
@@ -1154,7 +1144,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         /// writable / consumed item count
         /// ----------------------------------------------------
-        if (LLVM_UNLIKELY(isShared || isLocal)) {
+        if (LLVM_UNLIKELY(isLocal.any())) {
             props.push_back(mConsumedOutputItems[i]);
         } else if (isMainPipeline || requiresItemCount(output)) {
             props.push_back(mWritableOutputItems[i]);
@@ -1688,14 +1678,12 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
     const auto numOfOutputs = getNumOfStreamOutputs();
     for (unsigned i = 0; i < numOfOutputs; i++) {
         const Binding & output = mOutputStreamSets[i];
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
+        const auto isLocal = Kernel::isLocalBuffer(output);
+        if (LLVM_UNLIKELY(isLocal.any())) {
             auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
-            assert (isManaged == Kernel::isManagedBuffer(output));
+            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
             assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(output));
             if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer) && expectedNumOfStrides)) {
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};

@@ -358,10 +358,7 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(KernelBuilder & b) {
     for (unsigned i = 0; i < numOfOutputStreams; ++i) {
         const Binding & output = mOutputStreamSets[i];
         StreamSetBuffer * buffer = nullptr;
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        if (Kernel::isLocalBuffer(output, isShared, isManaged, isReturned)) {
+        if (Kernel::isLocalBuffer(output).any()) {
             const ProcessingRate & rate = output.getRate();
             const auto ub = rate.getUpperBound() * mTarget->getStride();
             const auto bufferSize = ceiling(ub);
@@ -426,10 +423,7 @@ void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(
     const auto n = mTarget->getNumOfStreamOutputs();
     for (unsigned i = 0; i != n; ++i) {
         const Binding & output = mTarget->getOutputStreamSetBinding(i);
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        if (LLVM_LIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
+        if (LLVM_LIKELY(Kernel::isLocalBuffer(output).any())) {
             auto & buffer = mStreamSetOutputBuffers[i];
             assert (buffer->getHandle());
             buffer->allocateBuffer(b, expectedNumOfStrides);
@@ -805,10 +799,7 @@ void OptimizationBranchCompiler::generateFinalizeMethod(KernelBuilder & b) {
     const auto n = mTarget->getNumOfStreamOutputs();
     for (unsigned i = 0; i != n; ++i) {
         const Binding & output = mTarget->getOutputStreamSetBinding(i);
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        if (LLVM_LIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
+        if (LLVM_LIKELY(Kernel::isLocalBuffer(output).any())) {
             auto & buffer = mStreamSetOutputBuffers[i];
             assert (buffer->getHandle());
             buffer->releaseBuffer(b);

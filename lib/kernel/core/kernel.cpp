@@ -59,26 +59,28 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isLocalBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ bool Kernel::isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned) {
+/* static */ Kernel::LocalBufferFlagSet Kernel::isLocalBuffer(const Binding & output) {
     // NOTE: if this function is modified, fix the PipelineCompiler to match it.
+    LocalBufferFlagSet fs;
     for (const auto & attr : output.getAttributes()) {
         switch (attr.getKind()) {
             case Binding::AttributeId::SharedManagedBuffer:
-                shared = true;
+                fs.Flags |= LocalBufferFlagSet::LBF_Shared;
                 break;
             case Binding::AttributeId::ManagedBuffer:
-                managed = true;
+                fs.Flags |= LocalBufferFlagSet::LBF_Managed;
                 break;
             case Binding::AttributeId::ReturnedBuffer:
-                returned = true;
+                fs.Flags |= LocalBufferFlagSet::LBF_Returned;
                 break;
             default: break;
         }
     }
     if (LLVM_UNLIKELY(output.getRate().isUnknown())) {
-        managed = true;
+        fs.Flags |= LocalBufferFlagSet::LBF_Managed;
     }
-    return shared | managed | returned;
+    assert (fs.isManaged() == isManagedBuffer(output));
+    return fs;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -87,14 +89,13 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 /* static */ bool Kernel::isManagedBuffer(const Binding & output) {
     for (const auto & attr : output.getAttributes()) {
         switch (attr.getKind()) {
-            // case AttrId::SharedManagedBuffer:
             case AttrId::ManagedBuffer:
                 return true;
             default: break;
         }
     }
     return output.getRate().isUnknown();
-};
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief requiresExplicitPartialFinalStride
@@ -1044,21 +1045,19 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
 
     for (unsigned i = 0; i < m; ++i) {
         const Binding & output = mOutputStreamSets[i];
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
+
+        const auto isLocal = Kernel::isLocalBuffer(output);
 
         // shared dynamic buffer handle or virtual base output address
-        if (LLVM_UNLIKELY(isShared)) {
+        if (LLVM_UNLIKELY(isLocal.isShared())) {
             fields.push_back(voidPtrTy);
-        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             fields.push_back(voidPtrTy->getPointerTo());
         } else {
             fields.push_back(voidPtrTy);
         }
 
-        assert (!isManaged || hasThreadLocal());
+        assert (!isLocal.isManaged() || hasThreadLocal());
 
         //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 
@@ -1075,7 +1074,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         // be synchronized; thus at most one branch could resize a buffer at any particular moment.
         // However, we need to share the current state of the buffer between the branches to ensure
         // that we are not using an old buffer allocation.
-        if (isShared || isLocal) {
+        if (isLocal.any()) {
             fields.push_back(sizeTy); // consumed
         } else if (isMainPipeline || requiresItemCount(output)) {
             fields.push_back(sizeTy); // writable item count
@@ -1167,10 +1166,7 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            bool isShared = false;
-            bool isManaged = false;
-            bool isReturned = false;
-            if (LLVM_UNLIKELY(isLocalBuffer(output, isShared, isManaged, isReturned))) {
+            if (LLVM_UNLIKELY(isLocalBuffer(output).any())) {
                 setNextArgName(output.getName() + "_consumed");
             } else if (isMainPipeline || requiresItemCount(output)) {
                 setNextArgName(output.getName() + "_writable");
