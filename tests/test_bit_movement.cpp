@@ -77,12 +77,16 @@ TEST_CASE(indexedshiftback1, indexStrm, marker, bakmarker) {
     AssertEQ(P, Result, Input<2>(T));
 }
 
-auto longmarker =    BinaryStreamSet({"..0.{25000}11001.{3270}1.01"});
-auto longindexStrm = BinaryStreamSet({"..1.{25000}11111.{3270}1.11"});
-auto longbakmarker = BinaryStreamSet({"..1.{25000}10011.{3270}0.10"});
+auto longmarker =    BinaryStreamSet({"..0.{25000}11001.{3277}1.01",
+                                      "..1.{25000}11111.{3277}1.11",
+                                      "..1.{25000}00110.{3277}1.10"});
+auto longindexStrm = BinaryStreamSet({"..1.{25000}11111.{3277}1.11"});
+auto longbakmarker = BinaryStreamSet({"..1.{25000}10011.{3277}0.10",
+                                      "..1.{25000}11111.{3277}1.10",
+                                      "..0.{25000}01101.{3277}1.00"});
 
 TEST_CASE(longindexedshiftback, longindexStrm, longmarker, longbakmarker) {
-    auto Result = P.CreateStreamSet(1);
+    auto Result = P.CreateStreamSet(3);
     P.CreateKernelCall<IndexedShiftBack>(Input<0>(T), Input<1>(T), Result);
     AssertEQ(P, Result, Input<2>(T));
 }
