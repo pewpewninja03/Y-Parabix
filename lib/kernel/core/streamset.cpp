@@ -1481,8 +1481,6 @@ void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * con
         StructType * handleTy = getHandleType(b);
         PointerType * const handlePtrTy = handleTy->getPointerTo(mAddressSpace);
 
-        ConstantInt * const sz_ZERO = b.getSize(0);
-
         auto & DL = m->getDataLayout();
 
         PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
@@ -1490,7 +1488,6 @@ void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * con
         Constant * const nullAddrPtr = ConstantPointerNull::get(addrPtrTy);
 
         const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
-        const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
 
         FixedArray<Type *, 2> paramTypes;
         paramTypes[0] = handlePtrTy;
@@ -1576,9 +1573,6 @@ void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * con
         b.CreateStore(capacity, capacityField);
         b.CreateStore(baseAddress, initialField);
         b.CreateStore(capacity, effCapacityField);
-
-        b.CallPrintInt("allocp", baseAddress);
-        b.CallPrintInt("allocc", capacityBytes);
 
         b.CreateBr(exit);
 

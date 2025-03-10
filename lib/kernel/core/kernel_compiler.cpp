@@ -917,9 +917,6 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
 
     const auto canTerminate = canSetTerminateSignal();
 
-
-    size_t managedStreamSetCount = 0;
-
     for (unsigned i = 0; i < numOfOutputs; i++) {
 
         /// ----------------------------------------------------
@@ -945,19 +942,6 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
-        }
-        if (isLocal.isManaged()) {
-            assert (mThreadLocalHandle);
-            assert (managedStreamSetCount < mTarget->getThreadLocalStateType()->getStructNumElements());
-            assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(managedStreamSetCount) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
-            assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(managedStreamSetCount + 1)->isEmptyTy());
-            FixedArray<Value *, 3> indices;
-            indices[0] = b.getInt32(0);
-            indices[1] = b.getInt32(0);
-            indices[2] = b.getInt32(managedStreamSetCount);
-            Value * const tlh = b.CreateGEP(mTarget->getThreadLocalStateType(), mThreadLocalHandle, indices);
-            cast<ManagedDynamicBuffer>(buffer)->setThreadLocalHandle(tlh);
-            managedStreamSetCount += 2;
         }
 
         /// ----------------------------------------------------
@@ -1398,18 +1382,29 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     bool hasThreadLocalAccum = false;
 
-    size_t numOfManagedBuffers = 0;
-    BEGIN_SCOPED_REGION
-    const auto n = mOutputStreamSets.size();
-    for (size_t i = 0; i < n; ++i) {
-        const auto & buffer = mStreamSetOutputBuffers[i];
-        assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
-        if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
-            ++numOfManagedBuffers;
-            threadLocalGroups.insert(0);
+    size_t threadLocalGroup0StartIndex = 0;
+
+    if (options != InitializeOptions::DoNotIncludeThreadLocalScalars) {
+        const auto n = mOutputStreamSets.size();
+        for (size_t i = 0; i < n; ++i) {
+            const auto & buffer = mStreamSetOutputBuffers[i];
+            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
+            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+                assert (mThreadLocalHandle);
+                assert (threadLocalGroup0StartIndex < mTarget->getThreadLocalStateType()->getStructNumElements());
+                assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(threadLocalGroup0StartIndex) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+                assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(threadLocalGroup0StartIndex + 1)->isEmptyTy());
+                FixedArray<Value *, 3> indices;
+                indices[0] = b.getInt32(0);
+                indices[1] = b.getInt32(0);
+                indices[2] = b.getInt32(threadLocalGroup0StartIndex);
+                Value * const tlh = b.CreateGEP(mTarget->getThreadLocalStateType(), mThreadLocalHandle, indices);
+                cast<ManagedDynamicBuffer>(buffer.get())->setThreadLocalHandle(tlh);
+                threadLocalGroup0StartIndex += 2;
+                threadLocalGroups.insert(0);
+            }
         }
     }
-    END_SCOPED_REGION
 
     for (const auto & scalar : mInternalScalars) {
         assert (scalar.getValueType());
@@ -1437,8 +1432,8 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     // for the last "deallocated" memory chunk. A thread can only be confident that there are no other
     // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
     // Thus each managed buffer has an implicit thread local state that is passed in.
-    if (LLVM_UNLIKELY(numOfManagedBuffers)) {
-        threadLocalIndex[0] = numOfManagedBuffers * 2;
+    if (LLVM_UNLIKELY(threadLocalGroup0StartIndex)) {
+        threadLocalIndex[0] = threadLocalGroup0StartIndex;
     }
 
     BasicBlock * combineToMainThreadLocal = nullptr;

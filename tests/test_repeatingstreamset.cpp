@@ -138,9 +138,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     }
 
     StreamSetBuffer * const outputBuffer = b.getOutputStreamSetBuffer("output");
-    PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();
-    Type * const outputStreamSetTy = outputBuffer->getType();
-
 
     ConstantInt * const sz_ZERO = b.getSize(0);
 
