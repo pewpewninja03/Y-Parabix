@@ -64,7 +64,7 @@ using namespace pablo;
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
-static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(true), cl::cat(NFD_Options));
+static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
 static cl::opt<bool> FilterViolations("FilterViolations", cl::desc("Only include reorderable sequences in work items if they are misordered or start with a decomposable character"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> UseIndexedShiftBack("IndexedShiftBack", cl::desc("Use IndexedShiftBack in place of Filter/Spread combination"), cl::init(false), cl::cat(NFD_Options));
@@ -1009,6 +1009,36 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 }
 
+typedef void (*CombinedWorkFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, uint32_t fd);
+
+CombinedWorkFunctionType generate_combined_work_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
+    auto P = CreatePipeline(driver,
+                            Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("FinalWorkPlacementMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
+                            Output<streamset_t>("TransformedBasis", 8, 1, ReturnedBuffer(1)),
+                            Input<uint32_t>("inputFileDecriptor")
+                            );
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+
+    StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
+    StreamSet * const FinalWorkPlacementMask = P.getOutputStreamSet("FinalWorkPlacementMask");
+    StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
+    StreamSet * const TransformedBasis = P.getOutputStreamSet("TransformedBasis");
+
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
+    source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
+
+    StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
+    NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+
+    NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
+
+    return P.compile();
+}
+
+
+
 typedef void (*OutputAssemblyFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
 
 OutputAssemblyFunctionType generate_output_pipeline(CPUDriver & driver) {
@@ -1062,7 +1092,18 @@ int main(int argc, char *argv[]) {
     UTF_Encoder U8_Encoder(8);
     NFD_BixData NFD_Data(U8_Encoder);
     CPUDriver driver("NFD_function");
-    if (SeparatedPipelineStages > 0) {
+    if (SeparatedPipelineStages == 2) {
+        CombinedWorkFunctionType working_stages = generate_combined_work_pipeline(driver, NFD_Data);
+        kernel::StreamSetPtr WorkSelectionMask;
+        kernel::StreamSetPtr FinalWorkPlacementMask;
+        kernel::StreamSetPtr ByteStream;
+        kernel::StreamSetPtr TransformedBasis;
+        working_stages(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis, fd);
+        close(fd);
+
+        OutputAssemblyFunctionType stage3 = generate_output_pipeline(driver);
+        stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+    } else if (SeparatedPipelineStages == 4) {
         SourceInputFunctionType stage0 = source_input_pipeline(driver);
         kernel::StreamSetPtr ByteStream;
         kernel::StreamSetPtr BasisBits;
@@ -1075,16 +1116,12 @@ int main(int argc, char *argv[]) {
         kernel::StreamSetPtr WorkingBasis;
         stage1(BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
 
-        if (SeparatedPipelineStages > 1) {
-            NFD_TransformFunctionType stage2 = NFD_transform_pipeline(driver, NFD_Data);
-            kernel::StreamSetPtr TransformedBasis;
-            stage2(WorkingBasis, TransformedBasis);
+        NFD_TransformFunctionType stage2 = NFD_transform_pipeline(driver, NFD_Data);
+        kernel::StreamSetPtr TransformedBasis;
+        stage2(WorkingBasis, TransformedBasis);
 
-            if (SeparatedPipelineStages > 2) {
-                OutputAssemblyFunctionType stage3 = generate_output_pipeline(driver);
-                stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
-            }
-        }
+        OutputAssemblyFunctionType stage3 = generate_output_pipeline(driver);
+        stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
     } else {
         XfrmFunctionType fn = generate_unitary_pipeline(driver, NFD_Data);
         fn(fd);
