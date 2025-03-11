@@ -8,6 +8,23 @@
 #include <unicode/core/UCD_Config.h>
 #include <unicode/data/PropertyObjects.h>
 
+//
+// Constants for algorithmic transformation of Hangul graphemes between
+// precomposed and decomposed forms.   See Section 3.12 of the Unicode standard.
+//
+namespace Hangul {
+const UCD::codepoint_t SBase = 0xAC00;
+const UCD::codepoint_t LBase = 0x1100;
+const UCD::codepoint_t VBase = 0x1161;
+const UCD::codepoint_t TBase = 0x11A7;
+const unsigned LCount = 19;
+const unsigned VCount = 21;
+const unsigned TCount = 28;
+const unsigned NCount = 588;
+const unsigned SCount = 11172;
+const UCD::codepoint_t MaxPrecomposed = SBase + SCount - 1;
+}
+
 namespace UCD {
 //  Decomposition may use either canonical or compatibility mappings,
 //  possibly combined with casefolding.
