@@ -503,23 +503,23 @@ namespace UCD {
             CCC15, CCC16, CCC17, CCC18, CCC19, CCC20, CCC21, CCC22, CCC23,
             CCC24, CCC25, CCC26, CCC27, CCC28, CCC29, CCC30, CCC31, CCC32,
             CCC33, CCC34, CCC35, CCC36, CCC84, CCC91, CCC103, CCC107,
-            CCC118, CCC122, CCC129, CCC130, CCC132, ATB, ATA, ATAR, BL, B,
-            BR, L, R, AL, A, AR, DB, DA, IS, CCC133, ATBL
+            CCC118, CCC122, CCC129, CCC130, CCC132, CCC133, ATBL, ATB, ATA,
+            ATAR, BL, B, BR, L, R, AL, A, AR, DB, DA, IS
         };
         const uint16_t enum_val[] = {
               0, 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
             21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
-            84, 91, 103, 107, 118, 122, 129, 130, 132, 202, 214, 216, 218,
-            220, 222, 224, 226, 228, 230, 232, 233, 234, 240, 133, 200};
+            84, 91, 103, 107, 118, 122, 129, 130, 132, 133, 200, 202, 214,
+            216, 218, 220, 222, 224, 226, 228, 230, 232, 233, 234, 240};
         const static std::vector<std::string> enum_names = {
             "NR", "OV", "HANR", "NK", "KV", "VR", "CCC10", "CCC11", "CCC12",
             "CCC13", "CCC14", "CCC15", "CCC16", "CCC17", "CCC18", "CCC19",
             "CCC20", "CCC21", "CCC22", "CCC23", "CCC24", "CCC25", "CCC26",
             "CCC27", "CCC28", "CCC29", "CCC30", "CCC31", "CCC32", "CCC33",
             "CCC34", "CCC35", "CCC36", "CCC84", "CCC91", "CCC103", "CCC107",
-            "CCC118", "CCC122", "CCC129", "CCC130", "CCC132", "ATB", "ATA",
-            "ATAR", "BL", "B", "BR", "L", "R", "AL", "A", "AR", "DB", "DA",
-            "IS", "CCC133", "ATBL"};
+            "CCC118", "CCC122", "CCC129", "CCC130", "CCC132", "CCC133",
+            "ATBL", "ATB", "ATA", "ATAR", "BL", "B", "BR", "L", "R", "AL",
+            "A", "AR", "DB", "DA", "IS"};
         const static std::vector<std::string> value_names = {
             "Not_Reordered", "Overlay", "Han_Reading", "Nukta",
             "Kana_Voicing", "Virama", "CCC10", "CCC11", "CCC12", "CCC13",
@@ -527,19 +527,18 @@ namespace UCD {
             "CCC21", "CCC22", "CCC23", "CCC24", "CCC25", "CCC26", "CCC27",
             "CCC28", "CCC29", "CCC30", "CCC31", "CCC32", "CCC33", "CCC34",
             "CCC35", "CCC36", "CCC84", "CCC91", "CCC103", "CCC107",
-            "CCC118", "CCC122", "CCC129", "CCC130", "CCC132",
-            "Attached_Below", "Attached_Above", "Attached_Above_Right",
-            "Below_Left", "Below", "Below_Right", "Left", "Right",
-            "Above_Left", "Above", "Above_Right", "Double_Below",
-            "Double_Above", "Iota_Subscript", "CCC133",
-            "Attached_Below_Left"};
+            "CCC118", "CCC122", "CCC129", "CCC130", "CCC132", "CCC133",
+            "Attached_Below_Left", "Attached_Below", "Attached_Above",
+            "Attached_Above_Right", "Below_Left", "Below", "Below_Right",
+            "Left", "Right", "Above_Left", "Above", "Above_Right",
+            "Double_Below", "Double_Above", "Iota_Subscript"};
         const static std::vector<std::string> aliases = {{
             "0", "1", "6", "7", "8", "9", "10", "11", "12", "13", "14",
             "15", "16", "17", "18", "19", "20", "21", "22", "23", "24",
             "25", "26", "27", "28", "29", "30", "31", "32", "33", "34",
             "35", "36", "84", "91", "103", "107", "118", "122", "129",
-            "130", "132", "202", "214", "216", "218", "220", "222", "224",
-            "226", "228", "230", "232", "233", "234", "240", "133", "200"}};
+            "130", "132", "133", "200", "202", "214", "216", "218", "220",
+            "222", "224", "226", "228", "230", "232", "233", "234", "240"}};
     }
 
     namespace DT_ns {
