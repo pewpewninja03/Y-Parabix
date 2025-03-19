@@ -1,5 +1,5 @@
 from unicode_set import *
-trivial_name_char_re = re.compile('[-_\s]')
+trivial_name_char_re = re.compile('[-_\\s]')
 def canonicalize(property_string):
     return trivial_name_char_re.sub('', property_string.lower())
 
@@ -59,6 +59,8 @@ class EnumeratedPropertyObject(PropertyObject):
         self.default_value = None
         self.name_list_order = []
         self.independent_prop_values = 0
+        self.enum_integer_to_value_map={}
+        self.cp_value_map = {}
 
     def getPropertyKind(self): return "Enumerated"
 
@@ -67,9 +69,12 @@ class EnumeratedPropertyObject(PropertyObject):
         self.property_value_list.append(value_enum)
         if self.property_code == "ccc":
             self.property_value_enum_integer[value_enum] = int(aliases[0])
+            self.enum_integer_to_value_map[int(aliases[0])] = value_enum
         else:
             self.property_value_enum_integer[value_enum] = self.enum_integer
+            self.enum_integer_to_value_map[self.enum_integer] = value_enum
             self.enum_integer += 1
+
         self.property_value_full_name_map[value_enum] = value_preferred_full_name
         for name in [value_enum, value_preferred_full_name] + aliases:
             self.property_value_lookup_map[name] = value_enum
@@ -96,6 +101,10 @@ class EnumeratedPropertyObject(PropertyObject):
                 self.value_map[dflt] = uset_union(self.value_map[dflt], need_default_value)
             else:
                 self.value_map[dflt] = need_default_value
+        if self.property_code == 'ccc':
+            self.name_list_order = []
+            for k in sorted(self.enum_integer_to_value_map.keys()):
+                self.name_list_order.append(self.enum_integer_to_value_map[k])
         self.independent_prop_values = len(self.name_list_order)
         for v in self.property_value_list:
             if not v in self.name_list_order:
@@ -121,11 +130,12 @@ class EnumeratedPropertyObject(PropertyObject):
         enum_code = self.property_value_lookup_map[canon]
         self.value_map[enum_code] = uset_union(self.value_map[enum_code], range_uset(cp_lo, cp_hi))
         if not enum_code in self.name_list_order: self.name_list_order.append(enum_code)
+        for cp in range(cp_lo, cp_hi+1): self.cp_value_map[cp] = enum_code
 
 class BinaryPropertyObject(PropertyObject):
     def __init__(self):
         PropertyObject.__init__(self)
-        self.empty_regexp = re.compile("\s+")
+        self.empty_regexp = re.compile("\\s+")
         self.property_value_full_name_map = {"N" : "No", "Y" : "Yes"}
         self.name_list_order = ['N', 'Y']
         self.property_value_lookup_map = {"n" : "N", "N" : "N", "no" : "N", "f" : "N", "false" : "N",

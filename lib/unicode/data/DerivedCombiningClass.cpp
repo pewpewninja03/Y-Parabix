@@ -15,7 +15,7 @@
 
 namespace UCD {
   namespace CCC_ns {
-    const unsigned independent_prop_values = 56;
+    const unsigned independent_prop_values = 58;
     /** Code Point Ranges for NR
     [0000, 02ff], [034f, 034f], [0370, 0482], [0488, 0590], [05be, 05be],
     [05c0, 05c0], [05c3, 05c3], [05c6, 05c6], [05c8, 060f], [061b, 064a],
@@ -728,6 +728,30 @@ namespace UCD {
 
     const static UnicodeSet ccc132_Set{const_cast<UnicodeSet::run_t *>(__ccc132_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__ccc132_Set_quads), 1, 0};
 
+    /** Code Point Ranges for CCC133
+    **/
+
+
+    namespace {
+    const static UnicodeSet::run_t __ccc133_Set_runs[] = {
+    {Empty, 34816}};
+    const static UnicodeSet::bitquad_t * const __ccc133_Set_quads = nullptr;
+    }
+
+    const static UnicodeSet ccc133_Set{const_cast<UnicodeSet::run_t *>(__ccc133_Set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__ccc133_Set_quads), 0, 0};
+
+    /** Code Point Ranges for ATBL
+    **/
+
+
+    namespace {
+    const static UnicodeSet::run_t __atbl_Set_runs[] = {
+    {Empty, 34816}};
+    const static UnicodeSet::bitquad_t * const __atbl_Set_quads = nullptr;
+    }
+
+    const static UnicodeSet atbl_Set{const_cast<UnicodeSet::run_t *>(__atbl_Set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__atbl_Set_quads), 0, 0};
+
     /** Code Point Ranges for ATB
     [0321, 0322], [0327, 0328], [1dd0, 1dd0]**/
 
@@ -1009,30 +1033,6 @@ namespace UCD {
 
     const static UnicodeSet is_Set{const_cast<UnicodeSet::run_t *>(__is_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__is_Set_quads), 1, 0};
 
-    /** Code Point Ranges for CCC133
-    **/
-
-
-    namespace {
-    const static UnicodeSet::run_t __ccc133_Set_runs[] = {
-    {Empty, 34816}};
-    const static UnicodeSet::bitquad_t * const __ccc133_Set_quads = nullptr;
-    }
-
-    const static UnicodeSet ccc133_Set{const_cast<UnicodeSet::run_t *>(__ccc133_Set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__ccc133_Set_quads), 0, 0};
-
-    /** Code Point Ranges for ATBL
-    **/
-
-
-    namespace {
-    const static UnicodeSet::run_t __atbl_Set_runs[] = {
-    {Empty, 34816}};
-    const static UnicodeSet::bitquad_t * const __atbl_Set_quads = nullptr;
-    }
-
-    const static UnicodeSet atbl_Set{const_cast<UnicodeSet::run_t *>(__atbl_Set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__atbl_Set_quads), 0, 0};
-
     static EnumeratedPropertyObject property_object
         {ccc,
         CCC_ns::independent_prop_values,
@@ -1047,9 +1047,9 @@ namespace UCD {
         &ccc31_Set, &ccc32_Set, &ccc33_Set, &ccc34_Set, &ccc35_Set,
         &ccc36_Set, &ccc84_Set, &ccc91_Set, &ccc103_Set, &ccc107_Set,
         &ccc118_Set, &ccc122_Set, &ccc129_Set, &ccc130_Set, &ccc132_Set,
-        &atb_Set, &ata_Set, &atar_Set, &bl_Set, &b_Set, &br_Set, &l_Set,
-        &r_Set, &al_Set, &a_Set, &ar_Set, &db_Set, &da_Set, &is_Set,
-        &ccc133_Set, &atbl_Set
+        &ccc133_Set, &atbl_Set, &atb_Set, &ata_Set, &atar_Set, &bl_Set,
+        &b_Set, &br_Set, &l_Set, &r_Set, &al_Set, &a_Set, &ar_Set, &db_Set,
+        &da_Set, &is_Set
         }};
     }
 PropertyObject * get_CCC_PropertyObject() {  return & CCC_ns::property_object; }
