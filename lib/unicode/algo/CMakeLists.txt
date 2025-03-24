@@ -4,7 +4,7 @@ parabix_add_module(
 NAME
     unicode.algo
 SRC
-    decomposition.cpp
+    normalization.cpp
 DEPS
     unicode.core
     unicode.data

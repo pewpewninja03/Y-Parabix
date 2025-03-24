@@ -32,6 +32,7 @@
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <unicode/core/unicode_set.h>
+#include <unicode/algo/normalization.h>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -47,25 +48,10 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
-const UCD::codepoint_t Hangul_SBase = 0xAC00;
-const UCD::codepoint_t Hangul_LBase = 0x1100;
-const UCD::codepoint_t Hangul_VBase = 0x1161;
-const UCD::codepoint_t Hangul_TBase = 0x11A7;
-const unsigned Hangul_LCount = 19;
-const unsigned Hangul_VCount = 21;
-const unsigned Hangul_TCount = 28;
-const unsigned Hangul_NCount = 588;
-const unsigned Hangul_SCount = 11172;
-
-const unsigned S_Index_bits = 14;
-const unsigned L_Index_bits = 5;
-const unsigned V_Index_bits = 5;
-const unsigned T_Index_bits = 5;
-
 std::vector<re::CC *> Hangul_Decomposed_CCs() {
-    UCD::UnicodeSet Hangul_L(Hangul_LBase, Hangul_LBase + Hangul_LCount - 1);
-    UCD::UnicodeSet Hangul_V(Hangul_LBase, Hangul_VBase + Hangul_VCount - 1);
-    UCD::UnicodeSet Hangul_T(Hangul_LBase, Hangul_TBase + Hangul_TCount - 1);
+    UCD::UnicodeSet Hangul_L(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
+    UCD::UnicodeSet Hangul_V(Hangul::LBase, Hangul::VBase + Hangul::VCount - 1);
+    UCD::UnicodeSet Hangul_T(Hangul::LBase, Hangul::TBase + Hangul::TCount - 1);
     return {re::makeCC(Hangul_L, &cc::Unicode),
             re::makeCC(Hangul_V, &cc::Unicode),
             re::makeCC(Hangul_T, &cc::Unicode)};
@@ -136,11 +122,11 @@ void Hangul_Precomposition::generatePabloMethod() {
     BixNum ZeroIndex(index_bits, nested.createZeroes());
     BixNum L_index = bnc.Select(LV_combo, IndexBasis, ZeroIndex);
     unsigned indexMask = (1 << index_bits) - 1;  // mask to select low bits of index only
-    BixNum V_index = bnc.Select(LV_combo, bnc.SubModular(IndexAhead1, Hangul_VBase & indexMask), ZeroIndex);
-    BixNum T_index = bnc.Select(LVT_sequence, bnc.SubModular(IndexAhead2, Hangul_TBase & indexMask), ZeroIndex);
-    BixNum LV_index = bnc.AddFull(bnc.MulFull(L_index, Hangul_VCount), V_index);
-    BixNum S_Index = bnc.AddFull(bnc.MulFull(LV_index, Hangul_TCount), T_index);
-    BixNum Precomposed = bnc.Select(LV_combo, bnc.ZeroExtend(bnc.AddFull(S_Index, Hangul_SBase), 21), Basis);
+    BixNum V_index = bnc.Select(LV_combo, bnc.SubModular(IndexAhead1, Hangul::VBase & indexMask), ZeroIndex);
+    BixNum T_index = bnc.Select(LVT_sequence, bnc.SubModular(IndexAhead2, Hangul::TBase & indexMask), ZeroIndex);
+    BixNum LV_index = bnc.AddFull(bnc.MulFull(L_index, Hangul::VCount), V_index);
+    BixNum S_Index = bnc.AddFull(bnc.MulFull(LV_index, Hangul::TCount), T_index);
+    BixNum Precomposed = bnc.Select(LV_combo, bnc.ZeroExtend(bnc.AddFull(S_Index, Hangul::SBase), 21), Basis);
     for (unsigned i = 0; i < Basis.size(); i++) {
         nested.createAssign(outputVar[i], Precomposed[i]);
     }

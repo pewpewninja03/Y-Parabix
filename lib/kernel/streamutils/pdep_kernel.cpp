@@ -967,7 +967,7 @@ ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, Stre
    nm.flush();
    return tmp;
 }(),
-{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread}},
+{Binding{"spread", spread}, Binding{"byteStream", byteStream, PopcountOf("spread")}},
 {Binding{"output", output}}, {}, {}, {}) {
     if (streamOffset) {
         mInputScalars.emplace_back("offset", streamOffset);
@@ -980,7 +980,7 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
     Constant * const sz_ZERO = b.getSize(0);
     Constant * const sz_ONE = b.getSize(1);
-    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+    const auto fieldWidth = getInputStreamSet(1)->getFieldWidth();
     if (LLVM_UNLIKELY(fieldWidth < 8)) {
         report_fatal_error(Twine{getName(), ": does not support field widths under 8-bits"});
     }
