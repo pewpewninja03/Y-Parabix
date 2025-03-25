@@ -204,7 +204,6 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
 
     Value * const segmentItems = b.CreateMul(numOfStrides, b.getSize(stride));
     ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
-    Type * codeUnitTy = b.getIntNTy(codeUnitWidth);
 
     IntegerType * const sizeTy = b.getSizeTy();
 

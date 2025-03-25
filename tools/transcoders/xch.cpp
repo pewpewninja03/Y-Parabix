@@ -644,9 +644,13 @@ int main(int argc, char *argv[]) {
         }
     } else if (SrcChars != "" && TgtChars != "") {
         unicode::TranslationMap charmap;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
         std::u32string src = conv.from_bytes(SrcChars);
         std::u32string tgt = conv.from_bytes(TgtChars);
+#pragma GCC diagnostic pop
         for (unsigned i = 0; i < src.size(); i++) {
             if (i < tgt.size()) {
                 charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[i]));
