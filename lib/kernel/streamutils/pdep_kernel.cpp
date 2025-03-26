@@ -967,10 +967,20 @@ ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, Stre
    nm.flush();
    return tmp;
 }(),
-{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread}},
+{Binding{"spread", spread}, Binding{"byteStream", byteStream, PopcountOf("spread")}},
 {Binding{"output", output}}, {}, {}, {}) {
     if (streamOffset) {
         mInputScalars.emplace_back("offset", streamOffset);
+    }
+    const auto fieldWidth = byteStream->getFieldWidth();
+    if (LLVM_UNLIKELY(fieldWidth < 8)) {
+        report_fatal_error(Twine{getName(), ": does not support field widths under 8-bits"});
+    }
+    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
+        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
+    }
+    if (output->getNumElements() > byteStream->getNumElements()) {
+        report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
     }
 }
 
@@ -980,36 +990,20 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
     Constant * const sz_ZERO = b.getSize(0);
     Constant * const sz_ONE = b.getSize(1);
-    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
-    if (LLVM_UNLIKELY(fieldWidth < 8)) {
-        report_fatal_error(Twine{getName(), ": does not support field widths under 8-bits"});
-    }
-    StreamSet * const output = getOutputStreamSet(0);
-    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
-        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
-    }
+    const auto fieldWidth = getInputStreamSet(1)->getFieldWidth();
+    const auto numElements = getOutputStreamSet(0)->getNumElements();
+    const auto numInputElements = getInputStreamSet(1)->getNumElements();
 
     Value * initPos = b.getProcessedItemCount("byteStream");
-    const auto numElements = output->getNumElements();
-    const auto numInputElements = getInputStreamSet(0)->getNumElements();
-    if (numElements > numInputElements) {
-        report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
-    }
 
     SmallVector<Value *, 32> pending(numElements);
 
     ConstantInt * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
-
     const auto fieldsPerBlock = (b.getBitBlockWidth() / fieldWidth);
-
     ConstantInt * const BLOCK_WIDTH_MASK = b.getSize(b.getBitBlockWidth() - 1);
-
     ConstantInt * const FIELD_WIDTH_MASK = b.getSize(fieldWidth - 1);
-
     ConstantInt * const FIELDS_PER_BLOCK = b.getSize(fieldsPerBlock);
-
     ConstantInt * const FIELDS_PER_BLOCK_MASK = b.getSize(fieldsPerBlock - 1);
-
 
     // TODO: can we safely trust this stream if we read past the data even if we do not actually produce
     // anything from it?

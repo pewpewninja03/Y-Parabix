@@ -1,4 +1,4 @@
-﻿#include <kernel/core/kernel_compiler.h>
+#include <kernel/core/kernel_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -39,7 +39,10 @@
 #include <llvm/Transforms/Scalar/DCE.h>
 #include <llvm/Transforms/Scalar/EarlyCSE.h>
 #include <llvm/Transforms/Scalar/GVN.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include <llvm/Transforms/Scalar/SROA.h>
+#pragma GCC diagnostic pop
 #include <llvm/Transforms/Scalar/Reassociate.h>
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
 #include <llvm/Transforms/Scalar/NewGVN.h>
@@ -1246,8 +1249,8 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder 
             assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
             if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
                 StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
-                StructType * const streamSetTy = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
-                assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) == streamSetTy);
+                assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) == 
+                        ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
                 FixedArray<Value *, 3> indices;
                 indices[0] = b.getInt32(0);
                 indices[1] = b.getInt32(0);

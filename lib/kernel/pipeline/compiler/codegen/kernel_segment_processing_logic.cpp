@@ -1,4 +1,4 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 #include <kernel/pipeline/optimizationbranch.h>
 
 // TODO: if we have multiple copies of the same type of kernel executing sequentially, we could avoid
@@ -55,8 +55,8 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
             assert (!mAllowDataParallelExecution);
             assert (mKernelThreadLocalHandle);
             StructType * const threadLocalTy = mKernel->getThreadLocalStateType();
-            StructType * const streamSetTy = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
-            assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) == streamSetTy);
+            assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) ==
+                    ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
             FixedArray<Value *, 4> indices;
             indices[0] = b.getInt32(0);
             indices[1] = b.getInt32(0);

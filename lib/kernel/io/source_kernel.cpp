@@ -493,12 +493,6 @@ ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
-    addInternalScalar(codeUnitPtrTy, "buffer");
-    addThreadLocalScalar(codeUnitPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = ts.getSizeTy();
-    addInternalScalar(sizeTy, "effectiveCapacity");
-    addThreadLocalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
     setStride(codegen::SegmentSize);
@@ -522,10 +516,6 @@ FDSourceKernel::FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useM
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
     PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
-    addThreadLocalScalar(codeUnitPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = ts.getSizeTy();
-    addInternalScalar(sizeTy, "effectiveCapacity");
-    addThreadLocalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
     setStride(codegen::SegmentSize);
