@@ -204,8 +204,6 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
 
     Value * const segmentItems = b.CreateMul(numOfStrides, b.getSize(stride));
     ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
-    Type * codeUnitTy = b.getIntNTy(codeUnitWidth);
-
     IntegerType * const sizeTy = b.getSizeTy();
 
     // Can we append to our existing buffer without impacting any subsequent kernel?

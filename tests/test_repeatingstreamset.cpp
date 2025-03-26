@@ -95,6 +95,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     BasicBlock * const generateData = b.CreateBasicBlock("generateData");
     BasicBlock * const finishedDataLoop = b.CreateBasicBlock("finishedDataLoop");
     BasicBlock * const zeroExtraneousBytes = b.CreateBasicBlock("zeroExtraneousBytes");
+    BasicBlock * const zeroExtraneousBlocks = b.CreateBasicBlock("zeroExtraneousBlocks");
     BasicBlock * const exit = b.CreateBasicBlock("exit");
 
     // build our pattern array
@@ -195,7 +196,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     ConstantInt * const sz_strideFillSize = b.getSize(maxFillSize);
 
     Value * const produced = b.getProducedItemCount("output");
-    Value * const consumed = b.CreateRoundDown(b.getConsumedItemCount("output"), sz_BlockWidth);
+    Value * const consumed = b.getConsumedItemCount("output");
 
     Value * const fillSize = b.CreateMul(sz_strideFillSize, b.getNumOfStrides());
 
@@ -211,8 +212,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     b.SetInsertPoint(generateData);
     PHINode * const producedPhi = b.CreatePHI(b.getSizeTy(), 3);
     producedPhi->addIncoming(produced, prepareBufferExit);
-    PHINode * const ba = b.CreatePHI(baseAddress->getType(), 3);
-    ba->addIncoming(baseAddress, prepareBufferExit);
 
     FixedArray<Value *,2> offset;
     offset[0] = sz_ZERO;
@@ -225,14 +224,13 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
         Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
-        Value * const dst = outputBuffer->getStreamBlockPtr(b, ba, b.getInt32(i), currentIndex);
+        Value * const dst = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), currentIndex);
         b.CreateMemCpy(dst, src, elementSize, 1U);
     }
 
     Value * const currentProduced = b.CreateAdd(producedPhi, sz_BlockWidth);
     BasicBlock * const generateDataExit = b.GetInsertBlock();
     producedPhi->addIncoming(currentProduced, generateDataExit);
-    ba->addIncoming(ba, generateDataExit);
     b.CreateCondBr(b.CreateICmpULT(currentProduced, total), generateData, finishedDataLoop);
 
     b.SetInsertPoint(finishedDataLoop);
@@ -262,9 +260,9 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     for (unsigned i = 0; i < numElements; ++i) {
         Value * ptr = nullptr;
         if (fieldWidth == 1) {
-            ptr = outputBuffer->getStreamBlockPtr(b, ba, b.getInt32(i), startIndex);
+            ptr = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), startIndex);
         } else {
-            ptr = outputBuffer->getStreamPackPtr(b, ba, b.getInt32(i), startIndex, packIndex);
+            ptr = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), startIndex, packIndex);
         }
         Value * const val = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr);
         Value * const maskedVal = b.CreateAnd(val, mask);
@@ -274,8 +272,8 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     ConstantInt * const sz_ONE = b.getSize(1);
 
     if (fieldWidth > 1) {
-        BasicBlock * const clearRemainingPacks = b.CreateBasicBlock("clearRemainingPacks", exit);
-        BasicBlock * const clearRemainingPacksExit = b.CreateBasicBlock("clearRemainingPacksExit", exit);
+        BasicBlock * const clearRemainingPacks = b.CreateBasicBlock("clearRemainingPacks", zeroExtraneousBlocks);
+        BasicBlock * const clearRemainingPacksExit = b.CreateBasicBlock("clearRemainingPacksExit", zeroExtraneousBlocks);
 
         Constant * const vec_ZERO = ConstantVector::getNullValue(b.getBitBlockType());
 
@@ -287,7 +285,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
         packIndexPhi->addIncoming(firstPackIndex, zeroExtraneousBytes);
         for (unsigned i = 0; i < numElements; ++i) {
-            Value * ptr = outputBuffer->getStreamPackPtr(b, ba, b.getInt32(i), startIndex, packIndexPhi);
+            Value * ptr = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), startIndex, packIndexPhi);
             b.CreateBlockAlignedStore(vec_ZERO, ptr);
         }
         Value * const nextPackIndex = b.CreateAdd(packIndexPhi, sz_ONE);
@@ -297,16 +295,24 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         b.SetInsertPoint(clearRemainingPacksExit);
     }
 
+    Value * const totalIndex = b.CreateUDiv(total, sz_BlockWidth);
+
+    b.CreateCondBr(b.CreateICmpULT(startIndex, totalIndex), zeroExtraneousBlocks, exit);
+
+    b.SetInsertPoint(zeroExtraneousBlocks);
+
     Value * const nextIndex = b.CreateAdd(startIndex, sz_ONE);
+
     Value * const endIndex = b.CreateAdd(b.CreateUDiv(total, sz_BlockWidth), sz_ONE);
-    Value * const startPtr = outputBuffer->getStreamBlockPtr(b, ba, sz_ZERO, nextIndex);
-    Value * const endPtr = outputBuffer->getStreamBlockPtr(b, ba, sz_ZERO, endIndex);
+    Value * const startPtr = outputBuffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, nextIndex);
+    Value * const endPtr = outputBuffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, endIndex);
+
     DataLayout DL(b.getModule());
     Type * const intPtrTy = DL.getIntPtrType(startPtr->getType());
     Value * const startPtrInt = b.CreatePtrToInt(startPtr, intPtrTy);
     Value * const endPtrInt = b.CreatePtrToInt(endPtr, intPtrTy);
     Value * const numBytes = b.CreateSub(endPtrInt, startPtrInt);
-    b.CreateMemZero(startPtr, numBytes, blockWidth / 8);
+    b.CreateMemZero(startPtr, numBytes, 1U);
 
     b.CreateBr(exit);
 

@@ -12,10 +12,6 @@ namespace IDISA { class IDISA_Builder; }
 namespace llvm { class Value; }
 namespace llvm { class Constant; }
 
-uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow);
-
-void destroy_circular_buffer(uint8_t * base, const size_t size, const size_t hasUnderflow);
-
 namespace kernel {
 
 class Kernel;
@@ -394,6 +390,8 @@ public:
     void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
 
     llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
+
+    llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
     llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
 

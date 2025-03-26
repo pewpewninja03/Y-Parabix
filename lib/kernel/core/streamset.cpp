@@ -278,12 +278,14 @@ Type * StreamSetBuffer::resolveType(kernel::KernelBuilder & b, Type * const stre
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
-constexpr const char __MAKE_CIRCULAR_BUFFER[] =    "__make_circular_buffer";
-constexpr const char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
+constexpr const char __MAKE_CIRCULAR_BUFFER[] =    "__ss_mcb";
+constexpr auto __MAKE_CIRCULAR_BUFFER_LENGTH = std::string_view(__MAKE_CIRCULAR_BUFFER).size();
+constexpr const char __DESTROY_CIRCULAR_BUFFER[] = "__ss_dcb";
+constexpr auto __DESTROY_CIRCULAR_BUFFER_LENGTH = std::string_view(__DESTROY_CIRCULAR_BUFFER).size();
 
 void StreamSetBuffer::linkFunctions(kernel::KernelBuilder & b) {
-    b.LinkFunction(StringRef{__MAKE_CIRCULAR_BUFFER, strlen(__MAKE_CIRCULAR_BUFFER)}, make_circular_buffer);
-    b.LinkFunction(StringRef{__DESTROY_CIRCULAR_BUFFER, strlen(__DESTROY_CIRCULAR_BUFFER)}, destroy_circular_buffer);
+    b.LinkFunction(StringRef{__MAKE_CIRCULAR_BUFFER, __MAKE_CIRCULAR_BUFFER_LENGTH}, make_circular_buffer);
+    b.LinkFunction(StringRef{__DESTROY_CIRCULAR_BUFFER, __DESTROY_CIRCULAR_BUFFER_LENGTH}, destroy_circular_buffer);
 }
 
 // External Buffer
@@ -1448,6 +1450,10 @@ StructType * ManagedDynamicBuffer::getHandleType(kernel::KernelBuilder & b) cons
 
     }
     return mHandleType;
+}
+
+Value * ManagedDynamicBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
+    return b.CreatePointerCast(baseAddress, getPointerType());
 }
 
 void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capacityMultiplier) {
