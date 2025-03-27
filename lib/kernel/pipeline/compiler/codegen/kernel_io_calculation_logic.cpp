@@ -849,6 +849,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
         b.CreateAlignedStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr, PtrTyABIAlignment);
     }
 
+
+
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
     // executing this kernel and writing data but if we perform a copyback or expansion, we can't copy
     // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
@@ -875,6 +877,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     Value * mustExpand = nullptr;
 
     if (buffer->isLinear()) {
+
+        assert (!isa<ManagedDynamicBuffer>(buffer));
 
         BasicBlock * expand = nullptr;
 
@@ -905,8 +909,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     // held back by some input stream, we may end up expanding twice in the same iteration of this kernel,
     // which could result in free'ing the "old" buffer twice.
 
-    if (bn.isDeallocatable()) {
-        Value * expandedStruct = buffer->expandBuffer(b, produced, consumed, required);
+    if (isa<ManagedDynamicBuffer>(buffer)) {
+        cast<ManagedDynamicBuffer>(buffer)->expandBuffer(b, produced, consumed, required);
+    } else if (isa<DynamicBuffer>(buffer)) {
+        Value * expandedStruct = cast<DynamicBuffer>(buffer)->expandBuffer(b, produced, consumed, required);
         Value * priorBuffer = b.CreateExtractValue(expandedStruct, 0);
         assert (priorBuffer->getType()->isPointerTy());
         Value * priorCapacity = b.CreateExtractValue(expandedStruct, 1);

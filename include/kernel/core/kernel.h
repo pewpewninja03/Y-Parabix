@@ -441,7 +441,33 @@ public:
     template <typename ExternalFunctionType>
     void link(std::string name, ExternalFunctionType & functionPtr);
 
-    static bool isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned);
+    struct LocalBufferFlagSet {
+        enum LocalBufferFlagType : uint32_t {
+            LBF_Shared = 1,
+            LBF_Managed = 2,
+            LBF_Returned = 4
+        };
+
+        bool isShared() const {
+            return (Flags & LocalBufferFlagType::LBF_Shared) != 0;
+        }
+
+        bool isManaged() const {
+            return (Flags & LocalBufferFlagType::LBF_Managed) != 0;
+        }
+
+        bool isReturned() const {
+            return (Flags & LocalBufferFlagType::LBF_Returned) != 0;
+        }
+
+        bool any() const { return Flags != 0; }
+
+        uint32_t Flags = 0;
+    };
+
+    LLVM_READNONE static LocalBufferFlagSet isLocalBuffer(const Binding & output);
+
+    LLVM_READNONE static bool isManagedBuffer(const Binding & output);
 
     LLVM_READNONE bool canSetTerminateSignal() const;
 

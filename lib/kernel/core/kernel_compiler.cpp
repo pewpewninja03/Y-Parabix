@@ -1,4 +1,4 @@
-﻿#include <kernel/core/kernel_compiler.h>
+#include <kernel/core/kernel_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -39,7 +39,10 @@
 #include <llvm/Transforms/Scalar/DCE.h>
 #include <llvm/Transforms/Scalar/EarlyCSE.h>
 #include <llvm/Transforms/Scalar/GVN.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include <llvm/Transforms/Scalar/SROA.h>
+#pragma GCC diagnostic pop
 #include <llvm/Transforms/Scalar/Reassociate.h>
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
 #include <llvm/Transforms/Scalar/NewGVN.h>
@@ -146,6 +149,7 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     auto const oc = b.getCompiler();
     b.setCompiler(this);
     b.linkAllNecessaryExternalFunctions();
+    StreamSetBuffer::linkFunctions(b);
     constructStreamSetBuffers(b);
     #ifndef NDEBUG
     for (const auto & buffer : mStreamSetInputBuffers) {
@@ -442,19 +446,34 @@ inline void CPUDriver::preparePassManager() {
  * @brief constructStreamSetBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
+
     mStreamSetInputBuffers.clear();
     const auto numOfInputStreams = mInputStreamSets.size();
     mStreamSetInputBuffers.resize(numOfInputStreams);
     for (unsigned i = 0; i < numOfInputStreams; ++i) {
         const Binding & input = mInputStreamSets[i];
-        mStreamSetInputBuffers[i].reset(new ExternalBuffer(i, b, input.getType(), true, 0));
+        mStreamSetInputBuffers[i].reset(new ExternalBuffer(i, b, input.getType(), 0));
     }
     mStreamSetOutputBuffers.clear();
     const auto numOfOutputStreams = mOutputStreamSets.size();
     mStreamSetOutputBuffers.resize(numOfOutputStreams);
     for (unsigned i = 0; i < numOfOutputStreams; ++i) {
         const Binding & output = mOutputStreamSets[i];
-        mStreamSetOutputBuffers[i].reset(new ExternalBuffer(i + numOfInputStreams, b, output.getType(), true, 0));
+
+        StreamSetBuffer * buffer = nullptr;
+        if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
+            Rational R{mTarget->getStride(), b.getBitBlockWidth()};
+            const auto & ub = output.getRate().getUpperBound();
+            if (ub.numerator() > 0) {
+                R *= ub;
+            }
+            assert (R.numerator() > 0);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), R.numerator(), 0);
+        } else {
+            buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
+        }
+
+        mStreamSetOutputBuffers[i].reset(buffer);
     }
 }
 
@@ -468,11 +487,8 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
         const Binding & output = mOutputStreamSets[i];
         Type * const handleTy = mStreamSetOutputBuffers[i]->getHandleType(b);
         assert (handleTy && !handleTy->isPointerTy());
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
-        if (LLVM_UNLIKELY(isLocal)) {
+        const auto isLocal = Kernel::isLocalBuffer(output);
+        if (LLVM_UNLIKELY(isLocal.any())) {
             mTarget->addInternalScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
         } else {
             mTarget->addNonPersistentScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
@@ -636,6 +652,7 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilde
  * @brief callAllocateSharedInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelBuilder & b) {
+    // NOTE: the kernel compiler must call this AFTER initialization
     if (LLVM_UNLIKELY(mTarget->allocatesInternalStreamSets())) {
         assert (mSharedHandle == nullptr && mThreadLocalHandle == nullptr);
         mCurrentMethod = mTarget->getAllocateSharedInternalStreamSetsFunction(b);
@@ -653,7 +670,7 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelB
         }
         Value * const expectedNumOfStrides = nextArg();
         initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
-        initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+        initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars, expectedNumOfStrides);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
         b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
@@ -911,26 +928,23 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         StreamSetBuffer * const buffer = mStreamSetOutputBuffers[i].get();
 
         const Binding & output = mOutputStreamSets[i];
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal =  Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
-        if (LLVM_UNLIKELY(isShared)) {
+        const auto isLocal =  Kernel::isLocalBuffer(output);
+        if (LLVM_UNLIKELY(isLocal.isShared())) {
             Value * const handle = nextArg();
             assert (isa<DynamicBuffer>(buffer));
             buffer->setHandle(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
-        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             mUpdatableOutputBaseVirtualAddressPtr[i] = nextArg();
             Value * handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX).first;
             buffer->setHandle(handle);
         } else {
+            assert (isa<ExternalBuffer>(buffer));
             Value * const virtualBaseAddress = b.CreatePointerCast(nextArg(), buffer->getPointerType());
             Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
-            assert (isa<ExternalBuffer>(buffer));
         }
 
         /// ----------------------------------------------------
@@ -966,7 +980,8 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         /// writable / consumed item count
         /// ----------------------------------------------------
         Value * writable = nullptr;
-        if (isShared || isLocal) {
+        assert (isa<ManagedDynamicBuffer>(buffer) == isLocal.isManaged());
+        if (isLocal.any()) {
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
             mConsumedOutputItems[i] = consumed;
@@ -1090,16 +1105,12 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         const auto & buffer = mStreamSetOutputBuffers[i];
         const Binding & output = mOutputStreamSets[i];
-
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
+        const auto isLocal = Kernel::isLocalBuffer(output);
 
         Value * handle = nullptr;
-        if (LLVM_UNLIKELY(isShared)) {            
+        if (LLVM_UNLIKELY(isLocal.isShared())) {
             handle = b.CreatePointerCast(buffer->getHandle(), voidPtrTy);
-        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead
             // of being passed in through the function call.
             PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
@@ -1120,7 +1131,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         /// writable / consumed item count
         /// ----------------------------------------------------
-        if (LLVM_UNLIKELY(isShared || isLocal)) {
+        if (LLVM_UNLIKELY(isLocal.any())) {
             props.push_back(mConsumedOutputItems[i]);
         } else if (isMainPipeline || requiresItemCount(output)) {
             props.push_back(mWritableOutputItems[i]);
@@ -1228,6 +1239,28 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder 
         mThreadLocalHandle = nextArg();
         initializeScalarMap(b, InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars);
         mTarget->generateFinalizeThreadLocalMethod(b);
+
+
+        size_t numOfManagedBuffers = 0;
+        BEGIN_SCOPED_REGION
+        const auto n = mOutputStreamSets.size();
+        for (size_t i = 0; i < n; ++i) {
+            const auto & buffer = mStreamSetOutputBuffers[i];
+            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
+            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+                StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
+                assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) == 
+                        ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+                FixedArray<Value *, 3> indices;
+                indices[0] = b.getInt32(0);
+                indices[1] = b.getInt32(0);
+                indices[2] = b.getInt32(numOfManagedBuffers++);
+                Value * const threadLocalStreamSetPtr = b.CreateGEP(threadLocalTy, mThreadLocalHandle, indices);
+                cast<ManagedDynamicBuffer>(buffer.get())->freePendingDeletion(b, threadLocalStreamSetPtr);
+            }
+        }
+        END_SCOPED_REGION
+
         b.CreateRetVoid();
         clearInternalStateAfterCodeGen();
     }
@@ -1352,6 +1385,30 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     bool hasThreadLocalAccum = false;
 
+    size_t threadLocalGroup0StartIndex = 0;
+
+    if (options != InitializeOptions::DoNotIncludeThreadLocalScalars) {
+        const auto n = mOutputStreamSets.size();
+        for (size_t i = 0; i < n; ++i) {
+            const auto & buffer = mStreamSetOutputBuffers[i];
+            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
+            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+                assert (mThreadLocalHandle);
+                assert (threadLocalGroup0StartIndex < mTarget->getThreadLocalStateType()->getStructNumElements());
+                assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(threadLocalGroup0StartIndex) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+                assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(threadLocalGroup0StartIndex + 1)->isEmptyTy());
+                FixedArray<Value *, 3> indices;
+                indices[0] = b.getInt32(0);
+                indices[1] = b.getInt32(0);
+                indices[2] = b.getInt32(threadLocalGroup0StartIndex);
+                Value * const tlh = b.CreateGEP(mTarget->getThreadLocalStateType(), mThreadLocalHandle, indices);
+                cast<ManagedDynamicBuffer>(buffer.get())->setThreadLocalHandle(tlh);
+                threadLocalGroup0StartIndex += 2;
+                threadLocalGroups.insert(0);
+            }
+        }
+    }
+
     for (const auto & scalar : mInternalScalars) {
         assert (scalar.getValueType());
         switch (scalar.getScalarType()) {
@@ -1373,6 +1430,14 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     std::vector<unsigned> sharedIndex(sharedGroups.size() + 2, 0);
     std::vector<unsigned> threadLocalIndex(threadLocalGroups.size(), 0);
+
+    // Kernel managed buffers require both the struct for the buffer itself and a thread local pointer
+    // for the last "deallocated" memory chunk. A thread can only be confident that there are no other
+    // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
+    // Thus each managed buffer has an implicit thread local state that is passed in.
+    if (LLVM_UNLIKELY(threadLocalGroup0StartIndex)) {
+        threadLocalIndex[0] = threadLocalGroup0StartIndex;
+    }
 
     BasicBlock * combineToMainThreadLocal = nullptr;
 
@@ -1402,11 +1467,13 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     for (const auto & binding : mInternalScalars) {
         Value * scalar = nullptr;
         Type * scalarType = nullptr;
+
         auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
             const auto f = groups.find(binding.getGroup());
             assert (f != groups.end());
             return std::distance(groups.begin(), f);
         };
+
 
         switch (binding.getScalarType()) {
             case ScalarType::Internal:
@@ -1605,17 +1672,26 @@ void KernelCompiler::initializeIOBindingMap() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeOwnedBufferHandles
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions /* options */) {
+void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions /* options */, Value * const expectedNumOfStrides) {
     const auto numOfOutputs = getNumOfStreamOutputs();
     for (unsigned i = 0; i < numOfOutputs; i++) {
         const Binding & output = mOutputStreamSets[i];
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
+        const auto isLocal = Kernel::isLocalBuffer(output);
+        if (LLVM_UNLIKELY(isLocal.any())) {
             auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
+            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
+            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(output));
+            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer) && expectedNumOfStrides)) {
+                Rational R{mTarget->getStride(), b.getBitBlockWidth()};
+                const auto & ub = output.getRate().getUpperBound();
+                if (ub.numerator() > 0) {
+                    R *= ub;
+                }
+                Value * const bufferScale = b.CreateCeilUMulRational(expectedNumOfStrides, R);
+                buffer->allocateBuffer(b, bufferScale);
+            }
         }
     }
 }

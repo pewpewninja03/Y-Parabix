@@ -201,18 +201,14 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
                     assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 }
                 if (nonLocal) {
-
                     Value * multiplier = expectedNumOfStrides;
-
                     if (LLVM_UNLIKELY(bn.isReturned())) {
                         auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
                         if (scaleFactor > 0) {
 
                             size_t capacity = 1;
-                            if (isa<DynamicBuffer>(buffer)) {
+                            if (isa<DynamicBuffer>(buffer) || isa<ManagedDynamicBuffer>(buffer)) {
                                 capacity = cast<DynamicBuffer>(buffer)->getInitialCapacity();
-                            } else if (isa<MMapedBuffer>(buffer)) {
-                                capacity = cast<MMapedBuffer>(buffer)->getInitialCapacity();
                             }
                             multiplier = b.CreateRoundUp(expectedSourceOutputSize, expectedNumOfStrides);
                             Value * value = b.CreateCeilUDivRational(multiplier, capacity);
@@ -246,10 +242,12 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
     loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_LIKELY(bn.isDeallocatable())) {
+        if (bn.isDeallocatable() && !bn.isReturned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
-            assert (isFromCurrentFunction(b, buffer->getHandle(), false));
-            buffer->releaseBuffer(b);
+            if ((isa<DynamicBuffer>(buffer) || isa<ManagedDynamicBuffer>(buffer))) {
+                assert (isFromCurrentFunction(b, buffer->getHandle(), false));
+                buffer->releaseBuffer(b);
+            }
         }
     }
 }
@@ -261,7 +259,7 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
     if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_LIKELY(bn.isDeallocatable())) {
+            if (bn.isDeallocatable()) {
                 StreamSetBuffer * const buffer = bn.Buffer;
                 if (LLVM_LIKELY(isa<DynamicBuffer>(buffer))) {
                     const auto pe = in_edge(streamSet, mBufferGraph);
@@ -271,7 +269,11 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
                     const auto prefix = makeBufferName(p, rd.Port);
                     Value * const addr = b.getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
                     Value * const capacity = b.getScalarField(prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
-                    buffer->destroyBuffer(b, addr, capacity);
+                    cast<DynamicBuffer>(buffer)->destroyBuffer(b, addr, capacity);
+                } else if (isa<ManagedDynamicBuffer>(buffer)) {
+                    Value * const tlh = cast<ManagedDynamicBuffer>(buffer)->getThreadLocalHandle();
+                    assert (isFromCurrentFunction(b, tlh, false));
+                    cast<ManagedDynamicBuffer>(buffer)->freePendingDeletion(b, tlh);
                 }
             }
         }
@@ -835,7 +837,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
 
     Value * const addr = buffer->getVirtualBasePtr(b, baseAddress, position);
     if (prefetch) {
-        ExternalBuffer tmp(0, b, buffer->getBaseType(), true, buffer->getAddressSpace());
+        ExternalBuffer tmp(0, b, buffer->getBaseType(), buffer->getAddressSpace());
         Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
         Value * const blockIndex = b.CreateLShr(position, LOG_2_BLOCK_WIDTH);
         Value * const prefetchAddr = tmp.getStreamBlockPtr(b, addr, b.getSize(0), blockIndex);

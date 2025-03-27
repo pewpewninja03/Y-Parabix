@@ -430,6 +430,14 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             report_fatal_error(out.str());
         }
     }
+
+    for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+        if (LLVM_UNLIKELY(mBufferGraph[output].isManaged())) {
+            mBufferGraph[source(output, mBufferGraph)].Type |= BufferType::ManagedOutput;
+        }
+    }
+
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -779,6 +787,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
+
         if (LLVM_UNLIKELY(bn.Buffer != nullptr)) {
             continue;
         }
@@ -800,8 +809,10 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
+
             if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
-                buffer = new ExternalBuffer(streamSet, b, output.getType(), true, 0);
+                assert (!bn.isManagedOutput());
+                buffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
             } else { // is internal buffer
 
                 // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.
@@ -814,9 +825,15 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
                 bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
                 #endif
-                buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);
+
+                if (LLVM_UNLIKELY(bn.isManagedOutput())) {
+                    buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bufferSize, 0U);
+                } else {
+                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);
+                }
             }
         }
+
         assert ("missing buffer?" && buffer);
         mInternalBuffers[streamSet - FirstStreamSet].reset(buffer);
         bn.Buffer = buffer;

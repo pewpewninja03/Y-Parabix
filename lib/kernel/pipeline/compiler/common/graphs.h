@@ -273,6 +273,7 @@ enum BufferType : unsigned {
     , Truncated = 16
     , CrossThreaded = 32
     , InOutRedirect = 64
+    , ManagedOutput = 128
     // ------------------
     , HasIllustratedStreamset = 512
     , StartsNestedSynchronizationRegion = 1024
@@ -354,6 +355,9 @@ struct BufferNode {
         return (Type & BufferType::InOutRedirect) != 0;
     }
 
+    bool isManagedOutput() const {
+        return (Type & BufferType::ManagedOutput) != 0;
+    }
 
     bool startsNestedSynchronizationRegion() const {
         return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;

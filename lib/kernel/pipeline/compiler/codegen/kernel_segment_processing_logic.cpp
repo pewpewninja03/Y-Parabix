@@ -1,4 +1,4 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 #include <kernel/pipeline/optimizationbranch.h>
 
 // TODO: if we have multiple copies of the same type of kernel executing sequentially, we could avoid
@@ -45,11 +45,26 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     }
 
     bool checkOutputChannels = false;
+    size_t numOfManagedBuffers = 0;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
-        if (port.canModifySegmentLength()) {
+        if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
             checkOutputChannels = true;
-            break;
+        }
+        if (LLVM_UNLIKELY(port.isManaged())) {
+            assert (!mAllowDataParallelExecution);
+            assert (mKernelThreadLocalHandle);
+            StructType * const threadLocalTy = mKernel->getThreadLocalStateType();
+            assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) ==
+                    ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
+            FixedArray<Value *, 4> indices;
+            indices[0] = b.getInt32(0);
+            indices[1] = b.getInt32(0);
+            indices[2] = b.getInt32(numOfManagedBuffers++);
+            indices[3] = b.getInt32(ManagedDynamicBuffer::NewAddress);
+            Value * const newAddrPtr = b.CreateGEP(threadLocalTy, mKernelThreadLocalHandle, indices);
+            // TODO: voidptralign from DL
+            b.CreateAlignedStore(ConstantPointerNull::get(b.getVoidPtrTy()), newAddrPtr, sizeof(void *));
         }
     }
 

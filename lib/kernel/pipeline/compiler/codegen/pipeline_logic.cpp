@@ -438,8 +438,9 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         }
     }
 
-    Value * expectedSourceOutputSize = nullptr;
+    Value * expectedSourceOutputSize = expectedNumOfStrides;
     if (LLVM_UNLIKELY(hasAnyReturnedBuffer)) {
+        Value * bufferScaling = nullptr;
         for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
             if (LLVM_UNLIKELY(in_degree(kernel, mBufferGraph) == 0)) {
                 setActiveKernel(b, kernel, false);
@@ -447,16 +448,16 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
                 FixedArray<Value *, 1> args;
                 args[0] = mKernelSharedHandle;
                 Value * eosVal = callKernelExpectedSourceOutputSizeFunction(b, args);
-                expectedSourceOutputSize = b.CreateUMax(eosVal, expectedSourceOutputSize);
+                bufferScaling = b.CreateUMax(eosVal, bufferScaling);
             }
         }
-        if (expectedSourceOutputSize) {
-            expectedSourceOutputSize = b.CreateMul(expectedSourceOutputSize, expectedNumOfStrides);
-            expectedSourceOutputSize = b.CreateCeilUDiv(expectedSourceOutputSize, b.getSize(b.getBitBlockWidth()));
-        } else {
-            expectedSourceOutputSize = expectedNumOfStrides;
+        if (bufferScaling) {
+            bufferScaling = b.CreateMul(bufferScaling, expectedNumOfStrides);
+            expectedSourceOutputSize = b.CreateCeilUDiv(bufferScaling, b.getSize(b.getBitBlockWidth()));
         }
     }
+
+    assert (expectedSourceOutputSize);
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();

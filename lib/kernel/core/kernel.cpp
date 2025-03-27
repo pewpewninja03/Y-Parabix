@@ -59,23 +59,42 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isLocalBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ bool Kernel::isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool &returned) {
+/* static */ Kernel::LocalBufferFlagSet Kernel::isLocalBuffer(const Binding & output) {
     // NOTE: if this function is modified, fix the PipelineCompiler to match it.
+    LocalBufferFlagSet fs;
     for (const auto & attr : output.getAttributes()) {
         switch (attr.getKind()) {
             case Binding::AttributeId::SharedManagedBuffer:
-                shared = true;
+                fs.Flags |= LocalBufferFlagSet::LBF_Shared;
                 break;
             case Binding::AttributeId::ManagedBuffer:
-                managed = true;
+                fs.Flags |= LocalBufferFlagSet::LBF_Managed;
                 break;
             case Binding::AttributeId::ReturnedBuffer:
-                returned = true;
+                fs.Flags |= LocalBufferFlagSet::LBF_Returned;
                 break;
             default: break;
         }
     }
-    return shared | managed | returned | output.getRate().isUnknown();
+    if (LLVM_UNLIKELY(output.getRate().isUnknown())) {
+        fs.Flags |= LocalBufferFlagSet::LBF_Managed;
+    }
+    assert (fs.isManaged() == isManagedBuffer(output));
+    return fs;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isManagedBuffer
+ ** ------------------------------------------------------------------------------------------------------------- */
+/* static */ bool Kernel::isManagedBuffer(const Binding & output) {
+    for (const auto & attr : output.getAttributes()) {
+        switch (attr.getKind()) {
+            case AttrId::ManagedBuffer:
+                return true;
+            default: break;
+        }
+    }
+    return output.getRate().isUnknown();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -348,6 +367,18 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             flat_set<unsigned> sharedGroups;
             flat_set<unsigned> threadLocalGroups;
 
+            size_t numOfManagedBuffers = 0;
+
+            for (const Binding & output : mOutputStreamSets) {
+                if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
+                    ++numOfManagedBuffers;
+                }
+            }
+
+            if (numOfManagedBuffers) {
+                threadLocalGroups.insert(0);
+            }
+
             for (const auto & scalar : mInternalScalars) {
                 assert (scalar.getValueType());
                 switch (scalar.getScalarType()) {
@@ -376,6 +407,16 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 V.push_back(type); assert (type);
                 V.push_back(emptyTy);
             };
+
+            // Kernel managed buffers require both the struct for the buffer itself and a thread local pointer
+            // for the last "deallocated" memory chunk. A thread can only be confident that there are no other
+            // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
+            if (numOfManagedBuffers) {
+                StructType * const ty = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
+                for (unsigned i = 0; i < numOfManagedBuffers; ++i) {
+                    addScalar(threadLocal, 0, ty);
+                }
+            }
 
             for (const auto & scalar : mInputScalars) {
                 addScalar(shared, 0, scalar.getType());
@@ -419,6 +460,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 for (unsigned i = 0; i < n; ++i) {
                     const auto & S = structTypeVec[i];
                     const auto m = S.size();
+
                     assert ((m % 2) == 0);
                     for (unsigned j = 0; j < m; j += 2) {
                         assert (isa<StructType>(S[j]) ? !cast<StructType>(S[j])->isOpaque() : true);
@@ -783,6 +825,12 @@ Function * Kernel::addInitializeThreadLocalDeclaration(KernelBuilder & b) const 
  * @brief hasInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 bool Kernel::allocatesInternalStreamSets() const {
+    // TODO: store flag for this?
+    for (const Binding & output : mOutputStreamSets) {
+        if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -851,7 +899,7 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
  * @brief generateAllocateSharedInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & /* b */, Value * /* expectedNumOfStrides */) {
-    report_fatal_error("Kernel::generateAllocateSharedInternalStreamSetsMethod is not handled yet");
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -997,19 +1045,19 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
 
     for (unsigned i = 0; i < m; ++i) {
         const Binding & output = mOutputStreamSets[i];
-        bool isShared = false;
-        bool isManaged = false;
-        bool isReturned = false;
-        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
+
+        const auto isLocal = Kernel::isLocalBuffer(output);
 
         // shared dynamic buffer handle or virtual base output address
-        if (LLVM_UNLIKELY(isShared)) {
+        if (LLVM_UNLIKELY(isLocal.isShared())) {
             fields.push_back(voidPtrTy);
-        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal)) {
+        } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             fields.push_back(voidPtrTy->getPointerTo());
         } else {
             fields.push_back(voidPtrTy);
         }
+
+        assert (!isLocal.isManaged() || hasThreadLocal());
 
         //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 
@@ -1026,7 +1074,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         // be synchronized; thus at most one branch could resize a buffer at any particular moment.
         // However, we need to share the current state of the buffer between the branches to ensure
         // that we are not using an old buffer allocation.
-        if (isShared || isLocal) {
+        if (isLocal.any()) {
             fields.push_back(sizeTy); // consumed
         } else if (isMainPipeline || requiresItemCount(output)) {
             fields.push_back(sizeTy); // writable item count
@@ -1118,10 +1166,7 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            bool isShared = false;
-            bool isManaged = false;
-            bool isReturned = false;
-            if (LLVM_UNLIKELY(isLocalBuffer(output, isShared, isManaged, isReturned))) {
+            if (LLVM_UNLIKELY(isLocalBuffer(output).any())) {
                 setNextArgName(output.getName() + "_consumed");
             } else if (isMainPipeline || requiresItemCount(output)) {
                 setNextArgName(output.getName() + "_writable");

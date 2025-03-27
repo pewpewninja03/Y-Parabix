@@ -1,4 +1,4 @@
-/*
+﻿/*
  *  Copyright (c) 2018 International Characters.
  *  This software is licensed to the public under the Open Software License 3.0.
  *  icgrep is a trademark of International Characters.
@@ -44,11 +44,7 @@ class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
     RepeatingSourceKernel(LLVMTypeSystemInterface & driver, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
 protected:
-    bool allocatesInternalStreamSets() const override { return true; }
-    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;
-    void generateFinalizeMethod(KernelBuilder & b) override;
-
     StringRef getSignature() const override { return Signature; }
     bool hasSignature() const override { return true; }
 private:
@@ -82,7 +78,7 @@ RepeatingSourceKernel::RepeatingSourceKernel(LLVMTypeSystemInterface & ts, std::
 // input streams
 {},
 // output stream
-{Binding{"output", output, BoundedRate(0, fillSize), { ManagedBuffer(), Linear() }}},
+{Binding{"output", output, BoundedRate(0, fillSize), { ManagedBuffer() }}},
 // input scalar
 {Binding{ts.getSizeTy(), "repLength", repLength}},
 {},
@@ -92,43 +88,14 @@ RepeatingSourceKernel::RepeatingSourceKernel(LLVMTypeSystemInterface & ts, std::
 , Pattern(std::move(pattern)) {
     addAttribute(MustExplicitlyTerminate());
     setStride(1);
-    PointerType * const voidPtrTy = ts.getVoidPtrTy();
-    addInternalScalar(voidPtrTy, "buffer");
-    addInternalScalar(voidPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = ts.getSizeTy();
-    addInternalScalar(sizeTy, "effectiveCapacity");
-}
-
-
-
-void RepeatingSourceKernel::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
-    const auto output = b.getOutputStreamSet("output");
-    const auto fw = output->getFieldWidth();
-    const Binding & binding = b.getOutputStreamSetBinding("output");
-    const ProcessingRate & rate = binding.getRate();
-    const auto itemsPerStrideTimesTwo = 2 * getStride() * rate.getUpperBound();
-    const Rational bytesPerItem{fw * output->getNumElements(), 8};
-    Value * const initialCapacity = b.CreateMulRational(expectedNumOfStrides, itemsPerStrideTimesTwo);
-    Value * const bufferBytes = b.CreateMulRational(expectedNumOfStrides, itemsPerStrideTimesTwo * bytesPerItem);
-    Value * const buffer = b.CreatePageAlignedMalloc(bufferBytes);
-    PointerType * const ptrTy = b.getOutputStreamSetBuffer("output")->getPointerType();
-    b.setBaseAddress("output", b.CreatePointerCast(buffer, ptrTy));
-    b.setCapacity("output", initialCapacity);
-    b.setScalarField("buffer", buffer);
-    b.setScalarField("ancillaryBuffer", ConstantPointerNull::get(b.getVoidPtrTy()));
-    b.setScalarField("effectiveCapacity", initialCapacity);
 }
 
 void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
-    BasicBlock * const checkBuffer = b.CreateBasicBlock("checkBuffer");
-    BasicBlock * const moveData = b.CreateBasicBlock("moveData");
-    BasicBlock * const copyBack = b.CreateBasicBlock("CopyBack");
-    BasicBlock * const expandAndCopyBack = b.CreateBasicBlock("ExpandAndCopyBack");
-    BasicBlock * const prepareBuffer = b.CreateBasicBlock("PrepareBuffer");
     BasicBlock * const generateData = b.CreateBasicBlock("generateData");
     BasicBlock * const finishedDataLoop = b.CreateBasicBlock("finishedDataLoop");
     BasicBlock * const zeroExtraneousBytes = b.CreateBasicBlock("zeroExtraneousBytes");
+    BasicBlock * const zeroExtraneousBlocks = b.CreateBasicBlock("zeroExtraneousBlocks");
     BasicBlock * const exit = b.CreateBasicBlock("exit");
 
     // build our pattern array
@@ -172,9 +139,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     }
 
     StreamSetBuffer * const outputBuffer = b.getOutputStreamSetBuffer("output");
-    PointerType * const outputStreamSetPtrTy = outputBuffer->getPointerType();
-    Type * const outputStreamSetTy = outputBuffer->getType();
-
 
     ConstantInt * const sz_ZERO = b.getSize(0);
 
@@ -232,109 +196,22 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     ConstantInt * const sz_strideFillSize = b.getSize(maxFillSize);
 
     Value * const produced = b.getProducedItemCount("output");
-    Value * const consumed = b.CreateRoundDown(b.getConsumedItemCount("output"), sz_BlockWidth);
-    Value * const baseAddress = outputBuffer->getBaseAddress(b);
-    Value * const remaining = b.CreateSub(produced, consumed);
-
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        Value * const valid = b.CreateIsNull(b.CreateURem(remaining, sz_BlockWidth));
-        b.CreateAssert(valid, "remaining was not a multiple of block width");
-    }
+    Value * const consumed = b.getConsumedItemCount("output");
 
     Value * const fillSize = b.CreateMul(sz_strideFillSize, b.getNumOfStrides());
+
+    b.reserveCapacity("output", fillSize);
+
+    Value * const baseAddress = b.getBaseAddress("output");
+
     Value * const total = b.CreateAdd(fillSize, consumed); // produced + (fillSize - (produced - consumed))
-    Value * const totalStrides = b.CreateExactUDiv(total, sz_BlockWidth);
-    Value * const mustFill = b.CreateICmpULT(remaining, fillSize);
-    b.CreateLikelyCondBr(mustFill, checkBuffer, exit);
 
-    b.SetInsertPoint(checkBuffer);
-    // Can we append to our existing buffer without impacting any subsequent kernel?
-    Value * const effectiveCapacity = b.getScalarField("effectiveCapacity");
-    Value * const permitted = b.CreateICmpULT(total, effectiveCapacity);
-    BasicBlock * const checkBufferExit = b.GetInsertBlock();
-    b.CreateLikelyCondBr(permitted, generateData, moveData);
-
-    b.SetInsertPoint(moveData);
-    Value * const consumedIndex = b.CreateExactUDiv(consumed, sz_BlockWidth);
-
-    Value * const unreadData = outputBuffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, consumedIndex);
-    Value * const baseBuffer = b.CreatePointerCast(b.getScalarField("buffer"), outputStreamSetPtrTy);
-
-    FixedArray<Value *, 2> baseIndex;
-    baseIndex[0] = sz_ZERO;
-    baseIndex[1] = totalStrides;
-
-    Value * const toWrite = b.CreateGEP(outputStreamSetTy, baseBuffer, baseIndex);
-    Value * const canCopy = b.CreateICmpULT(toWrite, unreadData);
-    Value * const capacity = b.getCapacity("output");
-    // Have we consumed enough data that we can safely copy back the unconsumed data and still
-    // leave enough space for one segment without needing a temporary buffer?
-
-    const Rational bytesPerItem{fieldWidth * numElements, 8};
-   // Value * const remainingStrides = b.CreateExactUDiv(remaining, sz_BlockWidth);
-    Value * const remainingBytes = b.CreateMulRational(remaining, bytesPerItem);
-
-    b.CreateLikelyCondBr(canCopy, copyBack, expandAndCopyBack);
-
-    // If so, just copy the data ...
-    b.SetInsertPoint(copyBack);
-    b.CreateMemCpy(baseBuffer, unreadData, remainingBytes, 1);
-
-    // Since our consumed count cannot exceed the effective capacity, in order for (consumed % capacity)
-    // to be less than (effective capacity % capacity), we must have fully read all the data past the
-    // effective capacity of the buffer. Thus we can set the effective capacity to the buffer capacity.
-    // If, however, (consumed % capacity) >= (effective capacity % capacity), then we still have some
-    // unconsumed data at the end of the buffer. Here, we can set the reclaimed capacity position to
-    // (consumed % capacity).
-
-    Value * const consumedModCap = b.CreateURem(consumed, capacity);
-    Value * const effectiveCapacityModCap = b.CreateURem(effectiveCapacity, capacity);
-    Value * const reclaimCapacity = b.CreateICmpULT(consumedModCap, effectiveCapacityModCap);
-    Value * const reclaimedCapacity = b.CreateSelect(reclaimCapacity, capacity, consumedModCap);
-
-    Value * const updatedEffectiveCapacity = b.CreateAdd(consumed, reclaimedCapacity);
-    b.setScalarField("effectiveCapacity", updatedEffectiveCapacity);
-    BasicBlock * const copyBackExit = b.GetInsertBlock();
-    b.CreateBr(prepareBuffer);
-
-    // Otherwise, allocate a buffer with twice the capacity and copy the unconsumed data back into it
-    b.SetInsertPoint(expandAndCopyBack);
-    Value * const expandedCapacity = b.CreateShl(capacity, 1);
-    Value * const expandedBytes = b.CreateMulRational(expandedCapacity, bytesPerItem);
-
-    Value * expandedBuffer = b.CreatePageAlignedMalloc(expandedBytes);
-    b.CreateMemCpy(expandedBuffer, unreadData, remainingBytes, 1);
-    // Free the prior buffer if it exists
-    Value * const ancillaryBuffer = b.getScalarField("ancillaryBuffer");
-    b.setScalarField("ancillaryBuffer", b.CreatePointerCast(baseBuffer, b.getVoidPtrTy()));
-    b.CreateFree(ancillaryBuffer);
-    b.setScalarField("buffer", expandedBuffer);
-    b.setCapacity("output", expandedCapacity);
-    Value * const expandedEffectiveCapacity = b.CreateAdd(consumed, expandedCapacity);
-    b.setScalarField("effectiveCapacity", expandedEffectiveCapacity);
-    expandedBuffer = b.CreatePointerCast(expandedBuffer, outputStreamSetPtrTy);
-    BasicBlock * const expandAndCopyBackExit = b.GetInsertBlock();
-    b.CreateBr(prepareBuffer);
-
-    b.SetInsertPoint(prepareBuffer);
-    PHINode * const newBaseBuffer = b.CreatePHI(outputStreamSetPtrTy, 2);
-    newBaseBuffer->addIncoming(baseBuffer, copyBackExit);
-    newBaseBuffer->addIncoming(expandedBuffer, expandAndCopyBackExit);
-
-    Value * const newBaseAddress = b.CreateGEP(outputStreamSetTy, newBaseBuffer, b.CreateNeg(consumedIndex));
-    assert (newBaseAddress->getType() == baseAddress->getType());
-
-    b.setBaseAddress("output", newBaseAddress);
     BasicBlock * const prepareBufferExit = b.GetInsertBlock();
     b.CreateBr(generateData);
 
     b.SetInsertPoint(generateData);
     PHINode * const producedPhi = b.CreatePHI(b.getSizeTy(), 3);
-    producedPhi->addIncoming(produced, checkBufferExit);
     producedPhi->addIncoming(produced, prepareBufferExit);
-    PHINode * const ba = b.CreatePHI(baseAddress->getType(), 3);
-    ba->addIncoming(baseAddress, checkBufferExit);
-    ba->addIncoming(newBaseAddress, prepareBufferExit);
 
     FixedArray<Value *,2> offset;
     offset[0] = sz_ZERO;
@@ -347,14 +224,13 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
         Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
-        Value * const dst = outputBuffer->getStreamBlockPtr(b, ba, b.getInt32(i), currentIndex);
+        Value * const dst = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), currentIndex);
         b.CreateMemCpy(dst, src, elementSize, 1U);
     }
 
     Value * const currentProduced = b.CreateAdd(producedPhi, sz_BlockWidth);
     BasicBlock * const generateDataExit = b.GetInsertBlock();
     producedPhi->addIncoming(currentProduced, generateDataExit);
-    ba->addIncoming(ba, generateDataExit);
     b.CreateCondBr(b.CreateICmpULT(currentProduced, total), generateData, finishedDataLoop);
 
     b.SetInsertPoint(finishedDataLoop);
@@ -384,9 +260,9 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     for (unsigned i = 0; i < numElements; ++i) {
         Value * ptr = nullptr;
         if (fieldWidth == 1) {
-            ptr = outputBuffer->getStreamBlockPtr(b, ba, b.getInt32(i), startIndex);
+            ptr = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), startIndex);
         } else {
-            ptr = outputBuffer->getStreamPackPtr(b, ba, b.getInt32(i), startIndex, packIndex);
+            ptr = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), startIndex, packIndex);
         }
         Value * const val = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr);
         Value * const maskedVal = b.CreateAnd(val, mask);
@@ -396,8 +272,8 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     ConstantInt * const sz_ONE = b.getSize(1);
 
     if (fieldWidth > 1) {
-        BasicBlock * const clearRemainingPacks = b.CreateBasicBlock("clearRemainingPacks", exit);
-        BasicBlock * const clearRemainingPacksExit = b.CreateBasicBlock("clearRemainingPacksExit", exit);
+        BasicBlock * const clearRemainingPacks = b.CreateBasicBlock("clearRemainingPacks", zeroExtraneousBlocks);
+        BasicBlock * const clearRemainingPacksExit = b.CreateBasicBlock("clearRemainingPacksExit", zeroExtraneousBlocks);
 
         Constant * const vec_ZERO = ConstantVector::getNullValue(b.getBitBlockType());
 
@@ -409,7 +285,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
         packIndexPhi->addIncoming(firstPackIndex, zeroExtraneousBytes);
         for (unsigned i = 0; i < numElements; ++i) {
-            Value * ptr = outputBuffer->getStreamPackPtr(b, ba, b.getInt32(i), startIndex, packIndexPhi);
+            Value * ptr = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), startIndex, packIndexPhi);
             b.CreateBlockAlignedStore(vec_ZERO, ptr);
         }
         Value * const nextPackIndex = b.CreateAdd(packIndexPhi, sz_ONE);
@@ -419,27 +295,30 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         b.SetInsertPoint(clearRemainingPacksExit);
     }
 
+    Value * const totalIndex = b.CreateUDiv(total, sz_BlockWidth);
+
+    b.CreateCondBr(b.CreateICmpULT(startIndex, totalIndex), zeroExtraneousBlocks, exit);
+
+    b.SetInsertPoint(zeroExtraneousBlocks);
+
     Value * const nextIndex = b.CreateAdd(startIndex, sz_ONE);
+
     Value * const endIndex = b.CreateAdd(b.CreateUDiv(total, sz_BlockWidth), sz_ONE);
-    Value * const startPtr = outputBuffer->getStreamBlockPtr(b, ba, sz_ZERO, nextIndex);
-    Value * const endPtr = outputBuffer->getStreamBlockPtr(b, ba, sz_ZERO, endIndex);
+    Value * const startPtr = outputBuffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, nextIndex);
+    Value * const endPtr = outputBuffer->getStreamBlockPtr(b, baseAddress, sz_ZERO, endIndex);
+
     DataLayout DL(b.getModule());
     Type * const intPtrTy = DL.getIntPtrType(startPtr->getType());
     Value * const startPtrInt = b.CreatePtrToInt(startPtr, intPtrTy);
     Value * const endPtrInt = b.CreatePtrToInt(endPtr, intPtrTy);
     Value * const numBytes = b.CreateSub(endPtrInt, startPtrInt);
-    b.CreateMemZero(startPtr, numBytes, blockWidth / 8);
+    b.CreateMemZero(startPtr, numBytes, 1U);
 
     b.CreateBr(exit);
 
 
     b.SetInsertPoint(exit);
 
-}
-
-void RepeatingSourceKernel::generateFinalizeMethod(KernelBuilder & b) {
-    b.CreateFree(b.getScalarField("ancillaryBuffer"));
-    b.CreateFree(b.getScalarField("buffer"));
 }
 
 class StreamEq : public MultiBlockKernel {
@@ -753,10 +632,7 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
 
     const auto f = P.compile();
 
-    uint32_t result = 0;
-    f(&result);
-
-    if (result != 0 || optVerbose) {
+    if (optVerbose) {
 
         if (useNestedTest) {
 
@@ -791,6 +667,56 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
         }
 
         llvm::errs() << "] -- ";
+//        if (result == 0) {
+//            llvm::errs() << "success";
+//        } else {
+//            llvm::errs() << "failed";
+//        }
+//        llvm::errs() << '\n';
+    }
+
+    uint32_t result = 0;
+    f(&result);
+
+    if (result != 0 && !optVerbose) {
+
+        if (useNestedTest) {
+
+            llvm::errs() << "NESTED ";
+            bool called = false;
+            if (useFamilyCall[0]) {
+                llvm::errs() << "OUTER ";
+                called = true;
+            }
+            if (useNestedTest > 1 && useFamilyCall[1]) {
+                llvm::errs() << "INNER ";
+                called = true;
+            }
+            if (called) {
+                llvm::errs() << "FAMILY CALL ";
+            }
+        }
+
+        llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength << " : ";
+
+        char joiner = '[';
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            auto & vec = pattern[i];
+            llvm::errs() << joiner;
+            joiner = '{';
+            for (unsigned j = 0; j < patternLength; ++j) {
+                llvm::errs() << joiner << vec[j];
+                joiner = ',';
+            }
+            llvm::errs() << '}';
+        }
+
+        llvm::errs() << "] -- ";
+    }
+
+    if (result != 0 || optVerbose) {
+
         if (result == 0) {
             llvm::errs() << "success";
         } else {

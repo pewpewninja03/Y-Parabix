@@ -163,6 +163,7 @@ void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(KernelB
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::linkExternalMethods(KernelBuilder & b) {
     PipelineCompiler::linkPThreadLibrary(b);
+    StreamSetBuffer::linkFunctions(b);
     for (const auto & k : mKernels) {
         k.Object->linkExternalMethods(b);
     }
@@ -174,7 +175,6 @@ void PipelineKernel::linkExternalMethods(KernelBuilder & b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
-    StreamSetBuffer::linkFunctions(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
         PipelineCompiler::linkHistogramFunctions(b);
