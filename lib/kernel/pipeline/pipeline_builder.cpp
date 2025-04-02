@@ -197,12 +197,20 @@ Kernel * PipelineBuilder::makeKernel() {
             }
         };
 
+        if (mExternallySynchronized) {
+            mTarget->addAttribute(InternallySynchronized());
+        } else {
+            mTarget->setStride(codegen::SegmentSize);
+        }
+
         signature.reserve(4096);
         raw_string_ostream out(signature);
 
         out << 'P';
         if (mExternallySynchronized) {
             out << 'E';
+        } else {
+            out << mTarget->getStride();
         }
         for (unsigned i = 0; i < numOfKernels; ++i) {
             out << '_';
@@ -468,12 +476,6 @@ Kernel * PipelineBuilder::makeKernel() {
     }
 
     mTarget->mNumOfKernelFamilyCalls = numOfNestedKernelFamilyCalls;
-
-    if (mExternallySynchronized) {
-        mTarget->addAttribute(InternallySynchronized());
-    } else {
-        mTarget->setStride(codegen::SegmentSize);
-    }
 
     addKernelProperties(kernels, mTarget);
 
