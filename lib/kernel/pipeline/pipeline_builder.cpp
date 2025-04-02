@@ -103,7 +103,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
     bool canTerminate = false;
     bool sideEffecting = false;
     bool fatalTermination = false;
-    unsigned stride = 0;
     for (const auto & K : kernels) {
         Kernel * kernel = K.Object;
         for (const Attribute & attr : kernel->getAttributes()) {
@@ -124,11 +123,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
             }
         }
         assert (kernel->getStride());
-        if (stride) {
-            stride = boost::lcm(stride, kernel->getStride());
-        } else {
-            stride = kernel->getStride();
-        }
     }
 
     if (fatalTermination) {
@@ -142,7 +136,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
     if (sideEffecting) {
         output->addAttribute(SideEffecting());
     }
-    output->setStride(stride);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -478,6 +471,8 @@ Kernel * PipelineBuilder::makeKernel() {
 
     if (mExternallySynchronized) {
         mTarget->addAttribute(InternallySynchronized());
+    } else {
+        mTarget->setStride(codegen::SegmentSize);
     }
 
     addKernelProperties(kernels, mTarget);
