@@ -186,13 +186,28 @@ BixNum BixNumCompiler::HighBits(BixNum value, unsigned highBitCount) {
 }
 
 BixNum BixNumCompiler::Create(unsigned value) {
-    unsigned value_bits = floor_log2(value)+1;
+    unsigned value_bits = 1;
+    if (value > 0) value_bits = floor_log2(value)+1;
     BixNum v(value_bits);
     for (unsigned i = 0; i < value_bits; i++) {
         if ((value & (1<<i)) == 0) {
             v[i] = mPB.createZeroes();
         } else {
             v[i] = mPB.createOnes();
+        }
+    }
+    return v;
+}
+
+BixNum BixNumCompiler::Create(PabloAST * mask, unsigned value) {
+    unsigned value_bits = 1;
+    if (value > 0) value_bits = floor_log2(value)+1;
+    BixNum v(value_bits);
+    for (unsigned i = 0; i < value_bits; i++) {
+        if ((value & (1<<i)) == 0) {
+            v[i] = mPB.createZeroes();
+        } else {
+            v[i] = mask;
         }
     }
     return v;

@@ -26,6 +26,8 @@ class BixNumCompiler {
 public:
     BixNumCompiler(PabloBuilder & pb) : mPB(pb) {}
     BixNum Create(unsigned val);
+    // Create a bixnum of the given value at mask positions, 0 elsewhere.
+    BixNum Create(PabloAST * mask, unsigned val);
     PabloAST * EQ(BixNum value, unsigned test, const llvm::StringRef &Name = "");
     PabloAST * EQ(BixNum value, BixNum test, const llvm::StringRef &Name = "");
     PabloAST * NEQ(BixNum value, unsigned test, const llvm::StringRef &Name = "");
