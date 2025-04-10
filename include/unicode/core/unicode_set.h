@@ -27,7 +27,7 @@
 
 //
 // The internal datatype for quads - bitsets of 2^k codepoints.
-// Default: 64 codepoints (k=6).
+// Default: 32 codepoints (k=5).
 //
 
 namespace llvm { class raw_ostream; }
@@ -129,6 +129,10 @@ public:
     interval_t front() const noexcept;
 
     interval_t back() const noexcept;
+
+    codepoint_t min_codepoint() const {return front().first;}
+
+    codepoint_t max_codepoint() const {return back().second;}
 
     void print(llvm::raw_ostream & out) const noexcept;
 

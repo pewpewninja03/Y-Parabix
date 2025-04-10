@@ -297,7 +297,7 @@ void PropertyBasisExternal::resolveStreamSet(PipelineBuilder & b, std::vector<St
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
         std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
-        UTF::CC_List ccs;
+        std::vector<re::CC *> ccs;
         for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
         StreamSet * basis = b.CreateStreamSet(ccs.size());
         b.CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
@@ -877,9 +877,7 @@ void CodePointMatchKernel::generatePabloMethod() {
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
         const UCD::UnicodeSet & nullSet = p->GetNullSet();
-        std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
-        UTF::CC_List xfrm_ccs;
-        for (auto & b : xfrms) xfrm_ccs.push_back(makeCC(b, &cc::Unicode));
+        std::vector<UCD::UnicodeSet> & xfrm_ccs = p->GetBitTransformSets();
         UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
         std::vector<Var *> xfrm_vars;
         for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
@@ -887,8 +885,7 @@ void CodePointMatchKernel::generatePabloMethod() {
         }
         Var * nullVar = nullptr;
         if (!nullSet.empty()) {
-            re::CC * nullCC = makeCC(nullSet, &cc::Unicode);
-            xfrm_ccs.push_back(nullCC);
+            xfrm_ccs.push_back(nullSet);
             nullVar = pb.createVar("null_set", pb.createZeroes());
             xfrm_vars.push_back(nullVar);
         }
