@@ -414,6 +414,101 @@ def uset_to_range_list(s):
         rl.append((range_first, 0x10FFFF))
     return rl
 
+def range_list_to_uset(ranges):
+    s = empty_uset()
+    for r in ranges:
+        s = uset_union(s, range_uset(r))
+    return s
 
-UCD_point_regexp = re.compile("^([0-9A-F]{4,6})\s+;")
-UCD_range_regexp = re.compile("^([0-9A-F]{4,6})[.][.]([0-9A-F]{4,6})\s+;")
+def member_list_to_uset(members):
+    s = empty_uset()
+    for m in members:
+        s = uset_union(s, singleton_uset(m))
+    return s
+
+def uset_to_member_list(s):
+    rgs = uset_to_range_list(s)
+    cps = []
+    for (lo, hi) in rgs:
+        for cp in range(lo, hi+1):
+            cps.append(cp)
+    return cps
+
+UCD_point_regexp = re.compile("^([0-9A-F]{4,6})\\s+;")
+UCD_range_regexp = re.compile("^([0-9A-F]{4,6})[.][.]([0-9A-F]{4,6})\\s+;")
+
+#
+# Multiplexing Unicode Sets
+
+# Breakpoints of a set of character classes (CCs) represted as UnicodeSets:
+# each codepoint c such that there is some CC in CCs such that either
+# (a) c is in the CC and c-1 is not, or (b) c-1 is in the CC and c is not.
+# Boundary cases: if codepoint 0 is in some CC, then 0 is a breakpoint
+# (codepoint -1 is not in any CC).
+# If codepoint 0x10FFFF is in some CC then 0x110000 is a breakpoint.
+#
+# The breakpoints may be determined by iterating through the interval
+# representation of each CC.   For each interval (lo, hi), lo and hi+1
+# are breakpoints.
+#
+# For each breakpoint, a bitset is computed identifying the source CCs whose
+# status changes at the breakpoint.
+#
+
+def computeBreakpoints(CCs):
+    breakpoints = {}
+    for i in range(len(CCs)):
+        ranges = uset_to_range_list(CCs[i])
+        for rg in ranges:
+            (lo, hi) = rg
+            if not lo in breakpoints.keys():
+                breakpoints[lo] = 0  # empty bitset
+            breakpoints[lo] |= 1 << i
+            if not hi + 1 in breakpoints.keys():
+                breakpoints[hi+1] = 0  # empty bitset
+            breakpoints[hi+1] |= 1 << i
+    return breakpoints
+
+
+def computeMultiplexedCCs(CCs):
+    breakpoint_map = computeBreakpoints(CCs)
+
+    CC_set_to_exclusive_set_map = {}
+    # Entry 0 is for the characters not in any of the CCs.
+    CC_set_to_exclusive_set_map[0] = 0
+
+    exclusiveSetIDs = [[] for i in range(len(CCs))]
+
+    current_exclusive_set_idx = 0
+    multiplexed_bit_count = 0
+    current_set = 0
+
+    multiplexedCCs = []
+
+    range_lo = 0
+    next_set_index = 1
+    for bkpt in sorted(breakpoint_map.keys()):
+        if current_exclusive_set_idx > 0:  # We have a range entry to close for a pending exclusive set.
+            range_hi = bkpt - 1
+            for bit in range(multiplexed_bit_count):
+                if (current_exclusive_set_idx >> bit) & 1 == 1:
+                    multiplexedCCs[bit] = uset_union(multiplexedCCs[bit], range_uset(range_lo, range_hi))
+        range_lo = bkpt
+        if range_lo >= 0x110000: continue   # Beyond Unicode max
+        current_set ^= breakpoint_map[bkpt]
+        if current_set in CC_set_to_exclusive_set_map.keys():
+            current_exclusive_set_idx = CC_set_to_exclusive_set_map[current_set]
+        else:
+            # New exclusive class; assign the next sequential integer.
+            current_exclusive_set_idx = next_set_index
+            next_set_index += 1
+            CC_set_to_exclusive_set_map[current_set] = current_exclusive_set_idx
+            for i in range(len(CCs)):
+                if (current_set >> i) & 1 == 1:
+                    exclusiveSetIDs[i].append(current_exclusive_set_idx)
+            if current_exclusive_set_idx & (current_exclusive_set_idx - 1) == 0:
+                multiplexed_bit_count += 1
+                multiplexedCCs.append(empty_uset())
+
+    return (exclusiveSetIDs, multiplexedCCs)
+

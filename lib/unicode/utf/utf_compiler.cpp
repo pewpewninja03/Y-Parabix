@@ -123,10 +123,10 @@ struct Range {
 };
 
 
-UCD::UnicodeSet computeEndpoints(const std::vector<re::CC *> & CCs) {
+UCD::UnicodeSet computeEndpoints(CC_List & CCs) {
     UCD::UnicodeSet endpoints;
     for (unsigned i = 0; i < CCs.size(); i++) {
-        for (const auto range : *CCs[i]) {
+        for (const auto range : CCs[i]) {
             const auto lo = re::lo_codepoint(range);
             const auto hi = re::hi_codepoint(range);
             endpoints.insert(lo);
@@ -136,22 +136,9 @@ UCD::UnicodeSet computeEndpoints(const std::vector<re::CC *> & CCs) {
     return endpoints;
 }
 
-UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
-    UCD::UnicodeSet endpoints;
-    for (unsigned i = 0; i < CCs.size(); i++) {
-        for (const auto range : *CCs[i]) {
-            const auto lo = re::lo_codepoint(range);
-            const auto hi = re::hi_codepoint(range);
-            endpoints.insert(lo);
-            endpoints.insert(hi);
-        }
-    }
-    return endpoints;
-}
-
-re::CC * reduceCC(re::CC * cc, codepoint_t mask, cc::Alphabet & a) {
+re::CC * reduceCC(UCD::UnicodeSet cc, codepoint_t mask, cc::Alphabet & a) {
     UCD::UnicodeSet reduced;
-    for (const auto range : *cc) {
+    for (const auto range : cc) {
         const auto lo = re::lo_codepoint(range) & mask;
         const auto hi = re::hi_codepoint(range) & mask;
         reduced.insert_range(lo, hi);
@@ -161,13 +148,13 @@ re::CC * reduceCC(re::CC * cc, codepoint_t mask, cc::Alphabet & a) {
 //
 // Determine the actual range of codepoints encountered in a CC_List.
 // If all the CCs are empty, return the impossible range {0x10FFFF, 0}.
-Range CC_Set_Range(CC_List ccs) {
+Range CC_Set_Range(CC_List & ccs) {
     codepoint_t lo = 0x10FFFF;
     codepoint_t hi = 0;
     for (unsigned i = 0; i < ccs.size(); i++) {
-        if (!ccs[i]->empty()) {
-            lo = std::min(lo_codepoint(ccs[i]->front()), lo);
-            hi = std::max(hi_codepoint(ccs[i]->back()), hi);
+        if (!ccs[i].empty()) {
+            lo = std::min(ccs[i].min_codepoint(), lo);
+            hi = std::max(ccs[i].max_codepoint(), hi);
         }
     }
     return Range{lo, hi};
@@ -175,14 +162,14 @@ Range CC_Set_Range(CC_List ccs) {
 
 void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
     if (r.hi < r.lo) {
-        re::CC * const emptySet = re::makeCC(&Unicode);
+        auto const emptySet = UCD::UnicodeSet();
         for (unsigned i = 0; i < ccs.size(); i++) {
             in_range[i] = emptySet;
         }
     } else {
-        re::CC * const rangeCC = re::makeCC(r.lo, r.hi, &Unicode);
+        auto const rangeCC = UCD::UnicodeSet(r.lo, r.hi);
         for (unsigned i = 0; i < ccs.size(); i++) {
-            in_range[i] = re::intersectCC(ccs[i], rangeCC);
+            in_range[i] = ccs[i] & rangeCC;
         }
     }
 }
@@ -332,7 +319,7 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, EnclosingIn
     }
     if (CCmode == CC_Mode::BixNumCCs) {
         for (unsigned i = 0; i < ccs.size(); i++) {
-            for (const auto range : *ccs[i]) {
+            for (const auto range : ccs[i]) {
                 Range r{re::lo_codepoint(range), re::hi_codepoint(range)};
                 PabloAST * compiled = compileCodeRange(enclosing, r, pb);
                 pb.createAssign(mTargets[i], pb.createOr(mTargets[i], compiled));
@@ -342,7 +329,7 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, EnclosingIn
         Basis_Set basis = RangeBasis(enclosing.range, pb);
         cc::Parabix_CC_Compiler_Builder rangeCompiler(basis);
         for (unsigned i = 0; i < ccs.size(); i++) {
-            PabloAST * compiled = rangeCompiler.compileCC(ccs[i], pb);
+            PabloAST * compiled = rangeCompiler.compileCC(re::makeCC(ccs[i]), pb);
             pb.createAssign(mTargets[i], pb.createOr(mTargets[i], pb.createAnd(compiled, enclosing.test)));
         }
     } else {
@@ -396,7 +383,7 @@ public:
         mBasisVar(v), mPB(pb), mMask(mask) {
         mEncoder.setCodeUnitBits(mCodeUnitBits);
     }
-    void compile(Target_List targets, CC_List ccs);
+    void compile(Target_List & targets, CC_List & ccs);
 protected:
     pablo::Var *            mBasisVar;
     PabloBuilder &          mPB;
@@ -415,7 +402,7 @@ Basis_Set U21_Compiler::prepareUnifiedBasis(Range basis_range) {
     return basis;
 }
 
-void U21_Compiler::compile(Target_List targets, CC_List ccs) {
+void U21_Compiler::compile(Target_List & targets, CC_List & ccs) {
     //  Initialize all the target vars to 0.
     mTargets = targets;
     for (unsigned i = 0; i < targets.size(); i++) {
@@ -496,7 +483,7 @@ public:
         mBasisVar(v), mPB(pb), mMask(mask) {
         mEncoder.setCodeUnitBits(mCodeUnitBits);
     }
-    void compile(Target_List targets, CC_List ccs);
+    void compile(Target_List targets, CC_List & ccs);
 protected:
     pablo::Var *            mBasisVar;
     PabloBuilder &          mPB;
@@ -506,7 +493,7 @@ protected:
     SeqData                 mSeqData[4];
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompiler[4];
-    re::CC * codeUnitCC(re::CC *, unsigned pos = 1);
+    re::CC * codeUnitCC(UCD::UnicodeSet & cc, unsigned pos = 1);
     re::CC * codeUnitCC(CC_List & ccs, unsigned pos = 1);
     virtual Basis_Set & getBasis(U8_Seq_Kind k, unsigned pos) = 0;
     virtual bool costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold);
@@ -516,7 +503,7 @@ protected:
     void createInitialHierarchy(CC_List & ccs);
     void extendLengthHierarchy(EnclosingInfo & info, PabloBuilder & pb);
     void prepareFixedLengthHierarchy(U8_Seq_Kind k, EnclosingInfo & info, PabloBuilder & pb);
-    CC_List prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb);
+    CC_List prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, CC_List & ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb);
     void compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & if_parent, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
     PabloAST * compileCodeUnit(U8_Seq_Kind k, Range enclosing_range, re::CC * unitCC, unsigned pos, PabloBuilder & pb);
@@ -530,7 +517,7 @@ bool U8_Compiler::costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, u
     unsigned lgth = mEncoder.encoded_length(cc_span.hi);
     unsigned costSoFar = 0;
     for (auto cc : ccs) {
-        unsigned ranges = cc->size();
+        unsigned ranges = cc.size();
         unsigned logic_cost = ranges * (lgth - from_pos + 1) * BinaryLogicCostPerByte;
         costSoFar += logic_cost;
         if (costSoFar > threshhold) return true;
@@ -538,7 +525,7 @@ bool U8_Compiler::costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, u
     return false;
 }
 
-void U8_Compiler::compile(Target_List targets, CC_List ccs) {
+void U8_Compiler::compile(Target_List targets, CC_List & ccs) {
     //  Initialize all the target vars to 0.
     mTargets = targets;
     for (unsigned i = 0; i < targets.size(); i++) {
@@ -561,7 +548,7 @@ void U8_Compiler::compile(Target_List targets, CC_List ccs) {
     createInitialHierarchy(ccs);
 }
 
-re::CC * U8_Compiler::codeUnitCC(re::CC * cc, unsigned pos) {
+re::CC * U8_Compiler::codeUnitCC(UCD::UnicodeSet & cc, unsigned pos) {
     CC_List singleton = {cc};
     return codeUnitCC(singleton, pos);
 }
@@ -569,7 +556,7 @@ re::CC * U8_Compiler::codeUnitCC(re::CC * cc, unsigned pos) {
 re::CC * U8_Compiler::codeUnitCC(CC_List & ccs, unsigned pos) {
     re::CC * unitCC = re::makeCC(&Byte);
     for (auto cc : ccs) {
-        for (auto i : *cc) {
+        for (auto i : cc) {
             unsigned lo_unit = mEncoder.nthCodeUnit(lo_codepoint(i), pos);
             unsigned hi_unit = mEncoder.nthCodeUnit(hi_codepoint(i), pos);
             unitCC = makeCC(unitCC, makeByte(lo_unit, hi_unit));
@@ -614,7 +601,7 @@ PabloAST * U8_Compiler::compileCodeUnit(U8_Seq_Kind k, Range enclosing_range, re
 std::vector<UCD::UnicodeSet> U8_Compiler::computeFullBlockSets(CC_List & ccs, unsigned pos) {
     std::vector<UCD::UnicodeSet> fullBlockSet(ccs.size());
     for (unsigned i = 0; i < ccs.size(); i++) {
-        for (auto rg : *ccs[i]) {
+        for (auto rg : ccs[i]) {
             codepoint_t lo = lo_codepoint(rg);
             codepoint_t hi = hi_codepoint(rg);
             codepoint_t lo_base = mEncoder.minCodePointWithCommonCodeUnits(lo, pos);
@@ -769,7 +756,7 @@ void U8_Compiler::extendLengthHierarchy(EnclosingInfo & initialInfo, PabloBuilde
     }
 }
 
-CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb) {
+CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, CC_List & ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb) {
     std::vector<UCD::UnicodeSet> fullBlockSets = computeFullBlockSets(ccs, code_unit);
     CC_List remainingCCs(ccs.size());
     for (unsigned i = 0; i < ccs.size(); i++) {
@@ -777,8 +764,7 @@ CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, 
             remainingCCs[i] = ccs[i];
             continue;
         }
-        re::CC * fullBlockCC = re::makeCC(fullBlockSets[i], &Unicode);
-        re::CC * unitCC = codeUnitCC(fullBlockCC, code_unit);
+        re::CC * unitCC = codeUnitCC(fullBlockSets[i], code_unit);
         unsigned lgth = k + 1;
         PabloAST * t = nullptr;
         if (code_unit == 1) {
@@ -792,13 +778,13 @@ CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, 
         }
         if (UTF_CompilationTracing) {
             llvm::errs() << "prepareFullBlockSets[" ;
-            llvm::errs().write_hex(fullBlockCC->min_codepoint());
+            llvm::errs().write_hex(fullBlockSets[i].min_codepoint());
             llvm::errs() << ", ";
-            llvm::errs().write_hex(fullBlockCC->max_codepoint());
+            llvm::errs().write_hex(fullBlockSets[i].max_codepoint());
             llvm::errs() << "]\n";
         }
         pb.createAssign(mSeqData[k].targets[i], pb.createOr(mSeqData[k].targets[i], t));
-        remainingCCs[i] = subtractCC(ccs[i], fullBlockCC);
+        remainingCCs[i] = ccs[i] - fullBlockSets[i];
     }
     return remainingCCs;
 }
@@ -864,11 +850,11 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & if_parent, 
         rangeCCs = prepareFullBlockSets(k, enclosing.range, rangeCCs, enclosing_test, code_unit, pb);
         //
         // Now process the individual code units and directly compile low cost sequences.
-        re::CC * unionCC = rangeCCs[0];
+        UCD::UnicodeSet unionCC = rangeCCs[0];
         for (unsigned i = 1; i < rangeCCs.size(); i++) {
-            unionCC = re::makeCC(unionCC, rangeCCs[i]);
+            unionCC = unionCC + rangeCCs[i];
         }
-        codepoint_t lo = unionCC->min_codepoint();
+        codepoint_t lo = unionCC.min_codepoint();
         codepoint_t unit_range_base = mEncoder.minCodePointWithCommonCodeUnits(lo, code_unit);
         auto unit_range = mEncoder.maxCodePointWithCommonCodeUnits(lo, code_unit) - unit_range_base + 1;
         auto if_parent_range = if_parent.range.hi - if_parent.range.lo + 1;
@@ -1018,11 +1004,11 @@ bool U8_Advance_Compiler::costModelExceedsThreshhold(CC_List & ccs, unsigned fro
     unsigned lgth = mEncoder.encoded_length(cc_span.hi);
     unsigned costSoFar = 0;
     for (auto cc : ccs) {
-        unsigned ranges = cc->size();
+        unsigned ranges = cc.size();
         unsigned logic_cost = ranges * (lgth - from_pos + 1) * BinaryLogicCostPerByte;
         costSoFar += logic_cost;
         if ((from_pos < lgth) && !AdvanceBasis) {
-            unsigned cc_range = cc->max_codepoint() - cc->min_codepoint();
+            unsigned cc_range = cc.max_codepoint() - cc.min_codepoint();
             unsigned final_shifts = cc_range/64;
             unsigned shift_cost = final_shifts * ShiftCostFactor;
             costSoFar += shift_cost;
@@ -1089,6 +1075,14 @@ mVar(basisVar), mPB(pb), mMask(mask), mBitMovement(mode) {
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
              pablo::BitMovementMode mode) :
 mVar(basisVar), mPB(pb), mMask(nullptr), mBitMovement(mode) {}
+
+void UTF_Compiler::compile(Target_List targets, std::vector<re::CC *> ccs) {
+    std::vector<UCD::UnicodeSet> usets(ccs.size());
+    for (unsigned i = 0; i < ccs.size(); i++) {
+        usets[i] = *ccs[i];
+    }
+    compile(targets, usets);
+}
 
 void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
     llvm::ArrayType * ty = cast<ArrayType>(mVar->getType());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unicode/core/UCD_Config.h>
+#include <unicode/core/unicode_set.h>
 #include <unicode/utf/utf_encoder.h>
 #include <vector>
 #include <pablo/pablo_toolchain.h>
@@ -22,7 +23,7 @@ namespace UTF {
 std::string kernelAnnotation();
 
 using Target_List = std::vector<pablo::Var *>;
-using CC_List = std::vector<re::CC *>;
+using CC_List = std::vector<UCD::UnicodeSet>;
 
 class UTF_Compiler {
 public:
@@ -32,6 +33,7 @@ public:
     UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
                  pablo::BitMovementMode m);
     void compile(Target_List targets, CC_List ccs);
+    void compile(Target_List targets, std::vector<re::CC *> ccs);
 protected:
     pablo::Var *            mVar;
     pablo::PabloBuilder &   mPB;

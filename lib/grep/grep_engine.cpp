@@ -47,6 +47,7 @@
 #include <pablo/pablo_kernel.h>
 #include <re/adt/adt.h>
 #include <re/adt/re_utility.h>
+#include <re/adt/re_empty_set.h>
 #include <re/printer/re_printer.h>
 #include <re/alphabet/alphabet.h>
 #include <re/analysis/re_analysis.h>
@@ -271,6 +272,9 @@ void GrepEngine::initRE(re::RE * re) {
     }
     mRE = expandPermutes(re);
     mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
+    if (isEmptySet(mRE)) {
+        mColoring = false;
+    }
     // Determine the unit of length for the RE.  If the RE involves
     // fixed length UTF-8 sequences only, then UTF-8 can be used
     // for most efficient processing.   Otherwise we must use full
