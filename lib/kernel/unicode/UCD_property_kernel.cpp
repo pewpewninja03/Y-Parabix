@@ -52,12 +52,10 @@ void UnicodePropertyKernelBuilder::generatePabloMethod() {
     pablo::Var * propertyVar = pb.createVar(mName->getFullName(), pb.createZeroes());
     re::RE * property_defn = mName->getDefinition();
     if (re::CC * propertyCC = llvm::dyn_cast<re::CC>(property_defn)) {
-        //unicodeCompiler.addTarget(propertyVar, propertyCC);
         unicodeCompiler.compile({propertyVar}, {propertyCC});
     } else if (re::PropertyExpression * pe = llvm::dyn_cast<re::PropertyExpression>(property_defn)) {
         if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
             re::CC * propertyCC = llvm::cast<re::CC>(pe->getResolvedRE());
-            //unicodeCompiler.addTarget(propertyVar, propertyCC);
             unicodeCompiler.compile({propertyVar}, {propertyCC});
         }
     }
@@ -79,17 +77,15 @@ UnicodePropertyBasis::UnicodePropertyBasis(LLVMTypeSystemInterface & ts, UCD::En
 void UnicodePropertyBasis::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-    std::vector<UCD::UnicodeSet> & bases = mEnumObj->GetEnumerationBasisSets();
-    std::vector<Var *> targetVars(bases.size());
-    std::vector<re::CC *> basisCCs(bases.size());
-    for (unsigned i = 0; i < bases.size(); i++) {
+    std::vector<UCD::UnicodeSet> & basisSets = mEnumObj->GetEnumerationBasisSets();
+    std::vector<Var *> targetVars(basisSets.size());
+    for (unsigned i = 0; i < basisSets.size(); i++) {
         std::string vname = "basis" + std::to_string(i);
         targetVars[i] = pb.createVar(vname, pb.createZeroes());
-        basisCCs[i] = re::makeCC(bases[i], &Unicode);
     }
-    unicodeCompiler.compile(targetVars, basisCCs);
+    unicodeCompiler.compile(targetVars, basisSets);
     Var * const property_basis = getOutputStreamVar("property_basis");
-    for (unsigned i = 0; i < bases.size(); i++) {
+    for (unsigned i = 0; i < targetVars.size(); i++) {
         pb.createAssign(pb.createExtract(property_basis, pb.getInteger(i)), targetVars[i]);
     }
 }

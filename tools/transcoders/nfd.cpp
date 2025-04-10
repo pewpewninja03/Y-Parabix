@@ -239,34 +239,34 @@ void NFD_Translation::generatePabloMethod() {
     std::vector<Var *> NFD3_Vars(NFD3.size());
     std::vector<Var *> NFD4_Vars(NFD4.size());
     std::vector<Var *> all_targets(NFD1.size() + NFD2.size() + NFD3.size() + NFD4.size());
-    std::vector<re::CC *> all_CCs(NFD1.size() + NFD2.size() + NFD3.size() + NFD4.size());
+    std::vector<UCD::UnicodeSet> all_CCs(NFD1.size() + NFD2.size() + NFD3.size() + NFD4.size());
 
     for (unsigned i = 0; i < NFD1.size(); i++) {
         Var * v = pb.createVar("NFD1_bit" + std::to_string(i), pb.createZeroes());
         NFD1_Vars[i] = v;
         all_targets[i] = v;
-        all_CCs[i] = re::makeCC(NFD1[i], &cc::Unicode);
+        all_CCs[i] = NFD1[i];
     }
     unsigned base = NFD1.size();
     for (unsigned i = 0; i < NFD2.size(); i++) {
         Var * v = pb.createVar("NFD2_bit" + std::to_string(i), pb.createZeroes());
         NFD2_Vars[i] = v;
         all_targets[base + i] = v;
-        all_CCs[base + i] = re::makeCC(NFD2[i], &cc::Unicode);
+        all_CCs[base + i] = NFD2[i];
     }
     base = base + NFD2.size();
     for (unsigned i = 0; i < NFD3.size(); i++) {
         Var * v = pb.createVar("NFD3_bit" + std::to_string(i), pb.createZeroes());
         NFD3_Vars[i] = v;
         all_targets[base + i] = v;
-        all_CCs[base + i] = re::makeCC(NFD3[i], &cc::Unicode);
+        all_CCs[base + i] = NFD3[i];
     }
     base = base + NFD3.size();
     for (unsigned i = 0; i < NFD4.size(); i++) {
         Var * v = pb.createVar("NFD4_bit" + std::to_string(i), pb.createZeroes());
         NFD4_Vars[i] = v;
         all_targets[base + i] = v;
-        all_CCs[base + i] = re::makeCC(NFD4[i], &cc::Unicode);
+        all_CCs[base + i] = NFD4[i];
     }
     unicodeCompiler.compile(all_targets, all_CCs);
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
