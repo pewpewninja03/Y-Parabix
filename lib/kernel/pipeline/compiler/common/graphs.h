@@ -277,6 +277,7 @@ enum BufferType : unsigned {
     // ------------------
     , HasIllustratedStreamset = 512
     , StartsNestedSynchronizationRegion = 1024
+    , RequiresEmptyWriteOverflow = 2048
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -361,6 +362,10 @@ struct BufferNode {
 
     bool startsNestedSynchronizationRegion() const {
         return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;
+    }
+
+    bool requiresEmptyWriteOverflow() const {
+        return (Type & BufferType::RequiresEmptyWriteOverflow) != 0;
     }
 
     bool isThreadLocal() const {

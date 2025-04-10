@@ -1219,7 +1219,7 @@ void PipelineCompiler::recordBufferExpansionHistory(KernelBuilder & b,
     // consumer processed item count [3,n)
     if (LLVM_LIKELY(!bn.isReturned())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
-
+        assert (out_degree(id, mConsumerGraph) > 0);
         Value * consumerDataPtr; Type * consumerTy;
         std::tie(consumerDataPtr, consumerTy) = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
         Value * const processedPtr = b.CreateGEP(consumerTy, consumerDataPtr, { ZERO, ONE });
@@ -1243,7 +1243,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
         FunctionType * fTy = Dprintf->getFunctionType();
 
         size_t maxKernelLength = 0;
-        size_t maxBindingLength = 0;
+        size_t maxBindingLength = 0;        
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
             const Kernel * const kernel = getKernel(i);
             maxKernelLength = std::max(maxKernelLength, kernel->getName().size());
@@ -1258,6 +1258,10 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                 maxBindingLength = std::max(maxBindingLength, ref.getName().length());
             }
         }
+        if (LLVM_UNLIKELY(in_degree(PipelineOutput, mConsumerGraph) > 0)) {
+            maxKernelLength = std::max(maxKernelLength, mTarget->getName().size());
+        }
+
         maxKernelLength += 4;
         maxBindingLength += 4;
 
@@ -1440,13 +1444,19 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                     for (const auto e : make_iterator_range(out_edges(buffer, mConsumerGraph))) {
                         const ConsumerEdge & c = mConsumerGraph[e];
                         const auto consumer = target(e, mConsumerGraph);
-                        itemCountArgs[2] = b.getInt32(consumer);
-                        itemCountArgs[3] = b.GetString(getKernel(consumer)->getName());
-                        itemCountArgs[5] = b.getInt32(c.Port);
-                        const Binding & binding = getBinding(consumer, StreamSetPort{PortType::Input, c.Port});
-                        itemCountArgs[6] = b.GetString(binding.getName());
-                        const auto k = c.Index + 2; assert (k > 2);
-                        Value * const processedField = b.CreateGEP(arrayTy, entryArray, {index, b.getInt32(k)});
+                        if (LLVM_UNLIKELY(consumer == PipelineOutput)) {
+                            itemCountArgs[2] = b.getInt32(PipelineInput);
+                            itemCountArgs[3] = b.GetString(mTarget->getName());
+                            itemCountArgs[5] = b.getInt32(0);
+                            itemCountArgs[6] = b.GetString("");
+                        } else {
+                            itemCountArgs[2] = b.getInt32(consumer);
+                            itemCountArgs[3] = b.GetString(getKernel(consumer)->getName());
+                            itemCountArgs[5] = b.getInt32(c.Port);
+                            const Binding & binding = getBinding(consumer, StreamSetPort{PortType::Input, c.Port});
+                            itemCountArgs[6] = b.GetString(binding.getName());
+                        }
+                        Value * const processedField = b.CreateGEP(arrayTy, entryArray, {index, b.getInt32(c.Index + 2)});
                         itemCountArgs[7] = b.CreateAlignedLoad(sizeTy, processedField, SizeTyABIAlignment);
                         b.CreateCall(fTy, Dprintf, itemCountArgs);
                     }

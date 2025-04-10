@@ -1471,7 +1471,7 @@ ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, Stre
     return tmp;
 }(),
 {Binding{"byteStream", byteStream}, Binding{"filter", filter}},
-{Binding{"output", output, PopcountOf("filter")}}, {}, {}, {}) {
+{Binding{"output", output, PopcountOf("filter"), EmptyWriteOverflow()}}, {}, {}, {}) {
     assert (byteStream->getFieldWidth() == output->getFieldWidth());
     if (streamOffset) {
         mInputScalars.emplace_back("offset", streamOffset);

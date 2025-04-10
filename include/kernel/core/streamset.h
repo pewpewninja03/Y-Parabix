@@ -63,6 +63,8 @@ public:
 
     bool isEmptySet() const;
 
+    bool isSingleElementStreamSet() const;
+
     bool isDynamic() const {
         return (mBufferKind == BufferKind::DynamicBuffer) || (mBufferKind == BufferKind::ManagedDynamicBuffer);
     }

@@ -924,7 +924,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts) || codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))
 #endif
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
-, mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
+, mTraceDynamicBuffers(P.mTraceDynamicBuffers)
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
 , mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))

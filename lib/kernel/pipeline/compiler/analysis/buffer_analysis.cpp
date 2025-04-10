@@ -170,7 +170,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::EmptyWriteOverflow:
-                        bn.RequiredCapacity = std::max(bn.RequiredCapacity, 1U);
+                        bn.Type |= BufferType::RequiresEmptyWriteOverflow;
                         break;
                     case AttrId::InOut:
                         if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
@@ -209,6 +209,18 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         }
                         break;
                     default: break;
+                }
+            }
+
+            if (LLVM_UNLIKELY(bn.Type & BufferType::RequiresEmptyWriteOverflow)) {
+                auto id = streamSet;
+                for (;;) {
+                    if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
+                        break;
+                    }
+                    id = parent(id, InOutStreamSetReplacement);
+                    BufferNode & bi = mBufferGraph[id];
+                    bi.Type |= BufferType::RequiresEmptyWriteOverflow;
                 }
             }
 
@@ -418,6 +430,9 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
             }
         }
+
+
+
 
         // If this kernel is not a source kernel but all inputs have a zero lower bound, it doesnot have
         // explicit termination condition. Report an error if this is the case.
@@ -767,6 +782,9 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
             const auto underflowSize = round_up_to(maxLookBehind, blockWidth) / blockWidth;
             reqSize = std::max(reqSize, underflowSize);
         }
+        if (LLVM_UNLIKELY(reqSize == 0 && bn.requiresEmptyWriteOverflow())) {
+            reqSize = 1U;
+        }
         bn.RequiredCapacity = reqSize;
 
     }
@@ -791,8 +809,6 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
         if (LLVM_UNLIKELY(bn.Buffer != nullptr)) {
             continue;
         }
-
-
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) > 0)) {
@@ -827,6 +843,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 #endif
 
                 if (LLVM_UNLIKELY(bn.isManagedOutput())) {
+                    assert (!bn.IsLinear);
                     buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bufferSize, 0U);
                 } else {
                     buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);

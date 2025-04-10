@@ -125,6 +125,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     if (out_degree(streamSet, mConsumerGraph) == 0) {
 
         const auto & bn = mBufferGraph[streamSet];
+
         // A returned buffer never releases data.
         if (bn.isReturned()) {
             return b.getSize(0);
@@ -166,6 +167,15 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
         itemCount = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment, true);
     }
     assert (itemCount);
+
+//    const auto producer = parent(streamSet, mBufferGraph);
+//    assert (PipelineInput <= producer && producer < PipelineOutput);
+//    if (streamSet == 14 && getKernel(producer)->getName().compare("ByteFilterByMask1x8") == 0) {
+//        errs() << "ignoring streamset " << 14 << "\n";
+//        itemCount = b.CreateSaturatingSub(itemCount, b.getSize(2));
+//        // itemCount = b.getSize(0);
+//    }
+
     return itemCount;
 #endif
 }
@@ -234,6 +244,9 @@ void PipelineCompiler::writeConsumedItemCounts(KernelBuilder & b) {
         // check to see if we've fully finished processing any stream
         if (c.Flags & ConsumerEdge::WriteConsumedCount) {
             const auto id = getTruncatedStreamSetSourceId(streamSet);
+            #ifdef NDEBUG
+
+            #endif
             Value * const consumed = b.getScalarField(TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
             #ifdef PRINT_DEBUG_MESSAGES
             const auto output = in_edge(streamSet, mBufferGraph);
@@ -316,8 +329,10 @@ void PipelineCompiler::zeroAnySkippedTransitoryConsumedItemCountsUntil(KernelBui
             const auto consumer = target(e, mConsumerGraph);
             if (consumer >= mKernelId) { // && consumer <= targetKernelId
                 const auto name = TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet);
-                Value * const transConsumedPtr = getScalarFieldPtr(b, name).first;
-                b.CreateAlignedStore(b.getSize(0), transConsumedPtr, SizeTyABIAlignment);
+                if (LLVM_LIKELY(out_degree(streamSet, mConsumerGraph) != 0)) {
+                    Value * const transConsumedPtr = getScalarFieldPtr(b, name).first;
+                    b.CreateAlignedStore(b.getSize(0), transConsumedPtr, SizeTyABIAlignment);
+                }
                 break;
             }
         }

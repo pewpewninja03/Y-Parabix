@@ -23,12 +23,15 @@ BOOST_NOINLINE void PipelineCompiler::debugPrint(KernelBuilder & b, Twine format
     #endif
     #ifdef PRINT_DEBUG_MESSAGES_FOR_NON_NESTED_PIPELINE_ONLY
     if (mIsNestedPipeline) return;
-    #endif
+    #endif 
     #ifdef PRINT_DEBUG_MESSAGES_FOR_KERNEL_NUM
     const std::initializer_list<unsigned> L{0,PRINT_DEBUG_MESSAGES_FOR_KERNEL_NUM};
     if (std::find(L.begin(), L.end(), mKernelId) == L.end()) {
         return;
     }
+    #endif
+    #ifdef PRINT_DEBUG_MESSAGES_FOR_KERNEL_NAME
+    if (mKernel == nullptr || mKernel->getName().compare(PRINT_DEBUG_MESSAGES_FOR_KERNEL_NAME) != 0) return;
     #endif
     #ifdef PRINT_DEBUG_MESSAGES_FOR_MARKED_KERNELS_ONLY
     if (LLVM_LIKELY(mKernel == nullptr || !mKernel->hasEnabledPipelineDebugMessages())) return;

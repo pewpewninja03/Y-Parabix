@@ -368,7 +368,7 @@ add_output_rate:    O.set(nextRateId++);
     renumberingSeq.reserve(partitionCount);
 
     if (LLVM_UNLIKELY(!lexical_ordering(T, renumberingSeq))) {
-        report_fatal_error("Internal error: failed to generate acyclic partition graph");
+        report_fatal_error("Internal error: failed to generate initial acyclic partition graph");
     }
 
     assert (renumberingSeq[0] == 0);
@@ -857,10 +857,6 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     RenumberingGraph T(partitionCount);
 
-//    for (unsigned i = 1; i < partitionCount; ++i) {
-//        add_edge(0, i, 0, T);
-//    }
-
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
         const RelationshipNode & node = Relationships[u];
@@ -904,19 +900,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     for (unsigned i = 1; i < (partitionCount - 1); ++i) {
         if (out_degree(i, T) == 0) {
-            for (const auto e : make_iterator_range(in_edges(i, T))) {
-                V.set(source(e, T));
-            }
             add_edge(i, partitionCount - 1, 0, T);
-        }
-    }
-
-    for (const auto e : make_iterator_range(in_edges(partitionCount - 1, T))) {
-        const auto t = source(e, T);
-        for (auto j = V.find_first(); j != -1; j = V.find_next(j)) {
-            if (!edge(j, t, T).second) {
-                add_edge(j, t, 0, T);
-            }
         }
     }
 
@@ -924,7 +908,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
     renumberingSeq.reserve(partitionCount);
 
     if (LLVM_UNLIKELY(!lexical_ordering(T, renumberingSeq))) {
-        report_fatal_error("Internal error: failed to generate acyclic partition graph");
+        report_fatal_error("Internal error: failed to generate final acyclic partition graph");
     }
 
     assert (renumberingSeq[0] == 0);

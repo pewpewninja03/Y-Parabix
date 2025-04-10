@@ -90,8 +90,9 @@ uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
         report_fatal_error(Twine{"failed to size mmap buffer to ", std::to_string(size)});
     }
 
-    const size_t n = hasUnderflow ? 1 : 0;
-    const size_t m = 2 + n;
+    assert (hasUnderflow == 0 || hasUnderflow == 1);
+
+    const size_t m = 2 + hasUnderflow;
 
     uint8_t * base = (uint8_t*)mmap(NULL, m * size, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (base == MAP_FAILED) {
@@ -105,7 +106,7 @@ uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
         }
     }
     close(memfd);
-    return base + (n * size);
+    return base + (hasUnderflow * size);
 }
 
 void destroy_circular_buffer(uint8_t * base, const size_t size, const size_t hasUnderflow) {
@@ -192,6 +193,10 @@ Value * StreamSetBuffer::getStreamSetCount(kernel::KernelBuilder & b) const {
 
 bool StreamSetBuffer::isEmptySet() const {
     return getArraySize(mBaseType) == 0;
+}
+
+bool StreamSetBuffer::isSingleElementStreamSet() const {
+    return getArraySize(mBaseType) <= 1;
 }
 
 unsigned StreamSetBuffer::getFieldWidth() const {
@@ -1384,7 +1389,7 @@ Value * DynamicBuffer::expandBuffer(kernel::KernelBuilder & b, Value * const pro
 
             FixedArray<Value *, 2> makeArgs;
             makeArgs[0] = b.CreateMul(newInternalCapacity, typeSize);
-            makeArgs[1] = b.getSize(mHasUnderflow);
+            makeArgs[1] = b.getSize(mHasUnderflow ? 1U : 0U);
 
             Value * newBuffer = b.CreateCall(m->getFunction(__MAKE_CIRCULAR_BUFFER), makeArgs);
             newBuffer = b.CreatePointerCast(newBuffer, typePtrTy);
@@ -1398,8 +1403,12 @@ Value * DynamicBuffer::expandBuffer(kernel::KernelBuilder & b, Value * const pro
 
             auto & DL = m->getDataLayout();
             const auto typeSize = b.getTypeSize(DL, mType);
+            assert (typeSize >= (b.getBitBlockWidth() / 8));
             const auto align = largestPowerOf2ThatDivides(typeSize);
             assert ((typeSize % align) == 0);
+            assert (align >= (b.getBitBlockWidth() / 8));
+            assert ((align % (b.getBitBlockWidth() / 8)) == 0);
+
 
             b.CreateMemCpy(toWriteDataPtr, unreadDataPtr, bytesToCopy, align);
 

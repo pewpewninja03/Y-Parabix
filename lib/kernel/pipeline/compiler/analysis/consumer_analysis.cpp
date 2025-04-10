@@ -62,7 +62,6 @@ void PipelineAnalysis::makeConsumerGraph() {
             add_edge(id, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
 
-
         auto check = streamSet;
         while (out_degree(check, InOutStreamSetReplacement) > 0)  {
             check = child(check, InOutStreamSetReplacement);
@@ -73,7 +72,12 @@ void PipelineAnalysis::makeConsumerGraph() {
             }
         }
 
-
+        if (out_degree(id, mConsumerGraph) == 0 && id == streamSet) {
+            const auto producer = parent(id, mBufferGraph);
+            if (producer == PipelineInput || mTraceDynamicBuffers) {
+                add_edge(id, PipelineOutput, ConsumerEdge{}, mConsumerGraph);
+            }
+        }
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {

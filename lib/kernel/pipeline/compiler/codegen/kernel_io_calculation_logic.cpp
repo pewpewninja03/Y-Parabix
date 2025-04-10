@@ -813,8 +813,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     BasicBlock * const expandBuffer = b.CreateBasicBlock(prefix + "_mustModifyBuffer", mKernelLoopCall);
     BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
-    Value * const beforeExpansion = getWritableOutputItems(b, port);
-
+    Value * beforeExpansion = getWritableOutputItems(b, port);
     Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -1059,7 +1058,19 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
                             b.GetString(output.getName()),
                             consumed, produced);
         }
+
         writable = buffer->getLinearlyWritableItems(b, produced, consumed);
+
+        if (LLVM_UNLIKELY(bn.requiresEmptyWriteOverflow() && !bn.IsLinear)) {
+            auto width = b.getBitBlockWidth();
+            if (buffer->isSingleElementStreamSet()) {
+                const auto fw = buffer->getFieldWidth();
+                assert ((width % fw) == 0);
+                width /= fw;
+            }
+            writable = b.CreateSaturatingSub(writable, b.getSize(width));
+            writable = b.CreateRoundDown(writable, b.getSize(width - 1U));
+        }
     }
 
     #ifdef PRINT_DEBUG_MESSAGES
