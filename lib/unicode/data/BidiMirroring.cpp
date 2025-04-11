@@ -15,7 +15,7 @@
 
 namespace UCD {
     namespace BMG_ns {
-        /** Code Point Ranges for bmg mapping to <none>
+        /* Code Point Ranges for bmg mapping to <none>
         [0000, 0027], [002a, 003b], [003d, 003d], [003f, 005a],
         [005c, 005c], [005e, 007a], [007c, 007c], [007e, 00aa],
         [00ac, 00ba], [00bc, 0f39], [0f3e, 169a], [169d, 2038],
@@ -39,11 +39,9 @@ namespace UCD {
         [2e1e, 2e1f], [2e2a, 2e54], [2e5d, 3007], [3012, 3013],
         [301c, fe58], [fe5f, fe63], [fe66, ff07], [ff0a, ff1b],
         [ff1d, ff1d], [ff1f, ff3a], [ff3c, ff3c], [ff3e, ff5a],
-        [ff5c, ff5c], [ff5e, ff5e], [ff61, ff61], [ff64, 10ffff]**/
+        [ff5c, ff5c], [ff5e, ff5e], [ff61, ff61], [ff64, 10ffff]*/
 
-        
-        namespace {
-        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
+                const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
         {Full, 1}, {Mixed, 3}, {Full, 1}, {Mixed, 1}, {Full, 115},
         {Mixed, 1}, {Full, 58}, {Mixed, 1}, {Full, 76}, {Mixed, 4},
         {Full, 11}, {Mixed, 10}, {Full, 33}, {Mixed, 1}, {Full, 2},
@@ -61,24 +59,16 @@ namespace UCD {
         0xbf800000, 0xf87f8fc7, 0xbfffffff, 0xcfffc9c3, 0xfffffc00,
         0xe01fffff, 0xf00c00ff, 0x81ffffff, 0xffffffcf, 0xaffffcff,
         0xd7ffffff, 0x57ffffff, 0xfffffff2};
-        }
-
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 35, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 43, 0};
+        const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 35, __null_codepoint_set_quads, 43};
 
 
+        /* Code Point Ranges for bmg mapping to <codepoint>
+        */
 
-        /** Code Point Ranges for bmg mapping to <codepoint>
-        **/
-
-        
-        namespace {
-        const static UnicodeSet::run_t __reflexive_set_runs[] = {
+                const static UnicodeSet::run_t __reflexive_set_runs[] = {
         {Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __reflexive_set_quads = nullptr;
-        }
-
-        const static UnicodeSet reflexive_set{const_cast<UnicodeSet::run_t *>(__reflexive_set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__reflexive_set_quads), 0, 0};
-
+        const static UnicodeSet reflexive_set{__reflexive_set_runs, 1, __reflexive_set_quads, 0};
 
 
         const static std::unordered_map<codepoint_t, codepoint_t> explicit_cp_data = {

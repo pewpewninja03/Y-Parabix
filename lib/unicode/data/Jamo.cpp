@@ -15,35 +15,25 @@
 
 namespace UCD {
     namespace JSN_ns {
-        /** Code Point Ranges for JSN mapping to <none>
+        /* Code Point Ranges for JSN mapping to <none>
         [0000, 10ff], [110b, 110b], [1113, 1160], [1176, 11a7],
-        [11c3, 10ffff]**/
+        [11c3, 10ffff]*/
 
-        
-        namespace {
-        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
+                const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
         {Full, 136}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Full, 1},
         {Mixed, 2}, {Full, 34673}};
         const static UnicodeSet::bitquad_t  __null_codepoint_set_quads[] = {
         0xfff80800, 0xffc00001, 0x000000ff, 0xfffffff8};
-        }
-
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 7, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 4, 0};
+        const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 7, __null_codepoint_set_quads, 4};
 
 
+        /* Code Point Ranges for JSN mapping to <codepoint>
+        */
 
-        /** Code Point Ranges for JSN mapping to <codepoint>
-        **/
-
-        
-        namespace {
-        const static UnicodeSet::run_t __reflexive_set_runs[] = {
+                const static UnicodeSet::run_t __reflexive_set_runs[] = {
         {Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __reflexive_set_quads = nullptr;
-        }
-
-        const static UnicodeSet reflexive_set{const_cast<UnicodeSet::run_t *>(__reflexive_set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__reflexive_set_quads), 0, 0};
-
+        const static UnicodeSet reflexive_set{__reflexive_set_runs, 1, __reflexive_set_quads, 0};
 
 
         const static std::vector<unsigned> buffer_offsets = {

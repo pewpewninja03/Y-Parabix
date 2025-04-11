@@ -65,29 +65,17 @@ class UCset:
         hex_specifier = "%%#0%ix" % (int(quad_bits / 4) + 2)
         runtype = {-1: "Full", 0: "Empty", 1: "Mixed"}
 
-        str = "\n" + (" " * indent) + "namespace {\n" + \
-              (" " * indent) + "const static UnicodeSet::run_t __%s_runs[] = {\n" % propertyName + \
+        str = (" " * indent) + "const static UnicodeSet::run_t __%s_runs[] = {\n" % propertyName + \
               (" " * indent) + cformat.multiline_fill(['{%s, %i}' % (runtype[r[0]], r[1]) for r in self.runs], ',',
-                                                      indent) + \
-              "};\n"
+                                                      indent) + "};\n"
 
         if len(self.quads) == 0:
             str += (" " * indent) + "const static UnicodeSet::bitquad_t * const __%s_quads = nullptr;\n" % propertyName
         else:
             str += (" " * indent) + "const static UnicodeSet::bitquad_t  __%s_quads[] = {\n" % propertyName + \
-                   (" " * indent) + cformat.multiline_fill([hex_specifier % q for q in self.quads], ',', indent) + \
-                   "};\n"
-
-        # Despite being const_cast below, neither runs nor quads will be modified by the UnicodeSet. If any
-        # modifications are made, they first test the run/quad capacity and will observe that they 0 length
-        # and allocate heap memory to make any changes
-
-        str += (" " * indent) + "}\n\n" + \
-               (" " * indent) + \
-               "const static UnicodeSet %s{const_cast<UnicodeSet::run_t *>(__%s_runs), %i, 0, " \
-               "const_cast<UnicodeSet::bitquad_t *>(__%s_quads), %i, 0};\n\n" \
+                   (" " * indent) + cformat.multiline_fill([hex_specifier % q for q in self.quads], ',', indent) + "};\n"
+        str += (" " * indent) + "const static UnicodeSet %s{__%s_runs, %i, __%s_quads, %i};\n" \
                % (propertyName, propertyName, len(self.runs), propertyName, len(self.quads))
-
         return str
 
     def bytes(self):

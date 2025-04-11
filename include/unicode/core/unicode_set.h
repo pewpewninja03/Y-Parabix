@@ -162,6 +162,7 @@ public:
     UnicodeSet(const std::vector<interval_t>::iterator begin, const std::vector<interval_t>::iterator end) noexcept;
     UnicodeSet(std::initializer_list<interval_t>::iterator begin, std::initializer_list<interval_t>::iterator end) noexcept;
     UnicodeSet(run_t * const runs, const uint32_t runLength, const uint32_t runCapacity, bitquad_t * const quads, const uint32_t quadLength, const uint32_t quadCapacity) noexcept;
+    UnicodeSet(const run_t * const runs, const uint32_t runLength, const bitquad_t * const quads, const uint32_t quadLength) noexcept;
 
     UnicodeSet(std::initializer_list<run_t> r, std::initializer_list<bitquad_t> q) noexcept;
 
