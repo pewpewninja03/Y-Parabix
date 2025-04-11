@@ -18,10 +18,8 @@ namespace UCD {
         /* Code Point Ranges for lc (possibly overriding values from slc)
         [0130, 0130]*/
 
-                const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
-        {Empty, 9}, {Mixed, 1}, {Empty, 34806}};
-        const static UnicodeSet::bitquad_t  __explicitly_defined_set_quads[] = {
-        0x00010000};
+        const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {{Empty, 9}, {Mixed, 1}, {Empty, 34806}};
+        const static UnicodeSet::bitquad_t __explicitly_defined_set_quads[] = {0x00010000};
         const static UnicodeSet explicitly_defined_set{__explicitly_defined_set_runs, 3, __explicitly_defined_set_quads, 1};
 
 
@@ -50,12 +48,12 @@ PropertyObject * get_LC_PropertyObject() {  return & LC_ns::property_object; }
         [1fe2, 1fe4], [1fe6, 1fe7], [1ff2, 1ff4], [1ff6, 1ff7],
         [1ffc, 1ffc], [fb00, fb06], [fb13, fb17]*/
 
-                const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
+        const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
         {Empty, 6}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 4},
         {Mixed, 1}, {Empty, 12}, {Mixed, 2}, {Empty, 14}, {Mixed, 1},
         {Empty, 199}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Full, 1}, {Mixed, 3}, {Empty, 1752}, {Mixed, 1}, {Empty, 32807}};
-        const static UnicodeSet::bitquad_t  __explicitly_defined_set_quads[] = {
+        const static UnicodeSet::bitquad_t __explicitly_defined_set_quads[] = {
         0x80000000, 0x00000200, 0x00010000, 0x00010000, 0x00010000,
         0x00000080, 0x07c00000, 0x00550000, 0x10dcffff, 0x00cc10dc,
         0x10dc00dc, 0x00f8007f};
@@ -207,12 +205,12 @@ PropertyObject * get_UC_PropertyObject() {  return & UC_ns::property_object; }
         [1fe6, 1fe7], [1ff2, 1ff2], [1ff4, 1ff4], [1ff6, 1ff7],
         [fb00, fb06], [fb13, fb17]*/
 
-                const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
+        const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
         {Empty, 6}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 4},
         {Mixed, 1}, {Empty, 12}, {Mixed, 2}, {Empty, 14}, {Mixed, 1},
         {Empty, 199}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 2},
         {Mixed, 3}, {Empty, 1752}, {Mixed, 1}, {Empty, 32807}};
-        const static UnicodeSet::bitquad_t  __explicitly_defined_set_quads[] = {
+        const static UnicodeSet::bitquad_t __explicitly_defined_set_quads[] = {
         0x80000000, 0x00000200, 0x00010000, 0x00010000, 0x00010000,
         0x00000080, 0x07c00000, 0x00550000, 0x00d40000, 0x00cc00d4,
         0x00d400dc, 0x00f8007f};

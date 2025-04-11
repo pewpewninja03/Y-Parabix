@@ -216,7 +216,7 @@ namespace UCD {
         [1eeab, 1eebb], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189],
         [1fbf0, 1fbf9], [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d],
         [2b820, 2cea1], [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d],
-        [30000, 3134a], [31350, 323af]*/
+        [30000, 3134a], [31350, 323af] */
 
         const static UnicodeSet::run_t __alnum_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -297,7 +297,7 @@ namespace UCD {
         {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18}, {Mixed, 1},
         {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154},
         {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __alnum_set_quads[] = {
+        const static UnicodeSet::bitquad_t __alnum_set_quads[] = {
         0x03ff0000, 0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff,
         0xff7fffff, 0x0003ffc3, 0x0000501f, 0x00000020, 0xbcdffff8,
         0xffffd740, 0xfffffffb, 0xffbfffff, 0xfffffc03, 0xfffeffff,
@@ -411,7 +411,7 @@ PropertyObject * get_ALNUM_PropertyObject() {  return & ALNUM_ns::property_objec
         [11da0, 11da9], [11f50, 11f59], [16130, 16139], [16a60, 16a69],
         [16ac0, 16ac9], [16b50, 16b59], [16d70, 16d79], [1ccf0, 1ccf9],
         [1d7ce, 1d7ff], [1e140, 1e149], [1e2f0, 1e2f9], [1e4f0, 1e4f9],
-        [1e5f1, 1e5fa], [1e950, 1e959], [1fbf0, 1fbf9]*/
+        [1e5f1, 1e5fa], [1e950, 1e959], [1fbf0, 1fbf9] */
 
         const static UnicodeSet::run_t __xdigit_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 47}, {Mixed, 1}, {Empty, 3},
@@ -441,7 +441,7 @@ PropertyObject * get_ALNUM_PropertyObject() {  return & ALNUM_ns::property_objec
         {Mixed, 1}, {Empty, 12}, {Mixed, 1}, {Empty, 15}, {Mixed, 1},
         {Empty, 7}, {Mixed, 1}, {Empty, 26}, {Mixed, 1}, {Empty, 148},
         {Mixed, 1}, {Empty, 30752}};
-        const static UnicodeSet::bitquad_t  __xdigit_set_quads[] = {
+        const static UnicodeSet::bitquad_t __xdigit_set_quads[] = {
         0x03ff0000, 0x0000007e, 0x0000007e, 0x000003ff, 0x03ff0000,
         0x000003ff, 0x0000ffc0, 0x0000ffc0, 0x0000ffc0, 0x0000ffc0,
         0x0000ffc0, 0x0000ffc0, 0x0000ffc0, 0x0000ffc0, 0x0000ffc0,
@@ -464,12 +464,12 @@ PropertyObject * get_XDIGIT_PropertyObject() {  return & XDIGIT_ns::property_obj
     namespace BLANK_ns {
         /* Code Point Ranges for blank
         [0009, 0009], [0020, 0020], [00a0, 00a0], [1680, 1680],
-        [2000, 200a], [202f, 202f], [205f, 205f], [3000, 3000]*/
+        [2000, 200a], [202f, 202f], [205f, 205f], [3000, 3000] */
 
         const static UnicodeSet::run_t __blank_set_runs[] = {
         {Mixed, 2}, {Empty, 3}, {Mixed, 1}, {Empty, 174}, {Mixed, 1},
         {Empty, 75}, {Mixed, 3}, {Empty, 125}, {Mixed, 1}, {Empty, 34431}};
-        const static UnicodeSet::bitquad_t  __blank_set_quads[] = {
+        const static UnicodeSet::bitquad_t __blank_set_quads[] = {
         0x00000200, 0x00000001, 0x00000001, 0x00000001, 0x000007ff,
         0x00008000, 0x80000000, 0x00000001};
         const static UnicodeSet blank_set{__blank_set_runs, 10, __blank_set_quads, 8};
@@ -661,7 +661,7 @@ PropertyObject * get_BLANK_PropertyObject() {  return & BLANK_ns::property_objec
         [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0],
         [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af],
         [e0001, e0001], [e0020, e007f], [e0100, e01ef], [f0000, ffffd],
-        [100000, 10fffd]*/
+        [100000, 10fffd] */
 
         const static UnicodeSet::run_t __print_set_runs[] = {
         {Empty, 1}, {Full, 2}, {Mixed, 1}, {Empty, 1}, {Full, 22},
@@ -752,7 +752,7 @@ PropertyObject * get_BLANK_PropertyObject() {  return & BLANK_ns::property_objec
         {Empty, 22242}, {Mixed, 1}, {Full, 3}, {Empty, 4}, {Full, 7},
         {Mixed, 1}, {Empty, 2032}, {Full, 2047}, {Mixed, 1}, {Full, 2047},
         {Mixed, 1}};
-        const static UnicodeSet::bitquad_t  __print_set_quads[] = {
+        const static UnicodeSet::bitquad_t __print_set_quads[] = {
         0x7fffffff, 0xfcffffff, 0xffffd7f0, 0xfffffffb, 0xfffeffff,
         0xfe7fffff, 0xfffee7ff, 0xffff00ff, 0x001f87ff, 0xffffbfff,
         0xffffe7ff, 0x0003ffff, 0xe7ffffff, 0x7fff3fff, 0x4fffffff,
@@ -1046,7 +1046,7 @@ PropertyObject * get_PRINT_PropertyObject() {  return & PRINT_ns::property_objec
         [1eea5, 1eea9], [1eeab, 1eebb], [1f130, 1f149], [1f150, 1f169],
         [1f170, 1f189], [1fbf0, 1fbf9], [20000, 2a6df], [2a700, 2b739],
         [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0], [2ebf0, 2ee5d],
-        [2f800, 2fa1d], [30000, 3134a], [31350, 323af], [e0100, e01ef]*/
+        [2f800, 2fa1d], [30000, 3134a], [31350, 323af], [e0100, e01ef] */
 
         const static UnicodeSet::run_t __word_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -1128,7 +1128,7 @@ PropertyObject * get_PRINT_PropertyObject() {  return & PRINT_ns::property_objec
         {Mixed, 1}, {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47},
         {Full, 154}, {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 22250},
         {Full, 7}, {Mixed, 1}, {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __word_set_quads[] = {
+        const static UnicodeSet::bitquad_t __word_set_quads[] = {
         0x03ff0000, 0x87fffffe, 0x07fffffe, 0x04200400, 0xff7fffff,
         0xff7fffff, 0x0003ffc3, 0x0000501f, 0xbcdfffff, 0xffffd740,
         0xfffffffb, 0xffbfffff, 0xfffffffb, 0xfffeffff, 0x027fffff,
@@ -1410,7 +1410,7 @@ PropertyObject * get_WORD_PropertyObject() {  return & WORD_ns::property_object;
         [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0],
         [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af],
         [e0001, e0001], [e0020, e007f], [e0100, e01ef], [f0000, ffffd],
-        [100000, 10fffd]*/
+        [100000, 10fffd] */
 
         const static UnicodeSet::run_t __graph_set_runs[] = {
         {Empty, 1}, {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 1},
@@ -1500,7 +1500,7 @@ PropertyObject * get_WORD_PropertyObject() {  return & WORD_ns::property_object;
         {Empty, 22242}, {Mixed, 1}, {Full, 3}, {Empty, 4}, {Full, 7},
         {Mixed, 1}, {Empty, 2032}, {Full, 2047}, {Mixed, 1}, {Full, 2047},
         {Mixed, 1}};
-        const static UnicodeSet::bitquad_t  __graph_set_quads[] = {
+        const static UnicodeSet::bitquad_t __graph_set_quads[] = {
         0xfffffffe, 0x7fffffff, 0xfffffffe, 0xfcffffff, 0xffffd7f0,
         0xfffffffb, 0xfffeffff, 0xfe7fffff, 0xfffee7ff, 0xffff00ff,
         0x001f87ff, 0xffffbfff, 0xffffe7ff, 0x0003ffff, 0xe7ffffff,

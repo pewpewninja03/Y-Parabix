@@ -24,14 +24,14 @@ namespace UCD {
         [0fac, 0fac], [0fb9, 0fb9], [2adc, 2adc], [fb1d, fb1d],
         [fb1f, fb1f], [fb2a, fb36], [fb38, fb3c], [fb3e, fb3e],
         [fb40, fb41], [fb43, fb44], [fb46, fb4e], [1d15e, 1d164],
-        [1d1bb, 1d1c0]*/
+        [1d1bb, 1d1c0] */
 
         const static UnicodeSet::run_t __CE_set_runs[] = {
         {Empty, 74}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 2},
         {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 31}, {Mixed, 4},
         {Empty, 216}, {Mixed, 1}, {Empty, 1665}, {Mixed, 3}, {Empty, 1711},
         {Mixed, 2}, {Empty, 1}, {Mixed, 2}, {Empty, 31089}};
-        const static UnicodeSet::bitquad_t  __CE_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CE_set_quads[] = {
         0xff000000, 0xb0000000, 0x00480000, 0x4e000000, 0x30000000,
         0x10842008, 0x01400200, 0x20080000, 0x02001084, 0x10000000,
         0xa0000000, 0x5f7ffc00, 0x00007fdb, 0xc0000000, 0x0000001f,

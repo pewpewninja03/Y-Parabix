@@ -18,8 +18,7 @@ namespace UCD {
         /* Code Point Ranges for Name_Alias mapping to <none>
         */
 
-                const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
-        {Empty, 34816}};
+        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {{Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __null_codepoint_set_quads = nullptr;
         const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 1, __null_codepoint_set_quads, 0};
 
@@ -27,8 +26,7 @@ namespace UCD {
         /* Code Point Ranges for Name_Alias mapping to <codepoint>
         */
 
-                const static UnicodeSet::run_t __reflexive_set_runs[] = {
-        {Empty, 34816}};
+        const static UnicodeSet::run_t __reflexive_set_runs[] = {{Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __reflexive_set_quads = nullptr;
         const static UnicodeSet reflexive_set{__reflexive_set_runs, 1, __reflexive_set_quads, 0};
 

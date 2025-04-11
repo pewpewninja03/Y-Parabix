@@ -205,7 +205,7 @@ namespace UCD {
         [1eeab, 1eebb], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189],
         [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1],
         [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a],
-        [31350, 323af]*/
+        [31350, 323af] */
 
         const static UnicodeSet::run_t __Alpha_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -286,7 +286,7 @@ namespace UCD {
         {Full, 180}, {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18},
         {Mixed, 1}, {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47},
         {Full, 154}, {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __Alpha_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Alpha_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0x0003ffc3, 0x0000501f, 0x00000020, 0xbcdffff8, 0xffffd740,
         0xfffffffb, 0xffbfffff, 0xfffffc03, 0xfffeffff, 0x027fffff,
@@ -493,7 +493,7 @@ PropertyObject * get_ALPHA_PropertyObject() {  return & ALPHA_ns::property_objec
         [1e01b, 1e021], [1e023, 1e024], [1e026, 1e02a], [1e030, 1e06d],
         [1e08f, 1e08f], [1e130, 1e13d], [1e2ae, 1e2ae], [1e2ec, 1e2ef],
         [1e4eb, 1e4ef], [1e5ee, 1e5ef], [1e8d0, 1e8d6], [1e944, 1e94b],
-        [1f3fb, 1f3ff], [e0001, e0001], [e0020, e007f], [e0100, e01ef]*/
+        [1f3fb, 1f3ff], [e0001, e0001], [e0020, e007f], [e0100, e01ef] */
 
         const static UnicodeSet::run_t __CI_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 15},
@@ -550,7 +550,7 @@ PropertyObject * get_ALPHA_PropertyObject() {  return & ALPHA_ns::property_objec
         {Empty, 3}, {Mixed, 1}, {Empty, 84}, {Mixed, 1}, {Empty, 24672},
         {Mixed, 1}, {Full, 3}, {Empty, 4}, {Full, 7}, {Mixed, 1},
         {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __CI_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CI_set_quads[] = {
         0x04004080, 0x40000000, 0x00000001, 0x0190a100, 0xffff0000,
         0x0430ffff, 0x000000b0, 0x000003f8, 0x82000000, 0xfffe0000,
         0xbfffffff, 0x000000b6, 0x00100000, 0x17ff003f, 0xfffff801,
@@ -769,7 +769,7 @@ PropertyObject * get_CI_PropertyObject() {  return & CI_ns::property_object; }
         [fb00, fb06], [fb13, fb17], [ff21, ff3a], [10400, 10427],
         [104b0, 104d3], [10570, 1057a], [1057c, 1058a], [1058c, 10592],
         [10594, 10595], [10c80, 10cb2], [10d50, 10d65], [118a0, 118bf],
-        [16e40, 16e5f], [1e900, 1e921]*/
+        [16e40, 16e5f], [1e900, 1e921] */
 
         const static UnicodeSet::run_t __CWCF_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 1},
@@ -786,7 +786,7 @@ PropertyObject * get_CI_PropertyObject() {  return & CI_ns::property_object; }
         {Full, 1}, {Mixed, 1}, {Empty, 4}, {Mixed, 2}, {Empty, 89},
         {Full, 1}, {Empty, 684}, {Full, 1}, {Empty, 981}, {Full, 1},
         {Mixed, 1}, {Empty, 30902}};
-        const static UnicodeSet::bitquad_t  __CWCF_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWCF_set_quads[] = {
         0x07fffffe, 0x00200000, 0xff7fffff, 0x55555555, 0xaa555555,
         0x555556aa, 0xab555555, 0xb1dbced6, 0x11aed2d5, 0x4aaaadb0,
         0x55d65555, 0x55555555, 0x6c055555, 0x0000557a, 0x00000020,
@@ -842,7 +842,7 @@ PropertyObject * get_CWCF_PropertyObject() {  return & CWCF_ns::property_object;
         [10570, 1057a], [1057c, 1058a], [1058c, 10592], [10594, 10595],
         [10597, 105a1], [105a3, 105b1], [105b3, 105b9], [105bb, 105bc],
         [10c80, 10cb2], [10cc0, 10cf2], [10d50, 10d65], [10d70, 10d85],
-        [118a0, 118df], [16e40, 16e7f], [1e900, 1e943]*/
+        [118a0, 118df], [16e40, 16e7f], [1e900, 1e943] */
 
         const static UnicodeSet::run_t __CWCM_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 1},
@@ -863,7 +863,7 @@ PropertyObject * get_CWCF_PropertyObject() {  return & CWCF_ns::property_object;
         {Mixed, 1}, {Empty, 2}, {Mixed, 3}, {Empty, 88}, {Full, 2},
         {Empty, 683}, {Full, 2}, {Empty, 980}, {Full, 2}, {Mixed, 1},
         {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __CWCM_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWCM_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x00200000, 0xff7fffff, 0xff7fffff,
         0xfeffffff, 0xffffdfff, 0xb3fff3ff, 0xfffffff0, 0xfc0ffffd,
         0x1adfffff, 0x20269f7b, 0x60041f8d, 0x00000020, 0xb8cf0000,
@@ -1038,7 +1038,7 @@ PropertyObject * get_CWCM_PropertyObject() {  return & CWCM_ns::property_object;
         [a7dc, a7dc], [a7f5, a7f5], [ff21, ff3a], [10400, 10427],
         [104b0, 104d3], [10570, 1057a], [1057c, 1058a], [1058c, 10592],
         [10594, 10595], [10c80, 10cb2], [10d50, 10d65], [118a0, 118bf],
-        [16e40, 16e5f], [1e900, 1e921]*/
+        [16e40, 16e5f], [1e900, 1e921] */
 
         const static UnicodeSet::run_t __CWL_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 1},
@@ -1053,7 +1053,7 @@ PropertyObject * get_CWCM_PropertyObject() {  return & CWCM_ns::property_object;
         {Mixed, 2}, {Empty, 55}, {Full, 1}, {Mixed, 1}, {Empty, 4},
         {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684}, {Full, 1},
         {Empty, 981}, {Full, 1}, {Mixed, 1}, {Empty, 30902}};
-        const static UnicodeSet::bitquad_t  __CWL_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWL_set_quads[] = {
         0x07fffffe, 0x7f7fffff, 0x55555555, 0xaa555555, 0x555554aa,
         0x2b555555, 0xb1dbced6, 0x11aed2d5, 0x4aaaadb0, 0x55d65555,
         0x55555555, 0x6c055555, 0x0000557a, 0x80450000, 0xfffed740,
@@ -1233,7 +1233,7 @@ PropertyObject * get_CWL_PropertyObject() {  return & CWL_ns::property_object; }
         [fb13, fb17], [ff41, ff5a], [10428, 1044f], [104d8, 104fb],
         [10597, 105a1], [105a3, 105b1], [105b3, 105b9], [105bb, 105bc],
         [10cc0, 10cf2], [10d70, 10d85], [118c0, 118df], [16e60, 16e7f],
-        [1e922, 1e943]*/
+        [1e922, 1e943] */
 
         const static UnicodeSet::run_t __CWT_set_runs[] = {
         {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 16}, {Empty, 5},
@@ -1248,7 +1248,7 @@ PropertyObject * get_CWL_PropertyObject() {  return & CWL_ns::property_object; }
         {Empty, 4}, {Mixed, 2}, {Empty, 56}, {Full, 1}, {Mixed, 1},
         {Empty, 3}, {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684},
         {Full, 1}, {Empty, 981}, {Mixed, 2}, {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __CWT_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWT_set_quads[] = {
         0x07fffffe, 0x00200000, 0x80000000, 0xff7fffff, 0xaaaaaaaa,
         0x54aaaaaa, 0xaaaaab55, 0xd4aaaaaa, 0x4e241129, 0xa251212a,
         0xb55556d0, 0xaa2baaaa, 0xaaaaaaaa, 0x900aaaa8, 0x1adfaa85,
@@ -1430,7 +1430,7 @@ PropertyObject * get_CWT_PropertyObject() {  return & CWT_ns::property_object; }
         [fb00, fb06], [fb13, fb17], [ff41, ff5a], [10428, 1044f],
         [104d8, 104fb], [10597, 105a1], [105a3, 105b1], [105b3, 105b9],
         [105bb, 105bc], [10cc0, 10cf2], [10d70, 10d85], [118c0, 118df],
-        [16e60, 16e7f], [1e922, 1e943]*/
+        [16e60, 16e7f], [1e922, 1e943] */
 
         const static UnicodeSet::run_t __CWU_set_runs[] = {
         {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 16}, {Empty, 5},
@@ -1446,7 +1446,7 @@ PropertyObject * get_CWT_PropertyObject() {  return & CWT_ns::property_object; }
         {Mixed, 2}, {Empty, 56}, {Full, 1}, {Mixed, 1}, {Empty, 3},
         {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684}, {Full, 1},
         {Empty, 981}, {Mixed, 2}, {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __CWU_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWU_set_quads[] = {
         0x07fffffe, 0x00200000, 0x80000000, 0xff7fffff, 0xaaaaaaaa,
         0x54aaaaaa, 0xaaaaab55, 0xd4aaaaaa, 0x4e241129, 0xa251212a,
         0xb5555b60, 0xaa2daaaa, 0xaaaaaaaa, 0x900aaaa8, 0x1adfaa85,
@@ -1511,7 +1511,7 @@ PropertyObject * get_CWU_PropertyObject() {  return & CWU_ns::property_object; }
         [1d716, 1d734], [1d736, 1d74e], [1d750, 1d76e], [1d770, 1d788],
         [1d78a, 1d7a8], [1d7aa, 1d7c2], [1d7c4, 1d7cb], [1df00, 1df09],
         [1df0b, 1df1e], [1df25, 1df2a], [1e030, 1e06d], [1e900, 1e943],
-        [1f130, 1f149], [1f150, 1f169], [1f170, 1f189]*/
+        [1f130, 1f149], [1f150, 1f169], [1f170, 1f189] */
 
         const static UnicodeSet::run_t __Cased_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 5},
@@ -1535,7 +1535,7 @@ PropertyObject * get_CWU_PropertyObject() {  return & CWU_ns::property_object; }
         {Full, 10}, {Mixed, 10}, {Empty, 57}, {Mixed, 2}, {Empty, 7},
         {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 68}, {Full, 2},
         {Mixed, 1}, {Empty, 62}, {Mixed, 4}, {Empty, 30835}};
-        const static UnicodeSet::bitquad_t  __Cased_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Cased_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0xf7ffffff, 0xfffffff0, 0xffefffff, 0x01ffffff, 0x00000003,
         0x0000001f, 0x00000020, 0xbccf0000, 0xffffd740, 0xfffffffb,
@@ -1565,7 +1565,7 @@ PropertyObject * get_CASED_PropertyObject() {  return & CASED_ns::property_objec
         [17b4, 17b5], [180b, 180f], [200b, 200f], [202a, 202e],
         [2060, 206f], [3164, 3164], [fe00, fe0f], [feff, feff],
         [ffa0, ffa0], [fff0, fff8], [1bca0, 1bca3], [1d173, 1d17a],
-        [e0000, e0fff]*/
+        [e0000, e0fff] */
 
         const static UnicodeSet::run_t __DI_set_runs[] = {
         {Empty, 5}, {Mixed, 1}, {Empty, 20}, {Mixed, 1}, {Empty, 21},
@@ -1575,7 +1575,7 @@ PropertyObject * get_CASED_PropertyObject() {  return & CASED_ns::property_objec
         {Empty, 6}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Mixed, 1}, {Empty, 1509}, {Mixed, 1}, {Empty, 165}, {Mixed, 1},
         {Empty, 24948}, {Full, 128}, {Empty, 6016}};
-        const static UnicodeSet::bitquad_t  __DI_set_quads[] = {
+        const static UnicodeSet::bitquad_t __DI_set_quads[] = {
         0x00002000, 0x00008000, 0x10000000, 0x80000000, 0x00000001,
         0x00300000, 0x0000f800, 0x0000f800, 0x00007c00, 0x0000ffff,
         0x00000010, 0x0000ffff, 0x80000000, 0x00000001, 0x01ff0000,
@@ -1809,7 +1809,7 @@ PropertyObject * get_DI_PropertyObject() {  return & DI_ns::property_object; }
         [1face, 1fadc], [1fadf, 1fae9], [1faf0, 1faf8], [1fb00, 1fb92],
         [1fb94, 1fbf9], [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d],
         [2b820, 2cea1], [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d],
-        [30000, 3134a], [31350, 323af]*/
+        [30000, 3134a], [31350, 323af] */
 
         const static UnicodeSet::run_t __Gr_Base_set_runs[] = {
         {Empty, 1}, {Full, 2}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
@@ -1895,7 +1895,7 @@ PropertyObject * get_DI_PropertyObject() {  return & DI_ns::property_object; }
         {Mixed, 1}, {Full, 18}, {Mixed, 1}, {Empty, 77}, {Full, 16},
         {Mixed, 1}, {Empty, 47}, {Full, 154}, {Mixed, 1}, {Full, 130},
         {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __Gr_Base_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Gr_Base_set_quads[] = {
         0x7fffffff, 0xffffdfff, 0xfcff0000, 0xffffd7f0, 0xfffffffb,
         0xfffffc07, 0xfffeffff, 0xfe7fffff, 0x0000e7ff, 0x40000000,
         0xffff0049, 0x001f87ff, 0xe800ffc0, 0x000007ff, 0xfffeffff,
@@ -2094,7 +2094,7 @@ PropertyObject * get_GR_BASE_PropertyObject() {  return & GR_BASE_ns::property_o
         [1e000, 1e006], [1e008, 1e018], [1e01b, 1e021], [1e023, 1e024],
         [1e026, 1e02a], [1e08f, 1e08f], [1e130, 1e136], [1e2ae, 1e2ae],
         [1e2ec, 1e2ef], [1e4ec, 1e4ef], [1e5ee, 1e5ef], [1e8d0, 1e8d6],
-        [1e944, 1e94a], [e0020, e007f], [e0100, e01ef]*/
+        [1e944, 1e94a], [e0020, e007f], [e0100, e01ef] */
 
         const static UnicodeSet::run_t __Gr_Ext_set_runs[] = {
         {Empty, 24}, {Full, 3}, {Mixed, 1}, {Empty, 8}, {Mixed, 1},
@@ -2141,7 +2141,7 @@ PropertyObject * get_GR_BASE_PropertyObject() {  return & GR_BASE_ns::property_o
         {Empty, 7}, {Mixed, 1}, {Empty, 22}, {Mixed, 1}, {Empty, 3},
         {Mixed, 1}, {Empty, 24758}, {Full, 3}, {Empty, 4}, {Full, 7},
         {Mixed, 1}, {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __Gr_Ext_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Gr_Ext_set_quads[] = {
         0x0000ffff, 0x000003f8, 0xfffe0000, 0xbfffffff, 0x000000b6,
         0x07ff0000, 0xfffff800, 0x00010000, 0x9fc00000, 0x00003d9f,
         0x00020000, 0xffff0000, 0x000007ff, 0x0001ffc0, 0x200ff800,
@@ -2395,7 +2395,7 @@ PropertyObject * get_GR_LINK_PropertyObject() {  return & GR_LINK_ns::property_o
         [1eea5, 1eea9], [1eeab, 1eebb], [1fbf0, 1fbf9], [20000, 2a6df],
         [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0],
         [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af],
-        [e0100, e01ef]*/
+        [e0100, e01ef] */
 
         const static UnicodeSet::run_t __IDC_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -2476,7 +2476,7 @@ PropertyObject * get_GR_LINK_PropertyObject() {  return & GR_LINK_ns::property_o
         {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154}, {Mixed, 1},
         {Full, 130}, {Mixed, 1}, {Empty, 22250}, {Full, 7}, {Mixed, 1},
         {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __IDC_set_quads[] = {
+        const static UnicodeSet::bitquad_t __IDC_set_quads[] = {
         0x03ff0000, 0x87fffffe, 0x07fffffe, 0x04a00400, 0xff7fffff,
         0xff7fffff, 0x0003ffc3, 0x0000501f, 0xbcdfffff, 0xffffd7c0,
         0xfffffffb, 0xffbfffff, 0xfffffcfb, 0xfffeffff, 0x027fffff,
@@ -2742,7 +2742,7 @@ PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
         [1ee8b, 1ee9b], [1eea1, 1eea3], [1eea5, 1eea9], [1eeab, 1eebb],
         [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1],
         [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a],
-        [31350, 323af]*/
+        [31350, 323af] */
 
         const static UnicodeSet::run_t __IDS_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -2821,7 +2821,7 @@ PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
         {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18}, {Mixed, 1},
         {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154},
         {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __IDS_set_quads[] = {
+        const static UnicodeSet::bitquad_t __IDS_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0x0003ffc3, 0x0000501f, 0xbcdf0000, 0xffffd740, 0xfffffffb,
         0xffbfffff, 0xfffffc03, 0xfffeffff, 0x027fffff, 0x000001ff,
@@ -2914,6 +2914,7 @@ PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
 PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
   namespace INCB_ns {
     const unsigned independent_prop_values = 4;
+
     /* Code Point Ranges for None
     [0000, 02ff], [0370, 0482], [048a, 0590], [05be, 05be], [05c0, 05c0],
     [05c3, 05c3], [05c6, 05c6], [05c8, 060f], [061b, 064a], [0660, 066f],
@@ -3002,8 +3003,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     [1e019, 1e01a], [1e022, 1e022], [1e025, 1e025], [1e02b, 1e08e],
     [1e090, 1e12f], [1e137, 1e2ad], [1e2af, 1e2eb], [1e2f0, 1e4eb],
     [1e4f0, 1e5ed], [1e5f0, 1e8cf], [1e8d7, 1e943], [1e94b, 1f3fa],
-    [1f400, e001f], [e0080, e00ff], [e01f0, 10ffff]*/
-
+    [1f400, e001f], [e0080, e00ff], [e01f0, 10ffff] */
     const static UnicodeSet::run_t __none_Set_runs[] = {
     {Full, 24}, {Empty, 3}, {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 7},
     {Mixed, 3}, {Full, 1}, {Mixed, 1}, {Full, 1}, {Mixed, 2}, {Full, 2},
@@ -3043,7 +3043,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Full, 84}, {Mixed, 1},
     {Full, 24673}, {Empty, 3}, {Full, 4}, {Empty, 7}, {Mixed, 1},
     {Full, 6128}};
-    const static UnicodeSet::bitquad_t  __none_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __none_Set_quads[] = {
     0xffff0000, 0xfffffc07, 0x0001ffff, 0x40000000, 0xffffff49, 0xf800ffff,
     0x000007ff, 0xfffeffff, 0x603fffff, 0xffffc260, 0xfffdffff, 0x0000ffff,
     0xfffff800, 0xfffe003f, 0xdff007ff, 0x043fffff, 0xffffc110, 0xf1ffffff,
@@ -3083,34 +3083,35 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     0xffff7fff, 0xff80ffff, 0xffffbfff, 0xffff0fff, 0xffff0fff, 0xffff3fff,
     0xff80ffff, 0xfffff80f, 0x07ffffff, 0xffff0000};
     const static UnicodeSet none_Set{__none_Set_runs, 219, __none_Set_quads, 226};
+
     /* Code Point Ranges for Linker
     [094d, 094d], [09cd, 09cd], [0acd, 0acd], [0b4d, 0b4d], [0c4d, 0c4d],
-    [0d4d, 0d4d]*/
-
+    [0d4d, 0d4d] */
     const static UnicodeSet::run_t __linker_Set_runs[] = {
     {Empty, 74}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
     {Empty, 3}, {Mixed, 1}, {Empty, 7}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
     {Empty, 34709}};
-    const static UnicodeSet::bitquad_t  __linker_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __linker_Set_quads[] = {
     0x00002000, 0x00002000, 0x00002000, 0x00002000, 0x00002000, 0x00002000};
     const static UnicodeSet linker_Set{__linker_Set_runs, 13, __linker_Set_quads, 6};
+
     /* Code Point Ranges for Consonant
     [0915, 0939], [0958, 095f], [0978, 097f], [0995, 09a8], [09aa, 09b0],
     [09b2, 09b2], [09b6, 09b9], [09dc, 09dd], [09df, 09df], [09f0, 09f1],
     [0a95, 0aa8], [0aaa, 0ab0], [0ab2, 0ab3], [0ab5, 0ab9], [0af9, 0af9],
     [0b15, 0b28], [0b2a, 0b30], [0b32, 0b33], [0b35, 0b39], [0b5c, 0b5d],
     [0b5f, 0b5f], [0b71, 0b71], [0c15, 0c28], [0c2a, 0c39], [0c58, 0c5a],
-    [0d15, 0d3a]*/
-
+    [0d15, 0d3a] */
     const static UnicodeSet::run_t __consonant_Set_runs[] = {
     {Empty, 72}, {Mixed, 8}, {Empty, 4}, {Mixed, 2}, {Empty, 1}, {Mixed, 5},
     {Empty, 4}, {Mixed, 3}, {Empty, 5}, {Mixed, 2}, {Empty, 34710}};
-    const static UnicodeSet::bitquad_t  __consonant_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __consonant_Set_quads[] = {
     0xffe00000, 0x03ffffff, 0xff000000, 0xff000000, 0xffe00000, 0x03c5fdff,
     0xb0000000, 0x00030000, 0xffe00000, 0x03edfdff, 0x02000000, 0xffe00000,
     0x03edfdff, 0xb0000000, 0x00020000, 0xffe00000, 0x03fffdff, 0x07000000,
     0xffe00000, 0x07ffffff};
     const static UnicodeSet consonant_Set{__consonant_Set_runs, 11, __consonant_Set_quads, 20};
+
     /* Code Point Ranges for Extend
     [0300, 036f], [0483, 0489], [0591, 05bd], [05bf, 05bf], [05c1, 05c2],
     [05c4, 05c5], [05c7, 05c7], [0610, 061a], [064b, 065f], [0670, 0670],
@@ -3193,8 +3194,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     [1e000, 1e006], [1e008, 1e018], [1e01b, 1e021], [1e023, 1e024],
     [1e026, 1e02a], [1e08f, 1e08f], [1e130, 1e136], [1e2ae, 1e2ae],
     [1e2ec, 1e2ef], [1e4ec, 1e4ef], [1e5ee, 1e5ef], [1e8d0, 1e8d6],
-    [1e944, 1e94a], [1f3fb, 1f3ff], [e0020, e007f], [e0100, e01ef]*/
-
+    [1e944, 1e94a], [1f3fb, 1f3ff], [e0020, e007f], [e0100, e01ef] */
     const static UnicodeSet::run_t __extend_Set_runs[] = {
     {Empty, 24}, {Full, 3}, {Mixed, 1}, {Empty, 8}, {Mixed, 1}, {Empty, 7},
     {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 2}, {Empty, 2},
@@ -3235,7 +3235,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     {Empty, 22}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 84},
     {Mixed, 1}, {Empty, 24673}, {Full, 3}, {Empty, 4}, {Full, 7},
     {Mixed, 1}, {Empty, 6128}};
-    const static UnicodeSet::bitquad_t  __extend_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __extend_Set_quads[] = {
     0x0000ffff, 0x000003f8, 0xfffe0000, 0xbfffffff, 0x000000b6, 0x07ff0000,
     0xfffff800, 0x00010000, 0x9fc00000, 0x00003d9f, 0x00020000, 0xffff0000,
     0x000007ff, 0x0001ffc0, 0x200ff800, 0xfbc00000, 0x00003eef, 0x0e000000,
@@ -3455,7 +3455,7 @@ PropertyObject * get_INCB_PropertyObject() {  return & INCB_ns::property_object;
         [1d6dc, 1d6e1], [1d6fc, 1d714], [1d716, 1d71b], [1d736, 1d74e],
         [1d750, 1d755], [1d770, 1d788], [1d78a, 1d78f], [1d7aa, 1d7c2],
         [1d7c4, 1d7c9], [1d7cb, 1d7cb], [1df00, 1df09], [1df0b, 1df1e],
-        [1df25, 1df2a], [1e030, 1e06d], [1e922, 1e943]*/
+        [1df25, 1df2a], [1e030, 1e06d], [1e922, 1e943] */
 
         const static UnicodeSet::run_t __Lower_set_runs[] = {
         {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 14}, {Full, 1},
@@ -3474,7 +3474,7 @@ PropertyObject * get_INCB_PropertyObject() {  return & INCB_ns::property_object;
         {Empty, 812}, {Mixed, 31}, {Empty, 57}, {Mixed, 2}, {Empty, 7},
         {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 69}, {Mixed, 2},
         {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __Lower_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Lower_set_quads[] = {
         0x07fffffe, 0x04200400, 0x80000000, 0xff7fffff, 0xaaaaaaaa,
         0x55aaaaaa, 0xaaaaab55, 0xd4aaaaaa, 0x4e243129, 0xe6512d2a,
         0xb5555240, 0xaa29aaaa, 0xaaaaaaaa, 0x93faaaaa, 0xffffaa85,
@@ -3542,7 +3542,7 @@ PropertyObject * get_LOWER_PropertyObject() {  return & LOWER_ns::property_objec
         [1ee5d, 1ee5d], [1ee5f, 1ee5f], [1ee61, 1ee62], [1ee64, 1ee64],
         [1ee67, 1ee6a], [1ee6c, 1ee72], [1ee74, 1ee77], [1ee79, 1ee7c],
         [1ee7e, 1ee7e], [1ee80, 1ee89], [1ee8b, 1ee9b], [1eea1, 1eea3],
-        [1eea5, 1eea9], [1eeab, 1eebb], [1eef0, 1eef1]*/
+        [1eea5, 1eea9], [1eeab, 1eebb], [1eef0, 1eef1] */
 
         const static UnicodeSet::run_t __Math_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Empty, 22},
@@ -3556,7 +3556,7 @@ PropertyObject * get_LOWER_PropertyObject() {  return & LOWER_ns::property_objec
         {Mixed, 1}, {Full, 1}, {Mixed, 3}, {Full, 1}, {Mixed, 3},
         {Full, 10}, {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 1},
         {Empty, 176}, {Mixed, 6}, {Empty, 1}, {Mixed, 1}, {Empty, 30856}};
-        const static UnicodeSet::bitquad_t  __Math_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Math_set_quads[] = {
         0x70000800, 0x40000000, 0x50000000, 0x00021000, 0x00800000,
         0x00800000, 0x00270000, 0x00730000, 0x000001c0, 0x00400000,
         0x001c0000, 0x00040011, 0x7c00001e, 0x00007c00, 0x1fff0000,
@@ -3739,7 +3739,7 @@ PropertyObject * get_MATH_PropertyObject() {  return & MATH_ns::property_object;
         [1d56c, 1d585], [1d5a0, 1d5b9], [1d5d4, 1d5ed], [1d608, 1d621],
         [1d63c, 1d655], [1d670, 1d689], [1d6a8, 1d6c0], [1d6e2, 1d6fa],
         [1d71c, 1d734], [1d756, 1d76e], [1d790, 1d7a8], [1d7ca, 1d7ca],
-        [1e900, 1e921], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189]*/
+        [1e900, 1e921], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189] */
 
         const static UnicodeSet::run_t __Upper_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 1},
@@ -3755,7 +3755,7 @@ PropertyObject * get_MATH_PropertyObject() {  return & MATH_ns::property_object;
         {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684}, {Full, 1},
         {Empty, 813}, {Mixed, 31}, {Empty, 137}, {Full, 1}, {Mixed, 1},
         {Empty, 63}, {Mixed, 4}, {Empty, 30835}};
-        const static UnicodeSet::bitquad_t  __Upper_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Upper_set_quads[] = {
         0x07fffffe, 0x7f7fffff, 0x55555555, 0xaa555555, 0x555554aa,
         0x2b555555, 0xb1dbced6, 0x11aed2d5, 0x4aaaa490, 0x55d25555,
         0x55555555, 0x6c055555, 0x0000557a, 0x80450000, 0xfffed740,
@@ -3984,7 +3984,7 @@ PropertyObject * get_UPPER_PropertyObject() {  return & UPPER_ns::property_objec
         [1ee80, 1ee89], [1ee8b, 1ee9b], [1eea1, 1eea3], [1eea5, 1eea9],
         [1eeab, 1eebb], [1fbf0, 1fbf9], [20000, 2a6df], [2a700, 2b739],
         [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0], [2ebf0, 2ee5d],
-        [2f800, 2fa1d], [30000, 3134a], [31350, 323af], [e0100, e01ef]*/
+        [2f800, 2fa1d], [30000, 3134a], [31350, 323af], [e0100, e01ef] */
 
         const static UnicodeSet::run_t __XIDC_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -4065,7 +4065,7 @@ PropertyObject * get_UPPER_PropertyObject() {  return & UPPER_ns::property_objec
         {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154}, {Mixed, 1},
         {Full, 130}, {Mixed, 1}, {Empty, 22250}, {Full, 7}, {Mixed, 1},
         {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __XIDC_set_quads[] = {
+        const static UnicodeSet::bitquad_t __XIDC_set_quads[] = {
         0x03ff0000, 0x87fffffe, 0x07fffffe, 0x04a00400, 0xff7fffff,
         0xff7fffff, 0x0003ffc3, 0x0000501f, 0xb8dfffff, 0xffffd7c0,
         0xfffffffb, 0xffbfffff, 0xfffffcfb, 0xfffeffff, 0x027fffff,
@@ -4332,7 +4332,7 @@ PropertyObject * get_XIDC_PropertyObject() {  return & XIDC_ns::property_object;
         [1ee79, 1ee7c], [1ee7e, 1ee7e], [1ee80, 1ee89], [1ee8b, 1ee9b],
         [1eea1, 1eea3], [1eea5, 1eea9], [1eeab, 1eebb], [20000, 2a6df],
         [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0],
-        [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af]*/
+        [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af] */
 
         const static UnicodeSet::run_t __XIDS_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 14},
@@ -4410,7 +4410,7 @@ PropertyObject * get_XIDC_PropertyObject() {  return & XIDC_ns::property_object;
         {Full, 180}, {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18},
         {Mixed, 1}, {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47},
         {Full, 154}, {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __XIDS_set_quads[] = {
+        const static UnicodeSet::bitquad_t __XIDS_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0x0003ffc3, 0x0000501f, 0xb8df0000, 0xffffd740, 0xfffffffb,
         0xffbfffff, 0xfffffc03, 0xfffeffff, 0x027fffff, 0x000001ff,

@@ -44,7 +44,7 @@ namespace UCD {
         [ff08, ff09], [ff1c, ff1c], [ff1e, ff1e], [ff3b, ff3b],
         [ff3d, ff3d], [ff5b, ff5b], [ff5d, ff5d], [ff5f, ff60],
         [ff62, ff63], [1d6db, 1d6db], [1d715, 1d715], [1d74f, 1d74f],
-        [1d789, 1d789], [1d7c3, 1d7c3]*/
+        [1d789, 1d789], [1d7c3, 1d7c3] */
 
         const static UnicodeSet::run_t __Bidi_M_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 115},
@@ -56,7 +56,7 @@ namespace UCD {
         {Empty, 4}, {Mixed, 4}, {Empty, 1722}, {Mixed, 1}, {Empty, 1},
         {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
         {Empty, 1}, {Mixed, 1}, {Empty, 31041}};
-        const static UnicodeSet::bitquad_t  __Bidi_M_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Bidi_M_set_quads[] = {
         0x50000300, 0x28000000, 0x28000000, 0x08000800, 0x3c000000,
         0x18000000, 0x06000000, 0x00000060, 0x60000000, 0x00006000,
         0x00000001, 0xbc623f1e, 0xfa0ff857, 0x803c1fff, 0xffffeff5,

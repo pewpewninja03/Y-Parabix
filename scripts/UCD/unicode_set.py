@@ -65,15 +65,18 @@ class UCset:
         hex_specifier = "%%#0%ix" % (int(quad_bits / 4) + 2)
         runtype = {-1: "Full", 0: "Empty", 1: "Mixed"}
 
-        str = (" " * indent) + "const static UnicodeSet::run_t __%s_runs[] = {\n" % propertyName + \
-              (" " * indent) + cformat.multiline_fill(['{%s, %i}' % (runtype[r[0]], r[1]) for r in self.runs], ',',
+        str = "const static UnicodeSet::run_t __%s_runs[] = {" % propertyName
+        if len(self.runs) > 3: str += "\n" + (" " * indent)
+        str += cformat.multiline_fill(['{%s, %i}' % (runtype[r[0]], r[1]) for r in self.runs], ',',
                                                       indent) + "};\n"
 
+        str += (" " * indent) + "const static UnicodeSet::bitquad_t"
         if len(self.quads) == 0:
-            str += (" " * indent) + "const static UnicodeSet::bitquad_t * const __%s_quads = nullptr;\n" % propertyName
+            str += " * const __%s_quads = nullptr;\n" % propertyName
         else:
-            str += (" " * indent) + "const static UnicodeSet::bitquad_t  __%s_quads[] = {\n" % propertyName + \
-                   (" " * indent) + cformat.multiline_fill([hex_specifier % q for q in self.quads], ',', indent) + "};\n"
+            str += " __%s_quads[] = {" % propertyName
+            if len(self.quads) > 3: str += "\n" + (" " * indent)
+            str += cformat.multiline_fill([hex_specifier % q for q in self.quads], ',', indent) + "};\n"
         str += (" " * indent) + "const static UnicodeSet %s{__%s_runs, %i, __%s_quads, %i};\n" \
                % (propertyName, propertyName, len(self.runs), propertyName, len(self.quads))
         return str

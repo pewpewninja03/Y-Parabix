@@ -16,6 +16,7 @@
 namespace UCD {
   namespace AGE_ns {
     const unsigned independent_prop_values = 28;
+
     /* Code Point Ranges for Unassigned
     [0378, 0379], [0380, 0383], [038b, 038b], [038d, 038d], [03a2, 03a2],
     [0530, 0530], [0557, 0558], [058b, 058c], [0590, 0590], [05c8, 05cf],
@@ -184,8 +185,7 @@ namespace UCD {
     [323b0, 3fffd], [40000, 4fffd], [50000, 5fffd], [60000, 6fffd],
     [70000, 7fffd], [80000, 8fffd], [90000, 9fffd], [a0000, afffd],
     [b0000, bfffd], [c0000, cfffd], [d0000, dfffd], [e0000, e0000],
-    [e0002, e001f], [e0080, e00ff], [e01f0, efffd]*/
-
+    [e0002, e001f], [e0080, e00ff], [e01f0, efffd] */
     const static UnicodeSet::run_t __unassigned_Set_runs[] = {
     {Empty, 27}, {Mixed, 3}, {Empty, 11}, {Mixed, 2}, {Empty, 1},
     {Mixed, 1}, {Empty, 1}, {Mixed, 2}, {Empty, 8}, {Mixed, 1}, {Empty, 1},
@@ -269,7 +269,7 @@ namespace UCD {
     {Full, 2047}, {Mixed, 1}, {Full, 2047}, {Mixed, 1}, {Full, 2047},
     {Mixed, 2}, {Empty, 3}, {Full, 4}, {Empty, 7}, {Mixed, 1}, {Full, 2031},
     {Mixed, 1}, {Empty, 4096}};
-    const static UnicodeSet::bitquad_t  __unassigned_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __unassigned_Set_quads[] = {
     0x03000000, 0x0000280f, 0x00000004, 0x00010000, 0x01800000, 0x00011800,
     0x0000ff00, 0xffe07800, 0x00004000, 0x00001800, 0xfffc0000, 0x18000000,
     0x8000c000, 0xb0000000, 0x0000f800, 0x007c8000, 0x00066010, 0x0c3a0200,
@@ -346,6 +346,7 @@ namespace UCD {
     0x3fffffff, 0x3fffffff, 0x3fffffff, 0x3fffffff, 0x3fffffff, 0x3fffffff,
     0x3fffffff, 0x3fffffff, 0x3fffffff, 0xfffffffd, 0xffff0000, 0x3fffffff};
     const static UnicodeSet unassigned_Set{__unassigned_Set_runs, 471, __unassigned_Set_quads, 450};
+
     /* Code Point Ranges for V1_1
     [0000, 01f5], [01fa, 0217], [0250, 02a8], [02b0, 02de], [02e0, 02e9],
     [0300, 0345], [0360, 0361], [0374, 0375], [037a, 037a], [037e, 037e],
@@ -404,8 +405,7 @@ namespace UCD {
     [fe20, fe23], [fe30, fe44], [fe49, fe52], [fe54, fe66], [fe68, fe6b],
     [fe70, fe72], [fe74, fe74], [fe76, fefc], [feff, feff], [ff01, ff5e],
     [ff61, ffbe], [ffc2, ffc7], [ffca, ffcf], [ffd2, ffd7], [ffda, ffdc],
-    [ffe0, ffe6], [ffe8, ffee], [fffd, ffff]*/
-
+    [ffe0, ffe6], [ffe8, ffee], [fffd, ffff] */
     const static UnicodeSet::run_t __v1_1_Set_runs[] = {
     {Full, 15}, {Mixed, 2}, {Empty, 1}, {Mixed, 1}, {Full, 2}, {Mixed, 3},
     {Full, 2}, {Mixed, 7}, {Full, 1}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
@@ -427,7 +427,7 @@ namespace UCD {
     {Mixed, 1}, {Full, 1}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 3},
     {Mixed, 2}, {Full, 1}, {Mixed, 2}, {Full, 1}, {Mixed, 3},
     {Empty, 32768}};
-    const static UnicodeSet::bitquad_t  __v1_1_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v1_1_Set_quads[] = {
     0xfc3fffff, 0x00ffffff, 0xffff0000, 0xffff01ff, 0x7fffffff, 0x000003ff,
     0x0000003f, 0x44300003, 0xffffd7f0, 0xfffffffb, 0x547f7fff, 0x000ffffd,
     0xffffdffe, 0xdffeffff, 0xffff007f, 0xffff199f, 0x033fcfff, 0xfffe0000,
@@ -455,6 +455,7 @@ namespace UCD {
     0x9fffffff, 0xfffffffe, 0x7fffffff, 0xfffffffe, 0x7fffffff, 0x1cfcfcfc,
     0xe0007f7f};
     const static UnicodeSet v1_1_Set{__v1_1_Set_runs, 111, __v1_1_Set_quads, 151};
+
     /* Code Point Ranges for V2_0
     [0591, 05a1], [05a3, 05af], [05c4, 05c4], [0f00, 0f47], [0f49, 0f69],
     [0f71, 0f8b], [0f90, 0f95], [0f97, 0f97], [0f99, 0fad], [0fb1, 0fb7],
@@ -462,8 +463,7 @@ namespace UCD {
     [1fffe, 1ffff], [2fffe, 2ffff], [3fffe, 3ffff], [4fffe, 4ffff],
     [5fffe, 5ffff], [6fffe, 6ffff], [7fffe, 7ffff], [8fffe, 8ffff],
     [9fffe, 9ffff], [afffe, affff], [bfffe, bffff], [cfffe, cffff],
-    [dfffe, dffff], [efffe, 10ffff]*/
-
+    [dfffe, dffff], [efffe, 10ffff] */
     const static UnicodeSet::run_t __v2_0_Set_runs[] = {
     {Empty, 44}, {Mixed, 3}, {Empty, 73}, {Full, 2}, {Mixed, 4},
     {Empty, 118}, {Mixed, 1}, {Empty, 16}, {Mixed, 1}, {Empty, 1114},
@@ -474,20 +474,19 @@ namespace UCD {
     {Empty, 2047}, {Mixed, 1}, {Empty, 2047}, {Mixed, 1}, {Empty, 2047},
     {Mixed, 1}, {Empty, 2047}, {Mixed, 1}, {Empty, 2047}, {Mixed, 1},
     {Empty, 2047}, {Mixed, 1}, {Full, 4096}};
-    const static UnicodeSet::bitquad_t  __v2_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v2_0_Set_quads[] = {
     0xfffe0000, 0x0000fffb, 0x00000010, 0xfffffeff, 0xfffe03ff, 0xfebf0fff,
     0x02fe3fff, 0x08000000, 0x00000800, 0x0000000f, 0xc0000000, 0xc0000000,
     0xc0000000, 0xc0000000, 0xc0000000, 0xc0000000, 0xc0000000, 0xc0000000,
     0xc0000000, 0xc0000000, 0xc0000000, 0xc0000000, 0xc0000000, 0xc0000000};
     const static UnicodeSet v2_0_Set{__v2_0_Set_runs, 43, __v2_0_Set_quads, 24};
-    /* Code Point Ranges for V2_1
-    [20ac, 20ac], [fffc, fffc]*/
 
+    /* Code Point Ranges for V2_1    [20ac, 20ac], [fffc, fffc] */
     const static UnicodeSet::run_t __v2_1_Set_runs[] = {
     {Empty, 261}, {Mixed, 1}, {Empty, 1785}, {Mixed, 1}, {Empty, 32768}};
-    const static UnicodeSet::bitquad_t  __v2_1_Set_quads[] = {
-    0x00001000, 0x10000000};
+    const static UnicodeSet::bitquad_t __v2_1_Set_quads[] = {0x00001000, 0x10000000};
     const static UnicodeSet v2_1_Set{__v2_1_Set_runs, 5, __v2_1_Set_quads, 2};
+
     /* Code Point Ranges for V3_0
     [01f6, 01f9], [0218, 021f], [0222, 0233], [02a9, 02ad], [02df, 02df],
     [02ea, 02ee], [0346, 034e], [0362, 0362], [03d7, 03d7], [03db, 03db],
@@ -513,8 +512,7 @@ namespace UCD {
     [2e80, 2e99], [2e9b, 2ef3], [2f00, 2fd5], [2ff0, 2ffb], [3038, 303a],
     [303e, 303e], [31a0, 31b7], [3400, 4db5], [a000, a48c], [a490, a4a1],
     [a4a4, a4b3], [a4b5, a4c0], [a4c2, a4c4], [a4c6, a4c6], [fb1d, fb1d],
-    [fff9, fffb]*/
-
+    [fff9, fffb] */
     const static UnicodeSet::run_t __v3_0_Set_runs[] = {
     {Empty, 15}, {Mixed, 3}, {Empty, 3}, {Mixed, 3}, {Empty, 2}, {Mixed, 2},
     {Empty, 2}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
@@ -533,7 +531,7 @@ namespace UCD {
     {Empty, 11}, {Mixed, 1}, {Empty, 18}, {Full, 205}, {Mixed, 1},
     {Empty, 658}, {Full, 36}, {Mixed, 3}, {Empty, 689}, {Mixed, 1},
     {Empty, 38}, {Mixed, 1}, {Empty, 32768}};
-    const static UnicodeSet::bitquad_t  __v3_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v3_0_Set_quads[] = {
     0x03c00000, 0xff000000, 0x000ffffc, 0x00003e00, 0x80000000, 0x00007c00,
     0x00007fc0, 0x00000004, 0xa8800000, 0x00000002, 0x00002001, 0x20010000,
     0x0000f300, 0x00003000, 0x00000400, 0x00380000, 0x83000000, 0x00008000,
@@ -548,6 +546,7 @@ namespace UCD {
     0xfbffffff, 0x000fffff, 0x003fffff, 0x0fff0000, 0x47000000, 0x00ffffff,
     0x003fffff, 0xffff1fff, 0xffeffff3, 0x0000005d, 0x20000000, 0x0e000000};
     const static UnicodeSet v3_0_Set{__v3_0_Set_runs, 97, __v3_0_Set_quads, 78};
+
     /* Code Point Ranges for V3_1
     [03f4, 03f5], [fdd0, fdef], [10300, 1031e], [10320, 10323],
     [10330, 1034a], [10400, 10425], [10428, 1044d], [1d000, 1d0f5],
@@ -557,8 +556,7 @@ namespace UCD {
     [1d4c5, 1d505], [1d507, 1d50a], [1d50d, 1d514], [1d516, 1d51c],
     [1d51e, 1d539], [1d53b, 1d53e], [1d540, 1d544], [1d546, 1d546],
     [1d54a, 1d550], [1d552, 1d6a3], [1d6a8, 1d7c9], [1d7ce, 1d7ff],
-    [20000, 2a6d6], [2f800, 2fa1d], [e0001, e0001], [e0020, e007f]*/
-
+    [20000, 2a6d6], [2f800, 2fa1d], [e0001, e0001], [e0020, e007f] */
     const static UnicodeSet::run_t __v3_1_Set_runs[] = {
     {Empty, 31}, {Mixed, 1}, {Empty, 1998}, {Mixed, 2}, {Empty, 40},
     {Mixed, 3}, {Empty, 5}, {Full, 1}, {Mixed, 2}, {Empty, 1629}, {Full, 7},
@@ -567,12 +565,13 @@ namespace UCD {
     {Full, 10}, {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 1}, {Empty, 320},
     {Full, 1334}, {Mixed, 1}, {Empty, 649}, {Full, 16}, {Mixed, 1},
     {Empty, 22575}, {Mixed, 1}, {Full, 3}, {Empty, 6140}};
-    const static UnicodeSet::bitquad_t  __v3_1_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v3_1_Set_quads[] = {
     0x00300000, 0xffff0000, 0x0000ffff, 0x7fffffff, 0xffff000f, 0x000007ff,
     0xffffff3f, 0x00003fff, 0x003fffff, 0xfffffc7f, 0x3fffffff, 0xffdfffff,
     0xdfffffff, 0xebffde64, 0xffffffed, 0xdfdfe7bf, 0x7bffffff, 0xfffdfc5f,
     0xffffff0f, 0xffffc3ff, 0x007fffff, 0x3fffffff, 0x00000002};
     const static UnicodeSet v3_1_Set{__v3_1_Set_runs, 38, __v3_1_Set_quads, 23};
+
     /* Code Point Ranges for V3_2
     [0220, 0220], [034f, 034f], [0363, 036f], [03d8, 03d9], [03f6, 03f6],
     [048a, 048b], [04c5, 04c6], [04c9, 04ca], [04cd, 04ce], [0500, 050f],
@@ -585,8 +584,7 @@ namespace UCD {
     [27f0, 27ff], [2900, 2aff], [303b, 303d], [3095, 3096], [309f, 30a0],
     [30ff, 30ff], [31f0, 31ff], [3251, 325f], [32b1, 32bf], [a4a2, a4a3],
     [a4b4, a4b4], [a4c1, a4c1], [a4c5, a4c5], [fa30, fa6a], [fdfc, fdfc],
-    [fe00, fe0f], [fe45, fe46], [fe73, fe73], [ff5f, ff60]*/
-
+    [fe00, fe0f], [fe45, fe46], [fe73, fe73], [ff5f, ff60] */
     const static UnicodeSet::run_t __v3_2_Set_runs[] = {
     {Empty, 17}, {Mixed, 1}, {Empty, 8}, {Mixed, 2}, {Empty, 2}, {Mixed, 2},
     {Empty, 4}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
@@ -602,7 +600,7 @@ namespace UCD {
     {Mixed, 2}, {Empty, 682}, {Mixed, 1}, {Full, 1}, {Mixed, 1},
     {Empty, 27}, {Mixed, 2}, {Empty, 1}, {Mixed, 2}, {Empty, 6}, {Mixed, 2},
     {Empty, 32772}};
-    const static UnicodeSet::bitquad_t  __v3_2_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v3_2_Set_quads[] = {
     0x00000001, 0x00008000, 0x0000fff8, 0x03000000, 0x00400000, 0x00000c00,
     0x00006660, 0x0000ffff, 0x0000c000, 0x00020000, 0x01800000, 0x001fdfff,
     0x007fffff, 0x000fffff, 0x000ddfff, 0x8087c080, 0x0002000f, 0x00030000,
@@ -613,6 +611,7 @@ namespace UCD {
     0x0010000c, 0x00000022, 0xffff0000, 0x000007ff, 0x10000000, 0x0000ffff,
     0x00000060, 0x00080000, 0x80000000, 0x00000001};
     const static UnicodeSet v3_2_Set{__v3_2_Set_runs, 75, __v3_2_Set_quads, 52};
+
     /* Code Point Ranges for V4_0
     [0221, 0221], [0234, 0236], [02ae, 02af], [02ef, 02ff], [0350, 0357],
     [035d, 035f], [03f7, 03fb], [0600, 0603], [060d, 0615], [0656, 0658],
@@ -630,8 +629,7 @@ namespace UCD {
     [10137, 1013f], [10380, 1039d], [1039f, 1039f], [10426, 10427],
     [1044e, 1049d], [104a0, 104a9], [10800, 10805], [10808, 10808],
     [1080a, 10835], [10837, 10838], [1083c, 1083c], [1083f, 1083f],
-    [1d300, 1d356], [1d4c1, 1d4c1], [e0100, e01ef]*/
-
+    [1d300, 1d356], [1d4c1, 1d4c1], [e0100, e01ef] */
     const static UnicodeSet::run_t __v4_0_Set_runs[] = {
     {Empty, 17}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
     {Empty, 2}, {Mixed, 1}, {Empty, 4}, {Mixed, 1}, {Empty, 16}, {Mixed, 1},
@@ -650,7 +648,7 @@ namespace UCD {
     {Empty, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 2}, {Empty, 26}, {Mixed, 2},
     {Empty, 1622}, {Full, 2}, {Mixed, 1}, {Empty, 11}, {Mixed, 1},
     {Empty, 24929}, {Full, 7}, {Mixed, 1}, {Empty, 6128}};
-    const static UnicodeSet::bitquad_t  __v4_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v4_0_Set_quads[] = {
     0x00700002, 0x0000c000, 0xffff8000, 0xe0ff0000, 0x0f800000, 0x003fe00f,
     0x01c00000, 0x8000c000, 0x0000e000, 0x0000e000, 0x00000010, 0x20000000,
     0x0000000a, 0x00001000, 0x0002000e, 0x00200000, 0x00020000, 0x07f80000,
@@ -662,6 +660,7 @@ namespace UCD {
     0xff8fffff, 0xbfffffff, 0x000000c0, 0xffffc000, 0x3fffffff, 0x000003ff,
     0xfffffd3f, 0x91bfffff, 0x007fffff, 0x00000002, 0x0000ffff};
     const static UnicodeSet v4_0_Set{__v4_0_Set_runs, 97, __v4_0_Set_quads, 59};
+
     /* Code Point Ranges for V4_1
     [0237, 0241], [0358, 035c], [03fc, 03ff], [04f6, 04f7], [05a2, 05a2],
     [05c5, 05c7], [060b, 060b], [061e, 061e], [0659, 065e], [0750, 076d],
@@ -680,8 +679,7 @@ namespace UCD {
     [a800, a82b], [fa70, fad9], [fe10, fe19], [10140, 1018a],
     [103a0, 103c3], [103c8, 103d5], [10a00, 10a03], [10a05, 10a06],
     [10a0c, 10a13], [10a15, 10a17], [10a19, 10a33], [10a38, 10a3a],
-    [10a3f, 10a47], [10a50, 10a58], [1d200, 1d245], [1d6a4, 1d6a5]*/
-
+    [10a3f, 10a47], [10a50, 10a58], [1d200, 1d245], [1d6a4, 1d6a5] */
     const static UnicodeSet::run_t __v4_1_Set_runs[] = {
     {Empty, 17}, {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 4}, {Mixed, 1},
     {Empty, 7}, {Mixed, 1}, {Empty, 5}, {Mixed, 2}, {Empty, 1}, {Mixed, 1},
@@ -702,7 +700,7 @@ namespace UCD {
     {Empty, 16}, {Full, 1}, {Mixed, 1}, {Empty, 49}, {Mixed, 3},
     {Empty, 1597}, {Full, 2}, {Mixed, 1}, {Empty, 34}, {Mixed, 1},
     {Empty, 31050}};
-    const static UnicodeSet::bitquad_t  __v4_1_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v4_1_Set_quads[] = {
     0xff800000, 0x00000003, 0x1f000000, 0xf0000000, 0x00c00000, 0x00000004,
     0x000000e0, 0x40000800, 0x7e000000, 0xffff0000, 0x00003fff, 0x20000000,
     0x00004000, 0x00400000, 0x00000040, 0x00030000, 0x16000000, 0x00000080,
@@ -716,6 +714,7 @@ namespace UCD {
     0x03ffffff, 0x03ff0000, 0x000007ff, 0x003fff0f, 0xfeeff06f, 0x870fffff,
     0x01ff00ff, 0x0000003f, 0x00000030};
     const static UnicodeSet v4_1_Set{__v4_1_Set_runs, 106, __v4_1_Set_quads, 69};
+
     /* Code Point Ranges for V5_0
     [0242, 024f], [037b, 037d], [04cf, 04cf], [04fa, 04ff], [0510, 0513],
     [05ba, 05ba], [07c0, 07fa], [097b, 097c], [097e, 097f], [0ce2, 0ce3],
@@ -724,8 +723,7 @@ namespace UCD {
     [27c7, 27ca], [2b14, 2b1a], [2b20, 2b23], [2c60, 2c6c], [2c74, 2c77],
     [a717, a71a], [a720, a721], [a840, a877], [10900, 10919],
     [1091f, 1091f], [12000, 1236e], [12400, 12462], [12470, 12473],
-    [1d360, 1d371], [1d7ca, 1d7cb]*/
-
+    [1d360, 1d371], [1d7ca, 1d7cb] */
     const static UnicodeSet::run_t __v5_0_Set_runs[] = {
     {Empty, 18}, {Mixed, 1}, {Empty, 8}, {Mixed, 1}, {Empty, 10},
     {Mixed, 3}, {Empty, 4}, {Mixed, 1}, {Empty, 16}, {Full, 1}, {Mixed, 1},
@@ -737,7 +735,7 @@ namespace UCD {
     {Empty, 8}, {Full, 1}, {Mixed, 1}, {Empty, 772}, {Mixed, 1},
     {Empty, 183}, {Full, 27}, {Mixed, 1}, {Empty, 4}, {Full, 3}, {Mixed, 1},
     {Empty, 1399}, {Mixed, 1}, {Empty, 34}, {Mixed, 1}, {Empty, 31041}};
-    const static UnicodeSet::bitquad_t  __v5_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v5_0_Set_quads[] = {
     0x0000fffc, 0x38000000, 0x00008000, 0xfc000000, 0x000f0000, 0x04000000,
     0x07ffffff, 0xd8000000, 0x0006000c, 0xffff0fff, 0x1fffffff, 0x000007f0,
     0xc0000000, 0x0000f000, 0x00006000, 0x00000010, 0xf0000000, 0x000000ff,
@@ -745,6 +743,7 @@ namespace UCD {
     0x00000003, 0x00ffffff, 0x83ffffff, 0x00007fff, 0x000f0007, 0x0003ffff,
     0x00000c00};
     const static UnicodeSet v5_0_Set{__v5_0_Set_runs, 54, __v5_0_Set_quads, 31};
+
     /* Code Point Ranges for V5_1
     [0370, 0373], [0376, 0377], [03cf, 03cf], [0487, 0487], [0514, 0523],
     [0606, 060a], [0616, 061a], [063b, 063f], [076e, 077f], [0971, 0972],
@@ -764,8 +763,7 @@ namespace UCD {
     [aa00, aa36], [aa40, aa4d], [aa50, aa59], [aa5c, aa5f], [fe24, fe26],
     [10190, 1019b], [101d0, 101fd], [10280, 1029c], [102a0, 102d0],
     [10920, 10939], [1093f, 1093f], [1d129, 1d129], [1f000, 1f02b],
-    [1f030, 1f093]*/
-
+    [1f030, 1f093] */
     const static UnicodeSet::run_t __v5_1_Set_runs[] = {
     {Empty, 27}, {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Empty, 5}, {Mixed, 1},
     {Empty, 3}, {Mixed, 2}, {Empty, 6}, {Mixed, 2}, {Empty, 9}, {Mixed, 1},
@@ -787,7 +785,7 @@ namespace UCD {
     {Full, 1}, {Mixed, 1}, {Empty, 50}, {Mixed, 1}, {Empty, 1599},
     {Mixed, 1}, {Empty, 246}, {Full, 1}, {Mixed, 1}, {Full, 2}, {Mixed, 1},
     {Empty, 30843}};
-    const static UnicodeSet::bitquad_t  __v5_1_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v5_1_Set_quads[] = {
     0x00cf0000, 0x00008000, 0x00000080, 0xfff00000, 0x0000000f, 0x07c007c0,
     0xf8000000, 0xffffc000, 0x00060000, 0x00020000, 0x00200000, 0x00000010,
     0x0000000c, 0x00010000, 0x20000000, 0x03000000, 0xff00000c, 0x20000000,
@@ -802,6 +800,7 @@ namespace UCD {
     0xffff0000, 0x3fffffff, 0x1fffffff, 0x0001ffff, 0x83ffffff, 0x00000200,
     0xffff0fff, 0x000fffff};
     const static UnicodeSet v5_1_Set{__v5_1_Set_runs, 112, __v5_1_Set_quads, 74};
+
     /* Code Point Ranges for V5_2
     [0524, 0525], [0800, 082d], [0830, 083e], [0900, 0900], [094e, 094e],
     [0955, 0955], [0979, 097a], [09fb, 09fb], [0fd5, 0fd8], [109a, 109d],
@@ -822,8 +821,7 @@ namespace UCD {
     [1f142, 1f142], [1f146, 1f146], [1f14a, 1f14e], [1f157, 1f157],
     [1f15f, 1f15f], [1f179, 1f179], [1f17b, 1f17c], [1f17f, 1f17f],
     [1f18a, 1f18d], [1f190, 1f190], [1f200, 1f200], [1f210, 1f231],
-    [1f240, 1f248], [2a700, 2b734]*/
-
+    [1f240, 1f248], [2a700, 2b734] */
     const static UnicodeSet::run_t __v5_2_Set_runs[] = {
     {Empty, 41}, {Mixed, 1}, {Empty, 22}, {Full, 1}, {Mixed, 1}, {Empty, 6},
     {Mixed, 1}, {Empty, 1}, {Mixed, 2}, {Empty, 3}, {Mixed, 1}, {Empty, 46},
@@ -846,7 +844,7 @@ namespace UCD {
     {Full, 2}, {Mixed, 1}, {Empty, 249}, {Full, 33}, {Mixed, 1},
     {Empty, 1510}, {Mixed, 5}, {Empty, 3}, {Mixed, 3}, {Empty, 1445},
     {Full, 129}, {Mixed, 1}, {Empty, 29254}};
-    const static UnicodeSet::bitquad_t  __v5_2_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v5_2_Set_quads[] = {
     0x00000030, 0x7fff3fff, 0x00000001, 0x00204000, 0x06000000, 0x08000000,
     0x01e00000, 0x3c000000, 0x7c000000, 0x000000f8, 0xfc000000, 0x00000001,
     0xff800000, 0xffff0000, 0x003fffff, 0x00000c00, 0x04000000, 0x7fffffff,
@@ -860,6 +858,7 @@ namespace UCD {
     0x00007fff, 0xffff07ff, 0xa0027fff, 0x80807c44, 0x9a000000, 0x00013c00,
     0xffff0001, 0x0003ffff, 0x000001ff, 0x001fffff};
     const static UnicodeSet v5_2_Set{__v5_2_Set_runs, 115, __v5_2_Set_quads, 70};
+
     /* Code Point Ranges for V6_0
     [0526, 0527], [0620, 0620], [065f, 065f], [0840, 085b], [085e, 085e],
     [093a, 093b], [094f, 094f], [0956, 0957], [0973, 0977], [0b72, 0b77],
@@ -884,8 +883,7 @@ namespace UCD {
     [1f5fb, 1f5ff], [1f601, 1f610], [1f612, 1f614], [1f616, 1f616],
     [1f618, 1f618], [1f61a, 1f61a], [1f61c, 1f61e], [1f620, 1f625],
     [1f628, 1f62b], [1f62d, 1f62d], [1f630, 1f633], [1f635, 1f640],
-    [1f645, 1f64f], [1f680, 1f6c5], [1f700, 1f773], [2b740, 2b81d]*/
-
+    [1f645, 1f64f], [1f680, 1f6c5], [1f700, 1f773], [2b740, 2b81d] */
     const static UnicodeSet::run_t __v6_0_Set_runs[] = {
     {Empty, 41}, {Mixed, 1}, {Empty, 7}, {Mixed, 2}, {Empty, 15},
     {Mixed, 1}, {Empty, 6}, {Mixed, 3}, {Empty, 15}, {Mixed, 1},
@@ -903,7 +901,7 @@ namespace UCD {
     {Full, 1}, {Mixed, 3}, {Empty, 3}, {Mixed, 4}, {Empty, 1}, {Full, 2},
     {Mixed, 1}, {Empty, 1}, {Full, 3}, {Mixed, 1}, {Empty, 1534}, {Full, 6},
     {Mixed, 1}, {Empty, 29247}};
-    const static UnicodeSet::bitquad_t  __v6_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v6_0_Set_quads[] = {
     0x000000c0, 0x00000001, 0x80000000, 0x4fffffff, 0x0c000000, 0x00c08000,
     0x00f80000, 0x00fc0000, 0x04000200, 0x00004000, 0x0000f000, 0x06000000,
     0x60000000, 0xf00fffff, 0x10000000, 0x1fe00000, 0x02000000, 0x000ffe00,
@@ -917,6 +915,7 @@ namespace UCD {
     0xffff0000, 0x000000ff, 0xf8000000, 0x755dfffe, 0xffef2f3f, 0x0000ffe1,
     0x0000003f, 0x000fffff, 0x3fffffff};
     const static UnicodeSet v6_0_Set{__v6_0_Set_runs, 82, __v6_0_Set_quads, 69};
+
     /* Code Point Ranges for V6_1
     [058f, 058f], [0604, 0604], [08a0, 08a0], [08a2, 08ac], [08e4, 08fe],
     [0af0, 0af0], [0ede, 0edf], [10c7, 10c7], [10cd, 10cd], [10fd, 10ff],
@@ -938,8 +937,7 @@ namespace UCD {
     [1eeab, 1eebb], [1eef0, 1eef1], [1f16a, 1f16b], [1f540, 1f543],
     [1f600, 1f600], [1f611, 1f611], [1f615, 1f615], [1f617, 1f617],
     [1f619, 1f619], [1f61b, 1f61b], [1f61f, 1f61f], [1f626, 1f627],
-    [1f62c, 1f62c], [1f62e, 1f62f], [1f634, 1f634]*/
-
+    [1f62c, 1f62c], [1f62e, 1f62f], [1f634, 1f634] */
     const static UnicodeSet::run_t __v6_1_Set_runs[] = {
     {Empty, 44}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 20},
     {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 15}, {Mixed, 1},
@@ -954,7 +952,7 @@ namespace UCD {
     {Full, 2}, {Mixed, 3}, {Empty, 1011}, {Mixed, 6}, {Empty, 1},
     {Mixed, 1}, {Empty, 19}, {Mixed, 1}, {Empty, 30}, {Mixed, 1},
     {Empty, 5}, {Mixed, 2}, {Empty, 30798}};
-    const static UnicodeSet::bitquad_t  __v6_1_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v6_1_Set_quads[] = {
     0x00008000, 0x00000010, 0x00001ffd, 0x7ffffff0, 0x00010000, 0xc0000000,
     0x00002080, 0xe0000000, 0xfc003800, 0x000000ff, 0x00780000, 0x00002800,
     0x000c0000, 0x00002080, 0x000000c0, 0x0ffc0000, 0x00001000, 0x0ff00000,
@@ -964,22 +962,18 @@ namespace UCD {
     0x0af7fe96, 0xaa96ea84, 0x5ef7f796, 0x0ffffbff, 0x0ffffbee, 0x00030000,
     0x00000c00, 0x0000000f, 0x8aa20001, 0x0010d0c0};
     const static UnicodeSet v6_1_Set{__v6_1_Set_runs, 67, __v6_1_Set_quads, 46};
-    /* Code Point Ranges for V6_2
-    [20ba, 20ba]*/
 
-    const static UnicodeSet::run_t __v6_2_Set_runs[] = {
-    {Empty, 261}, {Mixed, 1}, {Empty, 34554}};
-    const static UnicodeSet::bitquad_t  __v6_2_Set_quads[] = {
-    0x04000000};
+    /* Code Point Ranges for V6_2    [20ba, 20ba] */
+    const static UnicodeSet::run_t __v6_2_Set_runs[] = {{Empty, 261}, {Mixed, 1}, {Empty, 34554}};
+    const static UnicodeSet::bitquad_t __v6_2_Set_quads[] = {0x04000000};
     const static UnicodeSet v6_2_Set{__v6_2_Set_runs, 3, __v6_2_Set_quads, 1};
-    /* Code Point Ranges for V6_3
-    [061c, 061c], [2066, 2069]*/
 
+    /* Code Point Ranges for V6_3    [061c, 061c], [2066, 2069] */
     const static UnicodeSet::run_t __v6_3_Set_runs[] = {
     {Empty, 48}, {Mixed, 1}, {Empty, 210}, {Mixed, 1}, {Empty, 34556}};
-    const static UnicodeSet::bitquad_t  __v6_3_Set_quads[] = {
-    0x10000000, 0x000003c0};
+    const static UnicodeSet::bitquad_t __v6_3_Set_quads[] = {0x10000000, 0x000003c0};
     const static UnicodeSet v6_3_Set{__v6_3_Set_runs, 5, __v6_3_Set_quads, 2};
+
     /* Code Point Ranges for V7_0
     [037f, 037f], [0528, 052f], [058d, 058e], [0605, 0605], [08a1, 08a1],
     [08ad, 08b2], [08ff, 08ff], [0978, 0978], [0980, 0980], [0c00, 0c00],
@@ -1014,8 +1008,7 @@ namespace UCD {
     [1f57b, 1f5a3], [1f5a5, 1f5fa], [1f641, 1f642], [1f650, 1f67f],
     [1f6c6, 1f6cf], [1f6e0, 1f6ec], [1f6f0, 1f6f3], [1f780, 1f7d4],
     [1f800, 1f80b], [1f810, 1f847], [1f850, 1f859], [1f860, 1f887],
-    [1f890, 1f8ad]*/
-
+    [1f890, 1f8ad] */
     const static UnicodeSet::run_t __v7_0_Set_runs[] = {
     {Empty, 27}, {Mixed, 1}, {Empty, 13}, {Mixed, 1}, {Empty, 2},
     {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 20}, {Mixed, 1}, {Empty, 1},
@@ -1045,7 +1038,7 @@ namespace UCD {
     {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Full, 1}, {Empty, 2}, {Mixed, 2},
     {Empty, 4}, {Full, 2}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Full, 1},
     {Mixed, 1}, {Full, 1}, {Mixed, 2}, {Empty, 30778}};
-    const static UnicodeSet::bitquad_t  __v7_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v7_0_Set_quads[] = {
     0x80000000, 0x0000ff00, 0x00006000, 0x00000020, 0x0007e002, 0x80000000,
     0x01000000, 0x00000001, 0x00000001, 0x00100000, 0x00000002, 0x00000002,
     0x0000ffc0, 0x01fe0000, 0x60000000, 0x7fff0000, 0x03000000, 0x003fff80,
@@ -1066,6 +1059,7 @@ namespace UCD {
     0xffff0006, 0x0000ffc0, 0x000f1fff, 0x001fffff, 0xffff0fff, 0x03ff00ff,
     0xffff00ff, 0x00003fff};
     const static UnicodeSet v7_0_Set{__v7_0_Set_runs, 158, __v7_0_Set_quads, 110};
+
     /* Code Point Ranges for V8_0
     [08b3, 08b4], [08e3, 08e3], [0af9, 0af9], [0c5a, 0c5a], [0d5f, 0d5f],
     [13f5, 13f5], [13f8, 13fd], [20be, 20be], [218a, 218b], [2bec, 2bef],
@@ -1080,8 +1074,7 @@ namespace UCD {
     [1d1de, 1d1e8], [1d800, 1da8b], [1da9b, 1da9f], [1daa1, 1daaf],
     [1f32d, 1f32f], [1f37e, 1f37f], [1f3cf, 1f3d3], [1f3f8, 1f3ff],
     [1f4ff, 1f4ff], [1f54b, 1f54f], [1f643, 1f644], [1f6d0, 1f6d0],
-    [1f910, 1f918], [1f980, 1f984], [1f9c0, 1f9c0], [2b820, 2cea1]*/
-
+    [1f910, 1f918], [1f980, 1f984], [1f9c0, 1f9c0], [2b820, 2cea1] */
     const static UnicodeSet::run_t __v8_0_Set_runs[] = {
     {Empty, 69}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 15},
     {Mixed, 1}, {Empty, 10}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
@@ -1100,7 +1093,7 @@ namespace UCD {
     {Empty, 7}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 17}, {Mixed, 1},
     {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 1522},
     {Full, 180}, {Mixed, 1}, {Empty, 29066}};
-    const static UnicodeSet::bitquad_t  __v8_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v8_0_Set_quads[] = {
     0x00180000, 0x00000008, 0x02000000, 0x04000000, 0x80000000, 0x3f200000,
     0x40000000, 0x00000c00, 0x0000f000, 0x003fe000, 0x40000000, 0x00008000,
     0x00fc0000, 0x30000000, 0xffff000f, 0x0000c000, 0xf837ffff, 0x30000000,
@@ -1110,6 +1103,7 @@ namespace UCD {
     0x0000e000, 0xc0000000, 0x000f8000, 0xff000000, 0x80000000, 0x0000f800,
     0x00000018, 0x00010000, 0x01ff0000, 0x0000001f, 0x00000001, 0x00000003};
     const static UnicodeSet v8_0_Set{__v8_0_Set_runs, 90, __v8_0_Set_quads, 48};
+
     /* Code Point Ranges for V9_0
     [08b6, 08bd], [08d4, 08e2], [0c80, 0c80], [0d4f, 0d4f], [0d54, 0d56],
     [0d58, 0d5e], [0d76, 0d78], [1c80, 1c88], [1dfb, 1dfb], [23fb, 23fe],
@@ -1123,8 +1117,7 @@ namespace UCD {
     [1e95e, 1e95f], [1f19b, 1f1ac], [1f23b, 1f23b], [1f57a, 1f57a],
     [1f5a4, 1f5a4], [1f6d1, 1f6d2], [1f6f4, 1f6f6], [1f919, 1f91e],
     [1f920, 1f927], [1f930, 1f930], [1f933, 1f93e], [1f940, 1f94b],
-    [1f950, 1f95e], [1f985, 1f991]*/
-
+    [1f950, 1f95e], [1f985, 1f991] */
     const static UnicodeSet::run_t __v9_0_Set_runs[] = {
     {Empty, 69}, {Mixed, 3}, {Empty, 28}, {Mixed, 1}, {Empty, 5},
     {Mixed, 2}, {Empty, 120}, {Mixed, 1}, {Empty, 10}, {Mixed, 1},
@@ -1137,7 +1130,7 @@ namespace UCD {
     {Mixed, 1}, {Empty, 65}, {Mixed, 2}, {Empty, 3}, {Mixed, 1},
     {Empty, 25}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 8}, {Mixed, 2},
     {Empty, 16}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 30771}};
-    const static UnicodeSet::bitquad_t  __v9_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v9_0_Set_quads[] = {
     0x3fc00000, 0xfff00000, 0x00000007, 0x00000001, 0x7f708000, 0x01c00000,
     0x000001ff, 0x08000000, 0x78000000, 0x00000018, 0x00004000, 0x00000020,
     0x00006000, 0xffff0000, 0xff0fffff, 0x0fffffff, 0x40000000, 0x2bffffff,
@@ -1146,6 +1139,7 @@ namespace UCD {
     0xc3ff07ff, 0xf8000000, 0x00001fff, 0x08000000, 0x04000000, 0x00000010,
     0x00060000, 0x00700000, 0x7e000000, 0x7ff900ff, 0x7fff0fff, 0x0003ffe0};
     const static UnicodeSet v9_0_Set{__v9_0_Set_runs, 57, __v9_0_Set_quads, 42};
+
     /* Code Point Ranges for V10_0
     [0860, 086a], [09fc, 09fd], [0afa, 0aff], [0d00, 0d00], [0d3b, 0d3c],
     [1cf7, 1cf7], [1df6, 1df9], [20bf, 20bf], [23ff, 23ff], [2bd2, 2bd2],
@@ -1156,8 +1150,7 @@ namespace UCD {
     [1b002, 1b11e], [1b170, 1b2fb], [1f260, 1f265], [1f6d3, 1f6d4],
     [1f6f7, 1f6f8], [1f900, 1f90b], [1f91f, 1f91f], [1f928, 1f92f],
     [1f931, 1f932], [1f94c, 1f94c], [1f95f, 1f96b], [1f992, 1f997],
-    [1f9d0, 1f9e6], [2ceb0, 2ebe0]*/
-
+    [1f9d0, 1f9e6], [2ceb0, 2ebe0] */
     const static UnicodeSet::run_t __v10_0_Set_runs[] = {
     {Empty, 67}, {Mixed, 1}, {Empty, 11}, {Mixed, 1}, {Empty, 7},
     {Mixed, 1}, {Empty, 16}, {Mixed, 2}, {Empty, 125}, {Mixed, 1},
@@ -1170,7 +1163,7 @@ namespace UCD {
     {Mixed, 1}, {Empty, 507}, {Mixed, 1}, {Empty, 34}, {Mixed, 2},
     {Empty, 16}, {Mixed, 5}, {Empty, 1}, {Mixed, 2}, {Empty, 1701},
     {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Empty, 28832}};
-    const static UnicodeSet::bitquad_t  __v10_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v10_0_Set_quads[] = {
     0x000007ff, 0x30000000, 0xfc000000, 0x00000001, 0x18000000, 0x00800000,
     0x03c00000, 0x80000000, 0x80000000, 0x00040000, 0x000003e0, 0x00004000,
     0xffc00000, 0x000007ff, 0x0000e000, 0xffff00ff, 0xdfffffcf, 0x00000007,
@@ -1179,6 +1172,7 @@ namespace UCD {
     0x0006ff00, 0x80001000, 0x00000fff, 0x00fc0000, 0xffff0000, 0x0000007f,
     0xffff0000, 0x00000001};
     const static UnicodeSet v10_0_Set{__v10_0_Set_runs, 56, __v10_0_Set_quads, 38};
+
     /* Code Point Ranges for V11_0
     [0560, 0560], [0588, 0588], [05ef, 05ef], [07fd, 07ff], [08d3, 08d3],
     [09fe, 09fe], [0a76, 0a76], [0c04, 0c04], [0c84, 0c84], [1878, 1878],
@@ -1193,8 +1187,7 @@ namespace UCD {
     [1d372, 1d378], [1ec71, 1ecb4], [1f12f, 1f12f], [1f6f9, 1f6f9],
     [1f7d5, 1f7d8], [1f94d, 1f94f], [1f96c, 1f970], [1f973, 1f976],
     [1f97a, 1f97a], [1f97c, 1f97f], [1f998, 1f9a2], [1f9b0, 1f9b9],
-    [1f9c1, 1f9c2], [1f9e7, 1f9ff], [1fa60, 1fa6d]*/
-
+    [1f9c1, 1f9c2], [1f9e7, 1f9ff], [1fa60, 1fa6d] */
     const static UnicodeSet::run_t __v11_0_Set_runs[] = {
     {Empty, 43}, {Mixed, 2}, {Empty, 2}, {Mixed, 1}, {Empty, 15},
     {Mixed, 1}, {Empty, 6}, {Mixed, 1}, {Empty, 8}, {Mixed, 1}, {Empty, 3},
@@ -1212,7 +1205,7 @@ namespace UCD {
     {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 35}, {Mixed, 1}, {Empty, 45},
     {Mixed, 1}, {Empty, 6}, {Mixed, 1}, {Empty, 11}, {Mixed, 6}, {Empty, 3},
     {Mixed, 1}, {Empty, 30764}};
-    const static UnicodeSet::bitquad_t  __v11_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v11_0_Set_quads[] = {
     0x00000001, 0x00000100, 0x00008000, 0xe0000000, 0x00080000, 0x40000000,
     0x00400000, 0x00000010, 0x00000010, 0x01000000, 0xffff0000, 0xe7ffffff,
     0x1c000000, 0xfff80000, 0x7fff0fff, 0x00007c00, 0x00008000, 0x0000f800,
@@ -1223,6 +1216,7 @@ namespace UCD {
     0x00008000, 0x02000000, 0x01e00000, 0x0000e000, 0xf479f000, 0xff000000,
     0x03ff0007, 0x00000006, 0xffffff80, 0x00003fff};
     const static UnicodeSet v11_0_Set{__v11_0_Set_runs, 83, __v11_0_Set_quads, 52};
+
     /* Code Point Ranges for V12_0
     [0c77, 0c77], [0e86, 0e86], [0e89, 0e89], [0e8c, 0e8c], [0e8e, 0e93],
     [0e98, 0e98], [0ea0, 0ea0], [0ea8, 0ea9], [0eac, 0eac], [0eba, 0eba],
@@ -1238,8 +1232,7 @@ namespace UCD {
     [1f93f, 1f93f], [1f971, 1f971], [1f97b, 1f97b], [1f9a5, 1f9aa],
     [1f9ae, 1f9af], [1f9ba, 1f9bf], [1f9c3, 1f9ca], [1f9cd, 1f9cf],
     [1fa00, 1fa53], [1fa70, 1fa73], [1fa78, 1fa7a], [1fa80, 1fa82],
-    [1fa90, 1fa95]*/
-
+    [1fa90, 1fa95] */
     const static UnicodeSet::run_t __v12_0_Set_runs[] = {
     {Empty, 99}, {Mixed, 1}, {Empty, 16}, {Mixed, 2}, {Empty, 113},
     {Mixed, 1}, {Empty, 118}, {Mixed, 2}, {Empty, 18}, {Mixed, 1},
@@ -1253,7 +1246,7 @@ namespace UCD {
     {Empty, 33}, {Mixed, 1}, {Empty, 42}, {Mixed, 2}, {Empty, 7},
     {Mixed, 1}, {Empty, 8}, {Mixed, 2}, {Empty, 1}, {Mixed, 1}, {Empty, 1},
     {Mixed, 2}, {Empty, 1}, {Full, 2}, {Mixed, 3}, {Empty, 30763}};
-    const static UnicodeSet::bitquad_t  __v12_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v12_0_Set_quads[] = {
     0x00800000, 0x010fd240, 0x04001301, 0x04000000, 0x00000200, 0x80000000,
     0x00008000, 0xfc000000, 0x0000007c, 0x000000c0, 0x007fffff, 0x80000000,
     0x01000000, 0xfffffcff, 0xfcffffff, 0x0000001f, 0x00000030, 0x8003ffff,
@@ -1263,14 +1256,12 @@ namespace UCD {
     0x0000e000, 0x80000000, 0x08020000, 0xfc00c7e0, 0x0000e7f8, 0x000fffff,
     0x070f0000, 0x003f0007};
     const static UnicodeSet v12_0_Set{__v12_0_Set_runs, 63, __v12_0_Set_quads, 44};
-    /* Code Point Ranges for V12_1
-    [32ff, 32ff]*/
 
-    const static UnicodeSet::run_t __v12_1_Set_runs[] = {
-    {Empty, 407}, {Mixed, 1}, {Empty, 34408}};
-    const static UnicodeSet::bitquad_t  __v12_1_Set_quads[] = {
-    0x80000000};
+    /* Code Point Ranges for V12_1    [32ff, 32ff] */
+    const static UnicodeSet::run_t __v12_1_Set_runs[] = {{Empty, 407}, {Mixed, 1}, {Empty, 34408}};
+    const static UnicodeSet::bitquad_t __v12_1_Set_quads[] = {0x80000000};
     const static UnicodeSet v12_1_Set{__v12_1_Set_runs, 3, __v12_1_Set_quads, 1};
+
     /* Code Point Ranges for V13_0
     [08be, 08c7], [0b55, 0b55], [0d04, 0d04], [0d81, 0d81], [1abf, 1ac0],
     [2b97, 2b97], [2e50, 2e52], [31bb, 31bf], [4db6, 4dbf], [9ff0, 9ffc],
@@ -1285,8 +1276,7 @@ namespace UCD {
     [1f972, 1f972], [1f977, 1f978], [1f9a3, 1f9a4], [1f9ab, 1f9ad],
     [1f9cb, 1f9cb], [1fa74, 1fa74], [1fa83, 1fa86], [1fa96, 1faa8],
     [1fab0, 1fab6], [1fac0, 1fac2], [1fad0, 1fad6], [1fb00, 1fb92],
-    [1fb94, 1fbca], [1fbf0, 1fbf9], [2a6d7, 2a6dd], [30000, 3134a]*/
-
+    [1fb94, 1fbca], [1fbf0, 1fbf9], [2a6d7, 2a6dd], [30000, 3134a] */
     const static UnicodeSet::run_t __v13_0_Set_runs[] = {
     {Empty, 69}, {Mixed, 2}, {Empty, 19}, {Mixed, 1}, {Empty, 13},
     {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 104}, {Mixed, 2},
@@ -1304,7 +1294,7 @@ namespace UCD {
     {Empty, 4}, {Mixed, 4}, {Empty, 1}, {Full, 4}, {Mixed, 1}, {Full, 1},
     {Mixed, 2}, {Empty, 1366}, {Mixed, 1}, {Empty, 713}, {Full, 154},
     {Mixed, 1}, {Empty, 28517}};
-    const static UnicodeSet::bitquad_t  __v13_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v13_0_Set_quads[] = {
     0xc0000000, 0x000000ff, 0x00200000, 0x00000010, 0x00000002, 0x80000000,
     0x00000001, 0x00800000, 0x00070000, 0xf8000000, 0xffc00000, 0x1fff0000,
     0x00000780, 0x00600000, 0x00001000, 0x00000f00, 0x10000000, 0x00033bff,
@@ -1315,6 +1305,7 @@ namespace UCD {
     0x00100000, 0xffc00078, 0x007f01ff, 0x007f0007, 0xfff7ffff, 0x000007ff,
     0x03ff0000, 0x3f800000, 0x000007ff};
     const static UnicodeSet v13_0_Set{__v13_0_Set_runs, 80, __v13_0_Set_quads, 51};
+
     /* Code Point Ranges for V14_0
     [061d, 061d], [0870, 088e], [0890, 0891], [0898, 089f], [08b5, 08b5],
     [08c8, 08d2], [0c3c, 0c3c], [0c5d, 0c5d], [0cdd, 0cdd], [170d, 170d],
@@ -1333,8 +1324,7 @@ namespace UCD {
     [1e7e8, 1e7eb], [1e7ed, 1e7ee], [1e7f0, 1e7fe], [1f6dd, 1f6df],
     [1f7f0, 1f7f0], [1f979, 1f979], [1f9cc, 1f9cc], [1fa7b, 1fa7c],
     [1faa9, 1faac], [1fab7, 1faba], [1fac3, 1fac5], [1fad7, 1fad9],
-    [1fae0, 1fae7], [1faf0, 1faf6], [2a6de, 2a6df], [2b735, 2b738]*/
-
+    [1fae0, 1fae7], [1faf0, 1faf6], [2a6de, 2a6df], [2b735, 2b738] */
     const static UnicodeSet::run_t __v14_0_Set_runs[] = {
     {Empty, 48}, {Mixed, 1}, {Empty, 18}, {Mixed, 4}, {Empty, 26},
     {Mixed, 2}, {Empty, 3}, {Mixed, 1}, {Empty, 81}, {Mixed, 1}, {Empty, 7},
@@ -1354,7 +1344,7 @@ namespace UCD {
     {Empty, 11}, {Mixed, 1}, {Empty, 2}, {Mixed, 1}, {Empty, 4}, {Mixed, 1},
     {Empty, 1}, {Mixed, 3}, {Empty, 1374}, {Mixed, 1}, {Empty, 130},
     {Mixed, 1}, {Empty, 29254}};
-    const static UnicodeSet::bitquad_t  __v14_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v14_0_Set_quads[] = {
     0x20000000, 0xffff0000, 0xff037fff, 0x00200000, 0x0007ff00, 0x10000000,
     0x20000000, 0x20000000, 0x80202000, 0x00008000, 0x00007ffe, 0x00001000,
     0x60000000, 0x04000000, 0x00000001, 0x00008000, 0x80000000, 0x3ff80000,
@@ -1367,6 +1357,7 @@ namespace UCD {
     0x00010000, 0x02000000, 0x00001000, 0x18000000, 0x07801e00, 0x03800038,
     0x007f00ff, 0xc0000000, 0x01e00000};
     const static UnicodeSet v14_0_Set{__v14_0_Set_runs, 92, __v14_0_Set_quads, 63};
+
     /* Code Point Ranges for V15_0
     [0cf3, 0cf3], [0ece, 0ece], [10efd, 10eff], [1123f, 11241],
     [11b00, 11b09], [11f00, 11f10], [11f12, 11f3a], [11f3e, 11f59],
@@ -1375,8 +1366,7 @@ namespace UCD {
     [1e4d0, 1e4f9], [1f6dc, 1f6dc], [1f774, 1f776], [1f77b, 1f77f],
     [1f7d9, 1f7d9], [1fa75, 1fa77], [1fa87, 1fa88], [1faad, 1faaf],
     [1fabb, 1fabd], [1fabf, 1fabf], [1face, 1facf], [1fada, 1fadb],
-    [1fae8, 1fae8], [1faf7, 1faf8], [2b739, 2b739], [31350, 323af]*/
-
+    [1fae8, 1fae8], [1faf7, 1faf8], [2b739, 2b739], [31350, 323af] */
     const static UnicodeSet::run_t __v15_0_Set_runs[] = {
     {Empty, 103}, {Mixed, 1}, {Empty, 14}, {Mixed, 1}, {Empty, 2048},
     {Mixed, 1}, {Empty, 25}, {Mixed, 2}, {Empty, 69}, {Mixed, 1},
@@ -1386,7 +1376,7 @@ namespace UCD {
     {Empty, 142}, {Mixed, 1}, {Empty, 4}, {Mixed, 1}, {Empty, 2},
     {Mixed, 1}, {Empty, 20}, {Mixed, 5}, {Empty, 1505}, {Mixed, 1},
     {Empty, 736}, {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-    const static UnicodeSet::bitquad_t  __v15_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v15_0_Set_quads[] = {
     0x00080000, 0x00004000, 0xe0000000, 0x80000000, 0x00000003, 0x000003ff,
     0xfffdffff, 0xc7ffffff, 0x03ffffff, 0xfe008000, 0x003fffff, 0x00040000,
     0x00200000, 0x000fffff, 0x000007e0, 0xffff0000, 0x00003fff, 0x00008000,
@@ -1394,15 +1384,15 @@ namespace UCD {
     0x00000180, 0xb800e000, 0x0c00c000, 0x01800100, 0x02000000, 0xffff0000,
     0x0000ffff};
     const static UnicodeSet v15_0_Set{__v15_0_Set_runs, 41, __v15_0_Set_quads, 31};
-    /* Code Point Ranges for V15_1
-    [2ffc, 2fff], [31ef, 31ef], [2ebf0, 2ee5d]*/
 
+    /* Code Point Ranges for V15_1    [2ffc, 2fff], [31ef, 31ef], [2ebf0, 2ee5d] */
     const static UnicodeSet::run_t __v15_1_Set_runs[] = {
     {Empty, 383}, {Mixed, 1}, {Empty, 15}, {Mixed, 1}, {Empty, 5583},
     {Mixed, 1}, {Full, 18}, {Mixed, 1}, {Empty, 28813}};
-    const static UnicodeSet::bitquad_t  __v15_1_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v15_1_Set_quads[] = {
     0xf0000000, 0x00008000, 0xffff0000, 0x3fffffff};
     const static UnicodeSet v15_1_Set{__v15_1_Set_runs, 9, __v15_1_Set_quads, 4};
+
     /* Code Point Ranges for V16_0
     [0897, 0897], [1b4e, 1b4f], [1b7f, 1b7f], [1c89, 1c8a], [2427, 2429],
     [31e4, 31e5], [a7cb, a7cd], [a7da, a7dc], [105c0, 105f3],
@@ -1415,8 +1405,7 @@ namespace UCD {
     [1cc00, 1ccf9], [1cd00, 1ceb3], [1e5d0, 1e5fa], [1e5ff, 1e5ff],
     [1f8b2, 1f8bb], [1f8c0, 1f8c1], [1fa89, 1fa89], [1fa8f, 1fa8f],
     [1fabe, 1fabe], [1fac6, 1fac6], [1fadc, 1fadc], [1fadf, 1fadf],
-    [1fae9, 1fae9], [1fbcb, 1fbef]*/
-
+    [1fae9, 1fae9], [1fbcb, 1fbef] */
     const static UnicodeSet::run_t __v16_0_Set_runs[] = {
     {Empty, 68}, {Mixed, 1}, {Empty, 149}, {Mixed, 2}, {Empty, 8},
     {Mixed, 1}, {Empty, 60}, {Mixed, 1}, {Empty, 109}, {Mixed, 1},
@@ -1429,7 +1418,7 @@ namespace UCD {
     {Full, 13}, {Mixed, 1}, {Empty, 184}, {Mixed, 2}, {Empty, 149},
     {Mixed, 2}, {Empty, 13}, {Mixed, 4}, {Empty, 6}, {Mixed, 2},
     {Empty, 30752}};
-    const static UnicodeSet::bitquad_t  __v16_0_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __v16_0_Set_quads[] = {
     0x00800000, 0x0000c000, 0x80000000, 0x00000600, 0x00000380, 0x00000030,
     0x1c003800, 0x000fffff, 0xfffffe3f, 0x0000c03f, 0x0000001c, 0x10000000,
     0xffff4bff, 0xffbfffff, 0x01bff7a5, 0x00000006, 0xffff0000, 0x0000000f,

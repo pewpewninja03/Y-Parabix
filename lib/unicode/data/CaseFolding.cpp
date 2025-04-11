@@ -428,8 +428,7 @@ namespace UCD {
         /* Code Point Ranges for scf mapping to <none>
         */
 
-                const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
-        {Empty, 34816}};
+        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {{Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __null_codepoint_set_quads = nullptr;
         const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 1, __null_codepoint_set_quads, 0};
 
@@ -593,7 +592,7 @@ namespace UCD {
         [10596, 10c7f], [10cb3, 10d4f], [10d66, 1189f], [118c0, 16e3f],
         [16e60, 1e8ff], [1e922, 10ffff]*/
 
-                const static UnicodeSet::run_t __reflexive_set_runs[] = {
+        const static UnicodeSet::run_t __reflexive_set_runs[] = {
         {Full, 2}, {Mixed, 1}, {Full, 2}, {Mixed, 2}, {Full, 1},
         {Mixed, 11}, {Full, 7}, {Mixed, 6}, {Empty, 1}, {Mixed, 1},
         {Full, 1}, {Mixed, 8}, {Full, 90}, {Empty, 1}, {Mixed, 1},
@@ -607,7 +606,7 @@ namespace UCD {
         {Full, 55}, {Empty, 1}, {Mixed, 1}, {Full, 4}, {Mixed, 2},
         {Full, 89}, {Empty, 1}, {Full, 684}, {Empty, 1}, {Full, 981},
         {Empty, 1}, {Mixed, 1}, {Full, 30902}};
-        const static UnicodeSet::bitquad_t  __reflexive_set_quads[] = {
+        const static UnicodeSet::bitquad_t __reflexive_set_quads[] = {
         0xf8000001, 0xffdfffff, 0x80800000, 0xaaaaaaaa, 0x55abaaaa,
         0xaaaaab55, 0x54aaaaaa, 0x4e243129, 0xee512d2a, 0xb555524f,
         0xaa29aaaa, 0xaaaaaaaa, 0x93faaaaa, 0xffffaa85, 0xffffffdf,
@@ -1141,12 +1140,12 @@ PropertyObject * get_SCF_PropertyObject() {  return & SCF_ns::property_object; }
         [1ff2, 1ff4], [1ff6, 1ff7], [1ffc, 1ffc], [fb00, fb06],
         [fb13, fb17]*/
 
-                const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
+        const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
         {Empty, 6}, {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 4},
         {Mixed, 1}, {Empty, 12}, {Mixed, 2}, {Empty, 14}, {Mixed, 1},
         {Empty, 199}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Full, 1}, {Mixed, 3}, {Empty, 1752}, {Mixed, 1}, {Empty, 32807}};
-        const static UnicodeSet::bitquad_t  __explicitly_defined_set_quads[] = {
+        const static UnicodeSet::bitquad_t __explicitly_defined_set_quads[] = {
         0x80000000, 0x00010000, 0x00000200, 0x00010000, 0x00010000,
         0x00010000, 0x00000080, 0x47c00000, 0x00550000, 0x10dcffff,
         0x00cc10dc, 0x10dc00dc, 0x00f8007f};

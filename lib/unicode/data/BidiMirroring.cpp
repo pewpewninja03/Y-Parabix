@@ -41,7 +41,7 @@ namespace UCD {
         [ff1d, ff1d], [ff1f, ff3a], [ff3c, ff3c], [ff3e, ff5a],
         [ff5c, ff5c], [ff5e, ff5e], [ff61, ff61], [ff64, 10ffff]*/
 
-                const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
         {Full, 1}, {Mixed, 3}, {Full, 1}, {Mixed, 1}, {Full, 115},
         {Mixed, 1}, {Full, 58}, {Mixed, 1}, {Full, 76}, {Mixed, 4},
         {Full, 11}, {Mixed, 10}, {Full, 33}, {Mixed, 1}, {Full, 2},
@@ -49,7 +49,7 @@ namespace UCD {
         {Full, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 3}, {Full, 7},
         {Mixed, 1}, {Full, 16}, {Mixed, 3}, {Full, 13}, {Mixed, 1},
         {Full, 1649}, {Mixed, 2}, {Full, 4}, {Mixed, 4}, {Full, 32772}};
-        const static UnicodeSet::bitquad_t  __null_codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __null_codepoint_set_quads[] = {
         0xaffffcff, 0xd7ffffff, 0xd7ffffff, 0xf7fff7ff, 0xc3ffffff,
         0xe7ffffff, 0xf9ffffff, 0xffffff9f, 0x9fffffff, 0xffff9fff,
         0x7fdfc0ff, 0xcfffffe8, 0xffc3efd7, 0x0000300f, 0xfef87000,
@@ -65,8 +65,7 @@ namespace UCD {
         /* Code Point Ranges for bmg mapping to <codepoint>
         */
 
-                const static UnicodeSet::run_t __reflexive_set_runs[] = {
-        {Empty, 34816}};
+        const static UnicodeSet::run_t __reflexive_set_runs[] = {{Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __reflexive_set_quads = nullptr;
         const static UnicodeSet reflexive_set{__reflexive_set_runs, 1, __reflexive_set_quads, 0};
 
