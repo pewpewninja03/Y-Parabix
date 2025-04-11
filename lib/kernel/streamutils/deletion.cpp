@@ -1240,7 +1240,7 @@ FilterByMaskKernel::FilterByMaskKernel(LLVMTypeSystemInterface & ts,
     for (auto const & kv : inputBindings) {
         mInputStreamSets.push_back(Bind(kv.second, kv.first, ZeroExtended()));
     }
-    mOutputStreamSets.push_back(Bind("filteredOutput", filteredOutput, PopcountOf("extractionMask"), insertionProbabilityDistribution));
+    mOutputStreamSets.push_back(Bind("filteredOutput", filteredOutput, PopcountOf("extractionMask"), EmptyWriteOverflow()));
     assert (mOutputStreamSets.back().getDistribution().getTypeId() == insertionProbabilityDistribution.getTypeId());
     if (mStreamCount >= MIN_STREAMS_TO_SWIZZLE) {
         mPendingType = ts.getBitBlockType();

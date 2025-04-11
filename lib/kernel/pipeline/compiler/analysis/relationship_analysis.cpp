@@ -777,8 +777,6 @@ struct RelationshipGraphBuilder {
                                     }
                                 }
 
-                                errs() << "Kernel " << original << " is duplicate of " << replacement << "\n";
-
                                 clear_vertex(original, G);
                                 RelationshipNode & rn = G[original];
                                 rn.Type = RelationshipNode::IsNil;
@@ -885,9 +883,6 @@ struct RelationshipGraphBuilder {
             if (LLVM_UNLIKELY(visited.count(v) == 0)) {
                 RelationshipNode & rn = G[v];
                 clear_vertex(v, G);
-                if (rn.Type == RelationshipNode::IsKernel) {
-                    errs() << "Kernel " << v << " is unused\n";
-                }
                 rn.Type = RelationshipNode::IsNil;
                 rn.Kernel = nullptr;
             }
