@@ -1537,6 +1537,17 @@ UnicodeSet::UnicodeSet(run_t * const runs, const uint32_t runLength, const uint3
     assert (verify(mRuns, mRunLength, mQuads, mQuadLength));
 }
 
+UnicodeSet::UnicodeSet(const run_t * const runs, const uint32_t runLength,
+                       const bitquad_t * const quads, const uint32_t quadLength) noexcept
+: mRuns(const_cast<UnicodeSet::run_t *>(runs))
+, mQuads(const_cast<UnicodeSet::bitquad_t *>(quads))
+, mRunLength(runLength)
+, mQuadLength(quadLength)
+, mRunCapacity(0)
+, mQuadCapacity(0) {
+    assert (verify(mRuns, mRunLength, mQuads, mQuadLength));
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief Deprecated Constructor
  ** ------------------------------------------------------------------------------------------------------------- */
