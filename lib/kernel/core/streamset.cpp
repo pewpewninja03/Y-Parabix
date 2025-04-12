@@ -83,7 +83,7 @@ uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream msg(tmp);
         msg << "failed to create memfd (" << (size_t)errno << ')';
-        llvm::report_fatal_error(msg.str());
+        report_fatal_error(msg.str());
     }
 
     if (ftruncate(memfd, size) == -1) {
@@ -154,7 +154,7 @@ LLVM_READNONE inline size_t getArraySize(const Type * ty) {
     }
 }
 
-void StreamSetBuffer::assertValidStreamIndex(kernel::KernelBuilder & b, Value * streamIndex) const {
+void StreamSetBuffer::assertValidStreamIndex(KernelBuilder & b, Value * streamIndex) const {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         Value * const count = getStreamSetCount(b);
         Value * const index = b.CreateZExtOrTrunc(streamIndex, count->getType());
@@ -163,27 +163,17 @@ void StreamSetBuffer::assertValidStreamIndex(kernel::KernelBuilder & b, Value * 
     }
 }
 
-Value * StreamSetBuffer::getStreamBlockPtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex) const {
+Value * StreamSetBuffer::getStreamBlockPtr(KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex) const {
    // assertValidStreamIndex(b, streamIndex);
     return b.CreateInBoundsGEP(mType, baseAddress, {blockIndex, streamIndex});
 }
 
-Value * StreamSetBuffer::getStreamPackPtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * blockIndex, Value * const packIndex) const {
+Value * StreamSetBuffer::getStreamPackPtr(KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * blockIndex, Value * const packIndex) const {
    // assertValidStreamIndex(b, streamIndex);
     return b.CreateInBoundsGEP(mType, baseAddress, {blockIndex, streamIndex, packIndex});
 }
 
-Value * StreamSetBuffer::loadStreamBlock(kernel::KernelBuilder & b, Value * baseAddress, Value * streamIndex, Value * blockIndex, const bool unaligned) const {
-    Value * addr = getStreamBlockPtr(b, baseAddress, streamIndex, blockIndex);
-    return b.CreateAlignedLoad(b.getBitBlockType(), addr, unaligned ? 1U : (b.getBitBlockWidth() / 8));
-}
-
-Value * StreamSetBuffer::loadStreamPack(kernel::KernelBuilder & b, Value * baseAddress, Value * streamIndex, Value * blockIndex, Value * packIndex, const bool unaligned) const {
-    Value * addr = getStreamPackPtr(b, baseAddress, streamIndex, blockIndex, packIndex);
-    return b.CreateAlignedLoad(b.getBitBlockType(), addr, unaligned ? 1U : (b.getBitBlockWidth() / 8));
-}
-
-Value * StreamSetBuffer::getStreamSetCount(kernel::KernelBuilder & b) const {
+Value * StreamSetBuffer::getStreamSetCount(KernelBuilder & b) const {
     size_t count = 1;
     if (isa<ArrayType>(getBaseType())) {
         count = getBaseType()->getArrayNumElements();
@@ -210,7 +200,7 @@ unsigned StreamSetBuffer::getFieldWidth() const {
  * In the case of a stream whose fields are less than one byte (8 bits) in size, the pointer is to the containing byte.
  * The type of the pointer is i8* for fields of 8 bits or less, otherwise iN* for N-bit fields.
  */
-Value * StreamSetBuffer::getRawItemPointer(kernel::KernelBuilder & b, Value * streamIndex, Value * absolutePosition) const {
+Value * StreamSetBuffer::getRawItemPointer(KernelBuilder & b, Value * streamIndex, Value * absolutePosition) const {
     Type * const elemTy = cast<ArrayType>(mBaseType)->getElementType();
     Type * itemTy = cast<VectorType>(elemTy)->getElementType();
     #if LLVM_VERSION_CODE < LLVM_VERSION_CODE(12, 0, 0)
@@ -239,7 +229,7 @@ Value * StreamSetBuffer::getRawItemPointer(kernel::KernelBuilder & b, Value * st
     }
     if (LLVM_UNLIKELY(itemWidth < 8)) {
         const Rational itemsPerByte{8, itemWidth};
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
             b.CreateAssertZero(b.CreateURemRational(absolutePosition, itemsPerByte),
                                 "absolutePosition (%" PRIu64 " * %" PRIu64 "x%" PRIu64 ") must be byte aligned",
                                 absolutePosition, streamCount, b.getSize(itemWidth));
@@ -255,7 +245,7 @@ Value * StreamSetBuffer::getRawItemPointer(kernel::KernelBuilder & b, Value * st
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief resolveType
  ** ------------------------------------------------------------------------------------------------------------- */
-Type * StreamSetBuffer::resolveType(kernel::KernelBuilder & b, Type * const streamSetType) {
+Type * StreamSetBuffer::resolveType(KernelBuilder & b, Type * const streamSetType) {
     unsigned numElements = 1;
     Type * type = streamSetType;
     if (LLVM_LIKELY(type->isArrayTy())) {
@@ -281,6 +271,27 @@ Type * StreamSetBuffer::resolveType(kernel::KernelBuilder & b, Type * const stre
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isItemAlignedAccessWithinStreamSetMemory
+ ** ------------------------------------------------------------------------------------------------------------- */
+void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const {
+
+    assert (codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts));
+
+    Value * startPtr = getRawItemPointer(b, b.getSize(0), start);
+    Value * const streamCount = getStreamSetCount(b);
+    Value * endPtr = getRawItemPointer(b, b.CreateSub(streamCount, b.getSize(1)), end);
+    auto & dl = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = dl.getIntPtrType(b.getContext());
+    startPtr = b.CreatePtrToInt(startPtr, intPtrTy);
+    ptr = b.CreatePtrToInt(ptr, intPtrTy);
+    Value * valid = b.CreateICmpULE(startPtr, ptr);
+    ptr = b.CreateAdd(ptr, ConstantInt::get(intPtrTy, size));
+    endPtr = b.CreatePtrToInt(endPtr, intPtrTy);
+    valid = b.CreateOr(valid, b.CreateICmpULE(ptr, endPtr));
+    b.CreateAssert(valid, "streamset access is outside of valid memory boundaries");
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
 constexpr const char __MAKE_CIRCULAR_BUFFER[] =    "__ss_mcb";
@@ -288,14 +299,14 @@ constexpr auto __MAKE_CIRCULAR_BUFFER_LENGTH = std::string_view(__MAKE_CIRCULAR_
 constexpr const char __DESTROY_CIRCULAR_BUFFER[] = "__ss_dcb";
 constexpr auto __DESTROY_CIRCULAR_BUFFER_LENGTH = std::string_view(__DESTROY_CIRCULAR_BUFFER).size();
 
-void StreamSetBuffer::linkFunctions(kernel::KernelBuilder & b) {
+void StreamSetBuffer::linkFunctions(KernelBuilder & b) {
     b.LinkFunction(StringRef{__MAKE_CIRCULAR_BUFFER, __MAKE_CIRCULAR_BUFFER_LENGTH}, make_circular_buffer);
     b.LinkFunction(StringRef{__DESTROY_CIRCULAR_BUFFER, __DESTROY_CIRCULAR_BUFFER_LENGTH}, destroy_circular_buffer);
 }
 
 // External Buffer
 
-StructType * ExternalBuffer::getHandleType(kernel::KernelBuilder & b) const {
+StructType * ExternalBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
         FixedArray<Type *, 2> fields;
         fields[0] = getPointerType();
@@ -305,69 +316,69 @@ StructType * ExternalBuffer::getHandleType(kernel::KernelBuilder & b) const {
     return mHandleType;
 }
 
-void ExternalBuffer::allocateBuffer(kernel::KernelBuilder & /* b */, Value * const /* capacityMultiplier */) {
+void ExternalBuffer::allocateBuffer(KernelBuilder & /* b */, Value * const /* capacityMultiplier */) {
     unsupported("allocateBuffer", "External");
 }
 
-void ExternalBuffer::releaseBuffer(kernel::KernelBuilder & /* b */) const {
+void ExternalBuffer::releaseBuffer(KernelBuilder & /* b */) const {
     // this buffer is not responsible for free-ing th data associated with it
 }
 
-void ExternalBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress, Value *capacity) const {
+void ExternalBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress, Value *capacity) const {
 
 }
 
-void ExternalBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * const addr) const {
+void ExternalBuffer::setBaseAddress(KernelBuilder & b, Value * const addr) const {
     assert (mHandle && "has not been set prior to calling setBaseAddress");
     Value * const p = b.CreateInBoundsGEP(mHandleType, mHandle, {b.getInt32(0), b.getInt32(BaseAddress)});
     b.CreateStore(b.CreatePointerBitCastOrAddrSpaceCast(addr, getPointerType()), p);
 }
 
-Value * ExternalBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
+Value * ExternalBuffer::getBaseAddress(KernelBuilder & b) const {
     assert (mHandle && "has not been set prior to calling getBaseAddress");
     Value * const p = b.CreateInBoundsGEP(mHandleType, mHandle, {b.getInt32(0), b.getInt32(BaseAddress)});
     return b.CreateAlignedLoad(getPointerType(), p, sizeof(void*));
 }
 
-void ExternalBuffer::setCapacity(kernel::KernelBuilder & b, Value * const capacity) const {
+void ExternalBuffer::setCapacity(KernelBuilder & b, Value * const capacity) const {
     assert (mHandle && "has not been set prior to calling setCapacity");
     Value *  const p = b.CreateInBoundsGEP(mHandleType, mHandle, {b.getInt32(0), b.getInt32(EffectiveCapacity)});
     b.CreateAlignedStore(b.CreateZExt(capacity, b.getSizeTy()), p, sizeof(size_t));
 }
 
-Value * ExternalBuffer::getCapacity(kernel::KernelBuilder & b) const {
+Value * ExternalBuffer::getCapacity(KernelBuilder & b) const {
     assert (mHandle && "has not been set prior to calling getCapacity");
     Value * const p = b.CreateInBoundsGEP(mHandleType, mHandle, {b.getInt32(0), b.getInt32(EffectiveCapacity)});
     return b.CreateLoad(b.getSizeTy(), p);
 }
 
-Value * ExternalBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
+Value * ExternalBuffer::getInternalCapacity(KernelBuilder & b) const {
     return getCapacity(b);
 }
 
-Value * ExternalBuffer::modByCapacity(kernel::KernelBuilder & /* b */, Value * const offset) const {
+Value * ExternalBuffer::modByCapacity(KernelBuilder & /* b */, Value * const offset) const {
     assert (offset->getType()->isIntegerTy());
     return offset;
 }
 
-Value * ExternalBuffer::getLinearlyAccessibleItems(kernel::KernelBuilder & b, Value * const fromPosition, Value * const totalItems) const {
+Value * ExternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * const fromPosition, Value * const totalItems) const {
     return b.CreateSub(totalItems, fromPosition);
 }
 
-Value * ExternalBuffer::getLinearlyWritableItems(kernel::KernelBuilder & b, Value * const fromPosition, Value * const /* consumed */) const {
+Value * ExternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const fromPosition, Value * const /* consumed */) const {
     assert (fromPosition);
     Value * const capacity = getCapacity(b);
     assert (fromPosition->getType() == capacity->getType());
     return b.CreateSub(capacity, fromPosition);
 }
 
-Value * ExternalBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * baseAddress, Value * const /* transferredItems */) const {
+Value * ExternalBuffer::getVirtualBasePtr(KernelBuilder & b, Value * baseAddress, Value * const /* transferredItems */) const {
     Constant * const sz_ZERO = b.getSize(0);
     Value * const addr = StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, sz_ZERO);
     return b.CreatePointerCast(addr, getPointerType());
 }
 
-inline void ExternalBuffer::assertValidBlockIndex(kernel::KernelBuilder & b, Value * blockIndex) const {
+inline void ExternalBuffer::assertValidBlockIndex(KernelBuilder & b, Value * blockIndex) const {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         Value * const blockCount = b.CreateCeilUDiv(getCapacity(b), b.getSize(b.getBitBlockWidth()));
         blockIndex = b.CreateZExtOrTrunc(blockIndex, blockCount->getType());
@@ -376,25 +387,25 @@ inline void ExternalBuffer::assertValidBlockIndex(kernel::KernelBuilder & b, Val
     }
 }
 
-Value * ExternalBuffer::requiresExpansion(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * ExternalBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     unsupported("requiresExpansion", "External");
 }
 
-void ExternalBuffer::linearCopyBack(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+void ExternalBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     unsupported("linearCopyBack", "External");
 }
 
-Value * ExternalBuffer::expandBuffer(kernel::KernelBuilder & /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */) const  {
+Value * ExternalBuffer::expandBuffer(KernelBuilder & /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */) const  {
     unsupported("expandBuffer", "External");
 }
 
-Value * ExternalBuffer::getMallocAddress(kernel::KernelBuilder & /* b */) const {
+Value * ExternalBuffer::getMallocAddress(KernelBuilder & /* b */) const {
     unsupported("getMallocAddress", "External");
 }
 
 // Internal Buffer
 
-Value * InternalBuffer::getStreamBlockPtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex) const {
+Value * InternalBuffer::getStreamBlockPtr(KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex) const {
     Value * offset = nullptr;
     if (mLinear) {
         offset = blockIndex;
@@ -404,7 +415,7 @@ Value * InternalBuffer::getStreamBlockPtr(kernel::KernelBuilder & b, Value * con
     return StreamSetBuffer::getStreamBlockPtr(b, baseAddress, streamIndex, offset);
 }
 
-Value * InternalBuffer::getStreamPackPtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex, Value * const packIndex) const {
+Value * InternalBuffer::getStreamPackPtr(KernelBuilder & b, Value * const baseAddress, Value * const streamIndex, Value * const blockIndex, Value * const packIndex) const {
     Value * offset = nullptr;
     if (mLinear) {
         offset = blockIndex;
@@ -414,7 +425,7 @@ Value * InternalBuffer::getStreamPackPtr(kernel::KernelBuilder & b, Value * cons
     return StreamSetBuffer::getStreamPackPtr(b, baseAddress, streamIndex, offset, packIndex);
 }
 
-Value * InternalBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
+Value * InternalBuffer::getVirtualBasePtr(KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
     Constant * const sz_ZERO = b.getSize(0);
     Value * baseBlockIndex = nullptr;
     if (mLinear) {
@@ -429,11 +440,11 @@ Value * InternalBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * con
     return b.CreatePointerCast(addr, getPointerType());
 }
 
-Value * InternalBuffer::getLinearlyAccessibleItems(kernel::KernelBuilder & b, Value * const processedItems, Value * const totalItems) const {
+Value * InternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * const processedItems, Value * const totalItems) const {
     return b.CreateSub(totalItems, processedItems);
 }
 
-Value * InternalBuffer::getLinearlyWritableItems(kernel::KernelBuilder & b, Value * const producedItems, Value * const consumedItems) const {
+Value * InternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const producedItems, Value * const consumedItems) const {
     Value * const capacity = getCapacity(b);
     if (LLVM_UNLIKELY(mLinear)) {
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -455,7 +466,7 @@ Value * InternalBuffer::getLinearlyWritableItems(kernel::KernelBuilder & b, Valu
 
 // Static Buffer
 
-StructType * StaticBuffer::getHandleType(kernel::KernelBuilder & b) const {
+StructType * StaticBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
         auto & C = b.getContext();
         PointerType * const typePtr = getPointerType();
@@ -476,7 +487,7 @@ StructType * StaticBuffer::getHandleType(kernel::KernelBuilder & b) const {
     return mHandleType;
 }
 
-void StaticBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capacityMultiplier) {
+void StaticBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     Value * const handle = getHandle();
@@ -508,7 +519,7 @@ void StaticBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capac
     }
 }
 
-void StaticBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
+void StaticBuffer::releaseBuffer(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(mLinear ? MallocedAddress : BaseAddress);
@@ -518,11 +529,11 @@ void StaticBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
     b.CreateStore(ConstantPointerNull::get(cast<PointerType>(mType)), addressField);
 }
 
-void StaticBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress, Value *capacity) const {
+void StaticBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress, Value *capacity) const {
     b.CreateFree(baseAddress);
 }
 
-Value * StaticBuffer::modByCapacity(kernel::KernelBuilder & b, Value * const offset) const {
+Value * StaticBuffer::modByCapacity(KernelBuilder & b, Value * const offset) const {
     assert (offset->getType()->isIntegerTy());
     if (LLVM_UNLIKELY(mLinear || isCapacityGuaranteed(offset, mCapacity))) {
         return offset;
@@ -536,7 +547,7 @@ Value * StaticBuffer::modByCapacity(kernel::KernelBuilder & b, Value * const off
     }
 }
 
-Value * StaticBuffer::getCapacity(kernel::KernelBuilder & b) const {
+Value * StaticBuffer::getCapacity(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(mLinear ? EffectiveCapacity : InternalCapacity);
@@ -547,7 +558,7 @@ Value * StaticBuffer::getCapacity(kernel::KernelBuilder & b) const {
     return b.CreateMul(capacity, BLOCK_WIDTH, "capacity");
 }
 
-Value * StaticBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
+Value * StaticBuffer::getInternalCapacity(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(InternalCapacity);
@@ -558,7 +569,7 @@ Value * StaticBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
     return b.CreateMul(capacity, BLOCK_WIDTH, "internalCapacity");
 }
 
-void StaticBuffer::setCapacity(kernel::KernelBuilder & b, Value * capacity) const {
+void StaticBuffer::setCapacity(KernelBuilder & b, Value * capacity) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(InternalCapacity);
@@ -575,7 +586,7 @@ void StaticBuffer::setCapacity(kernel::KernelBuilder & b, Value * capacity) cons
     }
 }
 
-Value * StaticBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
+Value * StaticBuffer::getBaseAddress(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(BaseAddress);
@@ -584,7 +595,7 @@ Value * StaticBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
     return b.CreateLoad(getPointerType(), base, "baseAddress");
 }
 
-void StaticBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * addr) const {
+void StaticBuffer::setBaseAddress(KernelBuilder & b, Value * addr) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(BaseAddress);
@@ -596,18 +607,18 @@ void StaticBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * addr) const
     }
 }
 
-Value * StaticBuffer::getMallocAddress(kernel::KernelBuilder & b) const {
+Value * StaticBuffer::getMallocAddress(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(mLinear ? MallocedAddress : BaseAddress);
     return b.CreateLoad(getPointerType(), b.CreateInBoundsGEP(mHandleType, getHandle(), indices));
 }
 
-Value * StaticBuffer::requiresExpansion(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * StaticBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     return b.getFalse();
 }
 
-void StaticBuffer::linearCopyBack(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+void StaticBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     if (mLinear) {
         const auto blockWidth = b.getBitBlockWidth();
         assert (is_pow2(blockWidth));
@@ -635,7 +646,7 @@ void StaticBuffer::linearCopyBack(kernel::KernelBuilder & b, Value * produced, V
     }
 }
 
-Value * StaticBuffer::expandBuffer(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
+Value * StaticBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
     if (mLinear) {
 
         SmallVector<char, 200> buf;
@@ -748,7 +759,7 @@ Value * StaticBuffer::expandBuffer(kernel::KernelBuilder & b, Value * produced, 
 
 // Dynamic Buffer
 
-StructType * DynamicBuffer::getHandleType(kernel::KernelBuilder & b) const {
+StructType * DynamicBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
         auto & C = b.getContext();
         PointerType * const typePtr = getPointerType();
@@ -777,7 +788,7 @@ StructType * DynamicBuffer::getHandleType(kernel::KernelBuilder & b) const {
     return mHandleType;
 }
 
-void DynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capacityMultiplier) {
+void DynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
     assert (mHandle && "has not been set prior to calling allocateBuffer");
     // note: when adding extensible stream sets, make sure to set the initial count here.
     FixedArray<Value *, 2> indices;
@@ -855,7 +866,7 @@ void DynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capa
 
 }
 
-void DynamicBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
+void DynamicBuffer::releaseBuffer(KernelBuilder & b) const {
     /* Free the dynamically allocated buffer(s). */
     Value * const handle = getHandle();
     FixedArray<Value *, 2> indices;
@@ -892,7 +903,7 @@ void DynamicBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
 
 }
 
-void DynamicBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress, Value * capacity) const {
+void DynamicBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress, Value * capacity) const {
     if (mLinear) {
         b.CreateFree(baseAddress);
     } else {
@@ -904,12 +915,12 @@ void DynamicBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress
     }
 }
 
-void DynamicBuffer::setBaseAddress(kernel::KernelBuilder & /* b */, Value * /* addr */) const {
+void DynamicBuffer::setBaseAddress(KernelBuilder & /* b */, Value * /* addr */) const {
     assert (false);
     unsupported("setBaseAddress", "Dynamic");
 }
 
-Value * DynamicBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
+Value * DynamicBuffer::getBaseAddress(KernelBuilder & b) const {
     assert (getHandle());
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
@@ -930,7 +941,7 @@ Value * DynamicBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
     return b.CreateLoad(getPointerType(), ptr);
 }
 
-Value * DynamicBuffer::getMallocAddress(kernel::KernelBuilder & b) const {
+Value * DynamicBuffer::getMallocAddress(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     Value * ptr = nullptr;
@@ -950,7 +961,7 @@ Value * DynamicBuffer::getMallocAddress(kernel::KernelBuilder & b) const {
     return b.CreateLoad(getPointerType(), ptr);
 }
 
-Value * DynamicBuffer::modByCapacity(kernel::KernelBuilder & b, Value * const offset) const {
+Value * DynamicBuffer::modByCapacity(KernelBuilder & b, Value * const offset) const {
     assert (offset->getType()->isIntegerTy());
     if (mLinear || isCapacityGuaranteed(offset, mInitialCapacity)) {
         return offset;
@@ -974,7 +985,7 @@ Value * DynamicBuffer::modByCapacity(kernel::KernelBuilder & b, Value * const of
     }
 }
 
-Value * DynamicBuffer::getCapacity(kernel::KernelBuilder & b) const {
+Value * DynamicBuffer::getCapacity(KernelBuilder & b) const {
     assert (mHandle && mHandleType);
 
     FixedArray<Value *, 2> indices;
@@ -1003,7 +1014,7 @@ Value * DynamicBuffer::getCapacity(kernel::KernelBuilder & b) const {
     return b.CreateMul(capacity, BLOCK_WIDTH);
 }
 
-Value * DynamicBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
+Value * DynamicBuffer::getInternalCapacity(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     Value * capacity = nullptr;
@@ -1028,11 +1039,11 @@ Value * DynamicBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
     return b.CreateMul(capacity, BLOCK_WIDTH);
 }
 
-void DynamicBuffer::setCapacity(kernel::KernelBuilder & /* b */, Value * /* capacity */) const {
+void DynamicBuffer::setCapacity(KernelBuilder & /* b */, Value * /* capacity */) const {
     unsupported("setCapacity", "Dynamic");
 }
 
-Value * DynamicBuffer::requiresExpansion(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * DynamicBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
 
     if (mLinear) {
 
@@ -1071,7 +1082,7 @@ Value * DynamicBuffer::requiresExpansion(kernel::KernelBuilder & b, Value * prod
 
 }
 
-void DynamicBuffer::linearCopyBack(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+void DynamicBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
 
     if (mLinear) {
 
@@ -1195,7 +1206,7 @@ inline size_t largestPowerOf2ThatDivides(const size_t n) {
     return (n & (~(n - 1)));
 }
 
-Value * DynamicBuffer::expandBuffer(kernel::KernelBuilder & b, Value * const produced, Value * const consumed, Value * const required) const {
+Value * DynamicBuffer::expandBuffer(KernelBuilder & b, Value * const produced, Value * const consumed, Value * const required) const {
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -1442,7 +1453,7 @@ Value * DynamicBuffer::expandBuffer(kernel::KernelBuilder & b, Value * const pro
 
 // Managed Dynamic Buffer
 
-StructType * ManagedDynamicBuffer::getHandleType(kernel::KernelBuilder & b) const {
+StructType * ManagedDynamicBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
         auto & C = b.getContext();
         PointerType * const typePtr = getPointerType();
@@ -1461,11 +1472,11 @@ StructType * ManagedDynamicBuffer::getHandleType(kernel::KernelBuilder & b) cons
     return mHandleType;
 }
 
-Value * ManagedDynamicBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
+Value * ManagedDynamicBuffer::getVirtualBasePtr(KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
     return b.CreatePointerCast(baseAddress, getPointerType());
 }
 
-void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capacityMultiplier) {
+void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
     assert (mHandle && "has not been set prior to calling allocateBuffer");
 
     SmallVector<char, 200> buf;
@@ -1604,7 +1615,7 @@ void ManagedDynamicBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * con
     b.CreateCall(f, args);
 }
 
-void ManagedDynamicBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
+void ManagedDynamicBuffer::releaseBuffer(KernelBuilder & b) const {
     /* Free the dynamically allocated buffer(s). */
     Value * const handle = getHandle();
     FixedArray<Value *, 2> indices;
@@ -1620,7 +1631,7 @@ void ManagedDynamicBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
 }
 
 
-void ManagedDynamicBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress, Value * capacity) const {
+void ManagedDynamicBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress, Value * capacity) const {
     FixedArray<Value *, 3> destroyArgs;
     destroyArgs[0] = b.CreatePointerCast(baseAddress, b.getInt8PtrTy());
     destroyArgs[1] = b.CreateMul(b.getTypeSize(mType), capacity);
@@ -1628,7 +1639,7 @@ void ManagedDynamicBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * base
     b.CreateCall(b.getModule()->getFunction(__DESTROY_CIRCULAR_BUFFER), destroyArgs);
 }
 
-Value * ManagedDynamicBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
+Value * ManagedDynamicBuffer::getBaseAddress(KernelBuilder & b) const {
     assert (getHandle());
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
@@ -1638,7 +1649,7 @@ Value * ManagedDynamicBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
     return b.CreateLoad(getPointerType(), ptr);
 }
 
-Value * ManagedDynamicBuffer::getMallocAddress(kernel::KernelBuilder & b) const {
+Value * ManagedDynamicBuffer::getMallocAddress(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(LinearMallocedAddress);
@@ -1646,7 +1657,7 @@ Value * ManagedDynamicBuffer::getMallocAddress(kernel::KernelBuilder & b) const 
     return b.CreateLoad(getPointerType(), ptr);
 }
 
-Value * ManagedDynamicBuffer::getCapacity(kernel::KernelBuilder & b) const {
+Value * ManagedDynamicBuffer::getCapacity(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(LinearEffectiveCapacity);
@@ -1657,7 +1668,7 @@ Value * ManagedDynamicBuffer::getCapacity(kernel::KernelBuilder & b) const {
     return b.CreateMul(capacity, BLOCK_WIDTH, "capacity");
 }
 
-Value * ManagedDynamicBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
+Value * ManagedDynamicBuffer::getInternalCapacity(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(LinearInternalCapacity);
@@ -1669,7 +1680,7 @@ Value * ManagedDynamicBuffer::getInternalCapacity(kernel::KernelBuilder & b) con
 }
 
 
-void ManagedDynamicBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * const addr) const {
+void ManagedDynamicBuffer::setBaseAddress(KernelBuilder & b, Value * const addr) const {
     assert (mHandle && "has not been set prior to calling setBaseAddress");
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
@@ -1678,7 +1689,7 @@ void ManagedDynamicBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * con
     b.CreateStore(ptr, b.CreateInBoundsGEP(mHandleType, mHandle, indices));
 }
 
-void ManagedDynamicBuffer::setCapacity(kernel::KernelBuilder & b, Value * const capacity) const {
+void ManagedDynamicBuffer::setCapacity(KernelBuilder & b, Value * const capacity) const {
     assert (mHandle && "has not been set prior to calling setCapacity");
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
@@ -1686,19 +1697,19 @@ void ManagedDynamicBuffer::setCapacity(kernel::KernelBuilder & b, Value * const 
     b.CreateStore(capacity, b.CreateInBoundsGEP(mHandleType, mHandle, indices));
 }
 
-Value * ManagedDynamicBuffer::modByCapacity(kernel::KernelBuilder & b, Value * const offset) const {
+Value * ManagedDynamicBuffer::modByCapacity(KernelBuilder & b, Value * const offset) const {
     return offset;
 }
 
-Value * ManagedDynamicBuffer::requiresExpansion(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * ManagedDynamicBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     unsupported("requiresExpansion", "ManagedDynamicBuffer");
 }
 
-void ManagedDynamicBuffer::linearCopyBack(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+void ManagedDynamicBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     unsupported("linearCopyBack", "ManagedDynamicBuffer");
 }
 
-llvm::StructType * ManagedDynamicBuffer::getInternalThreadLocalHandleType(kernel::KernelBuilder & b) {
+StructType * ManagedDynamicBuffer::getInternalThreadLocalHandleType(KernelBuilder & b) {
     FixedArray<Type *, 3> fields;
     PointerType * const voidPtrTy = b.getVoidPtrTy();
     fields[PriorAddress] = voidPtrTy;
@@ -1707,7 +1718,7 @@ llvm::StructType * ManagedDynamicBuffer::getInternalThreadLocalHandleType(kernel
     return StructType::get(b.getContext(), fields);
 }
 
-void ManagedDynamicBuffer::freePendingDeletion(kernel::KernelBuilder & b, llvm::Value * threadLocalHandle) const {
+void ManagedDynamicBuffer::freePendingDeletion(KernelBuilder & b, Value * threadLocalHandle) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(PriorAddress);
@@ -1724,7 +1735,7 @@ void ManagedDynamicBuffer::freePendingDeletion(kernel::KernelBuilder & b, llvm::
     destroyBuffer(b, ptr, capacity);
 }
 
-llvm::Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -1995,7 +2006,7 @@ llvm::Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * prod
 
 // Repeating Buffer
 
-StructType * RepeatingBuffer::getHandleType(kernel::KernelBuilder & b) const {
+StructType * RepeatingBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
         auto & C = b.getContext();
         FixedArray<Type *, 1> types;
@@ -2005,37 +2016,37 @@ StructType * RepeatingBuffer::getHandleType(kernel::KernelBuilder & b) const {
     return mHandleType;
 }
 
-void RepeatingBuffer::allocateBuffer(kernel::KernelBuilder & b, Value * const capacityMultiplier) {
+void RepeatingBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
     unsupported("allocateBuffer", "Repeating");
 }
 
-void RepeatingBuffer::releaseBuffer(kernel::KernelBuilder & b) const {
+void RepeatingBuffer::releaseBuffer(KernelBuilder & b) const {
     unsupported("releaseBuffer", "Repeating");
 }
 
-void RepeatingBuffer::destroyBuffer(kernel::KernelBuilder & b, Value * baseAddress, Value *capacity) const {
+void RepeatingBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress, Value *capacity) const {
 
 }
 
-Value * RepeatingBuffer::modByCapacity(kernel::KernelBuilder & b, Value * const offset) const {
+Value * RepeatingBuffer::modByCapacity(KernelBuilder & b, Value * const offset) const {
     Value * const capacity = b.CreateExactUDiv(mModulus, b.getSize(b.getBitBlockWidth()));
     return b.CreateURem(offset, capacity);
 }
 
-Value * RepeatingBuffer::getCapacity(kernel::KernelBuilder & b) const {
+Value * RepeatingBuffer::getCapacity(KernelBuilder & b) const {
     return mModulus;
 }
 
-Value * RepeatingBuffer::getInternalCapacity(kernel::KernelBuilder & b) const {
+Value * RepeatingBuffer::getInternalCapacity(KernelBuilder & b) const {
     return mModulus;
 }
 
-void RepeatingBuffer::setCapacity(kernel::KernelBuilder & b, Value * capacity) const {
+void RepeatingBuffer::setCapacity(KernelBuilder & b, Value * capacity) const {
     unsupported("setCapacity", "Repeating");
 }
 
 
-Value * RepeatingBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
+Value * RepeatingBuffer::getVirtualBasePtr(KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
     Value * addr = nullptr;
     Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
     if (mUnaligned) {
@@ -2069,7 +2080,7 @@ Value * RepeatingBuffer::getVirtualBasePtr(kernel::KernelBuilder & b, Value * co
     return b.CreatePointerCast(addr, getPointerType());
 }
 
-Value * RepeatingBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
+Value * RepeatingBuffer::getBaseAddress(KernelBuilder & b) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(BaseAddress);
@@ -2078,7 +2089,7 @@ Value * RepeatingBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
     return b.CreateLoad(getPointerType(), base, "baseAddress");
 }
 
-void RepeatingBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * addr) const {
+void RepeatingBuffer::setBaseAddress(KernelBuilder & b, Value * addr) const {
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(BaseAddress);
@@ -2086,38 +2097,38 @@ void RepeatingBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * addr) co
     b.CreateStore(addr, b.CreateInBoundsGEP(mHandleType, handle, indices));
 }
 
-Value * RepeatingBuffer::getMallocAddress(kernel::KernelBuilder & b) const {
+Value * RepeatingBuffer::getMallocAddress(KernelBuilder & b) const {
     return getBaseAddress(b);
 }
 
-Value * RepeatingBuffer::requiresExpansion(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * RepeatingBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     return b.getFalse();
 }
 
-void RepeatingBuffer::linearCopyBack(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+void RepeatingBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
     unsupported("linearCopyBack", "Repeating");
 }
 
-Value * RepeatingBuffer::expandBuffer(kernel::KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
+Value * RepeatingBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
     unsupported("linearCopyBack", "Repeating");
 }
 
 // Constructors
 
-ExternalBuffer::ExternalBuffer(const unsigned id, kernel::KernelBuilder & b, Type * const type,
+ExternalBuffer::ExternalBuffer(const unsigned id, KernelBuilder & b, Type * const type,
                                const unsigned AddressSpace)
 : StreamSetBuffer(id, BufferKind::ExternalBuffer, b, type,  true, AddressSpace) {
 
 }
 
-StaticBuffer::StaticBuffer(const unsigned id, kernel::KernelBuilder & b, Type * const type,
+StaticBuffer::StaticBuffer(const unsigned id, KernelBuilder & b, Type * const type,
                            const size_t capacity,
                            const bool linear, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::StaticBuffer, b, type, linear, AddressSpace)
 , mCapacity(capacity) {
 }
 
-DynamicBuffer::DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, Type * const type,
+DynamicBuffer::DynamicBuffer(const unsigned id, KernelBuilder & b, Type * const type,
                              const size_t initialCapacity, const bool hasUnderflow,
                              const bool linear, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::DynamicBuffer, b, type, linear, AddressSpace)
@@ -2126,27 +2137,27 @@ DynamicBuffer::DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, Type 
     assert (initialCapacity);
 }
 
-ManagedDynamicBuffer::ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b,
-                                           llvm::Type * const type, const size_t initialCapacity, const unsigned AddressSpace)
+ManagedDynamicBuffer::ManagedDynamicBuffer(const unsigned id, KernelBuilder & b,
+                                           Type * const type, const size_t initialCapacity, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::ManagedDynamicBuffer, b, type, false, AddressSpace)
 , mInitialCapacity(initialCapacity) {
 
 }
 
-RepeatingBuffer::RepeatingBuffer(const unsigned id, kernel::KernelBuilder & b, Type * const type, const bool unaligned)
+RepeatingBuffer::RepeatingBuffer(const unsigned id, KernelBuilder & b, Type * const type, const bool unaligned)
 : InternalBuffer(id, BufferKind::RepeatingBuffer, b, type, false, 0)
 , mUnaligned(unaligned) {
 
 }
 
 
-inline InternalBuffer::InternalBuffer(const unsigned id, const BufferKind k, kernel::KernelBuilder & b, Type * const baseType,
+inline InternalBuffer::InternalBuffer(const unsigned id, const BufferKind k, KernelBuilder & b, Type * const baseType,
                                       const bool linear, const unsigned AddressSpace)
 : StreamSetBuffer(id, k, b, baseType, linear, AddressSpace) {
 
 }
 
-inline StreamSetBuffer::StreamSetBuffer(const unsigned id, const BufferKind k, kernel::KernelBuilder & b, Type * const baseType,
+inline StreamSetBuffer::StreamSetBuffer(const unsigned id, const BufferKind k, KernelBuilder & b, Type * const baseType,
                                         const bool linear, const unsigned AddressSpace)
 : mId(id)
 , mBufferKind(k)

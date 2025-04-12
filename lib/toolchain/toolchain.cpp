@@ -54,6 +54,9 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                                       "the difference between the deferred and total item count "
                                                                       "per executed stride."),
                         clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in all generated IR."),
+
+                        clEnumVal(EnableStreamSetAsserts, "Enable built-in Parabix framework asserts for streamset I/O IR."),
+
                         clEnumVal(EnablePipelineAsserts, "Enable built-in Parabix framework asserts in generated pipeline IR."),
                         clEnumVal(EnableMProtect, "Use mprotect to cause a write fault when erroneously "
                                                   "overwriting kernel state / stream space."),
@@ -268,6 +271,16 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag) {
     #endif
     return DebugOptions.isSet(flag);
 }
+
+bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag1, const DebugFlags flag2) {
+    #ifdef FORCE_ASSERTIONS
+    if (flag1 == DebugFlags::EnableAsserts) return true;
+    if (flag2 == DebugFlags::EnableAsserts) return true;
+    #endif
+    return DebugOptions.isSet(flag1) || DebugOptions.isSet(flag2);
+}
+
+
 
 bool LLVM_READONLY AnyDebugOptionIsSet() {
     #ifdef FORCE_ASSERTIONS

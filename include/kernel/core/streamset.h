@@ -105,10 +105,6 @@ public:
 
     virtual llvm::Value * getStreamPackPtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex) const;
 
-    virtual llvm::Value * loadStreamBlock(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, const bool unaligned) const;
-
-    virtual llvm::Value * loadStreamPack(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * streamIndex, llvm::Value * blockIndex, llvm::Value * packIndex, const bool unaligned) const;
-
     virtual llvm::Value * getStreamSetCount(kernel::KernelBuilder & b) const;
 
     virtual llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const = 0;
@@ -138,6 +134,8 @@ public:
     static llvm::Type * resolveType(kernel::KernelBuilder & b, llvm::Type * const streamSetType);
 
     static void linkFunctions(kernel::KernelBuilder & b); // temporary function
+
+    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
 
 protected:
 
