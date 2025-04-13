@@ -814,6 +814,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     BasicBlock * const expandBuffer = b.CreateBasicBlock(prefix + "_mustModifyBuffer", mKernelLoopCall);
     BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
     Value * beforeExpansion = getWritableOutputItems(b, port);
+
     Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -847,8 +848,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
         buffer->destroyBuffer(b, priorBuffer, priorCapacity);
         b.CreateAlignedStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr, PtrTyABIAlignment);
     }
-
-
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
     // executing this kernel and writing data but if we perform a copyback or expansion, we can't copy

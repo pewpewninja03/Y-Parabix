@@ -107,7 +107,8 @@ StoreInst * KernelBuilder::CreateMonitoredScalarFieldStore(const StringRef field
 Value * KernelBuilder::getTerminationSignal() {
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (ptr) {
-        return CreateIsNotNull(CreateAlignedLoad(getSizeTy(), ptr, sizeof(size_t)));
+        auto & dl = getModule()->getDataLayout();
+        return CreateIsNotNull(CreateAlignedLoad(getSizeTy(), ptr, dl.getABITypeAlign(getSizeTy()).value()));
     } else {
         return getFalse();
     }
@@ -117,17 +118,20 @@ Value * KernelBuilder::getTerminationSignal() {
  * @brief setTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::setTerminationSignal(Value * const value) {
+    auto & dl = getModule()->getDataLayout();
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (LLVM_UNLIKELY(ptr == nullptr)) {
         report_fatal_error(StringRef(COMPILER->getName()) + " does not have CanTerminateEarly or MustExplicitlyTerminate set.");
     }
-    CreateStore(value, ptr);    
+    CreateAlignedStore(value, ptr, dl.getABITypeAlign(getSizeTy()).value());
 }
 
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
+    auto & dl = getModule()->getDataLayout();
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Value * processed = CreateAlignedLoad(getSizeTy(), processedPtr, dl.getABITypeAlign(getSizeTy()).value());
+    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -137,9 +141,11 @@ Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * cons
 }
 
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
+    auto & dl = getModule()->getDataLayout();
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Value * processed = CreateAlignedLoad(getSizeTy(), processedPtr, dl.getABITypeAlign(getSizeTy()).value());
+    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -160,16 +166,17 @@ Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const 
     }
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
+    const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * total = COMPILER->getAccessibleInputItems(entry.Index);
         Value * const end = CreateAdd(processed, total);
-        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, bw / 8, processed, end);
+        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, dataWidth, processed, end);
     }
-    return CreateAlignedLoad(getBitBlockType(), ptr, unaligned ? 1U : (bw / 8));
+    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    return CreateAlignedLoad(getBitBlockType(), ptr, unaligned ? 1U : dataWidth);
 }
 
 Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
@@ -185,16 +192,17 @@ Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const s
     }
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
-    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
+    const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * total = COMPILER->getAccessibleInputItems(entry.Index);
         Value * const end = CreateAdd(processed, total);
-        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, bw / 8, processed, end);
+        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, dataWidth, processed, end);
     }
-    return CreateAlignedLoad(getBitBlockType(), ptr, unaligned ? 1U : (bw / 8));
+    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    return CreateAlignedLoad(getBitBlockType(), ptr, unaligned ? 1U : dataWidth);
 }
 
 Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
@@ -241,15 +249,16 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
+    const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * total = COMPILER->getWritableOutputItems(entry.Index);
         Value * const end = CreateAdd(produced, total);
-        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, bw / 8, produced, end);
+        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, dataWidth, produced, end);
     }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
+    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : dataWidth);
 }
 
 StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset, Value * toStore) {
@@ -266,15 +275,16 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
+    const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * total = COMPILER->getWritableOutputItems(entry.Index);
         Value * const end = CreateAdd(produced, total);
-        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, bw / 8, produced, end);
+        buf->assertAccessIsWithinStreamSetMemory(*this, ptr, dataWidth, produced, end);
     }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
+    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : dataWidth);
 }
 
 Value * KernelBuilder::getOutputStreamSetCount(const StringRef name) {
@@ -310,9 +320,24 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
         Value * const end = CreateAdd(start, total);
         buf->assertAccessIsWithinStreamSetMemory(*this, ptr, getTypeSize(dl, ty), start, end);
     }
-    ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-    const auto alignment = boost::lcm<size_t>(dl.getABITypeAlign(ty).value(), buf->getFieldWidth());
-    return CreateAlignedLoad(ty, ptr, alignment);
+    const auto fw = buf->getFieldWidth();
+    if (fw < 8) {
+        IntegerType * const int8Ty = getInt8Ty();
+        ptr = CreatePointerCast(ptr, int8Ty->getPointerTo(buf->getAddressSpace()));
+        Value * val = CreateZExt(CreateAlignedLoad(int8Ty, ptr, 1), getSizeTy());
+        const auto fieldsPerByte = 8U / fw;
+        Value * pos = CreateZExtOrTrunc(absolutePosition, getSizeTy());
+        pos = CreateAnd(pos, getSize(fieldsPerByte - 1));
+        pos = CreateShl(pos, getSize(floor_log2(fw)));
+        val = CreateLShr(val, pos);
+        val = CreateAnd(val, getSize((1UL << fw) - 1UL));
+        return CreateTrunc(val, ty);
+    } else {
+        ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
+        const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+        const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+        return CreateAlignedLoad(ty, ptr, alignment);
+    }
 }
 
 Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Value * const streamIndex, Value * absolutePosition) {
@@ -329,9 +354,27 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
         Value * const end = CreateAdd(start, total);
         buf->assertAccessIsWithinStreamSetMemory(*this, ptr, getTypeSize(dl, ty), start, end);
     }
-    ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-    const auto alignment = boost::lcm<size_t>(dl.getABITypeAlign(ty).value(), buf->getFieldWidth());
-    return CreateAlignedLoad(ty, ptr, alignment);
+
+    const auto fw = buf->getFieldWidth();
+    if (fw < 8) {
+        IntegerType * const int8Ty = getInt8Ty();
+        ptr = CreatePointerCast(ptr, int8Ty->getPointerTo(buf->getAddressSpace()));
+        Value * val = CreateZExt(CreateAlignedLoad(int8Ty, ptr, 1), getSizeTy());
+        const auto fieldsPerByte = 8U / fw;
+        Value * pos = CreateZExtOrTrunc(absolutePosition, getSizeTy());
+        pos = CreateAnd(pos, getSize(fieldsPerByte - 1));
+        pos = CreateShl(pos, getSize(floor_log2(fw)));
+        val = CreateLShr(val, pos);
+        val = CreateAnd(val, getSize((1UL << fw) - 1UL));
+        return CreateTrunc(val, ty);
+    } else {
+        ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
+        const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+        const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+        return CreateAlignedLoad(ty, ptr, alignment);
+    }
+
+
 }
 
 Value * KernelBuilder::getRawOutputPointer(const StringRef name, Value * absolutePosition) {
@@ -357,14 +400,16 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * absol
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
         CreateAssert(sanityCheck, "stream index must be explicit");
-        Value * startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index);
+        Value * startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        Value * total = COMPILER->getWritableOutputItems(binding.Index);
+        Value * total = COMPILER->getWritableOutputItems(binding.Index); assert (total);
         Value * const end = CreateAdd(start, total);
         buf->assertAccessIsWithinStreamSetMemory(*this, ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-    const auto alignment = boost::lcm<size_t>(dl.getABITypeAlign(ty).value(), buf->getFieldWidth());
+    const auto fw = buf->getFieldWidth();
+    const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+    const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
     return CreateAlignedStore(value, ptr, alignment);
 }
 
@@ -377,14 +422,16 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        Value * startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index);
+        Value * startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        Value * total = COMPILER->getWritableOutputItems(binding.Index);
+        Value * total = COMPILER->getWritableOutputItems(binding.Index); assert (total);
         Value * const end = CreateAdd(start, total);
         buf->assertAccessIsWithinStreamSetMemory(*this, ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-    const auto alignment = boost::lcm<size_t>(dl.getABITypeAlign(ty).value(), buf->getFieldWidth());
+    const auto fw = buf->getFieldWidth();
+    const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+    const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
     return CreateAlignedStore(value, ptr, alignment);
 }
 
@@ -409,8 +456,9 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
     if (LLVM_LIKELY(port.Type == PortType::Output)) {
         StreamSetBuffer * const buffer = COMPILER->getOutputStreamSetBuffer(port.Number);
         if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            auto & dl = getModule()->getDataLayout();
             Value * const producedItemPtr = COMPILER->getProducedOutputItemsPtr(port.Number);
-            Value * const producedItems = CreateAlignedLoad(getSizeTy(), producedItemPtr, sizeof(size_t));
+            Value * const producedItems = CreateAlignedLoad(getSizeTy(), producedItemPtr,  dl.getABITypeAlign(getSizeTy()).value());
             Value * const consumedItems = COMPILER->getConsumedOutputItems(port.Number);
             cast<ManagedDynamicBuffer>(buffer)->expandBuffer(*this, producedItems, consumedItems, capacity);
             return;
@@ -428,20 +476,25 @@ Value * KernelBuilder::getAccessibleItemCount(const StringRef name) const noexce
 }
 
 Value * KernelBuilder::getProcessedItemCount(const StringRef name) {
-    return CreateAlignedLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name), sizeof(size_t));
+    auto & dl = getModule()->getDataLayout();
+    return CreateAlignedLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 void KernelBuilder::setProcessedItemCount(const StringRef name, Value * value) {
+    auto & dl = getModule()->getDataLayout();
     assert (value->getType() == getSizeTy());
-    CreateAlignedStore(value, COMPILER->getProcessedInputItemsPtr(name), sizeof(size_t));
+    CreateAlignedStore(value, COMPILER->getProcessedInputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 Value * KernelBuilder::getProducedItemCount(const StringRef name) {
-    return CreateAlignedLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name), sizeof(size_t));
+    auto & dl = getModule()->getDataLayout();
+    return CreateAlignedLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 void KernelBuilder::setProducedItemCount(const StringRef name, Value * value) {
-    CreateAlignedStore(value, COMPILER->getProducedOutputItemsPtr(name), sizeof(size_t));
+    auto & dl = getModule()->getDataLayout();
+    assert (value->getType() == getSizeTy());
+    CreateAlignedStore(value, COMPILER->getProducedOutputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 Value * KernelBuilder::getWritableOutputItems(const StringRef name) const noexcept {

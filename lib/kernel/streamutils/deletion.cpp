@@ -1554,10 +1554,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         Value * const data = b.CreateAlignedLoad(dataVecTy, b.CreateGEP(dataVecTy, baseDataPtr, blockOffsetPhi), b.getBitBlockWidth() / 8);
         Value * const compressed = b.mvmd_compress(fieldWidth, data, filter);
 
-        Value * const ptr = b.getRawOutputPointer("output", toWritePosPhi);
-
-        Value * const toStorePtr = b.CreatePointerCast(ptr, compressed->getType()->getPointerTo());
-        b.CreateAlignedStore(compressed, toStorePtr, 1);
+        b.writeRawOutputPointer("output", toWritePosPhi, compressed);
 
         Value * const elementPopCount = b.CreatePopcount(filter);
         Value * toWritePos = b.CreateAdd(toWritePosPhi, b.CreateZExt(elementPopCount, b.getSizeTy()));

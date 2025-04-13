@@ -285,7 +285,7 @@ void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Val
     startPtr = b.CreatePtrToInt(startPtr, intPtrTy);
     ptr = b.CreatePtrToInt(ptr, intPtrTy);
     Value * valid = b.CreateICmpULE(startPtr, ptr);
-    ptr = b.CreateAdd(ptr, ConstantInt::get(intPtrTy, size));
+    ptr = b.CreateAdd(ptr, ConstantInt::get(intPtrTy, size)); assert (size > 0);
     endPtr = b.CreatePtrToInt(endPtr, intPtrTy);
     valid = b.CreateOr(valid, b.CreateICmpULE(ptr, endPtr));
     b.CreateAssert(valid, "streamset access is outside of valid memory boundaries");
