@@ -58,13 +58,65 @@ def u8_code_unit(cp, n):
     else:
         return 0x80 | ((cp >> (6 * (lgth - n))) & 0x3F)
 
-class Translation_Uset_Collector:
+def uset_structural_key(uset):
+    rgs = uset_to_range_list(uset)
+    rg_strings = []
+    for rg in rgs:
+        (lo, hi) = rg
+        if (lo == hi): rg_strings.append("%x" % lo)
+        elif (lo + 1 == hi): rg_strings.append("%x_%x" % (lo, hi))
+        else: rg_strings.append("%x___%x" % (lo, hi))
+    return "uset_" + "_".join(rg_strings)
+
+class Uset_Collector:
+    def __init__(self):
+        self.installed_usets = {}
+        self.role_to_key_map = {}
+        self.key_to_role_map = {}
+
+    def install_uset_for_role(self, role_name, uset):
+        key = uset_structural_key(uset)
+        self.role_to_key_map[role_name] = key
+        if not key in self.installed_usets.keys():
+            self.installed_usets[key] = uset
+            self.key_to_role_map[key] = [role_name]
+        else:
+            self.key_to_role_map[key].append(role_name)
+
+    def install_uset_family(self, role_template, usets):
+        for i in range(len(usets)):
+            self.install_uset_for_role(role_template % i, usets[i])
+
+    def get_uset_key_for_role(self, role_name):
+        if not role_name in self.role_to_key_map.keys():
+            raise Exception("Unknown role name: " + role_name)
+        return self.role_to_key_map[role_name]
+
+    def get_installed_usets(self):
+        return self.installed_usets
+
+    def get_role_to_key_map(self):
+        return self.role_to_key_map
+
+    def generate_uset_definitions(self, name_template):
+        defs = ""
+        i = 0
+        generated = {}
+        for role in sorted(self.role_to_key_map.keys()):
+            uset_key = self.role_to_key_map[role]
+            if uset_key not in generated.keys():
+                uset = self.installed_usets[uset_key]
+                set_name = name_template % i
+                defs += "    " + uset.generate(set_name)
+                generated[uset_key] = set_name
+                i += 1
+            defs += "    const UnicodeSet & %s = %s;\n" % (role, generated[uset_key])
+        return defs
+
+class U8_Translation_Generator:
     def __init__(self):
         self.codepoint_maps = {}
-        self.installed_usets = {}
-        self.basis_bit_translation_usets = {}
-        self.u8_insertion_bixnum_usets = {}
-        self.u8_deletion_bixnum_usets = {}
+        self.collector = Uset_Collector()
 
     def define_codepoint_map(self, skey, map):
         self.codepoint_maps[skey] = map
@@ -72,27 +124,8 @@ class Translation_Uset_Collector:
     def has_codepoint_map(self, skey):
         return skey in self.codepoint_maps.keys()
 
-    def uset_key(uset):
-        rgs = uset_to_range_list(uset)
-        rg_strings = []
-        for rg in rgs:
-            (lo, hi) = rg
-            if (lo == hi): rg_strings.append("%x" % lo)
-            elif (lo + 1 == hi): rg_strings.append("%x_%x" % (lo, hi))
-            else: rg_strings.append("%x___%x" % (lo, hi))
-        return "uset_" + "_".join(rg_strings)
-
-    def install_usets(set_list):
-        installed_keys = []
-        for s in set_list:
-            key = self.uset_key(s)
-            if not key in self.installed_usets.keys():
-                self.installed[key] = s
-            installed_keys.append(key)
-        return installed_keys
-
     def generate_basis_bit_translation_usets(self, skey):
-        if not has_codepoint_map(skey):
+        if not self.has_codepoint_map(skey):
             raise Exception("Requesting basis bit translations for %s no such codepoint_map" % (skey))
         translation_map = self.codepoint_maps[skey]
         translation_sets = []
@@ -107,11 +140,12 @@ class Translation_Uset_Collector:
                     translation_sets[bit] = uset_union(translation_sets[bit], singleton_uset(cp1))
                 bit_diffs >>=  1
                 bit += 1
-        self.basis_bit_translation_usets[skey] = self.install_usets(translation_sets)
+        self.collector.install_uset_family(skey + "_basis_%i", translation_sets)
 
     def generate_u8_adjustment_bixnum_usets(self, skey):
-        if not has_codepoint_map(skey):
+        if not self.has_codepoint_map(skey):
             raise Exception("Requesting insertion bixnums for %s no such codepoint_map" % (skey))
+        translation_map = self.codepoint_maps[skey]
         for cp1 in translation_map.keys():
             cp2 = translation_map[cp1]
             ldiff = u8_encoded_length(cp2) - u8_encoded_length(cp1)
@@ -121,7 +155,7 @@ class Translation_Uset_Collector:
                 bit = 0
                 while ldiff > 0:
                     if len(insertion_bixnum_usets) <= bit:
-                        insertion_bixnum_usets.append(bixnum_usets())
+                        insertion_bixnum_usets.append(empty_uset())
                     if ldiff & 1 == 1:
                         insertion_bixnum_usets[bit] = uset_union(insertion_bixnum_usets[bit], singleton_uset(cp1))
                     ldiff >>=  1
@@ -131,23 +165,65 @@ class Translation_Uset_Collector:
                 bit = 0
                 while ldiff > 0:
                     if len(deletion_bixnum_usets) <= bit:
-                        deletion_bixnum_usets.append(bixnum_usets())
+                        deletion_bixnum_usets.append(empty_uset())
                     if ldiff & 1 == 1:
                         deletion_bixnum_usets[bit] = uset_union(deletion_bixnum_usets[bit], singleton_uset(cp1))
                     ldiff >>=  1
                     bit += 1
-        self.u8_insertion_bixnum_usets[skey] = self.install_usets(insertion_bixnum_usets)
-        self.u8_deletion_bixnum_usets[skey] = self.install_usets(deletion_bixnum_usets)
+        if len(insertion_bixnum_usets) > 0:
+            self.collector.install_uset_family(skey + "_insert_basis_%i", insertion_bixnum_usets)
+        if len(deletion_bixnum_usets) > 0:
+            self.collector.install_uset_family(skey + "_delete_basis_%i", deletion_bixnum_usets)
+
+    def print_uset_definitions(self):
+        print(self.collector.generate_uset_definitions("uset_%i"))
 
 
-class NFC_generator:
+class NFC_generator(U8_Translation_Generator):
     def __init__(self, ucd):
+        super().__init__()
         self.ucd = ucd
         self.ccc_val_map = ucd.property_object_map['ccc'].cp_value_map
         self.ccc_enum_map = ucd.property_object_map['ccc'].property_value_enum_integer
         self.ccc_enum_rmap = ucd.property_object_map['ccc'].enum_integer_to_value_map
-        self.ccc_pass_allocation = {}
         self.pass_count = 0
+        self.ccc_pass_allocation = {}
+        self.pass_cccs = []
+        self.initialize_prefix_based_ranges()
+
+    def initialize_prefix_based_ranges(self):
+        # ASCII range
+        lo_cp = 0
+        hi_cp = 0x7F
+        self.prefix_based_ranges = [(lo_cp, hi_cp)]
+        #
+        #  Ranges based on groups of UTF-8 prefixes of length 2
+        for i in range(8):
+            lo_cp = hi_cp + 1
+            hi_cp = lo_cp | 0xFF
+            self.prefix_based_ranges.append((lo_cp, hi_cp))
+        #  Ranges based on individual prefixes of length 3 (E0 ... EF)
+        for i in range(16):
+            lo_cp = hi_cp + 1
+            hi_cp = lo_cp | 0xFFF
+            self.prefix_based_ranges.append((lo_cp, hi_cp))
+        #  Ranges based on individual prefixes of length 4 (F0 .. F4)
+        for i in range(4):
+            lo_cp = hi_cp + 1
+            hi_cp = lo_cp | 0x3FFFF
+            self.prefix_based_ranges.append((lo_cp, hi_cp))
+        lo_cp = hi_cp + 1
+
+    def show_prefix_based_ranges(self):
+        self.prefix_based_ranges.append((lo_cp, 0x10FFFF))
+        for rg in self.prefix_based_ranges:
+            (rlo, rhi) = rg
+            ulo = u8_code_unit(rlo, 1)
+            uhi = u8_code_unit(rhi, 1)
+            if ulo != uhi:
+                print("Range %x-%x, initial_code_units %x-%x" % (rlo, rhi, ulo, uhi))
+            else:
+                print("Range %x-%x, initial_code_unit %x" % (rlo, rhi, ulo))
 
     def create_mappings(self):
         self.singleton_map = {}
@@ -219,12 +295,14 @@ class NFC_generator:
                     min_pass = self.ccc_pass_allocation[other] + 1
                     if min_pass >= self.pass_count:
                         self.pass_count = min_pass + 1
+            while len(self.pass_cccs) <= min_pass: self.pass_cccs.append([])
+            self.pass_cccs[min_pass].append(ccc)
             self.ccc_pass_allocation[ccc] = min_pass
 
     def show_ccc_pass_allocation(self):
         print("%i passes allocated:" % self.pass_count)
         for k in sorted(self.ccc_pass_allocation.keys()):
-            print("ccc = %s (%s) allocated to pass %i:" % (k, self.ccc_enum_rmap[k], self.ccc_pass_allocation[k]))
+            print("ccc = %s (%s) allocated to pass %i." % (k, self.ccc_enum_rmap[k], self.ccc_pass_allocation[k]))
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -267,6 +345,12 @@ class NFC_generator:
                 cp = by_starter[cp1][cp2]
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
 
+    def generate_singleton_code(self):
+        self.define_codepoint_map("singletons", self.singleton_map)
+        self.generate_basis_bit_translation_usets("singletons")
+        self.generate_u8_adjustment_bixnum_usets("singletons")
+
+
 if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
@@ -275,7 +359,9 @@ if __name__ == "__main__":
     generator.show_ccc_pass_allocation()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
-    generator.display_short_composables()
+    #generator.display_short_composables()
     #generator.display_long_composables()
+    generator.generate_singleton_code()
+    generator.print_uset_definitions()
 
 
