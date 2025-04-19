@@ -218,6 +218,45 @@ def uset_complement(s):
                 it.advance(1)
     return iset
 
+def intersects(s1, s2):
+    i1 = Uset_Iterator(s1)
+    i2 = Uset_Iterator(s2)
+    while not i1.at_end():
+        (s1_type, s1_length) = i1.current_run()
+        (s2_type, s2_length) = i2.current_run()
+        n = min(s1_length, s2_length)
+        if s1_type == Empty or s2_type == Empty:
+            i1.advance(n)
+            i2.advance(n)
+        elif s1_type == Full or s2_type == Full:
+            return True
+        else:  # both s1 and s2 have mixed blocks; consider block-by-block
+            for i in range(n):
+                if i1.get_quad() & i2.get_quad() != 0:
+                    return True
+                i1.advance(1)
+                i2.advance(1)
+    return False
+
+def is_subset(s1, s2):
+    i1 = Uset_Iterator(s1)
+    i2 = Uset_Iterator(s2)
+    while not i1.at_end():
+        (s1_type, s1_length) = i1.current_run()
+        (s2_type, s2_length) = i2.current_run()
+        n = min(s1_length, s2_length)
+        if s1_type == Empty or s2_type == Full:
+            i1.advance(n)
+            i2.advance(n)
+        elif s1_type == Full or s2_type == Empty:
+            return False
+        else:  # both s1 and s2 have mixed blocks; check block-by-block
+            for i in range(n):
+                if i1.get_quad() | i2.get_quad() != i2.get_quad():
+                    return False
+                i1.advance(1)
+                i2.advance(1)
+    return True
 
 def uset_intersection(s1, s2):
     iset = UCset()
