@@ -60,28 +60,69 @@ def u8_code_unit(cp, n):
 
 def uset_structural_key(uset):
     rgs = uset_to_range_list(uset)
-    rg_strings = []
+    if len(rgs) == 0: return "empty"
+    (lo, hi) = rgs[0]
+    if lo <= 0x7F:
+        s = "ASC"
+    else:
+        s = "%X" % u8_code_unit(lo, 1)
+    last = 0
     for rg in rgs:
         (lo, hi) = rg
-        if (lo == hi): rg_strings.append("%x" % lo)
-        elif (lo + 1 == hi): rg_strings.append("%x_%x" % (lo, hi))
-        else: rg_strings.append("%x___%x" % (lo, hi))
-    return "uset_" + "_".join(rg_strings)
+        if (lo & 0xFFFFF0) == (last & 0xFFFFF0):
+            s += "_%x" % (lo & 0x0F)
+        elif (lo & 0xFFFF00) == (last & 0xFFFF00):
+            s += "_%x" % (lo & 0xFF)
+        else:
+            s += "_%x" % lo
+        last = lo
+        if lo < hi:
+            if lo + 1 == hi:
+                s += "_"
+            else:
+                s += "___"
+            if (hi & 0xFFFFF0) == (last & 0xFFFFF0):
+                s += "%x" % (hi & 0x0F)
+            elif (hi & 0xFFFF00) == (last & 0xFFFF00):
+                s += "%x" % (hi & 0xFF)
+            else:
+                s += "%x" % hi
+            last = hi
+    return s
 
-class Uset_Collector:
+scoped_compiler_template = r"""    UTF_Compiler ${scope}_compiler(Basis, ${scope});
+    std::vector<Var *> ${scope}_vars(${num_roles});
+    std::vector<UnicodeSet> ${scope}_usets(${num_roles});
+${assignments}
+    ${scope}_compiler.compile(${scope}_vars, ${scope}_usets);
+"""
+
+assignment_template = r"""    Var * ${role} = ${scope}.createVar("${role}", Zeroes);
+    ${scope}_vars[${index}] = ${role};
+    ${scope}_usets[${index}] = ${role}_uset;
+"""
+
+class Uset_Builder:
     def __init__(self):
         self.installed_usets = {}
         self.role_to_key_map = {}
         self.key_to_role_map = {}
+        self.current_scope_roles = []
+
+    def open_scope(self, scope):
+        self.current_scope = scope
+        self.current_scope_roles = []
 
     def install_uset_for_role(self, role_name, uset):
         key = uset_structural_key(uset)
         self.role_to_key_map[role_name] = key
         if not key in self.installed_usets.keys():
+            print("new key: %s" % key)
             self.installed_usets[key] = uset
             self.key_to_role_map[key] = [role_name]
         else:
             self.key_to_role_map[key].append(role_name)
+        self.current_scope_roles.append(role_name)
 
     def install_uset_family(self, role_template, usets):
         for i in range(len(usets)):
@@ -98,6 +139,17 @@ class Uset_Collector:
     def get_role_to_key_map(self):
         return self.role_to_key_map
 
+    def generate_scope_compilations(self):
+        t1 = string.Template(scoped_compiler_template)
+        t2 = string.Template(assignment_template)
+        assigs = ""
+        for i in range(len(self.current_scope_roles)):
+            assigs += t2.substitute(scope = self.current_scope, index = i, role = self.current_scope_roles[i])
+        defs = t1.substitute(scope = self.current_scope,
+                             num_roles = len(self.current_scope_roles),
+                             assignments = assigs)
+        return defs
+
     def generate_uset_definitions(self, name_template):
         defs = ""
         i = 0
@@ -110,13 +162,13 @@ class Uset_Collector:
                 defs += "    " + uset.generate(set_name)
                 generated[uset_key] = set_name
                 i += 1
-            defs += "    const UnicodeSet & %s = %s;\n" % (role, generated[uset_key])
+            defs += "    const UnicodeSet %s_uset = %s;\n" % (role, generated[uset_key])
         return defs
 
 class U8_Translation_Generator:
     def __init__(self):
         self.codepoint_maps = {}
-        self.collector = Uset_Collector()
+        self.builder = Uset_Builder()
 
     def define_codepoint_map(self, skey, map):
         self.codepoint_maps[skey] = map
@@ -140,7 +192,7 @@ class U8_Translation_Generator:
                     translation_sets[bit] = uset_union(translation_sets[bit], singleton_uset(cp1))
                 bit_diffs >>=  1
                 bit += 1
-        self.collector.install_uset_family(skey + "_basis_%i", translation_sets)
+        self.builder.install_uset_family(skey + "_basis_%02i", translation_sets)
 
     def generate_u8_adjustment_bixnum_usets(self, skey):
         if not self.has_codepoint_map(skey):
@@ -171,13 +223,134 @@ class U8_Translation_Generator:
                     ldiff >>=  1
                     bit += 1
         if len(insertion_bixnum_usets) > 0:
-            self.collector.install_uset_family(skey + "_insert_basis_%i", insertion_bixnum_usets)
+            self.builder.install_uset_family(skey + "_insert_basis_%i", insertion_bixnum_usets)
         if len(deletion_bixnum_usets) > 0:
-            self.collector.install_uset_family(skey + "_delete_basis_%i", deletion_bixnum_usets)
+            self.builder.install_uset_family(skey + "_delete_basis_%i", deletion_bixnum_usets)
 
     def print_uset_definitions(self):
-        print(self.collector.generate_uset_definitions("uset_%i"))
+        print(self.builder.generate_uset_definitions("uset_%i"))
 
+def get_pfx_code(cp):
+    initial = u8_code_unit(cp, 1)
+    if initial <= 0x7F: return 0
+    if initial <= 0xC3: return 0xC2
+    if initial <= 0xDF:
+        # strip low 2 bits
+        return initial & 0xFC
+    return initial
+
+def pfx_code_string(pfx_code):
+    if pfx_code == 0:
+        return "0_7F"
+    if pfx_code <= 0xDF:
+        return "%x_%x" % (pfx_code, pfx_code | 0x03)
+    return "%x" % pfx_code
+
+# TODO: consider possible optimization based on exact initial byte range
+def prefix_test_logic(pfx_code):
+    if pfx_code == 0:
+        return "pb.createNot(Basis[7])"
+    elif pfx_code <= 0xDF:
+        return "pb.createAnd(bnc.UGE(Basis, 0x%x), bnc.ULE(Basis, 0x%x))" % (pfx_code, pfx_code | 3)
+    else:
+        return "bnc.EQ(Basis, 0x%x)" % pfx_code
+
+def range_usets_from_cps(cp_list):
+    rg_sets = {}
+    for cp in cp_list:
+        code = get_pfx_code(cp)
+        if not code in rg_sets.keys():
+            rg_sets[code] = singleton_uset(cp)
+        else:
+            rg_sets[code] = uset_union(rg_sets[code], singleton_uset(cp))
+    return rg_sets
+
+
+pass_template = r"""//
+class FindComposables${pass_no} : public PabloKernel {
+public:
+    FindComposables${pass_no}
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR${extra_inputs},
+                                       StreamSet * MarksFound, StreamSet * Index_ccc_NR_or_MarksFound);
+protected:
+    void generatePabloMethod() override;
+};
+
+FindComposables${pass_no}::FindComposables${pass_no}
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR${extra_inputs},
+                                   StreamSet * MarksFound, StreamSet * Index_ccc_NR_or_MarksFound) :
+: PabloKernel(ts, 'FindComposables${pass_no}',
+{Binding{"Basis", Basis}, Binding{"ccc_NR", ccc_NR}${extra_bindings}},
+{Binding{"MarksFound", MarksFound}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
+
+FindComposables${pass_no}::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * Zeroes = pb.createZeroes();
+    PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
+    PabloAST * eligible_starter = ${eligible};
+    Var * composable2nd = pb.createVar("composable2nd", Zeroes);
+"""
+
+def gen_pass_header_code(pass_no):
+    s = string.Template(pass_template)
+    extra_inputs = ""
+    extra_bindings = ""
+    eligible = "pb.createOnes()"
+    if (pass_no > 0):
+        extra_inputs = ", StreamSet * priorFound"
+        extra_bindings = r""", Binding{"priorFound", priorFound}"""
+        eligible = r"""pb.createNot(getInputStreamSet("priorFound")[0])"""
+    return s.substitute(pass_no = pass_no,
+                        extra_inputs = extra_inputs,
+                        extra_bindings = extra_bindings,
+                        eligible = eligible)
+
+pfx_template = r"""
+    auto ${builder} = pb.createScope();
+    PabloAST * ${pfx_test_var} = ${logic};
+    pb.createIf(pb.createAnd(${pfx_test_var}, eligible_starter), ${builder});
+"""
+
+def gen_pass_pfx_code(pfx_code):
+    code_str = pfx_code_string(pfx_code)
+    pfx_test_var = "pfx_%s_test" % code_str
+    test = prefix_test_logic(pfx_code)
+    if pfx_code == 0:
+        test = "pb.createAnd(%s, pb.createLookAhead(ccc_NR, 1))" % test
+    scope = "b_%s" % code_str
+    t = string.Template(pfx_template)
+    return t.substitute(builder = scope,
+                        pfx_test_var = pfx_test_var,
+                        logic = test)
+
+
+mark_case_template = r"""
+//  Case for mark ${mark}
+    PabloAST * possible_${mark}_pos = ${builder}.createScanTo(${mark_starters}, ${ccc_enum}_or_NR);
+    PabloAST * found_${mark} = ${builder}.createAnd(possible_${mark}_pos, mark_${mark});
+    ${builder}.createAssign(composable2nd, ${builder}.createOr(composable2nd, found_${mark}));
+"""
+
+def gen_mark_case_logic(mark, ccc_enum, code_str):
+    t = string.Template(mark_case_template)
+    return t.substitute(builder = "b_%s" % code_str,
+                        mark="%x" % mark,
+                        mark_starters="mark_%x_starters_%s" % (mark, code_str),
+                        ccc_enum=ccc_enum)
+
+finalize_nfc_template = r"""// Generate combined outputs for pass ${pass_no}.
+    Var * marksFoundVar = pb.getOutputStreamVar("MarksFound");
+    pb.createAssign(pb.createExtract(marksFoundVar, pb.getInteger(0)), composable2nd);
+    PabloAST * updatedIndexStrm = pb.createOr(ccc_NR, composable2nd);
+    Var * indexVar = pb.getOutputStreamVar("Index_ccc_NR_or_MarksFound");
+    pb.createAssign(pb.createExtract(indexVar, pb.getInteger(0)), updatedIndexStrm);
+}
+"""
+
+def finalize_nfc_stage(pass_no):
+    s = string.Template(finalize_nfc_template)
+    return s.substitute(pass_no = pass_no)
 
 class NFC_generator(U8_Translation_Generator):
     def __init__(self, ucd):
@@ -351,17 +524,48 @@ class NFC_generator(U8_Translation_Generator):
         self.generate_u8_adjustment_bixnum_usets("singletons")
 
 
+    def generate_nfc_stage(self, pass_no):
+        s = gen_pass_header_code(pass_no)
+        pass_data = {}
+        for mark in self.long_composable_map.keys():
+            ccc = self.ccc_val_map[mark]
+            ccc_code = self.ccc_enum_map[ccc]
+            if self.ccc_pass_allocation[ccc_code] == pass_no:
+                rg_set_map = range_usets_from_cps(self.long_composable_map[mark].keys())
+                for pfx_code in rg_set_map.keys():
+                    if not pfx_code in pass_data.keys():
+                        pass_data[pfx_code] = {}
+                    pass_data[pfx_code][mark] = rg_set_map[pfx_code]
+        for pfx_code in pass_data.keys():
+            code_str = pfx_code_string(pfx_code)
+            scope = "b_%s" % code_str
+            s += gen_pass_pfx_code(pfx_code)
+
+            self.builder.open_scope(scope)
+            for mark in sorted(pass_data[pfx_code].keys()):
+                self.builder.install_uset_for_role("mark_%x_starters_%s" % (mark, code_str), pass_data[pfx_code][mark])
+                self.builder.install_uset_for_role("mark_%x" % mark, singleton_uset(mark))
+            s += self.builder.generate_scope_compilations()
+
+            for mark in sorted(pass_data[pfx_code].keys()):
+                ccc_enum = self.ccc_val_map[mark]
+                s += gen_mark_case_logic(mark, ccc_enum, code_str)
+
+        s+=finalize_nfc_stage(pass_no)
+        print(s)
+
 if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
     generator.create_mappings()
     generator.allocate_ccc_passes()
-    generator.show_ccc_pass_allocation()
+    #generator.show_ccc_pass_allocation()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
-    generator.generate_singleton_code()
+    #generator.generate_singleton_code()
+    generator.generate_nfc_stage(0)
     generator.print_uset_definitions()
 
 
