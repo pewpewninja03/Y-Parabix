@@ -113,11 +113,19 @@ class Uset_Builder:
         self.current_scope = scope
         self.current_scope_roles = []
 
+    def install_uset(self, uset):
+        key = uset_structural_key(uset)
+        if not key in self.installed_usets.keys():
+            #print("new key: %s" % key)
+            self.installed_usets[key] = uset
+        self.current_scope_roles.append(key)
+        return key
+
     def install_uset_for_role(self, role_name, uset):
         key = uset_structural_key(uset)
         self.role_to_key_map[role_name] = key
         if not key in self.installed_usets.keys():
-            print("new key: %s" % key)
+            #print("new key: %s" % key)
             self.installed_usets[key] = uset
             self.key_to_role_map[key] = [role_name]
         else:
@@ -352,6 +360,158 @@ def finalize_nfc_stage(pass_no):
     s = string.Template(finalize_nfc_template)
     return s.substitute(pass_no = pass_no)
 
+#
+# Generate the logic for UTF-8 bit translations of cp1 to cp2
+# given:  1. marker marks the first byte position of cp1
+#         2. zeroes have been inserted after cp1 encoding to
+#            match the length of cp2
+#
+# Assumption: zeroes have been inserted for any positions
+# require because the u8_encoded_length(cp2) is greater
+# than that for cp1
+#
+def add_u8_bit_translation_case(builder, cp1, cp2, pos):
+    marker = "mrkr_%xto_%x = %s;\n" % (cp1, cp2, pos)
+    case_code = "    PabloAST * %s = %s;\n" % (marker, pos)
+    marker_pos = 0
+    len1 = u8_encoded_length(cp1)
+    len2 = u8_encoded_length(cp2)
+    for i in range(len2):
+        cp2_unit = u8_code_unit(cp2, i)
+        if i < len1:
+            cp1_unit = u8_code_unit(cp1, i)
+        else:
+            cp1_unit = 0
+        bit_diffs = cp1_unit ^ cp2_unit
+        if bit_diffs == 0: continue
+        if i > 0:
+            adv = i - marker_pos
+            case_code += "    %s = %s.createAdvance(%s, %i);\n" % (marker, builder, marker, adv)
+            marker_pos = i
+        for bit in range(8):
+            if bit_diffs & 1 == 1:
+                 case_code += "    xfrm[%i] = %s.createOr(%s, xfrm[%i]);\n" % (i, builder, marker, i)
+            bit_diffs = bit_diffs >> 1
+    return case_code
+
+short_composable_header = r"""//
+class ShortComposableTranslation : public PabloKernel {
+public:
+    ShortComposableTranslation
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * DeletePrior, StreamSet * XfrmBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
+ShortComposableTranslation::FindComposables${pass_no}
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * DeletePrior, StreamSet * XfrmBasis) :
+: PabloKernel(ts, "ShortComposableTranslation",
+{Binding{"Basis", Basis}},
+{Binding{"DeletePrior", DeletePrior}, Binding{"XfrmBasis", XfrmBasis}}) {}
+
+ShortComposableTranslation::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * Zeroes = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    Var * DeletePriorVar = pb.createVar("DeletePriorVar", Zeroes);
+    Var * XfrmBasisVar = getOutputStreamVar("XfrmBasis");
+    std::vector<Var *> XfrmVar(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        XfrmOutputVar[i] = pb.createExtract(XfrmBasisVar, pb.getInteger(i));
+    }
+"""
+
+short_composable_case_template = r"""
+//  Case for ${cp1} + ${cp2} => ${precomposed}
+    PabloAST * possible_${cp2}_pos = ${builder}.createAdvance(cp_${cp1}, ${cp1_len});
+    PabloAST * found_${cp1}_${cp2} = ${builder}.createAnd(possible_${cp2}_pos, cp_${cp2});
+"""
+
+def generate_short_case_code(builder, cp1, cp2, precomposed):
+    t = string.Template(short_composable_case_template)
+    s = t.substitute(builder = builder,
+                        cp1 = "%x" % cp1,
+                        cp2 = "%x" % cp2,
+                        cp1_len=u8_encoded_length(cp1),
+                        precomposed = "%x" % precomposed)
+    xlate_code = add_u8_bit_translation_case(builder, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
+    return s
+
+short_composable_pfx_template = r"""
+    auto ${builder} = pb.createScope();
+    PabloAST * ${pfx_test_var} = ${logic};
+    pb.createIf(pb.createAnd(${pfx_test_var}, eligible_starter), ${builder});
+    std::vector<PabloAST *> xfrms_${code_str}(8, Zeroes);
+    PabloAST * del_prior_${code_str} = Zeroes;
+"""
+
+def gen_short_composable_pfx_code(pfx_code):
+    code_str = pfx_code_string(pfx_code)
+    pfx_test_var = "pfx_%s_test" % code_str
+    test = prefix_test_logic(pfx_code)
+    if pfx_code == 0:
+        test = "pb.createAnd(%s, pb.createLookAhead(ccc_NR, 1))" % test
+    scope = "b_%s" % code_str
+    t = string.Template(pfx_template)
+    return t.substitute(builder = scope,
+                        code_str = code_str,
+                        pfx_test_var = pfx_test_var,
+                        logic = test)
+
+short_composable_pfx_final_template = r"""
+    for (unsigned i = 0; i < 8; i++) {
+        ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
+    }
+    ${builder}.createAssign(DeletePriorVar, $builder.createOr(DeletePriorVar, del_prior_${code_str}));
+"""
+
+def finalize_short_composable_pfx_code(pfx_code):
+    code_str = pfx_code_string(pfx_code)
+    scope = "b_%s" % code_str
+    t = string.Template(short_composable_pfx_final_template)
+    return t.substitute(builder = scope,
+                        code_str = code_str)
+
+short_composable_final_code = r"""
+    Var * DeleteOutputVar = getOutputStreamVar("DeletePrior");
+    pb.createAssign(pb.createExtract(DeleteOutputVar, pb.getInteger(0)), DeletePriorVar);
+    Var * XfrmBasisVar = getOutputStreamVar("XfrmBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        Var * xfrm_out = pb.createExtract(XfrmBasisVar, pb.getInteger(i));
+        pb.createAssign(xfrm_out, XfrmBasis[i]));
+    }
+"""
+
+nonstarter_insertion_header_template = r"""//
+class InsertionsForNonStarterDecompositions : public PabloKernel {
+public:
+    InsertionsForNonStarterDecompositions
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * InsertionBixNum);
+protected:
+    void generatePabloMethod() override;
+};
+
+InsertionsForNonStarterDecompositions::InsertionsForNonStarterDecompositions
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * InsertionBixNum) :
+: PabloKernel(ts, "InsertionsForNonStarterDecompositions",
+{Binding{"Basis", Basis}},
+{Binding{"InsertionBixNum", InsertionBixNum}}) {}
+
+InsertionsForNonStarterDecompositions::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * Zeroes = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<PabloAST *> insertions(${insertion_bixnum_bits}, Zeroes); 
+"""
+
+nonstarter_insertion_final_code = r"""    writeOutputStreamSet("InsertionBixNum", insertions);
+}
+"""
+
 class NFC_generator(U8_Translation_Generator):
     def __init__(self, ucd):
         super().__init__()
@@ -418,11 +578,13 @@ class NFC_generator(U8_Translation_Generator):
                         if uset_member(ucd.ccc_map['NR'], cp1):
                             if uset_member(ucd.ccc_map['NR'], cp2):
                                 # Decomposition to two consecutive starters
-                                if not cp2 in self.short_composable_map.keys():
-                                    self.short_composable_map[cp2] = {}
-                                self.short_composable_map[cp2][cp1] = precomposed
+                                if not cp1 in self.short_composable_map.keys():
+                                    # index by the first character of decomposition
+                                    self.short_composable_map[cp1] = {}
+                                self.short_composable_map[cp1][cp2] = precomposed
                             else:
                                 if not cp2 in self.long_composable_map.keys():
+                                    # index by the mark (second char of decomposition)
                                     self.long_composable_map[cp2] = {}
                                 self.long_composable_map[cp2][cp1] = precomposed
                         else:
@@ -491,17 +653,10 @@ class NFC_generator(U8_Translation_Generator):
             print("%s => %s %s" % (self.cp_with_ccc(cp), self.cp_with_ccc(cp1), self.cp_with_ccc(cp2)))
 
     def display_short_composables(self):
-        by_starter = {}
-        for cp2 in sorted(self.short_composable_map.keys()):
-            for cp1 in self.short_composable_map[cp2].keys():
-                cp = self.short_composable_map[cp2][cp1]
-                if not cp1 in by_starter.keys():
-                    by_starter[cp1] = {}
-                by_starter[cp1][cp2] = cp
-        for cp1 in sorted(by_starter.keys()):
+        for cp1 in sorted(self.short_composable_map.keys()):
             print("%s: " % self.cp_with_ccc(cp1))
-            for cp2 in sorted(by_starter[cp1].keys()):
-                cp = by_starter[cp1][cp2]
+            for cp2 in sorted(self.short_composable_map[cp1].keys()):
+                cp = self.short_composable_map[cp1][cp2]
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
 
     def display_long_composables(self):
@@ -552,7 +707,88 @@ class NFC_generator(U8_Translation_Generator):
                 s += gen_mark_case_logic(mark, ccc_enum, code_str)
 
         s+=finalize_nfc_stage(pass_no)
-        print(s)
+        return s
+
+    def generate_short_composable_stage(self):
+        s = short_composable_header
+        rg_set_map = range_usets_from_cps(self.short_composable_map.keys())
+        for pfx_code in rg_set_map.keys():
+            code_str = pfx_code_string(pfx_code)
+            scope = "b_%s" % code_str
+            s += gen_short_composable_pfx_code(pfx_code)
+            self.builder.open_scope(scope)
+            generated = set()
+            cp1_list = uset_to_member_list(rg_set_map[pfx_code])
+            for cp1 in cp1_list:
+                if not cp1 in generated:
+                    self.builder.install_uset_for_role("cp_%x" % cp1, singleton_uset(cp1))
+                    generated.add(cp1)
+                for cp2 in self.short_composable_map[cp1].keys():
+                    if not cp2 in generated:
+                        self.builder.install_uset_for_role("cp_%x" % cp2, singleton_uset(cp2))
+                        generated.add(cp2)
+            s += self.builder.generate_scope_compilations()
+            case_code = {}
+            deferred = []
+            for cp1 in cp1_list:
+                for cp2 in self.short_composable_map[cp1].keys():
+                    precomposed = self.short_composable_map[cp1][cp2]
+                    case_code[(cp1, cp2)] = generate_short_case_code(scope, cp1, cp2, precomposed)
+                    if precomposed in cp1_list:
+                        deferred.append(precomposed)
+            precomposed_generated = set()
+            for cp1 in cp1_list:
+                if not cp1 in deferred:
+                    for cp2 in self.short_composable_map[cp1].keys():
+                        s += case_code[(cp1, cp2)]
+                        precomposed_generated.add(self.short_composable_map[cp1][cp2])
+            while len(deferred) > 0:
+                next_deferred = []
+                for cp1 in deferred:
+                    if cp1 in precomposed_generated:
+                        for cp2 in self.short_composable_map[cp1].keys():
+                            s += case_code[(cp1, cp2)]
+                            precomposed_generated.add(self.short_composable_map[cp1][cp2])
+                    else: next_deferred.append(cp1)
+                deferred = next_deferred
+            s += finalize_short_composable_pfx_code(pfx_code)
+        s += short_composable_final_code
+        return s
+
+    def generate_insertions_for_nonstarter_decompositions(self):
+        max_insert = 0
+        bixnum_usets = []
+        for cp in self.non_starter_decomposition_map.keys():
+            (cp1, cp2) = self.non_starter_decomposition_map[cp]
+            if uset_member(ucd.dt_map['Can'], cp1):
+                raise Exception("Unexpectec further decomposition for %x" % cp1)
+            if uset_member(ucd.dt_map['Can'], cp2):
+                raise Exception("Unexpectec further decomposition for %x" % cp2)
+            final_lgth = u8_encoded_length(cp1) + u8_encoded_length(cp2)
+            insert_amt = final_lgth - u8_encoded_length(cp)
+            if insert_amt > max_insert:
+                max_insert = insert_amt
+            i = 0
+            bit = 1 << i
+            while bit <= insert_amt:
+                if bit & insert_amt == bit:  # bit is set
+                    while len(bixnum_usets) <= i:
+                        bixnum_usets.append(empty_uset())
+                    bixnum_usets[i] = uset_union(bixnum_usets[i], singleton_uset(cp))
+                i += 1
+                bit = 1 << i
+        t = string.Template(nonstarter_insertion_header_template)
+        s = t.substitute(insertion_bixnum_bits = len(bixnum_usets))
+        self.builder.open_scope("pb")
+        defined = []
+        for i in range(len(bixnum_usets)):
+            defined.append(self.builder.install_uset(bixnum_usets[i]))
+        s += self.builder.generate_scope_compilations()
+        for i in range(len(bixnum_usets)):
+            s += "    insertions[%s] = %s;\n" % (i, defined[i])
+        s += nonstarter_insertion_final_code
+        return s
+
 
 if __name__ == "__main__":
     ucd = UCD_database()
@@ -561,11 +797,14 @@ if __name__ == "__main__":
     generator.allocate_ccc_passes()
     #generator.show_ccc_pass_allocation()
     #generator.display_singletons()
-    #generator.display_non_starter_decomps()
+    generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
     #generator.generate_singleton_code()
-    generator.generate_nfc_stage(0)
+    #print(generator.generate_nfc_stage(0))
+    #print(generator.generate_short_composable_stage())
+    #generator.print_uset_definitions()
+    print(generator.generate_insertions_for_nonstarter_decompositions())
     generator.print_uset_definitions()
 
 
