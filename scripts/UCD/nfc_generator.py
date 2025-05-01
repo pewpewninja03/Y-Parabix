@@ -90,14 +90,14 @@ def uset_structural_key(uset):
             last = hi
     return s
 
-scoped_compiler_template = r"""    UTF_Compiler ${scope}_compiler(Basis, ${scope});
+scoped_compiler_template = r"""    UTF::UTF_Compiler ${scope}_compiler(getInputStreamVar("Basis"), ${scope}, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> ${scope}_vars(${num_roles});
     std::vector<UnicodeSet> ${scope}_usets(${num_roles});
 ${assignments}
     ${scope}_compiler.compile(${scope}_vars, ${scope}_usets);
 """
 
-assignment_template = r"""    Var * ${role} = ${scope}.createVar("${role}", Zeroes);
+assignment_template = r"""    Var * ${role} = ${scope}.createVar("${role}", All0);
     ${scope}_vars[${index}] = ${role};
     ${scope}_usets[${index}] = ${role}_uset;
 """
@@ -162,15 +162,13 @@ class Uset_Builder:
         defs = ""
         i = 0
         generated = {}
-        for role in sorted(self.role_to_key_map.keys()):
-            uset_key = self.role_to_key_map[role]
-            if uset_key not in generated.keys():
-                uset = self.installed_usets[uset_key]
-                set_name = name_template % i
-                defs += "    " + uset.generate(set_name)
-                generated[uset_key] = set_name
-                i += 1
-            defs += "    const UnicodeSet %s_uset = %s;\n" % (role, generated[uset_key])
+        for key in sorted(self.installed_usets.keys()):
+            uset = self.installed_usets[key]
+            set_name = name_template % i
+            defs += "    " + uset.generate(set_name)
+            generated[key] = set_name
+            i += 1
+            defs += "    const UnicodeSet & %s_uset = %s;\n" % (key, generated[key])
         return defs
 
 class U8_Translation_Generator:
@@ -291,13 +289,13 @@ FindComposables${pass_no}::FindComposables${pass_no}
 {Binding{"Basis", Basis}, Binding{"ccc_NR", ccc_NR}${extra_bindings}},
 {Binding{"MarksFound", MarksFound}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
-FindComposables${pass_no}::generatePabloMethod() {
+void FindComposables${pass_no}::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
-    PabloAST * Zeroes = pb.createZeroes();
+    PabloAST * All0 = pb.createZeroes();
     PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
     PabloAST * eligible_starter = ${eligible};
-    Var * composable2nd = pb.createVar("composable2nd", Zeroes);
+    Var * composable2nd = pb.createVar("composable2nd", All0);
 """
 
 def gen_pass_header_code(pass_no):
@@ -336,15 +334,16 @@ def gen_pass_pfx_code(pfx_code):
 mark_case_template = r"""
 //  Case for mark ${mark}
     PabloAST * possible_${mark}_pos = ${builder}.createScanTo(${mark_starters}, ${ccc_enum}_or_NR);
-    PabloAST * found_${mark} = ${builder}.createAnd(possible_${mark}_pos, mark_${mark});
+    PabloAST * found_${mark} = ${builder}.createAnd(possible_${mark}_pos, ${mark_var});
     ${builder}.createAssign(composable2nd, ${builder}.createOr(composable2nd, found_${mark}));
 """
 
-def gen_mark_case_logic(mark, ccc_enum, code_str):
+def gen_mark_case_logic(mark, starters_var, mark_var, ccc_enum, code_str):
     t = string.Template(mark_case_template)
     return t.substitute(builder = "b_%s" % code_str,
                         mark="%x" % mark,
-                        mark_starters="mark_%x_starters_%s" % (mark, code_str),
+                        mark_var = mark_var,
+                        mark_starters=starters_var,
                         ccc_enum=ccc_enum)
 
 finalize_nfc_template = r"""// Generate combined outputs for pass ${pass_no}.
@@ -370,27 +369,33 @@ def finalize_nfc_stage(pass_no):
 # require because the u8_encoded_length(cp2) is greater
 # than that for cp1
 #
-def add_u8_bit_translation_case(builder, cp1, cp2, pos):
-    marker = "mrkr_%xto_%x = %s;\n" % (cp1, cp2, pos)
-    case_code = "    PabloAST * %s = %s;\n" % (marker, pos)
+def add_u8_bit_translation_case(code_str, cp1, cp2, pos):
+    marker = pos
+    case_code = ""
     marker_pos = 0
     len1 = u8_encoded_length(cp1)
     len2 = u8_encoded_length(cp2)
     for i in range(len2):
-        cp2_unit = u8_code_unit(cp2, i)
+        cp2_unit = u8_code_unit(cp2, i + 1)
         if i < len1:
-            cp1_unit = u8_code_unit(cp1, i)
+            cp1_unit = u8_code_unit(cp1, i + 1)
         else:
             cp1_unit = 0
         bit_diffs = cp1_unit ^ cp2_unit
         if bit_diffs == 0: continue
         if i > 0:
             adv = i - marker_pos
-            case_code += "    %s = %s.createAdvance(%s, %i);\n" % (marker, builder, marker, adv)
+            adv_exp = "b_%s.createAdvance(%s, %i)" % (code_str, marker, adv)
+            if marker_pos == 0:
+                marker = "mrkr_%xto_%x" % (cp1, cp2)
+                case_code += "    PabloAST * %s = %s;\n" % (marker, adv_exp)
+            else:
+                case_code += "    %s = %s;\n" % (marker, adv_exp)
             marker_pos = i
         for bit in range(8):
             if bit_diffs & 1 == 1:
-                 case_code += "    xfrm[%i] = %s.createOr(%s, xfrm[%i]);\n" % (i, builder, marker, i)
+                xfrm_var = "xfrm_%s[%i]" % (code_str, bit)
+                case_code += "    %s = b_%s.createOr(%s, %s);\n" % (xfrm_var, code_str, marker, xfrm_var)
             bit_diffs = bit_diffs >> 1
     return case_code
 
@@ -404,57 +409,76 @@ protected:
     void generatePabloMethod() override;
 };
 
-ShortComposableTranslation::FindComposables${pass_no}
+ShortComposableTranslation::ShortComposableTranslation
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * DeletePrior, StreamSet * XfrmBasis) :
+                                   StreamSet * DeletePrior, StreamSet * XfrmBasis)
 : PabloKernel(ts, "ShortComposableTranslation",
-{Binding{"Basis", Basis}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
 {Binding{"DeletePrior", DeletePrior}, Binding{"XfrmBasis", XfrmBasis}}) {}
 
-ShortComposableTranslation::generatePabloMethod() {
+void ShortComposableTranslation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * Zeroes = pb.createZeroes();
+    BixNumCompiler bnc(pb);
+    PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    Var * DeletePriorVar = pb.createVar("DeletePriorVar", Zeroes);
-    Var * XfrmBasisVar = getOutputStreamVar("XfrmBasis");
+    Var * DeletePriorVar = pb.createVar("DeletePriorVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
-        XfrmOutputVar[i] = pb.createExtract(XfrmBasisVar, pb.getInteger(i));
+        XfrmVar[i] = pb.createVar("XfrmBasis" + std::to_string(i), All0);
     }
 """
 
-short_composable_case_template = r"""
-//  Case for ${cp1} + ${cp2} => ${precomposed}
-    PabloAST * possible_${cp2}_pos = ${builder}.createAdvance(cp_${cp1}, ${cp1_len});
-    PabloAST * found_${cp1}_${cp2} = ${builder}.createAnd(possible_${cp2}_pos, cp_${cp2});
+short_composable_starter_template = r"""//  Cases for ${cp1}
+    PabloAST * after_${cp1} = ${builder}.createAdvance(${cp1_var}, ${cp1_len});
 """
 
-def generate_short_case_code(builder, cp1, cp2, precomposed):
-    t = string.Template(short_composable_case_template)
+def generate_short_case_starter_code(builder, cp1, generated):
+    t = string.Template(short_composable_starter_template)
     s = t.substitute(builder = builder,
                         cp1 = "%x" % cp1,
+                        cp1_var = generated[cp1],
+                        cp1_len=u8_encoded_length(cp1))
+    return s
+
+def generate_short_case_starter_code2(builder, cp1, generated):
+    t = string.Template(short_composable_starter_template)
+    s = t.substitute(builder = builder,
+                        cp1 = "%x" % cp1,
+                        cp1_var = generated[cp1],
+                        cp1_len=u8_encoded_length(cp1))
+    return s
+
+short_composable_case_template = r"""//     ${cp1} + ${cp2} => ${precomposed}
+    PabloAST * found_${cp1}_${cp2} = b_${code_str}.createAnd(after_${cp1}, ${cp2_var});
+    del_prior_${code_str} = b_${code_str}.createOr(del_prior_${code_str}, found_${cp1}_${cp2});
+"""
+
+def generate_short_case_code(code_str, cp1, cp2, generated, precomposed):
+    t = string.Template(short_composable_case_template)
+    s = t.substitute(code_str = code_str,
+                        cp1 = "%x" % cp1,
                         cp2 = "%x" % cp2,
+                        cp1_var = generated[cp1],
+                        cp2_var = generated[cp2],
                         cp1_len=u8_encoded_length(cp1),
                         precomposed = "%x" % precomposed)
-    xlate_code = add_u8_bit_translation_case(builder, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
-    return s
+    xlate_code = add_u8_bit_translation_case(code_str, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
+    return s + xlate_code
 
 short_composable_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
-    pb.createIf(pb.createAnd(${pfx_test_var}, eligible_starter), ${builder});
-    std::vector<PabloAST *> xfrms_${code_str}(8, Zeroes);
-    PabloAST * del_prior_${code_str} = Zeroes;
+    pb.createIf(${pfx_test_var}, ${builder});
+    std::vector<PabloAST *> xfrm_${code_str}(8, All0);
+    PabloAST * del_prior_${code_str} = All0;
 """
 
 def gen_short_composable_pfx_code(pfx_code):
     code_str = pfx_code_string(pfx_code)
     pfx_test_var = "pfx_%s_test" % code_str
     test = prefix_test_logic(pfx_code)
-    if pfx_code == 0:
-        test = "pb.createAnd(%s, pb.createLookAhead(ccc_NR, 1))" % test
     scope = "b_%s" % code_str
-    t = string.Template(pfx_template)
+    t = string.Template(short_composable_pfx_template)
     return t.substitute(builder = scope,
                         code_str = code_str,
                         pfx_test_var = pfx_test_var,
@@ -477,11 +501,12 @@ def finalize_short_composable_pfx_code(pfx_code):
 short_composable_final_code = r"""
     Var * DeleteOutputVar = getOutputStreamVar("DeletePrior");
     pb.createAssign(pb.createExtract(DeleteOutputVar, pb.getInteger(0)), DeletePriorVar);
-    Var * XfrmBasisVar = getOutputStreamVar("XfrmBasis");
+    Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
     for (unsigned i = 0; i < 8; i++) {
-        Var * xfrm_out = pb.createExtract(XfrmBasisVar, pb.getInteger(i));
-        pb.createAssign(xfrm_out, XfrmBasis[i]));
+        Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
+        pb.createAssign(xfrm_out, XfrmVar[i]);
     }
+}
 """
 
 nonstarter_insertion_header_template = r"""//
@@ -496,16 +521,16 @@ protected:
 
 InsertionsForNonStarterDecompositions::InsertionsForNonStarterDecompositions
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * InsertionBixNum) :
+                                   StreamSet * InsertionBixNum)
 : PabloKernel(ts, "InsertionsForNonStarterDecompositions",
 {Binding{"Basis", Basis}},
 {Binding{"InsertionBixNum", InsertionBixNum}}) {}
 
-InsertionsForNonStarterDecompositions::generatePabloMethod() {
+void InsertionsForNonStarterDecompositions::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * Zeroes = pb.createZeroes();
+    PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> insertions(${insertion_bixnum_bits}, Zeroes); 
+    std::vector<PabloAST *> insertions(${insertion_bixnum_bits}, All0); 
 """
 
 nonstarter_insertion_final_code = r"""    writeOutputStreamSet("InsertionBixNum", insertions);
@@ -696,15 +721,17 @@ class NFC_generator(U8_Translation_Generator):
             scope = "b_%s" % code_str
             s += gen_pass_pfx_code(pfx_code)
 
+            starters_var = {}
+            mark_var = {}
             self.builder.open_scope(scope)
             for mark in sorted(pass_data[pfx_code].keys()):
-                self.builder.install_uset_for_role("mark_%x_starters_%s" % (mark, code_str), pass_data[pfx_code][mark])
-                self.builder.install_uset_for_role("mark_%x" % mark, singleton_uset(mark))
+                starters_var[mark] = self.builder.install_uset(pass_data[pfx_code][mark])
+                mark_var[mark] = self.builder.install_uset(singleton_uset(mark))
             s += self.builder.generate_scope_compilations()
 
             for mark in sorted(pass_data[pfx_code].keys()):
                 ccc_enum = self.ccc_val_map[mark]
-                s += gen_mark_case_logic(mark, ccc_enum, code_str)
+                s += gen_mark_case_logic(mark, starters_var[mark], mark_var[mark], ccc_enum, code_str)
 
         s+=finalize_nfc_stage(pass_no)
         return s
@@ -717,38 +744,43 @@ class NFC_generator(U8_Translation_Generator):
             scope = "b_%s" % code_str
             s += gen_short_composable_pfx_code(pfx_code)
             self.builder.open_scope(scope)
-            generated = set()
+            generated = {}
             cp1_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in cp1_list:
-                if not cp1 in generated:
-                    self.builder.install_uset_for_role("cp_%x" % cp1, singleton_uset(cp1))
-                    generated.add(cp1)
+                if not cp1 in generated.keys():
+                    generated[cp1] = self.builder.install_uset(singleton_uset(cp1))
                 for cp2 in self.short_composable_map[cp1].keys():
-                    if not cp2 in generated:
-                        self.builder.install_uset_for_role("cp_%x" % cp2, singleton_uset(cp2))
-                        generated.add(cp2)
+                    if not cp2 in generated.keys():
+                        generated[cp2] = self.builder.install_uset(singleton_uset(cp2))
             s += self.builder.generate_scope_compilations()
             case_code = {}
             deferred = []
             for cp1 in cp1_list:
                 for cp2 in self.short_composable_map[cp1].keys():
                     precomposed = self.short_composable_map[cp1][cp2]
-                    case_code[(cp1, cp2)] = generate_short_case_code(scope, cp1, cp2, precomposed)
+                    case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, precomposed)
                     if precomposed in cp1_list:
                         deferred.append(precomposed)
-            precomposed_generated = set()
+            precomposed_generated = {}
             for cp1 in cp1_list:
                 if not cp1 in deferred:
+                    s += generate_short_case_starter_code(scope, cp1, generated)
                     for cp2 in self.short_composable_map[cp1].keys():
                         s += case_code[(cp1, cp2)]
-                        precomposed_generated.add(self.short_composable_map[cp1][cp2])
+                        precomp = self.short_composable_map[cp1][cp2]
+                        found = "found_%x_%x" % (cp1, cp2)
+                        precomposed_generated[precomp] = found
             while len(deferred) > 0:
                 next_deferred = []
                 for cp1 in deferred:
-                    if cp1 in precomposed_generated:
+                    if cp1 in precomposed_generated.keys():
+                        generated[cp1] = "%s.createOr(%s, %s)" % (scope, generated[cp1], precomposed_generated[cp1]) 
+                        s += generate_short_case_starter_code(scope, cp1, generated)
                         for cp2 in self.short_composable_map[cp1].keys():
                             s += case_code[(cp1, cp2)]
-                            precomposed_generated.add(self.short_composable_map[cp1][cp2])
+                            precomp = self.short_composable_map[cp1][cp2]
+                            found = "found_%x_%x" % (cp1, cp2)
+                            precomposed_generated[precomp] = found
                     else: next_deferred.append(cp1)
                 deferred = next_deferred
             s += finalize_short_composable_pfx_code(pfx_code)
@@ -797,14 +829,14 @@ if __name__ == "__main__":
     generator.allocate_ccc_passes()
     #generator.show_ccc_pass_allocation()
     #generator.display_singletons()
-    generator.display_non_starter_decomps()
+    #generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
     #generator.generate_singleton_code()
     #print(generator.generate_nfc_stage(0))
-    #print(generator.generate_short_composable_stage())
+    print(generator.generate_short_composable_stage())
     #generator.print_uset_definitions()
-    print(generator.generate_insertions_for_nonstarter_decompositions())
-    generator.print_uset_definitions()
+    #print(generator.generate_insertions_for_nonstarter_decompositions())
+    #generator.print_uset_definitions()
 
 
