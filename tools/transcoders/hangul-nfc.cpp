@@ -56,7 +56,7 @@ std::vector<re::CC *> Hangul_Composables() {
     UCD::UnicodeSet Hangul_T(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
     UCD::UnicodeSet Hangul_LV;
     for (unsigned i = 0; i < Hangul::LCount * Hangul::VCount; i++) {
-        Hangul_LV.insert(Hangul::LBase + i * Hangul::TCount);
+        Hangul_LV.insert(Hangul::SBase + i * Hangul::TCount);
     }
     return {re::makeCC(Hangul_L, &cc::Unicode),
             re::makeCC(Hangul_V, &cc::Unicode),
