@@ -54,11 +54,15 @@ CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts,
 CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses, BitMovementMode mode)
 : PabloKernel(ts, "cc_" + getStringHash(signature) + UTF::kernelAnnotation() +
               pablo::BitMovementMode_string(mode)
-, {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
+, {}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
 , mSignature(signature)
 , mBitMovement(mode) {
-
+    if (mode == pablo::BitMovementMode::LookAhead) {
+        mInputStreamSets.push_back(Binding{"basis", BasisBits, FixedRate(), LookAhead(3)});
+    } else {
+        mInputStreamSets.push_back(Binding{"basis", BasisBits});
+    }
 }
 
 llvm::StringRef CharClassesKernel::getSignature() const {

@@ -41,6 +41,7 @@ public:
     PabloAST * ULT(BixNum value, unsigned floor, const llvm::StringRef &Name = "");
     PabloAST * ULT(BixNum value, BixNum floor, const llvm::StringRef &Name = "");
     BixNum Select(PabloAST * cond, BixNum val1, BixNum val0);
+    BixNum Select(PabloAST * cond, BixNum val1, unsigned val0 = 0);
     BixNum ZeroExtend(BixNum value, unsigned extended_size);
     BixNum SignExtend(BixNum value, unsigned extended_size);
     BixNum Truncate(BixNum value, unsigned truncated_size);

@@ -171,6 +171,33 @@ class Uset_Builder:
             defs += "    const UnicodeSet & %s_uset = %s;\n" % (key, generated[key])
         return defs
 
+def u8_adjustment_bixnums_from_codepoint_map(translation_map):
+    for cp1 in translation_map.keys():
+    cp2 = translation_map[cp1]
+    ldiff = u8_encoded_length(cp2) - u8_encoded_length(cp1)
+    insertion_bixnum_usets = []
+    deletion_bixnum_usets = []
+    if ldiff > 0:
+        bit = 0
+        while ldiff > 0:
+            if len(insertion_bixnum_usets) <= bit:
+                insertion_bixnum_usets.append(empty_uset())
+            if ldiff & 1 == 1:
+                insertion_bixnum_usets[bit] = uset_union(insertion_bixnum_usets[bit], singleton_uset(cp1))
+            ldiff >>=  1
+            bit += 1
+    elif ldiff < 0:
+        ldiff = -ldiff
+        bit = 0
+        while ldiff > 0:
+            if len(deletion_bixnum_usets) <= bit:
+                deletion_bixnum_usets.append(empty_uset())
+            if ldiff & 1 == 1:
+                deletion_bixnum_usets[bit] = uset_union(deletion_bixnum_usets[bit], singleton_uset(cp1))
+            ldiff >>=  1
+            bit += 1
+    return (insertion_bixnum_usets, deletion_bixnum_usets)
+
 class U8_Translation_Generator:
     def __init__(self):
         self.codepoint_maps = {}
@@ -204,30 +231,7 @@ class U8_Translation_Generator:
         if not self.has_codepoint_map(skey):
             raise Exception("Requesting insertion bixnums for %s no such codepoint_map" % (skey))
         translation_map = self.codepoint_maps[skey]
-        for cp1 in translation_map.keys():
-            cp2 = translation_map[cp1]
-            ldiff = u8_encoded_length(cp2) - u8_encoded_length(cp1)
-            insertion_bixnum_usets = []
-            deletion_bixnum_usets = []
-            if ldiff > 0:
-                bit = 0
-                while ldiff > 0:
-                    if len(insertion_bixnum_usets) <= bit:
-                        insertion_bixnum_usets.append(empty_uset())
-                    if ldiff & 1 == 1:
-                        insertion_bixnum_usets[bit] = uset_union(insertion_bixnum_usets[bit], singleton_uset(cp1))
-                    ldiff >>=  1
-                    bit += 1
-            elif ldiff < 0:
-                ldiff = -ldiff
-                bit = 0
-                while ldiff > 0:
-                    if len(deletion_bixnum_usets) <= bit:
-                        deletion_bixnum_usets.append(empty_uset())
-                    if ldiff & 1 == 1:
-                        deletion_bixnum_usets[bit] = uset_union(deletion_bixnum_usets[bit], singleton_uset(cp1))
-                    ldiff >>=  1
-                    bit += 1
+        (insertion_bixnum_usets, deletion_bixnum_usets) = u8_adjustment_bixnums_from_codepoint_map(translation_map)
         if len(insertion_bixnum_usets) > 0:
             self.builder.install_uset_family(skey + "_insert_basis_%i", insertion_bixnum_usets)
         if len(deletion_bixnum_usets) > 0:
@@ -787,15 +791,15 @@ class NFC_generator(U8_Translation_Generator):
         s += short_composable_final_code
         return s
 
-    def generate_insertions_for_nonstarter_decompositions(self):
+    def insertion_bixnums_for_nonstarter_decompositions(self):
         max_insert = 0
         bixnum_usets = []
         for cp in self.non_starter_decomposition_map.keys():
             (cp1, cp2) = self.non_starter_decomposition_map[cp]
             if uset_member(ucd.dt_map['Can'], cp1):
-                raise Exception("Unexpectec further decomposition for %x" % cp1)
+                raise Exception("Unexpected further decomposition for %x" % cp1)
             if uset_member(ucd.dt_map['Can'], cp2):
-                raise Exception("Unexpectec further decomposition for %x" % cp2)
+                raise Exception("Unexpected further decomposition for %x" % cp2)
             final_lgth = u8_encoded_length(cp1) + u8_encoded_length(cp2)
             insert_amt = final_lgth - u8_encoded_length(cp)
             if insert_amt > max_insert:
@@ -809,6 +813,10 @@ class NFC_generator(U8_Translation_Generator):
                     bixnum_usets[i] = uset_union(bixnum_usets[i], singleton_uset(cp))
                 i += 1
                 bit = 1 << i
+        return bixnum_usets
+
+    def generate_insertions_for_nonstarter_decompositions(self):
+        bixnum_usets = self.insertion_bixnums_for_nonstarter_decompositions()
         t = string.Template(nonstarter_insertion_header_template)
         s = t.substitute(insertion_bixnum_bits = len(bixnum_usets))
         self.builder.open_scope("pb")
@@ -834,9 +842,9 @@ if __name__ == "__main__":
     #generator.display_long_composables()
     #generator.generate_singleton_code()
     #print(generator.generate_nfc_stage(0))
-    print(generator.generate_short_composable_stage())
+    #print(generator.generate_short_composable_stage())
     #generator.print_uset_definitions()
-    #print(generator.generate_insertions_for_nonstarter_decompositions())
+    print(generator.generate_insertions_for_nonstarter_decompositions())
     #generator.print_uset_definitions()
 
 
