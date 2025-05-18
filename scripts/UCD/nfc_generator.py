@@ -368,46 +368,6 @@ def finalize_nfc_stage(pass_no):
     s = string.Template(finalize_nfc_template)
     return s.substitute(pass_no = pass_no)
 
-#
-# Generate the logic for UTF-8 bit translations of cp1 to cp2
-# given:  1. marker marks the first byte position of cp1
-#         2. zeroes have been inserted after cp1 encoding to
-#            match the length of cp2
-#
-# Assumption: zeroes have been inserted for any positions
-# require because the u8_encoded_length(cp2) is greater
-# than that for cp1
-#
-def add_u8_bit_translation_case(code_str, cp1, cp2, pos):
-    marker = pos
-    case_code = ""
-    marker_pos = 0
-    len1 = u8_encoded_length(cp1)
-    len2 = u8_encoded_length(cp2)
-    for i in range(len2):
-        cp2_unit = u8_code_unit(cp2, i + 1)
-        if i < len1:
-            cp1_unit = u8_code_unit(cp1, i + 1)
-        else:
-            cp1_unit = 0
-        bit_diffs = cp1_unit ^ cp2_unit
-        if bit_diffs == 0: continue
-        if i > 0:
-            adv = i - marker_pos
-            adv_exp = "b_%s.createAdvance(%s, %i)" % (code_str, marker, adv)
-            if marker_pos == 0:
-                marker = "mrkr_%xto_%x" % (cp1, cp2)
-                case_code += "    PabloAST * %s = %s;\n" % (marker, adv_exp)
-            else:
-                case_code += "    %s = %s;\n" % (marker, adv_exp)
-            marker_pos = i
-        for bit in range(8):
-            if bit_diffs & 1 == 1:
-                xfrm_var = "xfrm_%s[%i]" % (code_str, bit)
-                case_code += "    %s = b_%s.createOr(%s, %s);\n" % (xfrm_var, code_str, marker, xfrm_var)
-            bit_diffs = bit_diffs >> 1
-    return case_code
-
 short_composable_header = r"""//
 class ShortComposableTranslation : public PabloKernel {
 public:
@@ -462,7 +422,7 @@ short_composable_case_template = r"""//     ${cp1} + ${cp2} => ${precomposed}
     del_prior_${code_str} = b_${code_str}.createOr(del_prior_${code_str}, found_${cp1}_${cp2});
 """
 
-def generate_short_case_code(code_str, cp1, cp2, generated, precomposed):
+def generate_short_case_code(code_str, cp1, cp2, generated, precomposed, Num0s):
     t = string.Template(short_composable_case_template)
     s = t.substitute(code_str = code_str,
                         cp1 = "%x" % cp1,
@@ -471,7 +431,8 @@ def generate_short_case_code(code_str, cp1, cp2, generated, precomposed):
                         cp2_var = generated[cp2],
                         cp1_len=u8_encoded_length(cp1),
                         precomposed = "%x" % precomposed)
-    xlate_code = add_u8_bit_translation_case(code_str, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
+    xlate_code = CharacterTranslationLogic(cp2, precomposed, Num0s, "found_%x_%x" % (cp1, cp2), "xfrm_%s" % code_str, "b_%s" % code_str)
+    #xlate_code = add_u8_bit_translation_case(code_str, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
     return s + xlate_code
 
 short_composable_pfx_template = r"""
@@ -520,7 +481,7 @@ short_composable_final_code = r"""
 
 #
 #  UTF-8 character translation using Xor method for cp1 -> cp2.
-#  Assumptions:  
+#  Assumptions:
 #    - marker is a bit stream marking the first byte of any cp1
 #    - Num0s zero bytes have been inserted the first byte of cp1
 #    - Num0s + u8_encoded_length(cp1) >= u8_encoded_length(cp2)
@@ -535,7 +496,7 @@ def CharacterTranslationLogic(cp1, cp2, Num0s, marker, basis_var, pb):
     len2 = u8_encoded_length(cp2)
     excess = Num0s + len1 - len2
     for i in range(len2):
-        # position for cp2 byte 
+        # position for cp2 byte
         cp2_byte = u8_code_unit(cp2, i + 1)
         pos = excess + i
         cp1_byte = 0 # default for positions corresponding to inserted zeroes
@@ -547,19 +508,19 @@ def CharacterTranslationLogic(cp1, cp2, Num0s, marker, basis_var, pb):
             diff = cp1_byte ^ cp2_byte
             # advance marker to pos
             if pos == 0:
-                s += "    PabloAST * m_%x_0 = %s;\n" % (cp1, marker)
+                s += "    PabloAST * m_%x_%x_0 = %s;\n" % (cp1, cp2, marker)
             else:
-                s += "    PabloAST * m_%x_%i = %s.createAdvance(%s, %i);\n" % (cp1, i, pb, marker, pos)
+                s += "    PabloAST * m_%x_%x_%i = %s.createAdvance(%s, %i);\n" % (cp1, cp2, i, pb, marker, pos)
             # apply xor logic for each bit difference between cp1_byte, cp2_byte
             for j in range(8):
                 bv = "%s[%i]" % (basis_var, j)
                 if ((diff >> j) & 1) == 1:
-                    s += "    %s = %s.createOr(%s, m_%x_%i);\n" % (bv, pb, bv, cp1, i)
+                    s += "    %s = %s.createOr(%s, m_%x_%x_%i);\n" % (bv, pb, bv, cp1, cp2, i)
     return s
 
 #
 #  UTF-8 character insertion for a given cp.
-#  Assumptions:  
+#  Assumptions:
 #    - marker is a bit stream marking the first byte of any cp
 #    - zero bytes have been inserted the each byte position of cp
 #    - pb is the PabloBuilder for logic
@@ -950,7 +911,10 @@ class NFC_generator(U8_Translation_Generator):
             for cp1 in cp1_list:
                 for cp2 in self.short_composable_map[cp1].keys():
                     precomposed = self.short_composable_map[cp1][cp2]
-                    case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, precomposed)
+                    Num0s = 0
+                    if cp2 in self.max_insert_map.keys():
+                        Num0s = self.max_insert_map[cp2]
+                    case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, precomposed, Num0s)
                     if precomposed in cp1_list:
                         deferred.append(precomposed)
             precomposed_generated = {}
@@ -1000,7 +964,7 @@ class NFC_generator(U8_Translation_Generator):
         for i in range(len(insertion_usets)):
             if i >= len(expansion_usets):
                 s += "    insertions[%s] = %s;\n" % (i, insertions[i])
-            else: 
+            else:
                 s += "    insertions[%s] = pb.createOr(insertions[%s], %s);\n" % (i, i, insertions[i])
         s += u8_insertion_final_code
         return s
@@ -1040,13 +1004,10 @@ if __name__ == "__main__":
     kernels = ""
     #generator.generate_singleton_code()
     #print(generator.generate_nfc_stage(0))
-    #print(generator.generate_short_composable_stage())
+    kernels += generator.generate_short_composable_stage()
     #generator.print_uset_definitions()
     #print(generator.generate_insertions_for_nonstarter_decompositions())
-    kernels += generator.generate_u8_insertion_kernel()
-    kernels += generator.generate_nonstarter_decompositions()
-    generator.print_uset_definitions()
+    #kernels += generator.generate_u8_insertion_kernel()
+    #kernels += generator.generate_nonstarter_decompositions()
+    #generator.print_uset_definitions()
     print(kernels)
-
-
-
