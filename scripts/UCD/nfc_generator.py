@@ -90,16 +90,16 @@ def uset_structural_key(uset):
             last = hi
     return s
 
-scoped_compiler_template = r"""    UTF::UTF_Compiler ${scope}_compiler(getInputStreamVar("Basis"), ${scope}, pablo::BitMovementMode::LookAhead);
-    std::vector<Var *> ${scope}_vars(${num_roles});
-    std::vector<UnicodeSet> ${scope}_usets(${num_roles});
+scoped_compiler_template = r"""    UTF::UTF_Compiler ${pfx}_compiler(getInputStreamVar("Basis"), ${scope}, pablo::BitMovementMode::${movement});
+    std::vector<Var *> ${pfx}_vars(${num_roles});
+    std::vector<UnicodeSet> ${pfx}_usets(${num_roles});
 ${assignments}
-    ${scope}_compiler.compile(${scope}_vars, ${scope}_usets);
+    ${pfx}_compiler.compile(${pfx}_vars, ${pfx}_usets);
 """
 
 assignment_template = r"""    Var * ${role} = ${scope}.createVar("${role}", All0);
-    ${scope}_vars[${index}] = ${role};
-    ${scope}_usets[${index}] = ${role}_uset;
+    ${pfx}_vars[${index}] = ${role};
+    ${pfx}_usets[${index}] = ${role}_uset;
 """
 
 class Uset_Builder:
@@ -147,13 +147,18 @@ class Uset_Builder:
     def get_role_to_key_map(self):
         return self.role_to_key_map
 
-    def generate_scope_compilations(self):
+    def generate_scope_compilations(self, movement_mode = "LookAhead"):
+        pfx = self.current_scope
+        if movement_mode != "LookAhead":
+            pfx = pfx + "_adv"
         t1 = string.Template(scoped_compiler_template)
         t2 = string.Template(assignment_template)
         assigs = ""
         for i in range(len(self.current_scope_roles)):
-            assigs += t2.substitute(scope = self.current_scope, index = i, role = self.current_scope_roles[i])
-        defs = t1.substitute(scope = self.current_scope,
+            assigs += t2.substitute(pfx = pfx, scope = self.current_scope, index = i, role = self.current_scope_roles[i])
+        defs = t1.substitute(pfx = pfx,
+                             scope = self.current_scope,
+                             movement = movement_mode,
                              num_roles = len(self.current_scope_roles),
                              assignments = assigs)
         return defs
@@ -173,29 +178,29 @@ class Uset_Builder:
 
 def u8_adjustment_bixnums_from_codepoint_map(translation_map):
     for cp1 in translation_map.keys():
-    cp2 = translation_map[cp1]
-    ldiff = u8_encoded_length(cp2) - u8_encoded_length(cp1)
-    insertion_bixnum_usets = []
-    deletion_bixnum_usets = []
-    if ldiff > 0:
-        bit = 0
-        while ldiff > 0:
-            if len(insertion_bixnum_usets) <= bit:
-                insertion_bixnum_usets.append(empty_uset())
-            if ldiff & 1 == 1:
-                insertion_bixnum_usets[bit] = uset_union(insertion_bixnum_usets[bit], singleton_uset(cp1))
-            ldiff >>=  1
-            bit += 1
-    elif ldiff < 0:
-        ldiff = -ldiff
-        bit = 0
-        while ldiff > 0:
-            if len(deletion_bixnum_usets) <= bit:
-                deletion_bixnum_usets.append(empty_uset())
-            if ldiff & 1 == 1:
-                deletion_bixnum_usets[bit] = uset_union(deletion_bixnum_usets[bit], singleton_uset(cp1))
-            ldiff >>=  1
-            bit += 1
+        cp2 = translation_map[cp1]
+        ldiff = u8_encoded_length(cp2) - u8_encoded_length(cp1)
+        insertion_bixnum_usets = []
+        deletion_bixnum_usets = []
+        if ldiff > 0:
+            bit = 0
+            while ldiff > 0:
+                if len(insertion_bixnum_usets) <= bit:
+                    insertion_bixnum_usets.append(empty_uset())
+                if ldiff & 1 == 1:
+                    insertion_bixnum_usets[bit] = uset_union(insertion_bixnum_usets[bit], singleton_uset(cp1))
+                ldiff >>=  1
+                bit += 1
+        elif ldiff < 0:
+            ldiff = -ldiff
+            bit = 0
+            while ldiff > 0:
+                if len(deletion_bixnum_usets) <= bit:
+                    deletion_bixnum_usets.append(empty_uset())
+                if ldiff & 1 == 1:
+                    deletion_bixnum_usets[bit] = uset_union(deletion_bixnum_usets[bit], singleton_uset(cp1))
+                ldiff >>=  1
+                bit += 1
     return (insertion_bixnum_usets, deletion_bixnum_usets)
 
 class U8_Translation_Generator:
@@ -513,33 +518,174 @@ short_composable_final_code = r"""
 }
 """
 
-nonstarter_insertion_header_template = r"""//
-class InsertionsForNonStarterDecompositions : public PabloKernel {
+#
+#  UTF-8 character translation using Xor method for cp1 -> cp2.
+#  Assumptions:  
+#    - marker is a bit stream marking the first byte of any cp1
+#    - Num0s zero bytes have been inserted the first byte of cp1
+#    - Num0s + u8_encoded_length(cp1) >= u8_encoded_length(cp2)
+#    - excess = Num0s + u8_encoded_length(cp1) - u8_encoded_length(cp2)
+#    - If excess > 0, the first excess positions are don't cares
+#      and will ultimately be deleted
+#    - pb is the PabloBuilder for logic
+#
+def CharacterTranslationLogic(cp1, cp2, Num0s, marker, basis_var, pb):
+    s = ""
+    len1 = u8_encoded_length(cp1)
+    len2 = u8_encoded_length(cp2)
+    excess = Num0s + len1 - len2
+    for i in range(len2):
+        # position for cp2 byte 
+        cp2_byte = u8_code_unit(cp2, i + 1)
+        pos = excess + i
+        cp1_byte = 0 # default for positions corresponding to inserted zeroes
+        if pos == 0:
+            cp1_byte = u8_code_unit(cp1, 1)
+        elif pos > Num0s:
+            cp1_byte = u8_code_unit(cp1, pos - Num0s + 1)
+        if cp1_byte != cp2_byte:
+            diff = cp1_byte ^ cp2_byte
+            # advance marker to pos
+            if pos == 0:
+                s += "    PabloAST * m_%x_0 = %s;\n" % (cp1, marker)
+            else:
+                s += "    PabloAST * m_%x_%i = %s.createAdvance(%s, %i);\n" % (cp1, i, pb, marker, pos)
+            # apply xor logic for each bit difference between cp1_byte, cp2_byte
+            for j in range(8):
+                bv = "%s[%i]" % (basis_var, j)
+                if ((diff >> j) & 1) == 1:
+                    s += "    %s = %s.createOr(%s, m_%x_%i);\n" % (bv, pb, bv, cp1, i)
+    return s
+
+#
+#  UTF-8 character insertion for a given cp.
+#  Assumptions:  
+#    - marker is a bit stream marking the first byte of any cp
+#    - zero bytes have been inserted the each byte position of cp
+#    - pb is the PabloBuilder for logic
+#
+def CharacterInsertionLogic(cp, marker, basis_var, pb):
+    s = ""
+    cp_len = u8_encoded_length(cp)
+    for i in range(cp_len):
+        cp_byte = u8_code_unit(cp, i + 1)
+        if i == 0:
+            s += "    PabloAST * m_%x_0 = %s;\n" % (cp, marker)
+        else:
+            s += "    PabloAST * m_%x_%i = %s.createAdvance(%s, %i);\n" % (cp, i, pb, marker, i)
+        # apply xor logic for each bit difference between cp1_byte, cp2_byte
+        for j in range(8):
+            bv = "%s[%i]" % (basis_var, j)
+            if ((cp_byte >> j) & 1) == 1:
+                s += "    %s = %s.createOr(%s, m_%x_%i);\n" % (bv, pb, bv, cp, i)
+    return s
+
+nonstarter_decomposition_template = r"""//
+class NonStarterDecomposition : public PabloKernel {
 public:
-    InsertionsForNonStarterDecompositions
+    NonStarterDecomposition
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * NSD_Basis);
+protected:
+    void generatePabloMethod() override;
+};
+
+NonStarterDecomposition::NonStarterDecomposition
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * NSD_Basis)
+: PabloKernel(ts, "NonStarterDecomposition",
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"NSD_Basis", NSD_Basis}}) {}
+
+void NonStarterDecomposition::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<Var *> NSD_Var(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        NSD_Var[i] = pb.createVar("NSD_Basis" + std::to_string(i), Basis[i]);
+    }
+${pablo_code}
+    writeOutputStreamSet("NSD_Basis", NSD_Var);
+}
+"""
+
+nonstarter_decomposition_case_template = r"""//  Case for ${cp}
+    auto ${builder} = pb.createScope();
+    pb.createIf(${cp_var}, ${builder});
+    std::vector<PabloAST *> ${basis_var}(8, All0);
+${cp1_logic}
+    PabloAST * ins_${cp2} = ${builder}.createAdvance(${cp_var}, ${adv});
+${cp2_logic}
+    for (unsigned i = 0; i < 8; i++) {
+        ${builder}.createAssign(NSD_Var[i], ${builder}.createXor(NSD_Var[i], ${basis_var}[i]));
+    }
+"""
+
+
+def generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2):
+    t = string.Template(nonstarter_decomposition_case_template)
+    builder = "b_%x" % cp
+    basis_var = "xfrm_%x" % cp
+    if Num0s != u8_encoded_length(cp2):
+        raise Exception("Num0s != u8_encoded_length(cp2)")
+    cp1_logic = CharacterTranslationLogic(cp, cp1, 0, cp_var, basis_var, builder)
+    adv = u8_encoded_length(cp1)
+    cp2_logic = CharacterInsertionLogic(cp2, "ins_%x" % cp2, basis_var, builder)
+    s = t.substitute(builder = builder,
+                        cp = "%x" % cp,
+                        cp2 = "%x" % cp2,
+                        cp_var = cp_var,
+                        basis_var = basis_var,
+                        adv = adv,
+                        cp1_logic = cp1_logic,
+                        cp2_logic = cp2_logic)
+    return s
+
+u8_insertion_bixnum_template = r"""//
+class U8_InsertionBixNum : public PabloKernel {
+public:
+    U8_InsertionBixNum
         (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                        StreamSet * InsertionBixNum);
 protected:
     void generatePabloMethod() override;
 };
 
-InsertionsForNonStarterDecompositions::InsertionsForNonStarterDecompositions
+U8_InsertionBixNum::U8_InsertionBixNum
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * InsertionBixNum)
-: PabloKernel(ts, "InsertionsForNonStarterDecompositions",
-{Binding{"Basis", Basis}},
+: PabloKernel(ts, "U8_InsertionBixNum",
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
 {Binding{"InsertionBixNum", InsertionBixNum}}) {}
 
-void InsertionsForNonStarterDecompositions::generatePabloMethod() {
+void U8_InsertionBixNum::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     std::vector<PabloAST *> insertions(${insertion_bixnum_bits}, All0); 
 """
 
-nonstarter_insertion_final_code = r"""    writeOutputStreamSet("InsertionBixNum", insertions);
+u8_insertion_final_code = r"""    writeOutputStreamSet("InsertionBixNum", insertions);
 }
 """
+
+def insert_map_to_bixnum_usets(ins_map):
+    bixnum_usets = []
+    for cp in ins_map.keys():
+        num = ins_map[cp]
+        uset1 = singleton_uset(cp)
+        i = 0
+        bit = 1 << i
+        while bit <= num:
+            if bit & num == bit:  # bit is set
+                while len(bixnum_usets) <= i:
+                    bixnum_usets.append(empty_uset())
+                bixnum_usets[i] = uset_union(bixnum_usets[i], uset1)
+            i += 1
+            bit = 1 << i
+    return bixnum_usets
+
 
 class NFC_generator(U8_Translation_Generator):
     def __init__(self, ucd):
@@ -624,6 +770,48 @@ class NFC_generator(U8_Translation_Generator):
                         self.non_starter_decomposition_map[precomposed] = (cp1, cp2)
                 else:
                     raise Exception("Unexpected: decomposition length(%x) = %i" % (precomposed, len(decomp)))
+
+    def update_max_insert_map(self, cp, insert_len):
+        if cp in self.max_insert_map.keys():
+            if insert_len > self.max_insert_map[cp]:
+                self.max_insert_map[cp] = insert_len
+        elif insert_len > 0:
+            self.max_insert_map[cp] = insert_len
+
+    def create_max_insert_map(self):
+        self.max_insert_map = {}
+        self.post_insert_map = {}
+        for cp in self.singleton_map.keys():
+            canon = self.singleton_map[cp]
+            ldiff = u8_encoded_length(canon) - u8_encoded_length(cp)
+            if ldiff > 0:
+                self.update_max_insert_map(cp, ldiff)
+        for cp in self.short_composable_map.keys():
+            for cp2 in self.short_composable_map[cp].keys():
+                precomposed = self.short_composable_map[cp][cp2]
+                ldiff = u8_encoded_length(precomposed) - u8_encoded_length(cp)
+                if ldiff > 0:
+                    self.update_max_insert_map(cp, ldiff)
+        for mark in self.long_composable_map.keys():
+            for starter in self.long_composable_map[mark].keys():
+                precomposed = self.long_composable_map[mark][starter]
+                ldiff = u8_encoded_length(precomposed) - u8_encoded_length(starter)
+                if ldiff > 0:
+                    self.update_max_insert_map(starter, ldiff)
+        for cp in self.non_starter_decomposition_map.keys():
+            (cp1, cp2) = self.non_starter_decomposition_map[cp]
+            if uset_member(ucd.dt_map['Can'], cp1):
+                raise Exception("Unexpected further decomposition for %x" % cp1)
+            if uset_member(ucd.dt_map['Can'], cp2):
+                raise Exception("Unexpected further decomposition for %x" % cp2)
+            ldiff = u8_encoded_length(cp1) - u8_encoded_length(cp)
+            if ldiff > 0:
+                self.update_max_insert_map(cp, ldiff)
+            self.post_insert_map[cp] = u8_encoded_length(cp2)
+
+    def display_max_insert_map(self):
+        for cp in sorted(self.max_insert_map.keys()):
+            print("%04x - insert %i" % (cp, self.max_insert_map[cp]))
 
     #
     # If a given starter has precompositions with marks of
@@ -791,42 +979,49 @@ class NFC_generator(U8_Translation_Generator):
         s += short_composable_final_code
         return s
 
-    def insertion_bixnums_for_nonstarter_decompositions(self):
-        max_insert = 0
-        bixnum_usets = []
+    def generate_u8_insertion_kernel(self):
+        expansion_usets = insert_map_to_bixnum_usets(self.max_insert_map)
+        insertion_usets = insert_map_to_bixnum_usets(self.post_insert_map)
+        bixnum_bits = max(len(expansion_usets), len(insertion_usets))
+        t = string.Template(u8_insertion_bixnum_template)
+        s = t.substitute(insertion_bixnum_bits = bixnum_bits)
+        self.builder.open_scope("pb")
+        expansions = []
+        for i in range(len(expansion_usets)):
+            expansions.append(self.builder.install_uset(expansion_usets[i]))
+        s += self.builder.generate_scope_compilations()
+        self.builder.open_scope("pb")
+        insertions = []
+        for i in range(len(insertion_usets)):
+            insertions.append(self.builder.install_uset(insertion_usets[i]))
+        s += self.builder.generate_scope_compilations("Advance")
+        for i in range(len(expansion_usets)):
+            s += "    insertions[%s] = %s;\n" % (i, expansions[i])
+        for i in range(len(insertion_usets)):
+            if i >= len(expansion_usets):
+                s += "    insertions[%s] = %s;\n" % (i, insertions[i])
+            else: 
+                s += "    insertions[%s] = pb.createOr(insertions[%s], %s);\n" % (i, i, insertions[i])
+        s += u8_insertion_final_code
+        return s
+
+    def generate_nonstarter_decompositions(self):
+        self.builder.open_scope("pb")
+        t = string.Template(nonstarter_decomposition_template)
+        generated = {}
+        for cp in self.non_starter_decomposition_map.keys():
+            generated[cp] = self.builder.install_uset(singleton_uset(cp))
+        code = self.builder.generate_scope_compilations()
         for cp in self.non_starter_decomposition_map.keys():
             (cp1, cp2) = self.non_starter_decomposition_map[cp]
             if uset_member(ucd.dt_map['Can'], cp1):
                 raise Exception("Unexpected further decomposition for %x" % cp1)
             if uset_member(ucd.dt_map['Can'], cp2):
                 raise Exception("Unexpected further decomposition for %x" % cp2)
-            final_lgth = u8_encoded_length(cp1) + u8_encoded_length(cp2)
-            insert_amt = final_lgth - u8_encoded_length(cp)
-            if insert_amt > max_insert:
-                max_insert = insert_amt
-            i = 0
-            bit = 1 << i
-            while bit <= insert_amt:
-                if bit & insert_amt == bit:  # bit is set
-                    while len(bixnum_usets) <= i:
-                        bixnum_usets.append(empty_uset())
-                    bixnum_usets[i] = uset_union(bixnum_usets[i], singleton_uset(cp))
-                i += 1
-                bit = 1 << i
-        return bixnum_usets
-
-    def generate_insertions_for_nonstarter_decompositions(self):
-        bixnum_usets = self.insertion_bixnums_for_nonstarter_decompositions()
-        t = string.Template(nonstarter_insertion_header_template)
-        s = t.substitute(insertion_bixnum_bits = len(bixnum_usets))
-        self.builder.open_scope("pb")
-        defined = []
-        for i in range(len(bixnum_usets)):
-            defined.append(self.builder.install_uset(bixnum_usets[i]))
-        s += self.builder.generate_scope_compilations()
-        for i in range(len(bixnum_usets)):
-            s += "    insertions[%s] = %s;\n" % (i, defined[i])
-        s += nonstarter_insertion_final_code
+            Num0s = self.post_insert_map[cp]
+            cp_var = generated[cp]
+            code += generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2)
+        s = t.substitute(pablo_code = code)
         return s
 
 
@@ -834,17 +1029,24 @@ if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
     generator.create_mappings()
+    generator.create_max_insert_map()
     generator.allocate_ccc_passes()
     #generator.show_ccc_pass_allocation()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
+    #generator.display_max_insert_map()
+    kernels = ""
     #generator.generate_singleton_code()
     #print(generator.generate_nfc_stage(0))
     #print(generator.generate_short_composable_stage())
     #generator.print_uset_definitions()
-    print(generator.generate_insertions_for_nonstarter_decompositions())
-    #generator.print_uset_definitions()
+    #print(generator.generate_insertions_for_nonstarter_decompositions())
+    kernels += generator.generate_u8_insertion_kernel()
+    kernels += generator.generate_nonstarter_decompositions()
+    generator.print_uset_definitions()
+    print(kernels)
+
 
 

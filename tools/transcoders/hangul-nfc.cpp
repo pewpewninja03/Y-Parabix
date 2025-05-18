@@ -641,6 +641,251 @@ const static UnicodeSet::run_t __uset_84_runs[] = {{Empty, 2923}, {Mixed, 1}, {E
 const static UnicodeSet::bitquad_t __uset_84_quads[] = {0x00000200};
 const static UnicodeSet uset_84{__uset_84_runs, 3, __uset_84_quads, 1};
 const UnicodeSet & F0_16d69_uset = uset_84;
+const static UnicodeSet::run_t __uset_90_runs[] = {{Empty, 1}, {Mixed, 3}, {Empty, 34812}};
+const static UnicodeSet::bitquad_t __uset_90_quads[] = {0x70000000, 0x07fdfbf6, 0x07fdfbf6};
+const static UnicodeSet uset_90{__uset_90_runs, 3, __uset_90_quads, 3};
+const UnicodeSet & ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a_uset = uset_90;
+const static UnicodeSet::run_t __uset_91_runs[] = {
+{Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 4}, {Empty, 1}, {Mixed, 2},
+{Empty, 1}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 10}, {Mixed, 3},
+{Empty, 15}, {Mixed, 2}, {Empty, 1955}, {Mixed, 1}, {Empty, 2},
+{Mixed, 1}, {Empty, 32809}};
+const static UnicodeSet::bitquad_t __uset_91_quads[] = {
+0x00000408, 0x00000408, 0x00000100, 0x00308484, 0x00308484, 0x000c000c,
+0x0c003000, 0x80000f03, 0x00018003, 0x00000300, 0x82a20000, 0x82a25222,
+0x00004e22, 0x5f7f0000, 0x000407db, 0x00001000, 0x00e38000};
+const static UnicodeSet uset_91{__uset_91_runs, 19, __uset_91_quads, 17};
+const UnicodeSet & ASC_43_a_63_a_a8_c2_7_a_f_d4_5_e2_7_a_f_f4_5_102_3_12_3_4c_d_5a_b_60_1_8___b_7f_a0_1_f_b0_228_9_391_5_7_9_f_a1_5_9_c_e_b1_5_7_9_f_c1_5_9___b_e_5d0___6_8___c_e_e0_1_3_4_6___a_f2_fa6c_cf___d1_5___7_uset = uset_91;
+const static UnicodeSet::run_t __uset_92_runs[] = {{Empty, 26}, {Mixed, 1}, {Empty, 34789}};
+const static UnicodeSet::bitquad_t __uset_92_quads[] = {0x00000010};
+const static UnicodeSet uset_92{__uset_92_runs, 3, __uset_92_quads, 1};
+const UnicodeSet & CD_344_uset = uset_92;
+const static UnicodeSet::run_t __uset_93_runs[] = {
+{Empty, 26}, {Mixed, 1}, {Empty, 96}, {Mixed, 2}, {Empty, 34691}};
+const static UnicodeSet::bitquad_t __uset_93_quads[] = {0x00000010, 0x00280000, 0x00000002};
+const static UnicodeSet uset_93{__uset_93_runs, 5, __uset_93_quads, 3};
+const UnicodeSet & CD_344_f73_5_81_uset = uset_93;
+const static UnicodeSet::run_t __uset_94_runs[] = {{Empty, 123}, {Mixed, 1}, {Empty, 34692}};
+const static UnicodeSet::bitquad_t __uset_94_quads[] = {0x00080000};
+const static UnicodeSet uset_94{__uset_94_runs, 3, __uset_94_quads, 1};
+const UnicodeSet & E0_f73_uset = uset_94;
+const static UnicodeSet::run_t __uset_95_runs[] = {{Empty, 123}, {Mixed, 2}, {Empty, 34691}};
+const static UnicodeSet::bitquad_t __uset_95_quads[] = {0x00280000, 0x00000002};
+const static UnicodeSet uset_95{__uset_95_runs, 3, __uset_95_quads, 2};
+const UnicodeSet & E0_f73_5_81_uset = uset_95;
+const static UnicodeSet::run_t __uset_96_runs[] = {{Empty, 123}, {Mixed, 1}, {Empty, 34692}};
+const static UnicodeSet::bitquad_t __uset_96_quads[] = {0x00200000};
+const static UnicodeSet uset_96{__uset_96_runs, 3, __uset_96_quads, 1};
+const UnicodeSet & E0_f75_uset = uset_96;
+const static UnicodeSet::run_t __uset_97_runs[] = {{Empty, 124}, {Mixed, 1}, {Empty, 34691}};
+const static UnicodeSet::bitquad_t __uset_97_quads[] = {0x00000002};
+const static UnicodeSet uset_97{__uset_97_runs, 3, __uset_97_quads, 1};
+const UnicodeSet & E0_f81_uset = uset_97;
+//
+class U8_InsertionBixNum : public PabloKernel {
+public:
+    U8_InsertionBixNum
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * InsertionBixNum);
+protected:
+    void generatePabloMethod() override;
+};
+
+U8_InsertionBixNum::U8_InsertionBixNum
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * InsertionBixNum)
+: PabloKernel(ts, "U8_InsertionBixNum",
+              {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"InsertionBixNum", InsertionBixNum}}) {}
+
+void U8_InsertionBixNum::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<PabloAST *> insertions(2, All0);
+    UTF::UTF_Compiler pb_compiler(getInputStreamVar("Basis"), pb, pablo::BitMovementMode::LookAhead);
+    std::vector<Var *> pb_vars(2);
+    std::vector<UnicodeSet> pb_usets(2);
+    Var * ASC_43_a_63_a_a8_c2_7_a_f_d4_5_e2_7_a_f_f4_5_102_3_12_3_4c_d_5a_b_60_1_8___b_7f_a0_1_f_b0_228_9_391_5_7_9_f_a1_5_9_c_e_b1_5_7_9_f_c1_5_9___b_e_5d0___6_8___c_e_e0_1_3_4_6___a_f2_fa6c_cf___d1_5___7 = pb.createVar("ASC_43_a_63_a_a8_c2_7_a_f_d4_5_e2_7_a_f_f4_5_102_3_12_3_4c_d_5a_b_60_1_8___b_7f_a0_1_f_b0_228_9_391_5_7_9_f_a1_5_9_c_e_b1_5_7_9_f_c1_5_9___b_e_5d0___6_8___c_e_e0_1_3_4_6___a_f2_fa6c_cf___d1_5___7", All0);
+    pb_vars[0] = ASC_43_a_63_a_a8_c2_7_a_f_d4_5_e2_7_a_f_f4_5_102_3_12_3_4c_d_5a_b_60_1_8___b_7f_a0_1_f_b0_228_9_391_5_7_9_f_a1_5_9_c_e_b1_5_7_9_f_c1_5_9___b_e_5d0___6_8___c_e_e0_1_3_4_6___a_f2_fa6c_cf___d1_5___7;
+    pb_usets[0] = ASC_43_a_63_a_a8_c2_7_a_f_d4_5_e2_7_a_f_f4_5_102_3_12_3_4c_d_5a_b_60_1_8___b_7f_a0_1_f_b0_228_9_391_5_7_9_f_a1_5_9_c_e_b1_5_7_9_f_c1_5_9___b_e_5d0___6_8___c_e_e0_1_3_4_6___a_f2_fa6c_cf___d1_5___7_uset;
+    Var * ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a = pb.createVar("ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a", All0);
+    pb_vars[1] = ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a;
+    pb_usets[1] = ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a_uset;
+
+    pb_compiler.compile(pb_vars, pb_usets);
+    UTF::UTF_Compiler pb_adv_compiler(getInputStreamVar("Basis"), pb, pablo::BitMovementMode::Advance);
+    std::vector<Var *> pb_adv_vars(2);
+    std::vector<UnicodeSet> pb_adv_usets(2);
+    Var * E0_f73_5_81 = pb.createVar("E0_f73_5_81", All0);
+    pb_adv_vars[0] = E0_f73_5_81;
+    pb_adv_usets[0] = E0_f73_5_81_uset;
+    Var * CD_344_f73_5_81 = pb.createVar("CD_344_f73_5_81", All0);
+    pb_adv_vars[1] = CD_344_f73_5_81;
+    pb_adv_usets[1] = CD_344_f73_5_81_uset;
+
+    pb_adv_compiler.compile(pb_adv_vars, pb_adv_usets);
+    insertions[0] = ASC_43_a_63_a_a8_c2_7_a_f_d4_5_e2_7_a_f_f4_5_102_3_12_3_4c_d_5a_b_60_1_8___b_7f_a0_1_f_b0_228_9_391_5_7_9_f_a1_5_9_c_e_b1_5_7_9_f_c1_5_9___b_e_5d0___6_8___c_e_e0_1_3_4_6___a_f2_fa6c_cf___d1_5___7;
+    insertions[1] = ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a;
+    insertions[0] = pb.createOr(insertions[0], E0_f73_5_81);
+    insertions[1] = pb.createOr(insertions[1], CD_344_f73_5_81);
+    writeOutputStreamSet("InsertionBixNum", insertions);
+}
+
+//
+class NonStarterDecomposition : public PabloKernel {
+public:
+    NonStarterDecomposition
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * NSD_Basis);
+protected:
+    void generatePabloMethod() override;
+};
+
+NonStarterDecomposition::NonStarterDecomposition
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * NSD_Basis)
+: PabloKernel(ts, "NonStarterDecomposition",
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"NSD_Basis", NSD_Basis}}) {}
+
+void NonStarterDecomposition::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<Var *> NSD_Var(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        NSD_Var[i] = pb.createVar("NSD_Basis" + std::to_string(i), Basis[i]);
+    }
+    UTF::UTF_Compiler pb_compiler(getInputStreamVar("Basis"), pb, pablo::BitMovementMode::LookAhead);
+    std::vector<Var *> pb_vars(4);
+    std::vector<UnicodeSet> pb_usets(4);
+    Var * CD_344 = pb.createVar("CD_344", All0);
+    pb_vars[0] = CD_344;
+    pb_usets[0] = CD_344_uset;
+    Var * E0_f73 = pb.createVar("E0_f73", All0);
+    pb_vars[1] = E0_f73;
+    pb_usets[1] = E0_f73_uset;
+    Var * E0_f75 = pb.createVar("E0_f75", All0);
+    pb_vars[2] = E0_f75;
+    pb_usets[2] = E0_f75_uset;
+    Var * E0_f81 = pb.createVar("E0_f81", All0);
+    pb_vars[3] = E0_f81;
+    pb_usets[3] = E0_f81_uset;
+
+    pb_compiler.compile(pb_vars, pb_usets);
+//  Case for 344
+    auto b_344 = pb.createScope();
+    pb.createIf(CD_344, b_344);
+    std::vector<PabloAST *> xfrm_344(8, All0);
+    PabloAST * m_344_0 = CD_344;
+    xfrm_344[0] = b_344.createOr(xfrm_344[0], m_344_0);
+    PabloAST * m_344_1 = b_344.createAdvance(CD_344, 1);
+    xfrm_344[2] = b_344.createOr(xfrm_344[2], m_344_1);
+    xfrm_344[3] = b_344.createOr(xfrm_344[3], m_344_1);
+
+    PabloAST * ins_301 = b_344.createAdvance(CD_344, 2);
+    PabloAST * m_301_0 = ins_301;
+    xfrm_344[2] = b_344.createOr(xfrm_344[2], m_301_0);
+    xfrm_344[3] = b_344.createOr(xfrm_344[3], m_301_0);
+    xfrm_344[6] = b_344.createOr(xfrm_344[6], m_301_0);
+    xfrm_344[7] = b_344.createOr(xfrm_344[7], m_301_0);
+    PabloAST * m_301_1 = b_344.createAdvance(ins_301, 1);
+    xfrm_344[0] = b_344.createOr(xfrm_344[0], m_301_1);
+    xfrm_344[7] = b_344.createOr(xfrm_344[7], m_301_1);
+
+    for (unsigned i = 0; i < 8; i++) {
+        b_344.createAssign(NSD_Var[i], b_344.createXor(NSD_Var[i], xfrm_344[i]));
+    }
+//  Case for f73
+    auto b_f73 = pb.createScope();
+    pb.createIf(E0_f73, b_f73);
+    std::vector<PabloAST *> xfrm_f73(8, All0);
+    PabloAST * m_f73_2 = b_f73.createAdvance(E0_f73, 2);
+    xfrm_f73[1] = b_f73.createOr(xfrm_f73[1], m_f73_2);
+
+    PabloAST * ins_f72 = b_f73.createAdvance(E0_f73, 3);
+    PabloAST * m_f72_0 = ins_f72;
+    xfrm_f73[5] = b_f73.createOr(xfrm_f73[5], m_f72_0);
+    xfrm_f73[6] = b_f73.createOr(xfrm_f73[6], m_f72_0);
+    xfrm_f73[7] = b_f73.createOr(xfrm_f73[7], m_f72_0);
+    PabloAST * m_f72_1 = b_f73.createAdvance(ins_f72, 1);
+    xfrm_f73[0] = b_f73.createOr(xfrm_f73[0], m_f72_1);
+    xfrm_f73[2] = b_f73.createOr(xfrm_f73[2], m_f72_1);
+    xfrm_f73[3] = b_f73.createOr(xfrm_f73[3], m_f72_1);
+    xfrm_f73[4] = b_f73.createOr(xfrm_f73[4], m_f72_1);
+    xfrm_f73[5] = b_f73.createOr(xfrm_f73[5], m_f72_1);
+    xfrm_f73[7] = b_f73.createOr(xfrm_f73[7], m_f72_1);
+    PabloAST * m_f72_2 = b_f73.createAdvance(ins_f72, 2);
+    xfrm_f73[1] = b_f73.createOr(xfrm_f73[1], m_f72_2);
+    xfrm_f73[4] = b_f73.createOr(xfrm_f73[4], m_f72_2);
+    xfrm_f73[5] = b_f73.createOr(xfrm_f73[5], m_f72_2);
+    xfrm_f73[7] = b_f73.createOr(xfrm_f73[7], m_f72_2);
+
+    for (unsigned i = 0; i < 8; i++) {
+        b_f73.createAssign(NSD_Var[i], b_f73.createXor(NSD_Var[i], xfrm_f73[i]));
+    }
+//  Case for f75
+    auto b_f75 = pb.createScope();
+    pb.createIf(E0_f75, b_f75);
+    std::vector<PabloAST *> xfrm_f75(8, All0);
+    PabloAST * m_f75_2 = b_f75.createAdvance(E0_f75, 2);
+    xfrm_f75[2] = b_f75.createOr(xfrm_f75[2], m_f75_2);
+
+    PabloAST * ins_f74 = b_f75.createAdvance(E0_f75, 3);
+    PabloAST * m_f74_0 = ins_f74;
+    xfrm_f75[5] = b_f75.createOr(xfrm_f75[5], m_f74_0);
+    xfrm_f75[6] = b_f75.createOr(xfrm_f75[6], m_f74_0);
+    xfrm_f75[7] = b_f75.createOr(xfrm_f75[7], m_f74_0);
+    PabloAST * m_f74_1 = b_f75.createAdvance(ins_f74, 1);
+    xfrm_f75[0] = b_f75.createOr(xfrm_f75[0], m_f74_1);
+    xfrm_f75[2] = b_f75.createOr(xfrm_f75[2], m_f74_1);
+    xfrm_f75[3] = b_f75.createOr(xfrm_f75[3], m_f74_1);
+    xfrm_f75[4] = b_f75.createOr(xfrm_f75[4], m_f74_1);
+    xfrm_f75[5] = b_f75.createOr(xfrm_f75[5], m_f74_1);
+    xfrm_f75[7] = b_f75.createOr(xfrm_f75[7], m_f74_1);
+    PabloAST * m_f74_2 = b_f75.createAdvance(ins_f74, 2);
+    xfrm_f75[2] = b_f75.createOr(xfrm_f75[2], m_f74_2);
+    xfrm_f75[4] = b_f75.createOr(xfrm_f75[4], m_f74_2);
+    xfrm_f75[5] = b_f75.createOr(xfrm_f75[5], m_f74_2);
+    xfrm_f75[7] = b_f75.createOr(xfrm_f75[7], m_f74_2);
+
+    for (unsigned i = 0; i < 8; i++) {
+        b_f75.createAssign(NSD_Var[i], b_f75.createXor(NSD_Var[i], xfrm_f75[i]));
+    }
+//  Case for f81
+    auto b_f81 = pb.createScope();
+    pb.createIf(E0_f81, b_f81);
+    std::vector<PabloAST *> xfrm_f81(8, All0);
+    PabloAST * m_f81_1 = b_f81.createAdvance(E0_f81, 1);
+    xfrm_f81[0] = b_f81.createOr(xfrm_f81[0], m_f81_1);
+    xfrm_f81[1] = b_f81.createOr(xfrm_f81[1], m_f81_1);
+    PabloAST * m_f81_2 = b_f81.createAdvance(E0_f81, 2);
+    xfrm_f81[4] = b_f81.createOr(xfrm_f81[4], m_f81_2);
+    xfrm_f81[5] = b_f81.createOr(xfrm_f81[5], m_f81_2);
+
+    PabloAST * ins_f80 = b_f81.createAdvance(E0_f81, 3);
+    PabloAST * m_f80_0 = ins_f80;
+    xfrm_f81[5] = b_f81.createOr(xfrm_f81[5], m_f80_0);
+    xfrm_f81[6] = b_f81.createOr(xfrm_f81[6], m_f80_0);
+    xfrm_f81[7] = b_f81.createOr(xfrm_f81[7], m_f80_0);
+    PabloAST * m_f80_1 = b_f81.createAdvance(ins_f80, 1);
+    xfrm_f81[1] = b_f81.createOr(xfrm_f81[1], m_f80_1);
+    xfrm_f81[2] = b_f81.createOr(xfrm_f81[2], m_f80_1);
+    xfrm_f81[3] = b_f81.createOr(xfrm_f81[3], m_f80_1);
+    xfrm_f81[4] = b_f81.createOr(xfrm_f81[4], m_f80_1);
+    xfrm_f81[5] = b_f81.createOr(xfrm_f81[5], m_f80_1);
+    xfrm_f81[7] = b_f81.createOr(xfrm_f81[7], m_f80_1);
+    PabloAST * m_f80_2 = b_f81.createAdvance(ins_f80, 2);
+    xfrm_f81[7] = b_f81.createOr(xfrm_f81[7], m_f80_2);
+
+    for (unsigned i = 0; i < 8; i++) {
+        b_f81.createAssign(NSD_Var[i], b_f81.createXor(NSD_Var[i], xfrm_f81[i]));
+    }
+
+    writeOutputStreamSet("NSD_Basis", NSD_Var);
+}
+
 
 //
 class ShortComposableTranslation : public PabloKernel {
@@ -1642,6 +1887,43 @@ void ShortComposableTranslation::generatePabloMethod() {
     }
 }
 
+class InsertionsForNonStarterDecompositions : public PabloKernel {
+public:
+    InsertionsForNonStarterDecompositions
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * InsertionBixNum);
+protected:
+    void generatePabloMethod() override;
+};
+
+InsertionsForNonStarterDecompositions::InsertionsForNonStarterDecompositions
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * InsertionBixNum)
+: PabloKernel(ts, "InsertionsForNonStarterDecompositions",
+{Binding{"Basis", Basis}},
+{Binding{"InsertionBixNum", InsertionBixNum}}) {}
+
+void InsertionsForNonStarterDecompositions::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<PabloAST *> insertions(2, All0);
+    UTF::UTF_Compiler pb_compiler(getInputStreamVar("Basis"), pb, pablo::BitMovementMode::LookAhead);
+    std::vector<Var *> pb_vars(2);
+    std::vector<UnicodeSet> pb_usets(2);
+    Var * E0_f73_5_81 = pb.createVar("E0_f73_5_81", All0);
+    pb_vars[0] = E0_f73_5_81;
+    pb_usets[0] = E0_f73_5_81_uset;
+    Var * CD_344_f73_5_81 = pb.createVar("CD_344_f73_5_81", All0);
+    pb_vars[1] = CD_344_f73_5_81;
+    pb_usets[1] = CD_344_f73_5_81_uset;
+
+    pb_compiler.compile(pb_vars, pb_usets);
+    insertions[0] = E0_f73_5_81;
+    insertions[1] = CD_344_f73_5_81;
+    writeOutputStreamSet("InsertionBixNum", insertions);
+}
+
 typedef void (*XfrmFunctionType)(uint32_t fd);
 
 XfrmFunctionType generate_pipeline(CPUDriver & driver) {
@@ -1664,18 +1946,33 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
+    StreamSet * InsertionBixNum = P.CreateStreamSet(2, 1);
+    P.CreateKernelCall<U8_InsertionBixNum>(BasisBits, InsertionBixNum);
+    SHOW_BIXNUM(InsertionBixNum);
+
+    StreamSet * SpreadMask = InsertionSpreadMask(P, InsertionBixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(SpreadMask);
+
+    StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
+    SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
+    SHOW_BIXNUM(ExpandedBasis);
+
+    StreamSet * NSD_Basis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<NonStarterDecomposition>(ExpandedBasis, NSD_Basis);
+    SHOW_BIXNUM(NSD_Basis);
+
     StreamSet * XfrmBasis = P.CreateStreamSet(8, 1);
     StreamSet * DelPrior = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ShortComposableTranslation>(BasisBits, DelPrior, XfrmBasis);
+    P.CreateKernelCall<ShortComposableTranslation>(NSD_Basis, DelPrior, XfrmBasis);
     SHOW_BIXNUM(XfrmBasis);
     SHOW_STREAM(DelPrior);
 
     StreamSet * XfrmedBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ApplyTransform>(BasisBits, XfrmBasis, XfrmedBasis);
+    P.CreateKernelCall<ApplyTransform>(NSD_Basis, XfrmBasis, XfrmedBasis);
     SHOW_BIXNUM(XfrmedBasis);
 
     StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<DelPriorToSelectMask>(BasisBits, DelPrior, SelectionMask0);
+    P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, DelPrior, SelectionMask0);
     SHOW_STREAM(SelectionMask0);
 
     StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
@@ -1722,6 +2019,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         // Given the 21-bit basis representation, we can now transform back
         // to a UTF-8 representation.
         U21_to_UTF8(P, NFC_Basis, OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
     } else {
         auto L_V_T_sets = Hangul_Composables();
         StreamSet * L_V_T =  P.CreateStreamSet(L_V_T_sets.size());
