@@ -118,7 +118,7 @@ class Uset_Builder:
         if not key in self.installed_usets.keys():
             #print("new key: %s" % key)
             self.installed_usets[key] = uset
-        self.current_scope_roles.append(key)
+            self.current_scope_roles.append(key)
         return key
 
     def install_uset_for_role(self, role_name, uset):
@@ -203,6 +203,19 @@ def u8_adjustment_bixnums_from_codepoint_map(translation_map):
                 bit += 1
     return (insertion_bixnum_usets, deletion_bixnum_usets)
 
+def u8_deletion_usets_from_codepoint_map(translation_map):
+    deletion_usets = {}
+    for cp1 in translation_map.keys():
+        cp2 = translation_map[cp1]
+        len1 = u8_encoded_length(cp1)
+        len2 = u8_encoded_length(cp2)
+        if len1 > len2:
+            ldiff = len1 - len2
+            if not ldiff in deletion_usets.keys():
+                deletion_usets[ldiff] = empty_uset()
+                deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], singleton_uset(cp1))
+    return deletion_usets
+
 class U8_Translation_Generator:
     def __init__(self):
         self.codepoint_maps = {}
@@ -280,6 +293,111 @@ def range_usets_from_cps(cp_list):
             rg_sets[code] = uset_union(rg_sets[code], singleton_uset(cp))
     return rg_sets
 
+singleton_header = r"""//
+class SingletonCanonicalization : public PabloKernel {
+public:
+    SingletonCanonicalization
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * SelectMask, StreamSet * XfrmBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
+SingletonCanonicalization::SingletonCanonicalization
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+: PabloKernel(ts, "SingletonCanonicalization" + Basis->shapeString(),
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+
+void SingletonCanonicalization::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    // DeleteVar will be inverted to produce SelectMask
+    Var * DeleteVar = pb.createVar("DeleteVar", All0);
+    std::vector<Var *> XfrmVar(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        XfrmVar[i] = pb.createVar("XfrmBasis" + std::to_string(i), All0);
+    }
+"""
+
+singleton_pfx_template = r"""
+    auto ${builder} = pb.createScope();
+    PabloAST * ${pfx_test_var} = ${logic};
+    pb.createIf(${pfx_test_var}, ${builder});
+    std::vector<PabloAST *> xfrm_${code_str}(8, All0);
+    PabloAST * del_${code_str} = All0;
+
+"""
+
+def gen_singleton_pfx_code(pfx_code):
+    code_str = pfx_code_string(pfx_code)
+    pfx_test_var = "pfx_%s_test" % code_str
+    test = prefix_test_logic(pfx_code)
+    scope = "b_%s" % code_str
+    t = string.Template(singleton_pfx_template)
+    return t.substitute(builder = scope,
+                        code_str = code_str,
+                        pfx_test_var = pfx_test_var,
+                        logic = test)
+
+singleton_case_template = r"""//     ${cp} => ${canon}
+${case_logic}
+"""
+
+mark_deletion_template = r"""    del_${code_str} = b_${code_str}.createOr(del_${code_str}, ${del_marker});
+"""
+
+def generate_singleton_code(code_str, cp, canon, cp_var, Num0s, ToDel):
+    xlate_code = CharacterTranslationLogic(cp, canon, Num0s, cp_var, "xfrm_%s" % code_str, "b_%s" % code_str)
+    if ToDel > 0:
+        t = string.Template(mark_deletion_template)
+        xlate_code += t.substitute(code_str = code_str, del_marker = cp_var)
+        for i in range(1, ToDel):
+            adv_mrkr = "b_%s.createAdvance(%s, %i)" % (code_str, cp_var, i)
+            xlate_code += t.substitute(code_str = code_str, del_marker = adv_mrkr)
+    t = string.Template(singleton_case_template)
+    s = t.substitute(code_str = code_str,
+                        cp = "%x" % cp,
+                        canon = "%x" % canon,
+                        case_logic = xlate_code)
+    return s
+
+singleton_pfx_final_template = r"""
+    for (unsigned i = 0; i < 8; i++) {
+        ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
+    }
+"""
+
+update_del_var_template = r"""
+    ${builder}.createAssign(DeleteVar, $builder.createOr(DeleteVar, del_${code_str}));
+"""
+
+def finalize_singleton_pfx_code(pfx_code, has_del):
+    code_str = pfx_code_string(pfx_code)
+    scope = "b_%s" % code_str
+    t1 = string.Template(singleton_pfx_final_template)
+    s = t1.substitute(builder = scope, code_str = code_str)
+    if has_del:
+        t2 = string.Template(update_del_var_template)
+        s2 = t2.substitute(builder = scope, code_str = code_str)
+        s += s2
+    return s
+
+
+singleton_final_code = r"""
+    Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
+        //  pb.createAssign(xfrm_out, XfrmVar[i]);
+        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+    }
+    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
+    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
+}
+"""
 
 pass_template = r"""//
 class FindComposables${pass_no} : public PabloKernel {
@@ -294,7 +412,7 @@ protected:
 FindComposables${pass_no}::FindComposables${pass_no}
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR${extra_inputs},
                                    StreamSet * MarksFound, StreamSet * Index_ccc_NR_or_MarksFound) :
-: PabloKernel(ts, 'FindComposables${pass_no}',
+: PabloKernel(ts, "FindComposables${pass_no}" + Basis->shapeString(),
 {Binding{"Basis", Basis}, Binding{"ccc_NR", ccc_NR}${extra_bindings}},
 {Binding{"MarksFound", MarksFound}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
@@ -381,7 +499,7 @@ protected:
 ShortComposableTranslation::ShortComposableTranslation
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * DeletePrior, StreamSet * XfrmBasis)
-: PabloKernel(ts, "ShortComposableTranslation",
+: PabloKernel(ts, "ShortComposableTranslation" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
 {Binding{"DeletePrior", DeletePrior}, Binding{"XfrmBasis", XfrmBasis}}) {}
 
@@ -541,6 +659,37 @@ def CharacterInsertionLogic(cp, marker, basis_var, pb):
                 s += "    %s = %s.createOr(%s, m_%x_%i);\n" % (bv, pb, bv, cp, i)
     return s
 
+def u8_bit_transform_sets(translation_map, zero_insertion_map):
+    bit_xfrm_sets = {}
+    for cp1 in translation_map.keys():
+        cp1_uset = singleton_uset(cp1)
+        cp2 = translation_map[cp1]
+        len1 = u8_encoded_length(cp1)
+        len2 = u8_encoded_length(cp2)
+        Num0s = 0
+        if cp1 in zero_insertion_map.keys():
+            Num0s = zero_insertion_map[cp1]
+        excess = Num0s + len1 - len2
+        for i in range(len2):
+            # position for cp2 byte
+            cp2_byte = u8_code_unit(cp2, i + 1)
+            pos = excess + i # position relative to cp1 starter
+            cp1_byte = 0 # default for positions corresponding to inserted zeroes
+            if pos == 0:
+                cp1_byte = u8_code_unit(cp1, 1)
+            elif pos > Num0s:
+                cp1_byte = u8_code_unit(cp1, pos - Num0s + 1)
+            if cp1_byte != cp2_byte:
+                diff = cp1_byte ^ cp2_byte
+                if not pos in bit_xfrm_sets.keys():
+                    bit_xfrm_sets[pos] = {}
+                for j in range(8):
+                    if (diff >> j) & 1 == 1:
+                        if not j in bit_xfrm_sets[pos].keys():
+                            bit_xfrm_sets[pos][j] = empty_uset()
+                        bit_xfrm_sets[pos][j] = uset_union(bit_xfrm_sets[pos][j], cp1_uset)
+    return bit_xfrm_sets
+
 nonstarter_decomposition_template = r"""//
 class NonStarterDecomposition : public PabloKernel {
 public:
@@ -554,7 +703,7 @@ protected:
 NonStarterDecomposition::NonStarterDecomposition
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * NSD_Basis)
-: PabloKernel(ts, "NonStarterDecomposition",
+: PabloKernel(ts, "NonStarterDecomposition" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
 {Binding{"NSD_Basis", NSD_Basis}}) {}
 
@@ -616,7 +765,7 @@ protected:
 U8_InsertionBixNum::U8_InsertionBixNum
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * InsertionBixNum)
-: PabloKernel(ts, "U8_InsertionBixNum",
+: PabloKernel(ts, "U8_InsertionBixNum" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
 {Binding{"InsertionBixNum", InsertionBixNum}}) {}
 
@@ -851,11 +1000,77 @@ class NFC_generator(U8_Translation_Generator):
                 cp = by_starter[cp1][cp2]
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
 
-    def generate_singleton_code(self):
-        self.define_codepoint_map("singletons", self.singleton_map)
-        self.generate_basis_bit_translation_usets("singletons")
-        self.generate_u8_adjustment_bixnum_usets("singletons")
+    def generate_singleton_stage(self):
+        s = singleton_header
+        rg_set_map = range_usets_from_cps(self.singleton_map.keys())
+        for pfx_code in rg_set_map.keys():
+            code_str = pfx_code_string(pfx_code)
+            scope = "b_%s" % code_str
+            s += gen_singleton_pfx_code(pfx_code)
+            self.builder.open_scope(scope)
+            generated = {}
+            singleton_list = uset_to_member_list(rg_set_map[pfx_code])
+            for cp in singleton_list:
+                generated[cp] = self.builder.install_uset(singleton_uset(cp))
+            s += self.builder.generate_scope_compilations()
+            DelTotal = 0
+            for cp in singleton_list:
+                canon = self.singleton_map[cp]
+                Num0s = 0
+                ToDel = 0
+                if cp in self.max_insert_map.keys():
+                    Num0s = self.max_insert_map[cp]
+                cp_len = u8_encoded_length(cp)
+                canon_len = u8_encoded_length(canon)
+                if canon_len < cp_len:
+                    ToDel = cp_len - canon_len
+                    DelTotal += ToDel
+                s += generate_singleton_code(code_str, cp, canon, generated[cp], Num0s, ToDel)
+            s += finalize_singleton_pfx_code(pfx_code, DelTotal)
+        s += singleton_final_code
+        return s
 
+    def generate_singleton_stage2(self):
+        s = singleton_header
+        rg_set_map = range_usets_from_cps(self.singleton_map.keys())
+        for pfx_code in rg_set_map.keys():
+            code_str = pfx_code_string(pfx_code)
+            scope = "b_%s" % code_str
+            s += gen_singleton_pfx_code(pfx_code)
+            self.builder.open_scope(scope)
+            pfx_xlate_map = {}
+            singleton_list = uset_to_member_list(rg_set_map[pfx_code])
+            for cp1 in singleton_list:
+                pfx_xlate_map[cp1] = self.singleton_map[cp1]
+            bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map, self.max_insert_map)
+            del_usets = u8_deletion_usets_from_codepoint_map(pfx_xlate_map)
+            del_vars = {}
+            for del_amt in del_usets.keys():
+                del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
+            by_pos = {}
+            for pos in sorted(bit_xfrm_sets.keys()):
+                by_pos[pos] = {}
+                for bit in bit_xfrm_sets[pos].keys():
+                    by_pos[pos][bit] = self.builder.install_uset(bit_xfrm_sets[pos][bit])
+            s += self.builder.generate_scope_compilations()
+            for pos in sorted(bit_xfrm_sets.keys()):
+                adv_markers = {}
+                for bit in bit_xfrm_sets[pos].keys():
+                    marker = by_pos[pos][bit]
+                    if pos > 0:
+                        if not marker in adv_markers.keys():
+                            adv = "%s_adv%i" % (marker, pos)
+                            s += "    PabloAST * %s = %s.createAdvance(%s, %i);\n" % (adv, scope, marker, pos)
+                            adv_markers[marker] = adv
+                        marker = adv_markers[marker]
+                    s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
+            for del_amt in sorted(del_usets.keys()):
+                s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
+                for d in range(1, del_amt):
+                    s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
+            s += finalize_singleton_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+        s += singleton_final_code
+        return s
 
     def generate_nfc_stage(self, pass_no):
         s = gen_pass_header_code(pass_no)
@@ -1002,12 +1217,12 @@ if __name__ == "__main__":
     #generator.display_long_composables()
     #generator.display_max_insert_map()
     kernels = ""
-    #generator.generate_singleton_code()
+    kernels += generator.generate_singleton_stage2()
     #print(generator.generate_nfc_stage(0))
-    kernels += generator.generate_short_composable_stage()
+    #kernels += generator.generate_short_composable_stage()
     #generator.print_uset_definitions()
     #print(generator.generate_insertions_for_nonstarter_decompositions())
     #kernels += generator.generate_u8_insertion_kernel()
     #kernels += generator.generate_nonstarter_decompositions()
-    #generator.print_uset_definitions()
+    generator.print_uset_definitions()
     print(kernels)

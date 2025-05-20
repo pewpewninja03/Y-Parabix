@@ -238,6 +238,15 @@ def intersects(s1, s2):
                 i2.advance(1)
     return False
 
+def is_empty(s):
+    i1 = Uset_Iterator(s)
+    while not i1.at_end():
+        (s1_type, s1_length) = i1.current_run()
+        if s1_type != Empty:
+            return False
+        i1.advance(s1_length)
+    return True
+
 def is_subset(s1, s2):
     i1 = Uset_Iterator(s1)
     i2 = Uset_Iterator(s2)
