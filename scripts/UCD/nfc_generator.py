@@ -213,7 +213,7 @@ def u8_deletion_usets_from_codepoint_map(translation_map):
             ldiff = len1 - len2
             if not ldiff in deletion_usets.keys():
                 deletion_usets[ldiff] = empty_uset()
-                deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], singleton_uset(cp1))
+            deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], singleton_uset(cp1))
     return deletion_usets
 
 class U8_Translation_Generator:
