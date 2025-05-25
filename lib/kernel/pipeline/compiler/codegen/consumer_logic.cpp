@@ -167,15 +167,6 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
         itemCount = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment, true);
     }
     assert (itemCount);
-
-//    const auto producer = parent(streamSet, mBufferGraph);
-//    assert (PipelineInput <= producer && producer < PipelineOutput);
-//    if (streamSet == 14 && getKernel(producer)->getName().compare("ByteFilterByMask1x8") == 0) {
-//        errs() << "ignoring streamset " << 14 << "\n";
-//        itemCount = b.CreateSaturatingSub(itemCount, b.getSize(2));
-//        // itemCount = b.getSize(0);
-//    }
-
     return itemCount;
 #endif
 }

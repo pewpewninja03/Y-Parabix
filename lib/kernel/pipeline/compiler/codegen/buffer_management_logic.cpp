@@ -143,17 +143,30 @@ Rational PipelineCompiler::getReturnedBufferScaleFactor(const size_t streamSet) 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief allocateOwnedBuffers
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal) {
-    assert (expectedNumOfStrides);
+void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const allocScale, Value * const expectedSourceOutputSize, const bool nonLocal) {
+    assert (allocScale);
     if (LLVM_UNLIKELY(CheckAssertions)) {
-        Value * const valid = b.CreateIsNotNull(expectedNumOfStrides);
+        Value * const valid = b.CreateIsNotNull(allocScale);
         b.CreateAssert(valid,
            "%s: expected number of strides for internally allocated buffers is 0",
            b.GetString(mTarget->getName()));
     }
+    b.CreateAssert(allocScale, "allocScale cannot be 0");
 
     // recursively allocate any internal buffers for the nested kernels, giving them the correct
     // num of strides it should expect to perform
+
+    auto minSource = std::numeric_limits<unsigned>::max();
+    if (out_degree(PipelineInput, mBufferGraph) > 0) {
+        minSource = MaximumNumOfStrides[PipelineInput];
+    } else {
+        for (auto i = FirstKernel; i <= LastKernel; ++i) {
+            if (in_degree(i, mBufferGraph) == 0) {
+                minSource = std::min(minSource, MaximumNumOfStrides[i]);
+            }
+        }
+    }
+
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
 
@@ -174,22 +187,31 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
-                params.push_back(b.CreateCeilUMulRational(expectedNumOfStrides, MaximumNumOfStrides[i]));
+                const Rational factor{MaximumNumOfStrides[i] * b.getBitBlockWidth(),  minSource};
+                assert (factor.numerator() > 0);
+                params.push_back(b.CreateMulRational(allocScale, factor));
 
                 b.CreateCall(funcTy, func, params);
             }
         }
     }
 
+//    auto & dl = b.getModule()->getDataLayout();
+//    const auto pageSize = getPageSize();
+
     // and allocate any output buffers
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) continue;
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) {
+            continue;
+        }
+        assert (bn.isNonThreadLocal() || bn.isOwned());
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
 
             if (LLVM_UNLIKELY(bn.isConstant())) {
-                generateGlobalDataForRepeatingStreamSet(b, streamSet, expectedNumOfStrides);
+                generateGlobalDataForRepeatingStreamSet(b, streamSet);
             } else {
                 if (LLVM_LIKELY(bn.isInternal())) {
                     const auto pe = in_edge(streamSet, mBufferGraph);
@@ -201,20 +223,21 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
                     assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 }
                 if (nonLocal) {
-                    Value * multiplier = expectedNumOfStrides;
+
+                    const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
+                    assert (R.numerator() > 0);
+                    Value * multiplier = b.CreateCeilUMulRational(allocScale, R);
+
                     if (LLVM_UNLIKELY(bn.isReturned())) {
                         auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
-                        if (scaleFactor > 0) {
-
-                            size_t capacity = 1;
-                            if (isa<DynamicBuffer>(buffer) || isa<ManagedDynamicBuffer>(buffer)) {
-                                capacity = cast<DynamicBuffer>(buffer)->getInitialCapacity();
-                            }
-                            multiplier = b.CreateRoundUp(expectedSourceOutputSize, expectedNumOfStrides);
-                            Value * value = b.CreateCeilUDivRational(multiplier, capacity);
-                            multiplier = b.CreateUMax(value, expectedNumOfStrides);
+                        if (scaleFactor.numerator() > 0) {
+                            assert (expectedSourceOutputSize);
+                            Value * expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
+                            multiplier = b.CreateUMax(multiplier, expectedBufferSize);
                         }
                     }
+
+                    b.CreateAssert(multiplier, "multiplier cannot be 0");
 
                     buffer->allocateBuffer(b, multiplier);
 
@@ -224,8 +247,9 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
                     const BufferPort & rd = mBufferGraph[pe];
                     const auto prefix = makeBufferName(producer, rd.Port);
                     Value * start = buffer->getMallocAddress(b);
+                    Constant * ts = b.getTypeSize(buffer->getType());
                     Value * end = b.CreateGEP(buffer->getType(), start, buffer->getCapacity(b));
-                    debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ")", start, end);
+                    debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ") [typeSize=%" PRIu64 "]", start, end, ts);
                     #endif
 
                 }
@@ -775,31 +799,33 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
 
     ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
 
-    DataLayout DL(b.getModule());
+    auto & DL = b.getModule()->getDataLayout();
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isThreadLocal()) {
-            assert (!bn.isTruncated());
-            assert (RequiredThreadLocalStreamSetMemory > 0);
-            assert (mThreadLocalStreamSetBaseAddress);
-            assert (mThreadLocalStreamSetBaseAddress->getType() == b.getInt8PtrTy());
-            auto start = bn.BufferStart;
-            assert ((start % b.getCacheAlignment()) == 0);
-            #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-            start *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-            #endif
 
-            assert (mThreadLocalScalingFactor);
-            Value * const startOffset = b.CreateMul(mThreadLocalScalingFactor, b.getSize(start));
+            assert (out_degree(mCurrentPartitionId, ThreadLocalPlacement) > 0);
+
+            auto src = streamSet;
+            if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+                while (LLVM_UNLIKELY(in_degree(src, InOutStreamSetReplacement) != 0)) {
+                    src = parent(src, InOutStreamSetReplacement);
+                }
+            }
+            assert (src >= FirstStreamSet);
+
+            const auto v = PartitionCount + src - FirstStreamSet;
+            Value * startOffset = mThreadLocalStartOffset[v];
+            assert (startOffset);
 
             ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();
 
-            Constant * const bytesPerPack = b.getTypeSize(buffer->getType());
-            Value * const producedBytes = b.CreateMul(b.CreateUDiv(produced, BLOCK_WIDTH), bytesPerPack);
+            const auto typeSize = b.getTypeSize(DL, buffer->getType());           
+            Value * const producedBytes = b.CreateMulRational(b.CreateUDiv(produced, BLOCK_WIDTH), typeSize);
 
             Value * const offset = b.CreateSub(startOffset, producedBytes);
             Value * ba = b.CreateGEP(b.getInt8Ty(), mThreadLocalStreamSetBaseAddress, offset);

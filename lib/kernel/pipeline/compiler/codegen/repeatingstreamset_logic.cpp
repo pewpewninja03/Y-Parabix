@@ -155,7 +155,7 @@ void PipelineCompiler::addRepeatingStreamSetInitializationArguments(const unsign
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateGlobalDataForRepeatingStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b, const unsigned streamSet, Value * const expectedNumOfStrides) {
+void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b, const unsigned streamSet) {
     const BufferNode & bn = mBufferGraph[streamSet];
     RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
 

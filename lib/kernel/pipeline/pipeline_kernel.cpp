@@ -162,7 +162,7 @@ void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(KernelB
  * @brief linkExternalMethods
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::linkExternalMethods(KernelBuilder & b) {
-    PipelineCompiler::linkPThreadLibrary(b);
+    PipelineCompiler::linkPipelineExternalMethods(b);
     StreamSetBuffer::linkFunctions(b);
     for (const auto & k : mKernels) {
         k.Object->linkExternalMethods(b);
@@ -494,7 +494,7 @@ void PipelineKernel::writeInternallyGeneratedStreamSetScaleVector(const Relation
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const MainMethodGenerationType method) const {
 
-    unsigned suppliedArgs = 0;
+    unsigned suppliedArgs = 1; // segment size
     if (LLVM_LIKELY(isStateful())) {
         suppliedArgs += 1;
     }
@@ -566,7 +566,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
     SmallVector<char, 256> tmp;
     raw_svector_ostream funcNameGen(tmp);
-    funcNameGen << getName() << '@' << codegen::SegmentSize << "_main";
+    funcNameGen << getName() << "_main";
     const auto funcName = funcNameGen.str();
 
     Function * main = m->getFunction(funcName);
@@ -681,7 +681,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
                     value = b.getSize(codegen::DynamicMultithreadingPeriod);
                     break;
                 case C::BufferSegmentLength:
-                    value = b.getSize(codegen::BufferSegments);
+                    value = b.getSize(codegen::BufferSegments); assert (false);
                     break;
                 case C::DynamicMultithreadingAddSynchronizationThreshold:
                     value = ConstantFP::get(b.getFloatTy(), codegen::DynamicMultithreadingAddThreshold); // %
@@ -729,6 +729,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         toFree.push_back(threadLocalHandle);
     }
 
+    const auto segLength = (codegen::SegmentSize + getStride()  - 1U) / getStride();
+
+    segmentArgs[argCount++] = b.getSize(segLength);
+
     assert (argCount == suppliedArgs);
 
     if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
@@ -737,14 +741,16 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
-        Constant * const sz_ONE = b.getSize(1);
+
+        ConstantInt * const sz_BufferSize = b.getSize(segLength * codegen::BufferSegments);
+
         Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
         SmallVector<Value *, 2> allocArgs;
         if (LLVM_LIKELY(isStateful())) {
             allocArgs.push_back(sharedHandle);
         }
         // pass in the desired number of segments
-        allocArgs.push_back(sz_ONE);
+        allocArgs.push_back(sz_BufferSize);
         b.CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
@@ -753,7 +759,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
                 allocArgs.push_back(sharedHandle);
             }
             allocArgs.push_back(threadLocalHandle);
-            allocArgs.push_back(sz_ONE);
+            allocArgs.push_back(sz_BufferSize);
             b.CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
@@ -974,7 +980,7 @@ PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs))
 , mSignature(std::move(signature)) {
-
+    setStride(ts.getBitBlockWidth());
 }
 
 PipelineKernel::~PipelineKernel() {

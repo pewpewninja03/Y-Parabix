@@ -1,4 +1,5 @@
 #include "../pipeline_compiler.hpp"
+#include <queue>
 
 namespace kernel {
 
@@ -44,14 +45,12 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
     IntegerType * const sizeTy = b.getSizeTy();
 
-    mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
-
     #ifdef ENABLE_PAPI
     if (LLVM_LIKELY(NumOfPAPIEvents > 0)) {
         mTarget->addThreadLocalScalar(b.getInt32Ty(), STATISTICS_PAPI_EVENT_SET, 0);
     }
     #endif
-    if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
+    if (LLVM_LIKELY(num_edges(ThreadLocalPlacement) > 0)) {
         PointerType * const int8PtrTy = b.getInt8PtrTy();
         mTarget->addThreadLocalScalar(int8PtrTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY, 0);
         mTarget->addThreadLocalScalar(sizeTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, 0);
@@ -395,15 +394,14 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const segmentSize) {
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
         assert (FirstKernel == LastKernel);
+        assert (LastStreamSet <= FirstStreamSet);
         return;
     }
 
     getABIAlignments(b);
-
-    b.setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
 
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
         assert (LastKernel == PipelineInput);
@@ -416,12 +414,13 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         return;
     }
 
-    initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
+    Rational S{mTarget->getStride(), b.getBitBlockWidth()};
 
-    Value * allocScale = expectedNumOfStrides;
+    Value * allocScale = b.CreateCeilUDivRational(segmentSize, S);
+
+    initializeInitialSlidingWindowSegmentLengths(b, allocScale);
+
     if (LLVM_LIKELY(!mIsNestedPipeline)) {
-        Value * bsl = b.getScalarField(BUFFER_SEGMENT_LENGTH);
-        allocScale = b.CreateMul(allocScale, bsl);
         Value * const threadCount = b.getScalarField(MAXIMUM_NUM_OF_THREADS);
         allocScale = b.CreateMul(allocScale, threadCount);
     }
@@ -438,7 +437,7 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         }
     }
 
-    Value * expectedSourceOutputSize = expectedNumOfStrides;
+    Value * expectedSourceOutputSize = nullptr;
     if (LLVM_UNLIKELY(hasAnyReturnedBuffer)) {
         Value * bufferScaling = nullptr;
         for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
@@ -452,12 +451,10 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
             }
         }
         if (bufferScaling) {
-            bufferScaling = b.CreateMul(bufferScaling, expectedNumOfStrides);
-            expectedSourceOutputSize = b.CreateCeilUDiv(bufferScaling, b.getSize(b.getBitBlockWidth()));
+            expectedSourceOutputSize = b.CreateCeilUDivRational(bufferScaling, b.getBitBlockWidth());
         }
     }
 
-    assert (expectedSourceOutputSize);
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
@@ -486,31 +483,89 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * const segmentSize) {
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
         assert (FirstKernel == LastKernel);
         return;
     }
     getABIAlignments(b);
-    assert (mTarget->hasThreadLocal());
-    Value * allocScale = expectedNumOfStrides;
-    if (LLVM_LIKELY(!mIsNestedPipeline)) {
-        Value * bsl = b.getScalarField(BUFFER_SEGMENT_LENGTH);
-        allocScale = b.CreateMul(allocScale, bsl);
+
+    assert (LastStreamSet >= FirstStreamSet);
+    assert (PartitionCount > 0);
+
+    const auto m = PartitionCount + (LastStreamSet - FirstStreamSet) + 1;
+
+    assert (num_vertices(ThreadLocalPlacement) == m);
+
+    std::vector<unsigned> toVisit(m);
+    for (unsigned i = PartitionCount; i < m; ++i) {
+        toVisit[i] = in_degree(i, ThreadLocalPlacement);
     }
-    if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
-        auto size = RequiredThreadLocalStreamSetMemory;
+
+    mThreadLocalStartOffset.reset(0, m);
+
+    const auto pageSize = getPageSize();
+    const auto log2PageSize = floor_log2(pageSize);
+    const auto useShift = is_pow2(pageSize);
+    ConstantInt * PAGE_SIZE = b.getSize(useShift ? log2PageSize : pageSize);
+
+    std::queue<unsigned> Q;
+
+    Value * memorySize = nullptr;
+
+    assert (segmentSize);
+
+    Rational S{mTarget->getStride(), b.getBitBlockWidth()};
+
+    Value * allocScale = b.CreateCeilUDivRational(segmentSize, S);
+
+    for (unsigned i = 0; i < PartitionCount; ++i) {
+        for (auto u = i;;) {
+            for (auto e : make_iterator_range(out_edges(u, ThreadLocalPlacement))) {
+                const auto v = target(e, ThreadLocalPlacement);
+                assert (toVisit[v] > 0);
+                if (--toVisit[v] == 0) {
+                    const auto streamSet = FirstStreamSet + v - PartitionCount;
+                    assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+                    const auto producer = parent(streamSet, mBufferGraph);
+                    const auto firstKernel = FirstKernelInPartition[KernelPartitionId[producer]];
+                    Rational R{ThreadLocalPlacement[e], StrideStepLength[firstKernel]};
+                    Value * off = b.CreateCeilUMulRational(allocScale, R);
+                    if (LLVM_LIKELY(useShift)) {
+                        off = b.CreateShl(off, PAGE_SIZE);
+                    } else {
+                        off = b.CreateMul(off, PAGE_SIZE);
+                    }
+                    if (mThreadLocalStartOffset[u]) {
+                        off = b.CreateAdd(mThreadLocalStartOffset[u], off);
+                    }
+                    mThreadLocalStartOffset[v] = off;
+                    if (out_degree(v, ThreadLocalPlacement) == 0) {
+                        memorySize = b.CreateUMax(memorySize, off);
+                    } else {
+                        Q.push(v);
+                    }
+                }
+            }
+            if (Q.empty()) {
+                break;
+            }
+            u = Q.front();
+            Q.pop();
+        }
+    }
+
+    assert (mTarget->hasThreadLocal());
+    if (memorySize) {
         #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-        size *= THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
+        memorySize = b.CreateMul(memorySize, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
         #endif
-        ConstantInt * const reqMemory = b.getSize(size);
-        Value * const memorySize = b.CreateMul(reqMemory, allocScale);
         Value * const base = b.CreatePageAlignedMalloc(memorySize);
         PointerType * const int8PtrTy = b.getInt8PtrTy();
         b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b.CreatePointerCast(base, int8PtrTy));
         b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
     }
-    allocateOwnedBuffers(b, expectedNumOfStrides, nullptr, false);
+    allocateOwnedBuffers(b, allocScale, nullptr, false);
     resetInternalBufferHandles();
 }
 
@@ -624,7 +679,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     // Since all of the nested kernels thread local state is contained within
     // this pipeline thread's thread local state, freeing the pipeline's will
     // also free the inner kernels.
-    if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
+    if (LLVM_LIKELY(num_edges(ThreadLocalPlacement) > 0)) {
         b.CreateFree(b.getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY));
     }
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {

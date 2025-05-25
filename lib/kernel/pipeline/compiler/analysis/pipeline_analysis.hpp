@@ -90,7 +90,8 @@ public:
             P.identifyIllustratedStreamSets();
         }
         P.calculatePartialSumStepFactors(b);
-        P.determineBufferSize(b);
+
+        P.estimateInitialBufferSizes(b);
 
         P.makeConsumerGraph();
 
@@ -104,9 +105,14 @@ public:
 
         // Finish the buffer graph
 
-        P.determineInitialThreadLocalBufferLayout(b, rng);
-
         P.addStreamSetsToBufferGraph(b);
+
+        if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
+            assert (b.getModule() == pipelineKernel->getModule());
+            P.printBufferGraph(b, errs());
+        }
+
+        P.determineInitialThreadLocalBufferLayout(b, rng);
 
         P.scanFamilyKernelBindings();
 
@@ -193,9 +199,12 @@ private:
     // buffer management analysis functions
 
     void addStreamSetsToBufferGraph(KernelBuilder & b);
+
     void generateInitialBufferGraph();
 
-    void determineBufferSize(KernelBuilder & b);
+    void estimateInitialBufferSizes(KernelBuilder & b);
+
+    void determineRequiredBufferSizes(KernelBuilder & b);
 
     void identifyOwnedBuffers();
 
@@ -306,7 +315,7 @@ public:
 
     bool                            HasZeroExtendedStream = false;
 
-    size_t                          RequiredThreadLocalStreamSetMemory = 0;
+    Rational                        RequiredThreadLocalStreamSetMemory{0};
 
     unsigned                        MaxNumOfInputPorts = 0;
     unsigned                        MaxNumOfOutputPorts = 0;
@@ -319,9 +328,15 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
+    std::vector<Rational>           ThreadLocalExpansionThresholdFactor;
+    flat_map<unsigned, Rational>    StreamSetIORateMap;
+
+    std::vector<Rational>           StreamSetIORate;
+
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;
+    ThreadLocalPlacementGraph       ThreadLocalPlacement;
 
     std::vector<unsigned>           PartitionJumpTargetId;
     RedundantStreamSetMap           RedundantStreamSets;

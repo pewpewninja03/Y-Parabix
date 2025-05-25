@@ -287,32 +287,14 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << ty->getIntegerBitWidth();
         }
 
-        #ifndef USE_SIMPLE_BUFFER_GRAPH
-        if (bn.Locality == BufferLocality::ThreadLocal) {
-            out << " [0x";
-            out.write_hex(bn.BufferStart);
-            out << "]";
-        }
-        #endif
-        out << "|{";
-
-        if (buffer) {
-            switch (buffer->getBufferKind()) {
-                case BufferId::StaticBuffer:
-                    out << cast<StaticBuffer>(buffer)->getCapacity();
-                    break;
-                case BufferId::DynamicBuffer:
-                    out << cast<DynamicBuffer>(buffer)->getInitialCapacity();
-                    break;
-                case BufferId::ManagedDynamicBuffer:
-                    out << cast<ManagedDynamicBuffer>(buffer)->getInitialCapacity();
-                    break;
-                case BufferId::RepeatingBuffer:
-                case BufferId::ExternalBuffer:
-                    break;
-                default: llvm_unreachable("unknown buffer type");
-            }
-        }
+//        #ifndef USE_SIMPLE_BUFFER_GRAPH
+//        if (bn.Locality == BufferLocality::ThreadLocal) {
+//            out << " [0x";
+//            out.write_hex(bn.BufferStart);
+//            out << "]";
+//        }
+//        #endif
+        out << "|{" << bn.MaxQuantityPerSegment;
 
         #ifndef USE_SIMPLE_BUFFER_GRAPH
         if (bn.LookBehind) {

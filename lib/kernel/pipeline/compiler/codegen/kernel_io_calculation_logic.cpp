@@ -117,7 +117,7 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         Value * maxNumOfLinearStrides = b.CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
         // TODO: this has an issue when we only have circular buffers; we may end up reaching the end
         // of some buffer each
-        mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mPotentialSegmentLength);
+        mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
         numOfLinearStrides = b.CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
     }
 

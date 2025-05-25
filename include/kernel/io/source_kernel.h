@@ -15,10 +15,10 @@ public:
     MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream);
     void linkExternalMethods(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b) override {
-        generateInitializeMethod(b, mCodeUnitWidth, mStride);
+        generateInitializeMethod(b, mCodeUnitWidth);
     }
     void generateDoSegmentMethod(KernelBuilder & b) override {
-        generateDoSegmentMethod(b, mCodeUnitWidth, mStride);
+        generateDoSegmentMethod(b, mCodeUnitWidth);
     }
     void generateFinalizeMethod(KernelBuilder & b) override {
         freeBuffer(b, mCodeUnitWidth);
@@ -28,8 +28,8 @@ public:
     }
 private:
     static void generatLinkExternalFunctions(KernelBuilder & b);
-    static void generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride);
-    static void generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride);
+    static void generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth);
+    static void generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth);
     static llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder & b, const unsigned codeUnitWidth);
     static void freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth);
 protected:
@@ -41,28 +41,16 @@ class ReadSourceKernel final : public SegmentOrientedKernel {
 public:
     ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream);
     void linkExternalMethods(KernelBuilder & b) override;
-    void generateInitializeMethod(KernelBuilder & b) override {
-        generateInitializeMethod(b, mCodeUnitWidth, mStride);
-    }
     void generateDoSegmentMethod(KernelBuilder & b) override {
-        generateDoSegmentMethod(b, mCodeUnitWidth, mStride);
-    }
-    void generateFinalizeThreadLocalMethod(KernelBuilder & b) override {
-        finalizeThreadLocalMethod(b, mCodeUnitWidth);
-    }
-    void generateFinalizeMethod(KernelBuilder & b) override {
-        freeBuffer(b, mCodeUnitWidth);
+        generateDoSegmentMethod(b, mCodeUnitWidth);
     }
     llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder & b) override {
         return generateExpectedOutputSizeMethod(b, mCodeUnitWidth);
     }
 protected:
     static void generatLinkExternalFunctions(KernelBuilder & b);
-    static void generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride);
-    static void finalizeThreadLocalMethod(KernelBuilder & b, const unsigned codeUnitWidth);
-    static void generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride);
+    static void generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth);
     static llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder & b, const unsigned codeUnitWidth);
-    static void freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth);
 private:
     const unsigned mCodeUnitWidth;
 };
@@ -73,7 +61,6 @@ public:
     void linkExternalMethods(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;
-    void generateFinalizeThreadLocalMethod(KernelBuilder & b) override;
     void generateFinalizeMethod(KernelBuilder & b) override;
     llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder &) override;
 protected:

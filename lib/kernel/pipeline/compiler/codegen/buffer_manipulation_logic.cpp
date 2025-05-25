@@ -1,11 +1,6 @@
 #include "../pipeline_compiler.hpp"
-#include <boost/interprocess/mapped_region.hpp>
 
 using namespace IDISA;
-
-inline unsigned getPageSize() {
-    return boost::interprocess::mapped_region::get_page_size();
-}
 
 namespace kernel {
 

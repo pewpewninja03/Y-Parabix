@@ -115,15 +115,14 @@ DeletionKernel::DeletionKernel(LLVMTypeSystemInterface & ts, StreamSet * input, 
 
 void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
-    BasicBlock * processBlock = b.CreateBasicBlock("processBlock");
-    BasicBlock * done = b.CreateBasicBlock("done");
-    Constant * const ZERO = b.getSize(0);
+    BasicBlock * processLoopBody = b.CreateBasicBlock("processLoopBody");
+    BasicBlock * exit = b.CreateBasicBlock("exit");
     assert (getStride() == b.getBitBlockWidth());
-    b.CreateBr(processBlock);
+    b.CreateBr(processLoopBody);
 
-    b.SetInsertPoint(processBlock);
+    b.SetInsertPoint(processLoopBody);
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
-    blockOffsetPhi->addIncoming(ZERO, entry);
+    blockOffsetPhi->addIncoming(b.getSize(0), entry);
 
     std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(b, {mMaskOp}, blockOffsetPhi);
     std::vector<Value *> input = streamutils::loadInputSelectionsBlock(b, mInputOps, blockOffsetPhi);
@@ -146,10 +145,8 @@ void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value
                 compressed = b.CreateZExtOrTrunc(compressed, fieldTy);
                 output = b.CreateInsertElement(output, compressed, b.getInt32(i));
             }
-
-            Value * outputPtr = b.getOutputStreamBlockPtr("outputStreamSet", b.getInt32(j), blockOffsetPhi);
-            b.CreateStore(b.CreateBitCast(output, b.getBitBlockType()), outputPtr);
-
+            output = b.CreateBitCast(output, b.getBitBlockType());
+            b.storeOutputStreamBlock("outputStreamSet", b.getInt32(j), blockOffsetPhi, output);
         }
     } else {
         std::vector<Value *> output = b.simd_pext(mFW, input, maskVec[0]);
@@ -158,11 +155,11 @@ void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value
         }
     }
     Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
-    blockOffsetPhi->addIncoming(nextBlk, processBlock);
+    blockOffsetPhi->addIncoming(nextBlk, processLoopBody);
     Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
-    b.CreateLikelyCondBr(moreToDo, processBlock, done);
+    b.CreateLikelyCondBr(moreToDo, processLoopBody, exit);
 
-    b.SetInsertPoint(done);
+    b.SetInsertPoint(exit);
 }
 
 FieldCompressKernel::FieldCompressKernel(LLVMTypeSystemInterface & ts,
@@ -1493,9 +1490,9 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
     }
 
-    const auto numElements = output->getNumElements();
+    const auto numOutputElements = output->getNumElements();
     const auto numInputElements = getInputStreamSet(0)->getNumElements();
-    if (numElements > getInputStreamSet(0)->getNumElements()) {
+    if (numOutputElements > numInputElements) {
         report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
     }
 
@@ -1517,7 +1514,9 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     Value * initToWritePos = b.getProducedItemCount("output");
 
-    if (numElements == 1 && numInputElements == 1) {
+    if (numInputElements == 1) {
+
+        assert (numOutputElements == 1);
 
         Value * const totalBlocks = b.CreateMul(numOfStrides, b.getSize(fieldWidth));
         Value * const baseDataPtr = b.getInputStreamPackPtr("byteStream", sz_ZERO, sz_ZERO);
@@ -1575,22 +1574,22 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         if (b.hasScalarField("offset")) {
             baseStreamIndex = b.getScalarField("offset");
             if (DebugOptionIsSet(codegen::EnableAsserts)) {
-                Value * const maxElem = b.CreateAdd(baseStreamIndex, b.getSize(numElements));
+                Value * const maxElem = b.CreateAdd(baseStreamIndex, b.getSize(numOutputElements));
                 Value * valid = b.CreateICmpULE(maxElem, b.getSize(numInputElements));
                 b.CreateAssert(valid, "%s: stream index plus output streamset size exceeds input streamset size",
-                               b.GetString(getName()), baseStreamIndex, b.getSize(numElements), b.getSize(numInputElements));
+                               b.GetString(getName()), baseStreamIndex, b.getSize(numOutputElements), b.getSize(numInputElements));
             }
         }
 
         Value * initialPosition = b.CreateAnd(initToWritePos, BLOCK_WIDTH_MASK);
         Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);
 
-        SmallVector<Value *, 32> pending(numElements);
-        SmallVector<PHINode *, 32> pendingPhi(numElements);
+        SmallVector<Value *, 32> pending(numOutputElements);
+        SmallVector<PHINode *, 32> pendingPhi(numOutputElements);
 
         Constant * ZERO_VEC = ConstantVector::getNullValue(dataVecTy);
 
-        for (unsigned i = 0; i < numElements; ++i) {
+        for (unsigned i = 0; i < numOutputElements; ++i) {
             Value * streamIndex = b.getSize(i);
             Value * ptr = b.getOutputStreamPackPtr("output", streamIndex, initialPackIndex, sz_ZERO);
             pending[i] = b.CreateAlignedLoad(dataVecTy, ptr, b.getBitBlockWidth() / 8);
@@ -1608,7 +1607,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
         packIndexPhi->addIncoming(initialPackIndex, entry);
 
-        for (unsigned i = 0; i < numElements; ++i) {
+        for (unsigned i = 0; i < numOutputElements; ++i) {
             PHINode * pPhi = b.CreatePHI(dataVecTy, 2);
             pPhi->addIncoming(pending[i], entry);
             pendingPhi[i] = pPhi;
@@ -1632,7 +1631,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         SmallVector<Value *, 64> keepCurrentPending(fieldWidth);
 
 
-        for (unsigned i = 0; i < numElements; ++i) {
+        for (unsigned i = 0; i < numOutputElements; ++i) {
 
             ConstantInt * outputStreamIndex = b.getSize(i);
             Value * inputStreamIndex = outputStreamIndex;
@@ -1668,7 +1667,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
             }
         }
 
-        for (unsigned i = 0; i < numElements; ++i) {
+        for (unsigned i = 0; i < numOutputElements; ++i) {
             pendingPhi[i]->addIncoming(pending[i], packLoop);
         }
 
@@ -1686,7 +1685,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         b.SetInsertPoint(packFinalize);
         Value * packIdx = b.CreateAnd(fieldPackIndex[fieldWidth], FIELD_WIDTH_MASK);
         Value * blkIdx = b.CreateLShr(fieldPackIndex[fieldWidth], LOG_2_FIELD_WIDTH);
-        for (unsigned i = 0; i < numElements; ++i) {
+        for (unsigned i = 0; i < numOutputElements; ++i) {
             b.storeOutputStreamPack("output", b.getSize(i), packIdx, blkIdx, pending[i]);
         }
 

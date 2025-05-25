@@ -62,8 +62,6 @@ const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY = "LSM";
 
 const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES = "LSMb";
 
-const static std::string EXPECTED_NUM_OF_STRIDES_MULTIPLIER = "EnSM";
-
 const static std::string ZERO_EXTENDED_BUFFER = "ZeB";
 const static std::string ZERO_EXTENDED_SPACE = "ZeS";
 
@@ -166,16 +164,16 @@ public:
     void addPipelineKernelProperties(KernelBuilder & b);
     void constructStreamSetBuffers(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b);
-    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides);
+    void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const segmentSize);
     void generateInitializeThreadLocalMethod(KernelBuilder & b);
-    void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides);
+    void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * segmentSize);
     void generateKernelMethod(KernelBuilder & b);
     void generateFinalizeMethod(KernelBuilder & b);
     void generateFinalizeThreadLocalMethod(KernelBuilder & b);
     std::vector<Value *> getFinalOutputScalars(KernelBuilder & b) override;
     void addOptimizationPasses(KernelBuilder & b, Kernel::SelectedOptimizationPasses & passes);
     void bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) override;
-    static void linkPThreadLibrary(KernelBuilder & b);
+    static void linkPipelineExternalMethods(KernelBuilder & b);
     #ifdef ENABLE_PAPI
     static void linkPAPILibrary(KernelBuilder & b);
     #endif
@@ -411,7 +409,7 @@ public:
 
     using InternallyGeneratedStreamSetMap = flat_map<Value *, std::pair<Value *, Value>>;
 
-    void generateGlobalDataForRepeatingStreamSet(KernelBuilder & b, const unsigned streamSet, Value * const expectedNumOfStrides);
+    void generateGlobalDataForRepeatingStreamSet(KernelBuilder & b, const unsigned streamSet);
     void addRepeatingStreamSetBufferProperties(KernelBuilder & b);
     void deallocateRepeatingBuffers(KernelBuilder & b);
     void generateMetaDataForRepeatingStreamSets(KernelBuilder & b);
@@ -642,8 +640,6 @@ protected:
     constexpr static unsigned                   NumOfPAPIEvents = 0;
     #endif
 
-    const size_t                                RequiredThreadLocalStreamSetMemory;
-
     const bool                                  AllowIOProcessThread;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
@@ -659,6 +655,7 @@ protected:
     const std::vector<unsigned>                 StrideStepLength;
     const std::vector<unsigned>                 MinimumNumOfStrides;
     const std::vector<unsigned>                 MaximumNumOfStrides;
+    const std::vector<Rational>                 ThreadLocalExpansionThresholdFactor;
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
@@ -673,6 +670,8 @@ protected:
     const IllustratedStreamSetMap               mIllustratedStreamSetBindings;
     const ZeroInputGraph                        mZeroInputGraph;
     const InOutGraph                            InOutStreamSetReplacement;
+    const std::vector<Rational>                 StreamSetIORate;
+    const ThreadLocalPlacementGraph             ThreadLocalPlacement;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -703,6 +702,7 @@ protected:
     BasicBlock *                                mRethrowException = nullptr;
 
     Value *                                     mThreadLocalStreamSetBaseAddress = nullptr;
+    Value *                                     mSegmentSize = nullptr;
     Value *                                     mExpectedNumOfStridesMultiplier = nullptr;
     Value *                                     mThreadLocalSizeMultiplier = nullptr;
 
@@ -713,6 +713,7 @@ protected:
     FixedVector<Value *>                        mLocallyAvailableItems;
 
     FixedVector<Value *>                        mScalarValue;
+    FixedVector<Value *>                        mThreadLocalStartOffset;
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
     BitVector                                   mKernelProducesCrossThreadedData;
@@ -756,7 +757,7 @@ protected:
     PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
     PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
     PHINode *                                   mMaximumNumOfStridesAtExitPhi = nullptr;
-    Value *                                     mThreadLocalScalingFactor = nullptr;
+//    Value *                                     mThreadLocalScalingFactor = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
     Value *                                     mUpdatedNumOfStrides = nullptr;
@@ -956,7 +957,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
     }
 }())
 #endif
-, RequiredThreadLocalStreamSetMemory(P.RequiredThreadLocalStreamSetMemory)
 , AllowIOProcessThread(P.AllowIOProcessThread)
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
@@ -971,6 +971,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , StrideStepLength(std::move(P.StrideRepetitionVector))
 , MinimumNumOfStrides(std::move(P.MinimumNumOfStrides))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
+, ThreadLocalExpansionThresholdFactor(std::move(P.ThreadLocalExpansionThresholdFactor))
 , mStreamGraph(std::move(P.mStreamGraph))
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))
@@ -985,12 +986,15 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
 , mZeroInputGraph(std::move(P.mZeroInputGraph))
 , InOutStreamSetReplacement(std::move(P.InOutStreamSetReplacement))
+, StreamSetIORate(std::move(P.StreamSetIORate))
+, ThreadLocalPlacement(std::move(P.ThreadLocalPlacement))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
+, mThreadLocalStartOffset(0, PartitionCount + LastStreamSet - FirstStreamSet + 1, mAllocator)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
 , mKernelProducesCrossThreadedData(PipelineOutput - PipelineInput + 1)

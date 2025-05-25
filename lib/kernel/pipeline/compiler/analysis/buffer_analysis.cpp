@@ -2,6 +2,13 @@
 #include "lexographic_ordering.hpp"
 #include <boost/container/flat_set.hpp>
 #include <unistd.h>
+#include <z3.h>
+
+#if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
+    typedef int64_t Z3_int64;
+#else
+    typedef long long int        Z3_int64;
+#endif
 
 // TODO: any buffers that exist only to satisfy the output dependencies are unnecessary.
 // We could prune away kernels if none of their outputs are needed but we'd want some
@@ -33,6 +40,9 @@ void PipelineAnalysis::generateInitialBufferGraph() {
     const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
 
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
+
+
+    Rational largestSourceStreamSetIORate{1};
 
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
@@ -269,7 +279,6 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         bool hasPrincipalInput = false;
         bool nonGuaranteedInputRate = false;
 
-
         for (auto e : make_iterator_range(in_edges(kernel, mStreamGraph))) {
             const RelationshipType & port = mStreamGraph[e];
             #ifndef NDEBUG
@@ -286,6 +295,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             }
             const Binding & bd = rn.Binding;
             const ProcessingRate & rate = bd.getRate();
+
 
             // The following targets a StreamCompress/StreamExpand edge case in icgrep. StreamExpand
             // has a popcount input, fixed input and fixed output. StreamCompress produces data at a
@@ -428,6 +438,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 const auto streamSet = target(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
+                if (numOfInputs == 0) {
+                    const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
+                    largestSourceStreamSetIORate = std::max(largestSourceStreamSetIORate, R);
+                }
             }
         }
 
@@ -446,12 +460,16 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         }
     }
 
+    for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
+        auto & R = StreamSetIORate[i - FirstStreamSet];
+        R /= largestSourceStreamSetIORate;
+    }
+
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         if (LLVM_UNLIKELY(mBufferGraph[output].isManaged())) {
             mBufferGraph[source(output, mBufferGraph)].Type |= BufferType::ManagedOutput;
         }
     }
-
 
 }
 
@@ -699,17 +717,120 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineBufferSize
+ * @brief estimateInitialBufferSizes
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
-
-    const auto blockWidth = b.getBitBlockWidth();
+void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
         return;
     }
+
+    assert (MinimumNumOfStrides[PipelineInput] == MaximumNumOfStrides[PipelineInput]);
+    assert (MinimumNumOfStrides[PipelineInput] > 0);
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+
+        BufferNode & currentNode = mBufferGraph[streamSet];
+
+        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+            continue;
+        }
+
+        unsigned maxLookBehind = 0;
+        unsigned maxOverflow = 0;
+        Rational minVal{std::numeric_limits<unsigned>::max()};
+        Rational maxVal{std::numeric_limits<unsigned>::min()};
+
+        auto id = streamSet;
+
+        for (;;) {
+
+            const BufferNode & bn = mBufferGraph[id];
+
+            if (LLVM_UNLIKELY(bn.isConstant() || bn.isUnowned())) {
+                goto unhandled_streamset;
+            }
+
+            if (LLVM_LIKELY(!bn.isConstant())) {
+
+                const auto producerOutput = in_edge(id, mBufferGraph);
+                const BufferPort & producerRate = mBufferGraph[producerOutput];
+                maxLookBehind = producerRate.LookBehind;
+                const auto producer = source(producerOutput, mBufferGraph);
+                const auto bMin = producerRate.Minimum * MinimumNumOfStrides[producer];
+                assert (bMin.denominator() == 1);
+                const auto bMax = producerRate.Maximum * MaximumNumOfStrides[producer];
+                assert (bMax.denominator() == 1);
+                assert (bMax >= bMin);
+                const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
+                maxOverflow = std::max(maxOverflow, extra);
+
+                minVal = std::min(minVal, bMin);
+                maxVal = std::max(maxVal, bMax);
+            }
+
+            for (const auto e : make_iterator_range(out_edges(id, mBufferGraph))) {
+
+                const BufferPort & consumerRate = mBufferGraph[e];
+
+                const auto consumer = target(e, mBufferGraph);
+
+                const auto cMin = consumerRate.Minimum * MinimumNumOfStrides[consumer];
+                assert (cMin.denominator() == 1);
+                const auto cMax = consumerRate.Maximum * MaximumNumOfStrides[consumer];
+                assert (cMax.denominator() == 1);
+                assert (cMax >= cMin);
+
+                minVal = std::min(minVal, cMin);
+                maxVal = std::max(maxVal, cMax);
+
+                maxLookBehind = std::max(maxLookBehind, consumerRate.LookBehind);
+                const auto extra = std::max(consumerRate.LookAhead, consumerRate.Add);
+                maxOverflow = std::max(maxOverflow, extra);
+                maxOverflow = std::max(maxOverflow, bn.PartialSumSpanLength);
+            }
+
+            if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
+                break;
+            }
+            id = child(id, InOutStreamSetReplacement);
+        }
+
+        BEGIN_SCOPED_REGION
+
+        auto amount = (maxVal * Rational{2}) - minVal;
+        assert (amount.denominator() == 1);
+        assert (amount.numerator() > 0);
+
+        if (maxLookBehind) {
+            currentNode.RequiresUnderflow = !currentNode.IsLinear;
+        }
+
+        currentNode.MaxQuantityPerSegment = std::max<unsigned>(amount.numerator(), maxOverflow + maxLookBehind);
+        assert (currentNode.MaxQuantityPerSegment > 0);
+        currentNode.Overflow = maxOverflow;
+
+        END_SCOPED_REGION
+
+unhandled_streamset:
+
+        continue;
+
+    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief determineRequiredBufferSizes
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::determineRequiredBufferSizes(KernelBuilder & b) {
+
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
+
+    const auto blockWidth = b.getBitBlockWidth();
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
@@ -718,6 +839,10 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
         }
 
         BufferNode & bn = mBufferGraph[streamSet];
+
+        if (LLVM_UNLIKELY(bn.isConstant() || bn.isInOutRedirect())) {
+            continue;
+        }
 
         unsigned maxLookBehind = 0;
 
@@ -738,6 +863,7 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
                 const auto max = std::max(MaximumNumOfStrides[producer], 1U);
                 const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
                 bMax = (producerRate.Maximum * max) + extra;
+
             }
 
             for (const auto e : make_iterator_range(out_edges(id, mBufferGraph))) {
@@ -772,6 +898,7 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
         // of space and automatically handle under/overflow issues.
 
         const auto rs = 2 * ceiling(bMax) - floor(bMin);
+
         auto reqSize = round_up_to(rs, blockWidth) / blockWidth;
 
         if (bn.PartialSumSpanLength) {
@@ -782,10 +909,8 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
             const auto underflowSize = round_up_to(maxLookBehind, blockWidth) / blockWidth;
             reqSize = std::max(reqSize, underflowSize);
         }
-        if (LLVM_UNLIKELY(reqSize == 0 && bn.requiresEmptyWriteOverflow())) {
-            reqSize = 1U;
-        }
-        bn.RequiredCapacity = reqSize;
+        assert (reqSize > 0);
+        bn.MaxQuantityPerSegment = reqSize;
 
     }
 
@@ -836,17 +961,10 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
                 // analyze any consumption rates.
 
-                auto bufferSize = bn.RequiredCapacity;
-                assert (bufferSize > 0);
-                #ifdef NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                bufferSize *= NON_THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-                #endif
-
                 if (LLVM_UNLIKELY(bn.isManagedOutput())) {
-                    assert (!bn.IsLinear);
-                    buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bufferSize, 0U);
+                    buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), 0U);
                 } else {
-                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bufferSize, bn.RequiresUnderflow, bn.IsLinear, 0U);
+                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, bn.IsLinear, 0U);
                 }
             }
         }

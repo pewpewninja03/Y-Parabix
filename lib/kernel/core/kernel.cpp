@@ -1017,6 +1017,8 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
             fields.push_back(b.getInt32Ty()); // eventSetId
         }
         #endif
+    } else {
+        fields.push_back(sizeTy); // segmentSize
     }
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
@@ -1142,6 +1144,8 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
                 setNextArgName("eventSetId");
             }
             #endif
+        } else {
+            setNextArgName("segmentSize");
         }
 
         for (unsigned i = 0; i < mInputStreamSets.size(); ++i) {

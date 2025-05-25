@@ -121,6 +121,8 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
             Output<streamset_t>{"matches", matches, Add1(), ManagedBuffer()},
             InternallySynchronized());
 
+        E.setStride(E.getBitBlockWidth());
+
         std::string tmp;
         raw_string_ostream name(tmp);
         name << "gitignore";

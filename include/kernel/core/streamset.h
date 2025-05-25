@@ -7,6 +7,7 @@
 
 #include <llvm/IR/Type.h>  // for Type
 #include <llvm/IR/DerivedTypes.h>  // for Type
+#include <boost/rational.hpp>
 
 namespace IDISA { class IDISA_Builder; }
 namespace llvm { class Value; }
@@ -28,6 +29,8 @@ public:
         , DynamicBuffer
         , ManagedDynamicBuffer
     };
+
+    using Rational = boost::rational<size_t>;
 
     using ScalarRef = std::pair<llvm::Value *, llvm::Type *>;
 
@@ -135,7 +138,7 @@ public:
 
     static void linkFunctions(kernel::KernelBuilder & b); // temporary function
 
-    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
+    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
 
 protected:
 
@@ -234,56 +237,6 @@ protected:
 
 };
 
-class StaticBuffer final : public InternalBuffer {
-public:
-    static inline bool classof(const StreamSetBuffer * b) {
-        return b->getBufferKind() == BufferKind::StaticBuffer;
-    }
-
-    StaticBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type,
-                 const size_t capacity,
-                 const bool linear, const unsigned AddressSpace);
-
-    enum Field { BaseAddress, EffectiveCapacity, MallocedAddress, InternalCapacity, PriorAddress };
-
-    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
-
-    void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
-
-    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
-
-    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
-
-    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
-
-    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
-
-    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    size_t getCapacity() const {
-        return mCapacity;
-    }
-
-private:
-
-    const size_t    mCapacity;
-
-};
-
 class DynamicBuffer final : public InternalBuffer {
 protected:
 
@@ -306,7 +259,7 @@ public:
         return b->getBufferKind() == BufferKind::DynamicBuffer;
     }
 
-    DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * type, const size_t initialCapacity,
+    DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * type,
                   const bool hasUnderflow,
                   const bool linear, const unsigned AddressSpace);
 
@@ -332,9 +285,9 @@ public:
 
     llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    size_t getInitialCapacity() const {
-        return mInitialCapacity;
-    }
+//    Rational getInitialCapacity() const {
+//        return mInitialCapacity;
+//    }
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
@@ -344,7 +297,7 @@ public:
 
 private:
 
-    const size_t    mInitialCapacity;
+//    const Rational  mInitialCapacity;
     const bool      mHasUnderflow;
 };
 
@@ -363,7 +316,7 @@ public:
         return b->getBufferKind() == BufferKind::ManagedDynamicBuffer;
     }
 
-    ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const size_t initialCapacity, const unsigned AddressSpace);
+    ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const unsigned AddressSpace);
 
     static llvm::StructType * getInternalThreadLocalHandleType(kernel::KernelBuilder & b);
 
@@ -412,13 +365,13 @@ public:
         mThreadLocalHandle = handle;
     }
 
-    size_t getInitialCapacity() const {
-        return mInitialCapacity;
-    }
+//    Rational getInitialCapacity() const {
+//        return mInitialCapacity;
+//    }
 
 private:
 
-    const size_t    mInitialCapacity;
+//    const Rational mInitialCapacity;
 
     mutable llvm::Value * mThreadLocalHandle;
 

@@ -41,7 +41,7 @@ void MMapSourceKernel::generatLinkExternalFunctions(KernelBuilder & b) {
     b.LinkFunction("munmap", munmap);
 }
 
-void MMapSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
+void MMapSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
 
     BasicBlock * const emptyFile = b.CreateBasicBlock("emptyFile");
     BasicBlock * const nonEmptyFile = b.CreateBasicBlock("NonEmptyFile");
@@ -67,11 +67,11 @@ void MMapSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigne
     b.CreateBr(exit);
 
     b.SetInsertPoint(emptyFile);
-    ConstantInt * const STRIDE_BYTES = b.getSize(stride * codeUnitWidth);
-    Value * const emptyFilePtr = b.CreatePointerCast(b.CreateAnonymousMMap(STRIDE_BYTES), codeUnitPtrTy);
+    const auto pageSize = getPageSize();
+    Value * const emptyFilePtr = b.CreatePointerCast(b.CreateAnonymousMMap(b.getSize(pageSize)), codeUnitPtrTy);
     b.setScalarField("buffer", emptyFilePtr);
     b.setBaseAddress("sourceBuffer", emptyFilePtr);
-    b.setScalarField("fileItems", STRIDE_BYTES);
+    b.setScalarField("fileItems", b.getSize(pageSize * 8 / codeUnitWidth));
     b.setTerminationSignal();
     b.CreateBr(exit);
 
@@ -79,16 +79,16 @@ void MMapSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigne
 }
 
 
-void MMapSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
+void MMapSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
 
     BasicBlock * const dropPages = b.CreateBasicBlock("dropPages");
     BasicBlock * const checkRemaining = b.CreateBasicBlock("checkRemaining");
     BasicBlock * const setTermination = b.CreateBasicBlock("setTermination");
     BasicBlock * const exit = b.CreateBasicBlock("mmapSourceExit");
 
-    Value * const numOfStrides = b.getNumOfStrides();
+    Value * const segmentItems = b.getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        b.CreateAssert(b.CreateIsNotNull(numOfStrides),
+        b.CreateAssert(b.CreateIsNotNull(segmentItems),
                         "Internal error: %s.numOfStrides cannot be 0", b.GetString("MMapSource"));
     }
 
@@ -96,7 +96,6 @@ void MMapSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
     // the cost of this kernel but might allow the first kernel to read the file data be better balanced with it.
 
     const auto pageSize = getPageSize();
-    Value * const desiredItems = b.CreateMul(numOfStrides, b.getSize(stride));
     ConstantInt * const CODE_UNIT_BYTES = b.getSize(codeUnitWidth / 8);
 
     Value * const consumedItems = b.getConsumedItemCount("sourceBuffer");
@@ -126,7 +125,7 @@ void MMapSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
     // determine whether or not we've exhausted the "safe" region of the file buffer
     b.SetInsertPoint(checkRemaining);
     Value * const producedItems = b.getProducedItemCount("sourceBuffer");
-    Value * const nextProducedItems = b.CreateAdd(producedItems, desiredItems);
+    Value * const nextProducedItems = b.CreateAdd(producedItems, segmentItems);
     Value * const fileItems = b.getScalarField("fileItems");
     Value * const lastPage = b.CreateICmpULE(fileItems, nextProducedItems);
     b.CreateUnlikelyCondBr(lastPage, setTermination, exit);
@@ -185,15 +184,11 @@ inline IntTy round_up_to(const IntTy x, const IntTy y) {
     return (x + y - 1) & -y;
 }
 
-void ReadSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
+void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
 
-}
-
-void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
-
-    Value * const numOfStrides = b.getNumOfStrides();
+    Value * const segmentItems = b.getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        b.CreateAssert(b.CreateIsNotNull(numOfStrides),
+        b.CreateAssert(b.CreateIsNotNull(segmentItems),
                         "Internal error: %s.numOfStrides cannot be 0", b.GetString("ReadSource"));
     }
 
@@ -202,7 +197,6 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
     BasicBlock * const setTermination = b.CreateBasicBlock("SetTermination");
     BasicBlock * const readExit = b.CreateBasicBlock("ReadExit");
 
-    Value * const segmentItems = b.CreateMul(numOfStrides, b.getSize(stride));
     ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
     IntegerType * const sizeTy = b.getSizeTy();
 
@@ -270,32 +264,6 @@ Value * ReadSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b, co
     return b.CreateZExtOrTrunc(b.CreateCall(fTy, fileSizeFn, fd), b.getSizeTy());
 }
 
-void ReadSourceKernel::freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth) {
-//    Module * m = b.getModule();
-//    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
-//    Value * const buffer = b.getScalarField("buffer");
-//    Value * const capacity = b.getScalarField("effectiveCapacity");
-//    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
-//    FixedArray<Value *, 3> destroyArgs;
-//    destroyArgs[0] = b.CreatePointerCast(buffer, b.getInt8PtrTy());
-//    destroyArgs[1] = b.CreateMul(capacity, codeUnitBytes);
-//    destroyArgs[2] = b.getSize(0);
-//    b.CreateCall(destroyBuffer, destroyArgs);
-}
-
-void ReadSourceKernel::finalizeThreadLocalMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
-//    Module * m = b.getModule();
-//    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
-//    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
-//    FixedArray<Value *, 3> destroyArgs;
-//    Value * const priorBuffer = b.getScalarField("ancillaryBuffer");
-//    Value * const priorCapacity = b.getScalarField("ancillaryCapacity");
-//    destroyArgs[0] = b.CreatePointerCast(priorBuffer, b.getInt8PtrTy());
-//    destroyArgs[1] = b.CreateMul(priorCapacity, codeUnitBytes);
-//    destroyArgs[2] = b.getSize(0);
-//    b.CreateCall(destroyBuffer, destroyArgs);
-}
-
 void ReadSourceKernel::linkExternalMethods(KernelBuilder & b) {
     ReadSourceKernel::generatLinkExternalFunctions(b);
 }
@@ -328,13 +296,12 @@ void FDSourceKernel::generateInitializeMethod(KernelBuilder & b) {
     b.CreateUnlikelyCondBr(emptyFile, initializeRead, initializeMMap);
 
     b.SetInsertPoint(initializeMMap);
-    MMapSourceKernel::generateInitializeMethod(b, mCodeUnitWidth, mStride);
+    MMapSourceKernel::generateInitializeMethod(b, mCodeUnitWidth);
     b.CreateBr(initializeDone);
 
     b.SetInsertPoint(initializeRead);
     // Ensure that readSource logic is used throughout.
     b.setScalarField("useMMap", ConstantInt::getNullValue(useMMap->getType()));
-    ReadSourceKernel::generateInitializeMethod(b, mCodeUnitWidth, mStride);
     b.CreateBr(initializeDone);
 
     b.SetInsertPoint(initializeDone);
@@ -347,10 +314,10 @@ void FDSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
     b.CreateCondBr(useMMap, DoSegmentMMap, DoSegmentRead);
     b.SetInsertPoint(DoSegmentMMap);
-    MMapSourceKernel::generateDoSegmentMethod(b, mCodeUnitWidth, mStride);
+    MMapSourceKernel::generateDoSegmentMethod(b, mCodeUnitWidth);
     b.CreateBr(DoSegmentDone);
     b.SetInsertPoint(DoSegmentRead);
-    ReadSourceKernel::generateDoSegmentMethod(b, mCodeUnitWidth, mStride);
+    ReadSourceKernel::generateDoSegmentMethod(b, mCodeUnitWidth);
     b.CreateBr(DoSegmentDone);
     b.SetInsertPoint(DoSegmentDone);
 }
@@ -375,27 +342,12 @@ Value * FDSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b) {
 }
 
 void FDSourceKernel::generateFinalizeMethod(KernelBuilder & b) {
-    BasicBlock * finalizeRead = b.CreateBasicBlock("finalizeRead");
     BasicBlock * finalizeMMap = b.CreateBasicBlock("finalizeMMap");
     BasicBlock * finalizeDone = b.CreateBasicBlock("finalizeDone");
     Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
-    b.CreateCondBr(useMMap, finalizeMMap, finalizeRead);
+    b.CreateCondBr(useMMap, finalizeMMap, finalizeDone);
     b.SetInsertPoint(finalizeMMap);
     MMapSourceKernel::freeBuffer(b, mCodeUnitWidth);
-    b.CreateBr(finalizeDone);
-    b.SetInsertPoint(finalizeRead);
-    ReadSourceKernel::freeBuffer(b, mCodeUnitWidth);
-    b.CreateBr(finalizeDone);
-    b.SetInsertPoint(finalizeDone);
-}
-
-void FDSourceKernel::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
-    BasicBlock * finalizeRead = b.CreateBasicBlock("finalizeRead");
-    BasicBlock * finalizeDone = b.CreateBasicBlock("finalizeDone");
-    Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
-    b.CreateCondBr(useMMap, finalizeDone, finalizeRead);
-    b.SetInsertPoint(finalizeRead);
-    ReadSourceKernel::finalizeThreadLocalMethod(b, mCodeUnitWidth);
     b.CreateBr(finalizeDone);
     b.SetInsertPoint(finalizeDone);
 }
@@ -452,7 +404,7 @@ std::string makeSourceName(StringRef prefix, const unsigned fieldWidth, const un
     std::string tmp;
     tmp.reserve(64);
     llvm::raw_string_ostream out(tmp);
-    out << prefix << codegen::SegmentSize << '@' << fieldWidth;
+    out << prefix << '@' << fieldWidth;
     if (numOfStreams != 1) {
         out << ':' << numOfStreams;
     }
@@ -477,7 +429,7 @@ MMapSourceKernel::MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
     addInternalScalar(codeUnitPtrTy, "buffer");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
-    setStride(codegen::SegmentSize);
+    setStride(1);
 }
 
 ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream)
@@ -495,7 +447,7 @@ ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
-    setStride(codegen::SegmentSize);
+    setStride(1);
 }
 
 
@@ -518,7 +470,7 @@ FDSourceKernel::FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useM
     addInternalScalar(codeUnitPtrTy, "buffer");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
-    setStride(codegen::SegmentSize);
+    setStride(1);
 }
 
 MemorySourceKernel::MemorySourceKernel(LLVMTypeSystemInterface & ts, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream)
@@ -533,8 +485,7 @@ MemorySourceKernel::MemorySourceKernel(LLVMTypeSystemInterface & ts, Scalar * fi
 // internal scalar
 {}) {
     addAttribute(MustExplicitlyTerminate());
-    addInternalScalar(fileSource->getType(), "ancillaryBuffer");
-    setStride(codegen::SegmentSize);
+    setStride(1);
 }
 
 }

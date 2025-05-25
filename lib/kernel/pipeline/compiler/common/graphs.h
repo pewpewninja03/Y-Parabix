@@ -304,12 +304,17 @@ struct BufferNode {
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
-    unsigned BufferStart = 0;
-    unsigned BufferEnd = 0;
+    unsigned Overflow = 0;
+
+//    unsigned BufferStart = 0;
+//    unsigned BufferEnd = 0;
+//    std::vector<size_t> PreceedingThreadLocalStrideSize;
+//    unsigned StrideSize = 0;
 
     bool RequiresUnderflow = false;
 
-    unsigned RequiredCapacity = 0;
+    size_t MaxQuantityPerSegment = 0;
+
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
@@ -665,6 +670,8 @@ using FamilyScalarGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property
 using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsigned>;
 
 using InOutGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
+
+using ThreadLocalPlacementGraph = adjacency_list<vecS, vecS, bidirectionalS, size_t, size_t>;
 
 }
 

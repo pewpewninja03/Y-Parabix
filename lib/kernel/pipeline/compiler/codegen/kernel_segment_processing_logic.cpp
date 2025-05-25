@@ -326,16 +326,16 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
         assert (isFromCurrentFunction(b, mFinalPartitionSegmentAtExitPhi, false));
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
-        if (LLVM_UNLIKELY(mIsIOProcessThread)) {
-            mThreadLocalScalingFactor = nullptr;
-        } else {
-            // NOTE: we use the partition root's max num of strides as a common scaling factor for
-            // thread local buffer memory placement. Since we won't actually know how many strides
-            // have been executed until after the root kernel has finished processing, we assume the
-            // maximum was used.
-            mThreadLocalScalingFactor =
-                b.CreateCeilUDivRational(mMaximumNumOfStridesAtExitPhi, MaximumNumOfStrides[mKernelId]);
-        }
+//        if (LLVM_UNLIKELY(mIsIOProcessThread)) {
+//            mThreadLocalScalingFactor = nullptr;
+//        } else {
+//            // NOTE: we use the partition root's max num of strides as a common scaling factor for
+//            // thread local buffer memory placement. Since we won't actually know how many strides
+//            // have been executed until after the root kernel has finished processing, we assume the
+//            // maximum was used.
+//            mThreadLocalScalingFactor =
+//                b.CreateCeilUDivRational(mMaximumNumOfStridesAtExitPhi, MaximumNumOfStrides[mKernelId]);
+//        }
 
     }
 

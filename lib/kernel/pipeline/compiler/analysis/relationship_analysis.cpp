@@ -152,6 +152,18 @@ struct RelationshipGraphBuilder {
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief prioritizePipelineIOTransfers
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void prioritizePipelineIOTransfers() {
+
+        // If we have any kernels that produce
+
+
+        // PipelineInput, PipelineOutput
+
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
      * @brief getReferencePort
      ** ------------------------------------------------------------------------------------------------------------- */
     StreamSetPort getReferencePort(const Kernel * const kernel, const StringRef ref) {
@@ -969,6 +981,9 @@ struct RelationshipGraphBuilder {
     }
     B.addTruncatedStreamSetContraints();
     B.addPopCountKernels(b, mKernels, vertex);
+
+    B.prioritizePipelineIOTransfers();
+
     B.addProducerScalars(PortType::Output, p_in, mPipelineKernel->getInputScalarBindings());
     B.addConsumerScalars(PortType::Input, p_out, mPipelineKernel->getOutputScalarBindings(), true);
     for (unsigned i = 0; i < n; ++i) {
@@ -1173,27 +1188,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     FirstKernelInPartition[PartitionCount - 1] = newPipelineOutput;
     FirstKernelInPartition[PartitionCount] = newPipelineOutput;
-#ifndef NDEBUG
-    if (LLVM_UNLIKELY(IsNestedPipeline && (MinimumNumOfStrides[PipelineInput] != 1))) {
-        auto checkIO = [](const Bindings & bindings) -> bool {
-            for (const Binding & binding : bindings) {
-                if (isCountable(binding) && !binding.isDeferred()) {
-                    return true;
-                }
-            }
-            return false;
-        };
-        if (checkIO(mPipelineKernel->getInputStreamSetBindings()) || checkIO(mPipelineKernel->getOutputStreamSetBindings())) {
-            errs() << "WARNING! nested pipeline "
-                   << mPipelineKernel->getName() <<
-                      " requires more than one stride of input but has at least one "
-                      "non-deferred Countable I/O rate. This may cause I/O errors "
-                      "with the outer pipeline.\n\n"
-                      "Check -PrintPipelineGraph for details.\n";
-        }
-    }
-#endif
-
 
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
     // nodes would be placed into the same (ignored) set but this won't be true after scheduling.
@@ -1227,10 +1221,16 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     assert (Relationships[kernels[PipelineInput]].Kernel == mPipelineKernel);
     assert (Relationships[kernels[PipelineOutput]].Kernel == mPipelineKernel);
 
+    StreamSetIORate.resize(numOfStreamSets, Rational{0});
     for (unsigned i = 0; i < numOfStreamSets; ++i) {
         assert (subsitution[streamSets[i]] == -1U);
+        auto f = StreamSetIORateMap.find(streamSets[i]);
+        if (f != StreamSetIORateMap.end()) {
+            StreamSetIORate[i] = f->second;
+        }
         subsitution[streamSets[i]] = FirstStreamSet + i;
     }
+
     for (unsigned i = 0; i < numOfBindings; ++i) {
         assert (subsitution[bindings[i]] == -1U);
         subsitution[bindings[i]] = FirstBinding  + i;

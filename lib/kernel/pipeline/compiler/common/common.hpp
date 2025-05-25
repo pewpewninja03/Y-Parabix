@@ -6,11 +6,16 @@
 #include <boost/intrusive/detail/math.hpp>
 #include <random>
 #include <kernel/core/kernel_compiler.h>
+#include <boost/interprocess/mapped_region.hpp>
 
 using boost::intrusive::detail::floor_log2;
 using boost::intrusive::detail::ceil_log2;
 using boost::intrusive::detail::ceil_pow2;
 using boost::intrusive::detail::is_pow2;
+
+inline unsigned getPageSize() {
+    return boost::interprocess::mapped_region::get_page_size();
+}
 
 namespace kernel {
 

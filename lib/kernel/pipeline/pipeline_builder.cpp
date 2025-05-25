@@ -122,7 +122,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
                 default: continue;
             }
         }
-        assert (kernel->getStride());
     }
 
     if (fatalTermination) {
@@ -199,8 +198,6 @@ Kernel * PipelineBuilder::makeKernel() {
 
         if (mExternallySynchronized) {
             mTarget->addAttribute(InternallySynchronized());
-        } else {
-            mTarget->setStride(codegen::SegmentSize);
         }
 
         signature.reserve(4096);
@@ -486,6 +483,8 @@ Kernel * PipelineBuilder::makeKernel() {
             PipelineKernel::makePipelineHashName(signature));
 
     mTarget->setCompilationStatus(Kernel::CompilationStatus::FullyInitialized);
+
+
 
     return mTarget;
 }

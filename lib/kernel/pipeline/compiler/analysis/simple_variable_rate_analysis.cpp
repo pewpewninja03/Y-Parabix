@@ -47,6 +47,11 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         return Z3_mk_real(ctx, value.numerator(), value.denominator());
     };
 
+    auto multiply_vars =[&](Z3_ast X, Z3_ast Y) {
+        Z3_ast args[2] = { X, Y };
+        return Z3_mk_mul(ctx, 2, args);
+    };
+
     auto multiply =[&](Z3_ast X, const Rational & value) {
         if ((value.numerator() == 1) && (value.denominator() == 1)) {
             return X;
@@ -55,28 +60,87 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         return Z3_mk_mul(ctx, 2, args);
     };
 
+
+
     const auto numOfPartitions = num_vertices(P);
 
     std::vector<Z3_ast> VarList(num_vertices(Relationships));
 
-    const auto ONE = constant_real(1);
+    assert (P[0].Kernels.size() == 1);
+    assert (P[0].Kernels[0] == PipelineInput);
 
-    for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
+    SmallVector<Z3_ast, 2> fakeIOVars;
+
+//    SmallVector<Z3_ast, 4> ioVars;
+
+    const auto z3_ZERO = constant_real(0);
+
+    const auto z3_ONE = constant_real(1);
+
+    for (size_t partId = 0; partId < numOfPartitions; ++partId) {
         const PartitionData & N = P[partId];
         const auto & K = N.Kernels;
+        assert (K.size() > 0);
         auto rootVar = Z3_mk_fresh_const(ctx, nullptr, varType);
-        hard_assert(Z3_mk_ge(ctx, rootVar, ONE));
-        const auto m = K.size();
+        hard_assert(Z3_mk_ge(ctx, rootVar, z3_ONE));
+        const auto m = K.size(); assert (m > 0);
         for (unsigned i = 0; i < m; ++i) {
-            VarList[K[i]] = multiply(rootVar, N.Repetitions[i]);
+            const auto k = K[i];
+            VarList[k] = multiply(rootVar, N.Repetitions[i]);
+            assert (Relationships[k].Type == RelationshipNode::IsKernel);
+//            for (const auto e : make_iterator_range(in_edges(k, Relationships))) {
+//                const auto binding = source(e, Relationships);
+//                if (Relationships[binding].Type == RelationshipNode::IsBinding) {
+//                    goto not_source_input;
+//                }
+//            }
+//            for (const auto e : make_iterator_range(out_edges(k, Relationships))) {
+//                const auto binding = target(e, Relationships);
+//                if (Relationships[binding].Type == RelationshipNode::IsBinding) {
+//                    auto ioVar = Z3_mk_fresh_const(ctx, nullptr, varType);
+//                    hard_assert(Z3_mk_gt(ctx, ioVar, z3_ZERO));
+//                    VarList[binding] = ioVar;
+//                    ioVars.push_back(ioVar);
+//                }
+//            }
+//not_source_input:
+//            continue;
         }
+    }
+//    assert (ioVars.size() > 0);
+
+    if (out_degree(0, P) == 0) {
+        Z3_ast args[2];
+        args[0] = VarList[PipelineInput];
+        SmallVector<Z3_ast, 2> fakeIOConstraint;
+        for (auto partId = 1U; partId < numOfPartitions; ++partId) {
+            if (in_degree(partId, P) == 0) {
+                const PartitionData & N = P[partId];
+                const auto & K = N.Kernels;
+                auto fakeIOVar = Z3_mk_fresh_const(ctx, nullptr, varType);
+                fakeIOVars.push_back(fakeIOVar);
+                hard_assert(Z3_mk_gt(ctx, fakeIOVar, z3_ZERO));
+                args[1] = fakeIOVar;
+                auto val = Z3_mk_mul(ctx, 2, args);
+                hard_assert(Z3_mk_eq(ctx, val, VarList[K[0]]));
+                fakeIOConstraint.push_back(Z3_mk_eq(ctx, fakeIOVar, z3_ONE));
+            }
+        }
+
+        const auto m = fakeIOConstraint.size(); assert (m > 0);
+        Z3_ast constraint;
+        if (m == 1) {
+            constraint = fakeIOConstraint[0];
+        } else {
+            constraint = Z3_mk_or(ctx, m, fakeIOConstraint.data());
+        }
+        hard_assert(constraint);
     }
 
     NonFixedTaintGraph T(numOfPartitions);
     for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
         T[partId] = false;
     }
-
 
     for (unsigned prodId = 0; prodId < numOfPartitions; ++prodId) {
         const PartitionData & N = P[prodId];
@@ -88,19 +152,35 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
             assert (Relationships[producer].Type == RelationshipNode::IsKernel);
 
             for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {
-                const auto binding = target(e, Relationships);
-                if (Relationships[binding].Type == RelationshipNode::IsBinding) {
-                    const auto f = first_out_edge(binding, Relationships);
+                const auto prodBinding = target(e, Relationships);
+                if (Relationships[prodBinding].Type == RelationshipNode::IsBinding) {
+                    const auto f = first_out_edge(prodBinding, Relationships);
                     assert (Relationships[f].Reason != ReasonType::Reference);
                     const auto streamSet = target(f, Relationships);
                     assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
-                    const RelationshipNode & output = Relationships[binding];
+                    const RelationshipNode & output = Relationships[prodBinding];
                     assert (output.Type == RelationshipNode::IsBinding);
                     const Binding & outputBinding = output.Binding;
                     const ProcessingRate & oRate = outputBinding.getRate();
 
+                    const RelationshipNode & producerNode = Relationships[producer];
+                    assert (producerNode.Type == RelationshipNode::IsKernel);
 
                     Z3_ast expOutRate = nullptr;
+
+                    if (LLVM_UNLIKELY(oRate.isGreedy() || oRate.isUnknown())) {
+                        assert (producer == PipelineInput || oRate.isUnknown());
+                        // we cannot predict how much data will be passed to this
+                        expOutRate = Z3_mk_fresh_const(ctx, nullptr, varType);
+                    } else {
+                        const auto s = producerNode.Kernel->getStride();
+                        assert (oRate.getUpperBound() >= oRate.getLowerBound() || oRate.isUnknown());
+                        const auto expectedOutput = (oRate.getLowerBound() + oRate.getUpperBound()) * Rational{s, 2};
+                        assert (expectedOutput.numerator() > 0);
+                        expOutRate = multiply(VarList[producer], expectedOutput);
+                    }
+
+                    VarList[streamSet] = expOutRate; assert (expOutRate);
 
                     for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
                         const auto binding = target(e, Relationships);
@@ -118,6 +198,21 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                             const auto consumerPartitionId = c->second;
                             assert (prodId <= consumerPartitionId);
 
+                            Z3_ast expInRate = nullptr;
+
+                            if (LLVM_UNLIKELY(iRate.isGreedy())) {
+                                expInRate = expOutRate; assert (expOutRate);
+                            } else {
+                                const RelationshipNode & consumerNode = Relationships[consumer];
+                                assert (consumerNode.Type == RelationshipNode::IsKernel);
+                                const auto s = consumerNode.Kernel->getStride();
+                                assert (s > 0);
+                                const auto expectedInput = (iRate.getLowerBound() + iRate.getUpperBound()) * Rational{s, 2};
+                                assert (expectedInput.numerator() > 0);
+                                expInRate = multiply(VarList[consumer], expectedInput);
+                            }
+
+                            Z3_ast constraint = Z3_mk_eq(ctx, expOutRate, expInRate);
                             if (prodId != consumerPartitionId) {
 
                                 // mark that there is non-fixed dataflow between these
@@ -126,31 +221,9 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                                     T[e] = true;
                                 }
 
-                                if (LLVM_UNLIKELY(oRate.isUnknown())) {
-                                    continue;
-                                }
-
-                                if (expOutRate == nullptr) {
-                                    const RelationshipNode & producerNode = Relationships[producer];
-                                    assert (producerNode.Type == RelationshipNode::IsKernel);
-                                    const auto s = producerNode.Kernel->getStride();
-                                    const auto expectedOutput = (oRate.getLowerBound() + oRate.getUpperBound()) * Rational{s, 2};
-                                    expOutRate = multiply(VarList[producer], expectedOutput);
-                                }
-
-                                Z3_ast expInRate = nullptr;
-
-                                if (LLVM_UNLIKELY(iRate.isGreedy())) {
-                                    expInRate = expOutRate;
-                                } else {
-                                    const RelationshipNode & consumerNode = Relationships[consumer];
-                                    assert (consumerNode.Type == RelationshipNode::IsKernel);
-                                    const auto s = consumerNode.Kernel->getStride();
-                                    const auto expectedInput = (iRate.getLowerBound() + iRate.getUpperBound()) * Rational{s, 2};
-                                    expInRate = multiply(VarList[consumer], expectedInput);
-                                }
-
-                                soft_assert(Z3_mk_eq(ctx, expOutRate, expInRate));
+                                soft_assert(constraint);
+                            } else {
+                                hard_assert(constraint);
                             }
                         }
                     }
@@ -187,9 +260,22 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
     const auto model = Z3_optimize_get_model(ctx, solver);
     Z3_model_inc_ref(ctx, model);
 
+
+    Z3_ast value;
+    if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, VarList[PipelineInput], Z3_L_TRUE, &value) != Z3_L_TRUE)) {
+        report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
+    }
+
+    Z3_int64 pipelineInputNum, pipelineInputDenom;
+    if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, value, &pipelineInputNum, &pipelineInputDenom) != Z3_L_TRUE)) {
+        report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
+    }
+    assert (pipelineInputDenom > 0);
+    assert (pipelineInputNum > 0);
+
     size_t lcmOfDenom = 1UL;
 
-    for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
+    for (size_t partId = 0; partId < numOfPartitions; ++partId) {
         PartitionData & N = P[partId];
         Z3_ast const stridesPerSegmentVar = VarList[N.Kernels[0]];
         Z3_ast value;
@@ -202,14 +288,12 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
             report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
         }
 
-
         assert (denom > 0);
         assert (num > 0);
         assert (N.Repetitions[0].numerator() > 0);
         assert (N.Repetitions[0].denominator() > 0);
 
-        N.ExpectedStridesPerSegment = Rational{num, denom} / N.Repetitions[0];
-
+        N.ExpectedStridesPerSegment = Rational{pipelineInputDenom * num, pipelineInputNum * denom} / N.Repetitions[0];
         const auto m = N.ExpectedStridesPerSegment.denominator();
         if (m > 1) {
             lcmOfDenom = boost::lcm(lcmOfDenom, m);
@@ -219,14 +303,77 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         N.LinkedGroupId = partId;
     }
 
+    assert (lcmOfDenom > 0);
+
+    SmallVector<unsigned, 16> approx;
+
+    for (unsigned prodId = 0; prodId < numOfPartitions; ++prodId) {
+        PartitionData & N = P[prodId];
+        const auto & K = N.Kernels;
+        const auto m = K.size();
+        for (unsigned i = 0; i < m; ++i) {
+            const auto producer = K[i];
+            assert (Relationships[producer].Type == RelationshipNode::IsKernel);
+            for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {
+                const auto prodBinding = target(e, Relationships);
+
+                if (Relationships[prodBinding].Type == RelationshipNode::IsBinding) {
+
+                    const auto f = first_out_edge(prodBinding, Relationships);
+                    assert (Relationships[f].Reason != ReasonType::Reference);
+                    const auto streamSet = target(f, Relationships);
+                    assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                    assert (VarList[streamSet]);
+
+                    Z3_ast value;
+                    if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, VarList[streamSet], Z3_L_TRUE, &value) != Z3_L_TRUE)) {
+                        report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
+                    }
+
+                    Z3_int64 num, denom;
+                    if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, value, &num, &denom) != Z3_L_TRUE)) {
+                        report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
+                    }
+
+                    assert (denom > 0);
+
+                    StreamSetIORateMap.emplace(streamSet, Rational{pipelineInputDenom * num * lcmOfDenom, pipelineInputNum * denom});
+                }
+            }
+        }
+    }
+
     Z3_model_dec_ref(ctx, model);
     Z3_optimize_dec_ref(ctx, solver);
     Z3_del_context(ctx);
     Z3_reset_memory();
 
+//    PartitionData & N = P[0];
+//    Rational scale{N.ExpectedStridesPerSegment.denominator() * lcmOfDenom, N.ExpectedStridesPerSegment.numerator()};
+
+
     for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
         PartitionData & N = P[partId];
+
         N.ExpectedStridesPerSegment *= lcmOfDenom;
+    }
+
+    if (LLVM_UNLIKELY(P[0].ExpectedStridesPerSegment != Rational{1})) {
+        auto checkIO = [](const Bindings & bindings) -> bool {
+            for (const Binding & binding : bindings) {
+                if (isCountable(binding) && !binding.isDeferred()) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (checkIO(mPipelineKernel->getInputStreamSetBindings()) || checkIO(mPipelineKernel->getOutputStreamSetBindings())) {
+            errs() << "WARNING! Pipeline "
+                   << mPipelineKernel->getName() <<
+                      " requires more than one stride of input but has at least one "
+                      "non-deferred Countable I/O rate. This may cause I/O errors.\n\n"
+                      "Check -PrintPipelineGraph for details.\n";
+        }
     }
 
 }

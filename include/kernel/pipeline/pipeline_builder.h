@@ -170,6 +170,10 @@ public:
         mTarget->mSignature.swap(name);
     }
 
+    void setStride(const unsigned stride) {
+        mTarget->setStride(stride);
+    }
+
     void captureByteData(llvm::StringRef streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
 
     void captureBitstream(llvm::StringRef streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');

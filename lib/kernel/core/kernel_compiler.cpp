@@ -462,13 +462,7 @@ void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
-            Rational R{mTarget->getStride(), b.getBitBlockWidth()};
-            const auto & ub = output.getRate().getUpperBound();
-            if (ub.numerator() > 0) {
-                R *= ub;
-            }
-            assert (R.numerator() > 0);
-            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), R.numerator(), 0);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
         }
@@ -772,15 +766,15 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
     Rational fixedRateLCM{0};
     mFixedRateFactor = nullptr;
 
+    if (LLVM_UNLIKELY(internallySynchronized)) {
+        mExternalSegNo = nextArg();
+    }
+    mRawNumOfStrides = nextArg();
+
     if (LLVM_UNLIKELY(isMainPipeline)) {
         mIsFinal = b.getTrue();
-        mRawNumOfStrides = nullptr;
-        mNumOfStrides = nullptr;
+        mNumOfStrides = mRawNumOfStrides;
     } else {
-        if (LLVM_UNLIKELY(internallySynchronized)) {
-            mExternalSegNo = nextArg();
-        }
-        mRawNumOfStrides = nextArg();
         if (LLVM_UNLIKELY(mTarget->hasAttribute(AttrId::MustExplicitlyTerminate))) {
             mIsFinal = nullptr;
             mNumOfStrides = mRawNumOfStrides;
@@ -1051,8 +1045,9 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         props.push_back(mExternalSegNo);
     }
 
+    props.push_back(mNumOfStrides); assert (mNumOfStrides);
+
     if (LLVM_LIKELY(!isMainPipeline)) {
-        props.push_back(mNumOfStrides); assert (mNumOfStrides);
         if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             props.push_back(mFixedRateFactor);
         }

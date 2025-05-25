@@ -396,7 +396,7 @@ protected:
  ** ------------------------------------------------------------------------------------------------------------- */
 class MemoryAnalysis {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<size_t>::Candidate;
 
     using IntervalEdge = typename MemIntervalGraph::edge_descriptor;
 
@@ -924,9 +924,9 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief SchedulingAnalysisWorker
  ** ------------------------------------------------------------------------------------------------------------- */
-struct SchedulingAnalysisWorker : public PermutationBasedEvolutionaryAlgorithmWorker {
+struct SchedulingAnalysisWorker : public PermutationBasedEvolutionaryAlgorithmWorker<size_t> {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<size_t>::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
@@ -967,7 +967,7 @@ public:
  ** ------------------------------------------------------------------------------------------------------------- */
 struct PartitionSchedulingAnalysisWorker final : public SchedulingAnalysisWorker {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<size_t>::Candidate;
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief repair
@@ -1033,7 +1033,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief PartitionSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+struct PartitionSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm<size_t> {
 
     WorkerPtr makeWorker(pipeline_random_engine & rng) final {
         return std::make_unique<PartitionSchedulingAnalysisWorker>(S, D, candidateLength, rng);
@@ -1136,7 +1136,7 @@ void PipelineAnalysis::analyzeDataflowWithinPartitions(PartitionGraph & P, pipel
         // a schedule that permits a minimum memory schedule.
 
         PartitionSchedulingAnalysis SA(S, D, numOfKernels + 2U, rng);
-        SA.runGA();
+        SA.runGA<false>();
         auto H = SA.getResult();
         const auto t = postorder_minimize(H);
 
@@ -1520,9 +1520,9 @@ using GlobalDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, BitSet,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingJumpAnalysisWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
+struct ProgramSchedulingJumpAnalysisWorker final : public PermutationBasedEvolutionaryAlgorithmWorker<size_t> {
 
-    using Candidate = PermutationBasedEvolutionaryAlgorithm::Candidate;
+    using Candidate = PermutationBasedEvolutionaryAlgorithm<size_t>::Candidate;
 
     using JumpGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 
@@ -1718,7 +1718,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingJumpAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+struct ProgramSchedulingJumpAnalysis final : public PermutationBasedEvolutionaryAlgorithm<size_t> {
 
     WorkerPtr makeWorker(pipeline_random_engine & rng) final {
         return std::make_unique<ProgramSchedulingJumpAnalysisWorker>(G, P, initialDegree, candidateLength, rng);
@@ -2010,7 +2010,7 @@ private:
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramSchedulingAnalysis
  ** ------------------------------------------------------------------------------------------------------------- */
-struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm {
+struct ProgramSchedulingAnalysis final : public PermutationBasedEvolutionaryAlgorithm<size_t> {
 
     WorkerPtr makeWorker(pipeline_random_engine & rng) final {
         return std::make_unique<ProgramSchedulingAnalysisWorker>(S, I, numOfKernels, rng);
@@ -2255,7 +2255,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
     }
 
     ProgramSchedulingJumpAnalysis JA(G, P, initialDegree, PartitionCount, rng);
-    JA.runGA();
+    JA.runGA<false>();
     auto pathGraph = JA.getResult();
     postorder_minimize(pathGraph);
 
@@ -2504,7 +2504,7 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
 
     ProgramSchedulingAnalysis SA(S, I, numOfFrontierKernels, rng);
 
-    SA.runGA();
+    SA.runGA<false>();
 
     auto partial = SA.getResult();
 

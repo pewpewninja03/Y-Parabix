@@ -85,7 +85,6 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
             VarList[u] = repVar; // multiply(rootVar, repVar);
         }
 
-
         for (const auto producer : K) {
             assert (Relationships[producer].Type == RelationshipNode::IsKernel);
             for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {
@@ -170,6 +169,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
     const auto model = Z3_solver_get_model(ctx, solver);
     Z3_model_inc_ref(ctx, model);
 
+    // TODO: if the root of a partition has a "large" rep vector count, split the partition?
+
     for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
         PartitionData & N = P[producerPartitionId];
         const auto & K = N.Kernels;
@@ -230,6 +231,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
     out << "}\n\n";
     out.flush();
     #endif
+
+
 
 }
 
