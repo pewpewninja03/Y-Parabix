@@ -26,6 +26,7 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
+#include <kernel/unicode/normalization.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <toolchain/toolchain.h>
@@ -50,6 +51,7 @@ static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-b
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
+#if 0
 std::vector<re::CC *> Hangul_Composables() {
     UCD::UnicodeSet Hangul_L(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
     UCD::UnicodeSet Hangul_V(Hangul::VBase, Hangul::VBase + Hangul::VCount - 1);
@@ -62,6 +64,53 @@ std::vector<re::CC *> Hangul_Composables() {
             re::makeCC(Hangul_V, &cc::Unicode),
             re::makeCC(Hangul_LV, &cc::Unicode),
             re::makeCC(Hangul_T, &cc::Unicode)};
+}
+
+
+class Hangul_Composable_Kernel : public pablo::PabloKernel {
+public:
+    enum Kind : unsigned {L, V, LV, T, Count};
+
+    Hangul_Composable_Kernel(LLVMTypeSystemInterface & ts,
+                       StreamSet * Basis, StreamSet * L_V_T_Composables, pablo::BitMovementMode m);
+protected:
+    void generatePabloMethod() override;
+private:
+    pablo::BitMovementMode mBitMovement;
+};
+
+Hangul_Composable_Kernel::Hangul_Composable_Kernel (LLVMTypeSystemInterface & ts,
+                                              StreamSet * Basis, StreamSet * L_V_T_Composables,
+                                              pablo::BitMovementMode m)
+: PabloKernel(ts, "Hangul_Composable_Kernel" + Basis->shapeString(),
+// inputs
+    {},
+// output
+    {Binding{"L_V_T_Composables", L_V_T_Composables}}), mBitMovement(m) {
+    if (m == pablo::BitMovementMode::LookAhead) {
+        // UTF-8 lookahead
+        mInputStreamSets.push_back(Binding{"Basis", Basis, FixedRate(1), LookAhead(3)});
+    } else {
+        mInputStreamSets.push_back(Binding{"Basis", Basis});
+    }
+}
+
+void Hangul_Composable_Kernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb, mBitMovement);
+    std::vector<Var *> Hangul_var(Kind::Count);
+    for (unsigned i = 0; i < Kind::Count; i++) {
+        Hangul_var[i] = pb.createVar("Composable_" + std::to_string(i), pb.createZeroes());
+    }
+    std::vector<UCD::UnicodeSet> Hangul_uset (Kind::Count);
+    Hangul_uset[Kind::L] = UCD::UnicodeSet(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
+    Hangul_uset[Kind::V] = UCD::UnicodeSet(Hangul::VBase, Hangul::VBase + Hangul::VCount - 1);
+    for (unsigned i = 0; i < Hangul::LCount * Hangul::VCount; i++) {
+        Hangul_uset[Kind::LV].insert(Hangul::SBase + i * Hangul::TCount);
+    }
+    Hangul_uset[Kind::T] = UCD::UnicodeSet(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
+    unicodeCompiler.compile(Hangul_var, Hangul_uset);
+    writeOutputStreamSet("L_V_T_Composables", Hangul_var);
 }
 
 class Hangul_Composition : public pablo::PabloKernel {
@@ -227,6 +276,7 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("Output_Basis", outputVar);
     writeOutputStreamSet("SelectionMask", std::vector<Var *>{maskVar});
 }
+#endif
 
 class ApplyTransform : public pablo::PabloKernel {
 public:
@@ -266,22 +316,23 @@ void ApplyTransform::generatePabloMethod() {
 class DelPriorToSelectMask : public PabloKernel {
 public:
     DelPriorToSelectMask
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * DeletePrior,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
                                        StreamSet * SelectMask);
 protected:
     void generatePabloMethod() override;
 };
 
 DelPriorToSelectMask::DelPriorToSelectMask
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * DeletePrior,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
                                    StreamSet * SelectMask)
 : PabloKernel(ts, "DelPriorToSelectMask",
-{Binding{"Basis", Basis}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
 {Binding{"SelectMask", SelectMask}}) {}
 
 void DelPriorToSelectMask::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * InputMask = getInputStreamSet("InputMask")[0];
     PabloAST * DelPrior = getInputStreamSet("DeletePrior")[0];
     BixNumCompiler bnc(pb);
     PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
@@ -296,7 +347,7 @@ void DelPriorToSelectMask::generatePabloMethod() {
     PabloAST * del2 = pb.createAnd(secondlast, pb.createLookahead(DelPrior, 2));
     PabloAST * del1 = pb.createLookahead(DelPrior, 1);
     PabloAST * del = pb.createOr(pb.createOr(delpfx4, del3), pb.createOr(del2, del1));
-    std::vector<PabloAST *> select_streamset = {pb.createInFile(pb.createNot(del))};
+    std::vector<PabloAST *> select_streamset = {pb.createAnd(InputMask, pb.createInFile(pb.createNot(del)))};
     writeOutputStreamSet("SelectMask", select_streamset);
 }
 using namespace UCD;
@@ -1227,11 +1278,11 @@ void SingletonCanonicalization::generatePabloMethod() {
     PabloAST * del_e1 = All0;
 
     UTF::UTF_Compiler b_e1_compiler(getInputStreamVar("Basis"), b_e1, pablo::BitMovementMode::LookAhead);
-    std::vector<Var *> b_e1_vars(12);
-    std::vector<UnicodeSet> b_e1_usets(12);
-    Var * E1_1f71 = b_e1.createVar("E1_1f71", All0);
-    b_e1_vars[0] = E1_1f71;
-    b_e1_usets[0] = E1_1f71_uset;
+    std::vector<Var *> b_e1_vars(11);
+    std::vector<UnicodeSet> b_e1_usets(11);
+    Var * E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d = b_e1.createVar("E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d", All0);
+    b_e1_vars[0] = E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d;
+    b_e1_usets[0] = E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d_uset;
     Var * E1_1fef = b_e1.createVar("E1_1fef", All0);
     b_e1_vars[1] = E1_1fef;
     b_e1_usets[1] = E1_1fef_uset;
@@ -1241,30 +1292,27 @@ void SingletonCanonicalization::generatePabloMethod() {
     Var * E1_1f71_3_5_7_9_b_d = b_e1.createVar("E1_1f71_3_5_7_9_b_d", All0);
     b_e1_vars[3] = E1_1f71_3_5_7_9_b_d;
     b_e1_usets[3] = E1_1f71_3_5_7_9_b_d_uset;
-    Var * E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d = b_e1.createVar("E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d", All0);
-    b_e1_vars[4] = E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d;
-    b_e1_usets[4] = E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d_uset;
     Var * E1_1ffd = b_e1.createVar("E1_1ffd", All0);
-    b_e1_vars[5] = E1_1ffd;
-    b_e1_usets[5] = E1_1ffd_uset;
+    b_e1_vars[4] = E1_1ffd;
+    b_e1_usets[4] = E1_1ffd_uset;
     Var * E1_1f71_5_9_d_bb_e_c9_d3_b_e3_b_e_f_f9_d = b_e1.createVar("E1_1f71_5_9_d_bb_e_c9_d3_b_e3_b_e_f_f9_d", All0);
-    b_e1_vars[6] = E1_1f71_5_9_d_bb_e_c9_d3_b_e3_b_e_f_f9_d;
-    b_e1_usets[6] = E1_1f71_5_9_d_bb_e_c9_d3_b_e3_b_e_f_f9_d_uset;
+    b_e1_vars[5] = E1_1f71_5_9_d_bb_e_c9_d3_b_e3_b_e_f_f9_d;
+    b_e1_usets[5] = E1_1f71_5_9_d_bb_e_c9_d3_b_e3_b_e_f_f9_d_uset;
     Var * E1_1f71_3_9_b_bb_e_eb_f_f9_b = b_e1.createVar("E1_1f71_3_9_b_bb_e_eb_f_f9_b", All0);
-    b_e1_vars[7] = E1_1f71_3_9_b_bb_e_eb_f_f9_b;
-    b_e1_usets[7] = E1_1f71_3_9_b_bb_e_eb_f_f9_b_uset;
+    b_e1_vars[6] = E1_1f71_3_9_b_bb_e_eb_f_f9_b;
+    b_e1_usets[6] = E1_1f71_3_9_b_bb_e_eb_f_f9_b_uset;
     Var * E1_1f71_3_5_7_bb_ee_f_fd = b_e1.createVar("E1_1f71_3_5_7_bb_ee_f_fd", All0);
-    b_e1_vars[8] = E1_1f71_3_5_7_bb_ee_f_fd;
-    b_e1_usets[8] = E1_1f71_3_5_7_bb_ee_f_fd_uset;
+    b_e1_vars[7] = E1_1f71_3_5_7_bb_ee_f_fd;
+    b_e1_usets[7] = E1_1f71_3_5_7_bb_ee_f_fd_uset;
     Var * E1_1f71_3_5_7_9_b_d_bb_db_e3_f9_b = b_e1.createVar("E1_1f71_3_5_7_9_b_d_bb_db_e3_f9_b", All0);
-    b_e1_vars[9] = E1_1f71_3_5_7_9_b_d_bb_db_e3_f9_b;
-    b_e1_usets[9] = E1_1f71_3_5_7_9_b_d_bb_db_e3_f9_b_uset;
+    b_e1_vars[8] = E1_1f71_3_5_7_9_b_d_bb_db_e3_f9_b;
+    b_e1_usets[8] = E1_1f71_3_5_7_9_b_d_bb_db_e3_f9_b_uset;
     Var * E1_1f73_5_b_d_be_cb_d3_e3_e_f = b_e1.createVar("E1_1f73_5_b_d_be_cb_d3_e3_e_f", All0);
-    b_e1_vars[10] = E1_1f73_5_b_d_be_cb_d3_e3_e_f;
-    b_e1_usets[10] = E1_1f73_5_b_d_be_cb_d3_e3_e_f_uset;
+    b_e1_vars[9] = E1_1f73_5_b_d_be_cb_d3_e3_e_f;
+    b_e1_usets[9] = E1_1f73_5_b_d_be_cb_d3_e3_e_f_uset;
     Var * E1_1f79_b_d_bb_eb_e_f9_b = b_e1.createVar("E1_1f79_b_d_bb_eb_e_f9_b", All0);
-    b_e1_vars[11] = E1_1f79_b_d_bb_eb_e_f9_b;
-    b_e1_usets[11] = E1_1f79_b_d_bb_eb_e_f9_b_uset;
+    b_e1_vars[10] = E1_1f79_b_d_bb_eb_e_f9_b;
+    b_e1_usets[10] = E1_1f79_b_d_bb_eb_e_f9_b_uset;
 
     b_e1_compiler.compile(b_e1_vars, b_e1_usets);
     PabloAST * E1_1f71_3_5_7_c9_b_d3_b_e3_b_e_f9_b_d_adv1 = b_e1.createAdvance(E1_1f71_3_5_7_c9_b_d3_b_e3_b_e_f9_b_d, 1);
@@ -1293,7 +1341,7 @@ void SingletonCanonicalization::generatePabloMethod() {
     PabloAST * E1_1fef_adv2 = b_e1.createAdvance(E1_1fef, 2);
     xfrm_e1[6] = b_e1.createOr(xfrm_e1[6], E1_1fef_adv2);
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], E1_1fef_adv2);
-    del_e1 = b_e1.createOr(del_e1, E1_1f71);
+    del_e1 = b_e1.createOr(del_e1, E1_1f71_3_5_7_9_b_d_bb_e_c9_b_d3_b_e3_b_e_f9_b_d);
     del_e1 = b_e1.createOr(del_e1, E1_1fef);
     del_e1 = b_e1.createOr(del_e1, b_e1.createAdvance(E1_1fef, 1));
 
@@ -1310,38 +1358,35 @@ void SingletonCanonicalization::generatePabloMethod() {
     PabloAST * del_e2 = All0;
 
     UTF::UTF_Compiler b_e2_compiler(getInputStreamVar("Basis"), b_e2, pablo::BitMovementMode::LookAhead);
-    std::vector<Var *> b_e2_vars(10);
-    std::vector<UnicodeSet> b_e2_usets(10);
-    Var * E2_2126 = b_e2.createVar("E2_2126", All0);
-    b_e2_vars[0] = E2_2126;
-    b_e2_usets[0] = E2_2126_uset;
+    std::vector<Var *> b_e2_vars(9);
+    std::vector<UnicodeSet> b_e2_usets(9);
+    Var * E2_2126_b = b_e2.createVar("E2_2126_b", All0);
+    b_e2_vars[0] = E2_2126_b;
+    b_e2_usets[0] = E2_2126_b_uset;
     Var * E2_212a = b_e2.createVar("E2_212a", All0);
     b_e2_vars[1] = E2_212a;
     b_e2_usets[1] = E2_212a_uset;
     Var * E2_2329_a = b_e2.createVar("E2_2329_a", All0);
     b_e2_vars[2] = E2_2329_a;
     b_e2_usets[2] = E2_2329_a_uset;
-    Var * E2_2126_b = b_e2.createVar("E2_2126_b", All0);
-    b_e2_vars[3] = E2_2126_b;
-    b_e2_usets[3] = E2_2126_b_uset;
     Var * E2_2126_2329_a = b_e2.createVar("E2_2126_2329_a", All0);
-    b_e2_vars[4] = E2_2126_2329_a;
-    b_e2_usets[4] = E2_2126_2329_a_uset;
+    b_e2_vars[3] = E2_2126_2329_a;
+    b_e2_usets[3] = E2_2126_2329_a_uset;
     Var * E2_212b = b_e2.createVar("E2_212b", All0);
-    b_e2_vars[5] = E2_212b;
-    b_e2_usets[5] = E2_212b_uset;
+    b_e2_vars[4] = E2_212b;
+    b_e2_usets[4] = E2_212b_uset;
     Var * E2_212b_2329_a = b_e2.createVar("E2_212b_2329_a", All0);
-    b_e2_vars[6] = E2_212b_2329_a;
-    b_e2_usets[6] = E2_212b_2329_a_uset;
+    b_e2_vars[5] = E2_212b_2329_a;
+    b_e2_usets[5] = E2_212b_2329_a_uset;
     Var * E2_2000_1_2126_b_232a = b_e2.createVar("E2_2000_1_2126_b_232a", All0);
-    b_e2_vars[7] = E2_2000_1_2126_b_232a;
-    b_e2_usets[7] = E2_2000_1_2126_b_232a_uset;
+    b_e2_vars[6] = E2_2000_1_2126_b_232a;
+    b_e2_usets[6] = E2_2000_1_2126_b_232a_uset;
     Var * E2_2126_a_2329_a = b_e2.createVar("E2_2126_a_2329_a", All0);
-    b_e2_vars[8] = E2_2126_a_2329_a;
-    b_e2_usets[8] = E2_2126_a_2329_a_uset;
+    b_e2_vars[7] = E2_2126_a_2329_a;
+    b_e2_usets[7] = E2_2126_a_2329_a_uset;
     Var * E2_212a_b_2329_a = b_e2.createVar("E2_212a_b_2329_a", All0);
-    b_e2_vars[9] = E2_212a_b_2329_a;
-    b_e2_usets[9] = E2_212a_b_2329_a_uset;
+    b_e2_vars[8] = E2_212a_b_2329_a;
+    b_e2_usets[8] = E2_212a_b_2329_a_uset;
 
     b_e2_compiler.compile(b_e2_vars, b_e2_usets);
     xfrm_e2[0] = b_e2.createOr(xfrm_e2[0], E2_2329_a);
@@ -1366,7 +1411,7 @@ void SingletonCanonicalization::generatePabloMethod() {
     PabloAST * E2_212a_adv2 = b_e2.createAdvance(E2_212a, 2);
     xfrm_e2[6] = b_e2.createOr(xfrm_e2[6], E2_212a_adv2);
     xfrm_e2[7] = b_e2.createOr(xfrm_e2[7], E2_212a_adv2);
-    del_e2 = b_e2.createOr(del_e2, E2_2126);
+    del_e2 = b_e2.createOr(del_e2, E2_2126_b);
     del_e2 = b_e2.createOr(del_e2, E2_212a);
     del_e2 = b_e2.createOr(del_e2, b_e2.createAdvance(E2_212a, 1));
 
@@ -1506,11 +1551,11 @@ void SingletonCanonicalization::generatePabloMethod() {
     PabloAST * del_f0 = All0;
 
     UTF::UTF_Compiler b_f0_compiler(getInputStreamVar("Basis"), b_f0, pablo::BitMovementMode::LookAhead);
-    std::vector<Var *> b_f0_vars(18);
-    std::vector<UnicodeSet> b_f0_usets(18);
-    Var * F0_2f800 = b_f0.createVar("F0_2f800", All0);
-    b_f0_vars[0] = F0_2f800;
-    b_f0_usets[0] = F0_2f800_uset;
+    std::vector<Var *> b_f0_vars(17);
+    std::vector<UnicodeSet> b_f0_usets(17);
+    Var * F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c = b_f0.createVar("F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c", All0);
+    b_f0_vars[0] = F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c;
+    b_f0_usets[0] = F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c_uset;
     Var * F0_2f800___6_d_12_6_9_34_8_89_f_91___3_8_a0_3___c1_3___6_8_9_b___d_f_d4___c_f___e2_4___6_8___b_d_f_f1_3___6_a_c___2f905_7___9_b_c_e_f_12_b_d_f_23_6_7_35_7_9_b_c_f_49_b_c_51_8_60_4_7_d_71___5_7_a___f_81___5_7_8_b___91_3___aa_c___b0_2___c4_6___9_d___d2_4___7_9___e1_5_d_f_f1_2_8_9_c_2fa03_8_d_e_10___4_6_d = b_f0.createVar("F0_2f800___6_d_12_6_9_34_8_89_f_91___3_8_a0_3___c1_3___6_8_9_b___d_f_d4___c_f___e2_4___6_8___b_d_f_f1_3___6_a_c___2f905_7___9_b_c_e_f_12_b_d_f_23_6_7_35_7_9_b_c_f_49_b_c_51_8_60_4_7_d_71___5_7_a___f_81___5_7_8_b___91_3___aa_c___b0_2___c4_6___9_d___d2_4___7_9___e1_5_d_f_f1_2_8_9_c_2fa03_8_d_e_10___4_6_d", All0);
     b_f0_vars[1] = F0_2f800___6_d_12_6_9_34_8_89_f_91___3_8_a0_3___c1_3___6_8_9_b___d_f_d4___c_f___e2_4___6_8___b_d_f_f1_3___6_a_c___2f905_7___9_b_c_e_f_12_b_d_f_23_6_7_35_7_9_b_c_f_49_b_c_51_8_60_4_7_d_71___5_7_a___f_81___5_7_8_b___91_3___aa_c___b0_2___c4_6___9_d___d2_4___7_9___e1_5_d_f_f1_2_8_9_c_2fa03_8_d_e_10___4_6_d;
     b_f0_usets[1] = F0_2f800___6_d_12_6_9_34_8_89_f_91___3_8_a0_3___c1_3___6_8_9_b___d_f_d4___c_f___e2_4___6_8___b_d_f_f1_3___6_a_c___2f905_7___9_b_c_e_f_12_b_d_f_23_6_7_35_7_9_b_c_f_49_b_c_51_8_60_4_7_d_71___5_7_a___f_81___5_7_8_b___91_3___aa_c___b0_2___c4_6___9_d___d2_4___7_9___e1_5_d_f_f1_2_8_9_c_2fa03_8_d_e_10___4_6_d_uset;
@@ -1520,48 +1565,45 @@ void SingletonCanonicalization::generatePabloMethod() {
     Var * F0_2f800___1b_d___8e_90___2_4___d5_7___2f979_b_c_e_80_1_4_6___a_e_92_7_a4___7_b_d___b2_f_c2_5_8_a___e_d3_8_9_d_ef_f2_4_8_9_c_2fa03_8_d_e_11_6 = b_f0.createVar("F0_2f800___1b_d___8e_90___2_4___d5_7___2f979_b_c_e_80_1_4_6___a_e_92_7_a4___7_b_d___b2_f_c2_5_8_a___e_d3_8_9_d_ef_f2_4_8_9_c_2fa03_8_d_e_11_6", All0);
     b_f0_vars[3] = F0_2f800___1b_d___8e_90___2_4___d5_7___2f979_b_c_e_80_1_4_6___a_e_92_7_a4___7_b_d___b2_f_c2_5_8_a___e_d3_8_9_d_ef_f2_4_8_9_c_2fa03_8_d_e_11_6;
     b_f0_usets[3] = F0_2f800___1b_d___8e_90___2_4___d5_7___2f979_b_c_e_80_1_4_6___a_e_92_7_a4___7_b_d___b2_f_c2_5_8_a___e_d3_8_9_d_ef_f2_4_8_9_c_2fa03_8_d_e_11_6_uset;
-    Var * F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c = b_f0.createVar("F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c", All0);
-    b_f0_vars[4] = F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c;
-    b_f0_usets[4] = F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c_uset;
     Var * F0_2f803_c_d_12_3_6_c_f_24_34_8_59_60_1_7_8_c_71_6_b_d_83_8___a_f_91___3_6_7_b_a1_2_4_b8_e_c2_7_a_e_d0_1_6_d_e_e3_7_c_e_f0_2_7___9_b_2f906_a_d_10_1_6_b_2a_c_d_33_9_e_7a_d_f_80_2_3_5_9___d_f___91_3___6_8___a3_8___a_c_b3___e_c0_1_3_4_6_7_9_a_f___d2_4___7_9___ee_f0_1_3_5___7_a_b_d___2fa02_4___7_9___c_f_10_2___5_7___d = b_f0.createVar("F0_2f803_c_d_12_3_6_c_f_24_34_8_59_60_1_7_8_c_71_6_b_d_83_8___a_f_91___3_6_7_b_a1_2_4_b8_e_c2_7_a_e_d0_1_6_d_e_e3_7_c_e_f0_2_7___9_b_2f906_a_d_10_1_6_b_2a_c_d_33_9_e_7a_d_f_80_2_3_5_9___d_f___91_3___6_8___a3_8___a_c_b3___e_c0_1_3_4_6_7_9_a_f___d2_4___7_9___ee_f0_1_3_5___7_a_b_d___2fa02_4___7_9___c_f_10_2___5_7___d", All0);
-    b_f0_vars[5] = F0_2f803_c_d_12_3_6_c_f_24_34_8_59_60_1_7_8_c_71_6_b_d_83_8___a_f_91___3_6_7_b_a1_2_4_b8_e_c2_7_a_e_d0_1_6_d_e_e3_7_c_e_f0_2_7___9_b_2f906_a_d_10_1_6_b_2a_c_d_33_9_e_7a_d_f_80_2_3_5_9___d_f___91_3___6_8___a3_8___a_c_b3___e_c0_1_3_4_6_7_9_a_f___d2_4___7_9___ee_f0_1_3_5___7_a_b_d___2fa02_4___7_9___c_f_10_2___5_7___d;
-    b_f0_usets[5] = F0_2f803_c_d_12_3_6_c_f_24_34_8_59_60_1_7_8_c_71_6_b_d_83_8___a_f_91___3_6_7_b_a1_2_4_b8_e_c2_7_a_e_d0_1_6_d_e_e3_7_c_e_f0_2_7___9_b_2f906_a_d_10_1_6_b_2a_c_d_33_9_e_7a_d_f_80_2_3_5_9___d_f___91_3___6_8___a3_8___a_c_b3___e_c0_1_3_4_6_7_9_a_f___d2_4___7_9___ee_f0_1_3_5___7_a_b_d___2fa02_4___7_9___c_f_10_2___5_7___d_uset;
+    b_f0_vars[4] = F0_2f803_c_d_12_3_6_c_f_24_34_8_59_60_1_7_8_c_71_6_b_d_83_8___a_f_91___3_6_7_b_a1_2_4_b8_e_c2_7_a_e_d0_1_6_d_e_e3_7_c_e_f0_2_7___9_b_2f906_a_d_10_1_6_b_2a_c_d_33_9_e_7a_d_f_80_2_3_5_9___d_f___91_3___6_8___a3_8___a_c_b3___e_c0_1_3_4_6_7_9_a_f___d2_4___7_9___ee_f0_1_3_5___7_a_b_d___2fa02_4___7_9___c_f_10_2___5_7___d;
+    b_f0_usets[4] = F0_2f803_c_d_12_3_6_c_f_24_34_8_59_60_1_7_8_c_71_6_b_d_83_8___a_f_91___3_6_7_b_a1_2_4_b8_e_c2_7_a_e_d0_1_6_d_e_e3_7_c_e_f0_2_7___9_b_2f906_a_d_10_1_6_b_2a_c_d_33_9_e_7a_d_f_80_2_3_5_9___d_f___91_3___6_8___a3_8___a_c_b3___e_c0_1_3_4_6_7_9_a_f___d2_4___7_9___ee_f0_1_3_5___7_a_b_d___2fa02_4___7_9___c_f_10_2___5_7___d_uset;
     Var * F0_2f800___2_4___6_d_19_e_20___3_5___34_6___a_4b___50_2_3_5_60_1_3_4_6___b_d___72_4_6_85___7_b___95_7_9_a_c___f_a4_b2___e_c0___2_7_c___d1_4_5_7___e0_7_b___d_f_f1_3___7_9_2f908_9_b___d_f___12_d_f___26_8___d_33_a___c_e_40_5___8_a_52_4_5_9___b_d___64_7_b_d_f___79_80_1_6___d_f___9e_a0___3_b_d_b0_3___e_c0_5_8_d___d1_8_e_f_e5_7___b_d_f3_5_7___a_c_2fa00___2_4___7_b___12_6 = b_f0.createVar("F0_2f800___2_4___6_d_19_e_20___3_5___34_6___a_4b___50_2_3_5_60_1_3_4_6___b_d___72_4_6_85___7_b___95_7_9_a_c___f_a4_b2___e_c0___2_7_c___d1_4_5_7___e0_7_b___d_f_f1_3___7_9_2f908_9_b___d_f___12_d_f___26_8___d_33_a___c_e_40_5___8_a_52_4_5_9___b_d___64_7_b_d_f___79_80_1_6___d_f___9e_a0___3_b_d_b0_3___e_c0_5_8_d___d1_8_e_f_e5_7___b_d_f3_5_7___a_c_2fa00___2_4___7_b___12_6", All0);
-    b_f0_vars[6] = F0_2f800___2_4___6_d_19_e_20___3_5___34_6___a_4b___50_2_3_5_60_1_3_4_6___b_d___72_4_6_85___7_b___95_7_9_a_c___f_a4_b2___e_c0___2_7_c___d1_4_5_7___e0_7_b___d_f_f1_3___7_9_2f908_9_b___d_f___12_d_f___26_8___d_33_a___c_e_40_5___8_a_52_4_5_9___b_d___64_7_b_d_f___79_80_1_6___d_f___9e_a0___3_b_d_b0_3___e_c0_5_8_d___d1_8_e_f_e5_7___b_d_f3_5_7___a_c_2fa00___2_4___7_b___12_6;
-    b_f0_usets[6] = F0_2f800___2_4___6_d_19_e_20___3_5___34_6___a_4b___50_2_3_5_60_1_3_4_6___b_d___72_4_6_85___7_b___95_7_9_a_c___f_a4_b2___e_c0___2_7_c___d1_4_5_7___e0_7_b___d_f_f1_3___7_9_2f908_9_b___d_f___12_d_f___26_8___d_33_a___c_e_40_5___8_a_52_4_5_9___b_d___64_7_b_d_f___79_80_1_6___d_f___9e_a0___3_b_d_b0_3___e_c0_5_8_d___d1_8_e_f_e5_7___b_d_f3_5_7___a_c_2fa00___2_4___7_b___12_6_uset;
+    b_f0_vars[5] = F0_2f800___2_4___6_d_19_e_20___3_5___34_6___a_4b___50_2_3_5_60_1_3_4_6___b_d___72_4_6_85___7_b___95_7_9_a_c___f_a4_b2___e_c0___2_7_c___d1_4_5_7___e0_7_b___d_f_f1_3___7_9_2f908_9_b___d_f___12_d_f___26_8___d_33_a___c_e_40_5___8_a_52_4_5_9___b_d___64_7_b_d_f___79_80_1_6___d_f___9e_a0___3_b_d_b0_3___e_c0_5_8_d___d1_8_e_f_e5_7___b_d_f3_5_7___a_c_2fa00___2_4___7_b___12_6;
+    b_f0_usets[5] = F0_2f800___2_4___6_d_19_e_20___3_5___34_6___a_4b___50_2_3_5_60_1_3_4_6___b_d___72_4_6_85___7_b___95_7_9_a_c___f_a4_b2___e_c0___2_7_c___d1_4_5_7___e0_7_b___d_f_f1_3___7_9_2f908_9_b___d_f___12_d_f___26_8___d_33_a___c_e_40_5___8_a_52_4_5_9___b_d___64_7_b_d_f___79_80_1_6___d_f___9e_a0___3_b_d_b0_3___e_c0_5_8_d___d1_8_e_f_e5_7___b_d_f3_5_7___a_c_2fa00___2_4___7_b___12_6_uset;
     Var * F0_2f800___2_4___6_c_d_12_3_6_9_f_24_3b___4f_52_3_5_9_60_1_7_8_73___82_4___7_b___e_90_4_5_9_a_c___f_a4_bf_c3___6_8_9_b___d_f_d4_5_8___c_f_e0_3_c_e_f2_8_a___2f912_6_b_23_6_a_c___38_a___c_e_40_5___8_a_d_52_4_5_65_6_8___c_e___70_6_8_9_b_c_e_84_7_8_d_e_9f_a4___a_c___b0_2___c0_2_5_8_a_d_e_d2___8_a___c_e___e1_5_c_e_f0_1_3___5_a_b_d_2fa01_b___f_11_5___d = b_f0.createVar("F0_2f800___2_4___6_c_d_12_3_6_9_f_24_3b___4f_52_3_5_9_60_1_7_8_73___82_4___7_b___e_90_4_5_9_a_c___f_a4_bf_c3___6_8_9_b___d_f_d4_5_8___c_f_e0_3_c_e_f2_8_a___2f912_6_b_23_6_a_c___38_a___c_e_40_5___8_a_d_52_4_5_65_6_8___c_e___70_6_8_9_b_c_e_84_7_8_d_e_9f_a4___a_c___b0_2___c0_2_5_8_a_d_e_d2___8_a___c_e___e1_5_c_e_f0_1_3___5_a_b_d_2fa01_b___f_11_5___d", All0);
-    b_f0_vars[7] = F0_2f800___2_4___6_c_d_12_3_6_9_f_24_3b___4f_52_3_5_9_60_1_7_8_73___82_4___7_b___e_90_4_5_9_a_c___f_a4_bf_c3___6_8_9_b___d_f_d4_5_8___c_f_e0_3_c_e_f2_8_a___2f912_6_b_23_6_a_c___38_a___c_e_40_5___8_a_d_52_4_5_65_6_8___c_e___70_6_8_9_b_c_e_84_7_8_d_e_9f_a4___a_c___b0_2___c0_2_5_8_a_d_e_d2___8_a___c_e___e1_5_c_e_f0_1_3___5_a_b_d_2fa01_b___f_11_5___d;
-    b_f0_usets[7] = F0_2f800___2_4___6_c_d_12_3_6_9_f_24_3b___4f_52_3_5_9_60_1_7_8_73___82_4___7_b___e_90_4_5_9_a_c___f_a4_bf_c3___6_8_9_b___d_f_d4_5_8___c_f_e0_3_c_e_f2_8_a___2f912_6_b_23_6_a_c___38_a___c_e_40_5___8_a_d_52_4_5_65_6_8___c_e___70_6_8_9_b_c_e_84_7_8_d_e_9f_a4___a_c___b0_2___c0_2_5_8_a_d_e_d2___8_a___c_e___e1_5_c_e_f0_1_3___5_a_b_d_2fa01_b___f_11_5___d_uset;
+    b_f0_vars[6] = F0_2f800___2_4___6_c_d_12_3_6_9_f_24_3b___4f_52_3_5_9_60_1_7_8_73___82_4___7_b___e_90_4_5_9_a_c___f_a4_bf_c3___6_8_9_b___d_f_d4_5_8___c_f_e0_3_c_e_f2_8_a___2f912_6_b_23_6_a_c___38_a___c_e_40_5___8_a_d_52_4_5_65_6_8___c_e___70_6_8_9_b_c_e_84_7_8_d_e_9f_a4___a_c___b0_2___c0_2_5_8_a_d_e_d2___8_a___c_e___e1_5_c_e_f0_1_3___5_a_b_d_2fa01_b___f_11_5___d;
+    b_f0_usets[6] = F0_2f800___2_4___6_c_d_12_3_6_9_f_24_3b___4f_52_3_5_9_60_1_7_8_73___82_4___7_b___e_90_4_5_9_a_c___f_a4_bf_c3___6_8_9_b___d_f_d4_5_8___c_f_e0_3_c_e_f2_8_a___2f912_6_b_23_6_a_c___38_a___c_e_40_5___8_a_d_52_4_5_65_6_8___c_e___70_6_8_9_b_c_e_84_7_8_d_e_9f_a4___a_c___b0_2___c0_2_5_8_a_d_e_d2___8_a___c_e___e1_5_c_e_f0_1_3___5_a_b_d_2fa01_b___f_11_5___d_uset;
     Var * F0_2f802_4_8_a_b_e___11_4_6_9_c_d_f_21___3_5___8_c___33_5___a_e___40_2_5___9_b___d_50_4___8_c___e_60_3_4_9___b_71_3_5_6_a_80___2_4_7_8_a_e_90_6_8___b_d___f_a4___a_f___b1_4_6_7_a_b_d_e_c1_2_5_a_e___d0_2___6_8___a_e0_2_4___7_9_b_c_e___f0_4___8_b_c_f_2f901___4_9_b___10_2_7___9_c_d_22_8_e___30_2_8_d_e_43___7_9_a_c_d_f_52_4_6_8_d_e_60_1_4_5_7_a_b_d_f_71_2_7_8_a_c_e_80_1_e_96_8_a_e___a3_5_6_8_9_b_c_e_f_b1___6_a_b_d_f_c1_8_a_b_d_f_d1_3_4_6_8_9_b_f_e2_4___7_c_e___f0_4_5_7_b___f_2fa02_6___8_b___11_6___8 = b_f0.createVar("F0_2f802_4_8_a_b_e___11_4_6_9_c_d_f_21___3_5___8_c___33_5___a_e___40_2_5___9_b___d_50_4___8_c___e_60_3_4_9___b_71_3_5_6_a_80___2_4_7_8_a_e_90_6_8___b_d___f_a4___a_f___b1_4_6_7_a_b_d_e_c1_2_5_a_e___d0_2___6_8___a_e0_2_4___7_9_b_c_e___f0_4___8_b_c_f_2f901___4_9_b___10_2_7___9_c_d_22_8_e___30_2_8_d_e_43___7_9_a_c_d_f_52_4_6_8_d_e_60_1_4_5_7_a_b_d_f_71_2_7_8_a_c_e_80_1_e_96_8_a_e___a3_5_6_8_9_b_c_e_f_b1___6_a_b_d_f_c1_8_a_b_d_f_d1_3_4_6_8_9_b_f_e2_4___7_c_e___f0_4_5_7_b___f_2fa02_6___8_b___11_6___8", All0);
-    b_f0_vars[8] = F0_2f802_4_8_a_b_e___11_4_6_9_c_d_f_21___3_5___8_c___33_5___a_e___40_2_5___9_b___d_50_4___8_c___e_60_3_4_9___b_71_3_5_6_a_80___2_4_7_8_a_e_90_6_8___b_d___f_a4___a_f___b1_4_6_7_a_b_d_e_c1_2_5_a_e___d0_2___6_8___a_e0_2_4___7_9_b_c_e___f0_4___8_b_c_f_2f901___4_9_b___10_2_7___9_c_d_22_8_e___30_2_8_d_e_43___7_9_a_c_d_f_52_4_6_8_d_e_60_1_4_5_7_a_b_d_f_71_2_7_8_a_c_e_80_1_e_96_8_a_e___a3_5_6_8_9_b_c_e_f_b1___6_a_b_d_f_c1_8_a_b_d_f_d1_3_4_6_8_9_b_f_e2_4___7_c_e___f0_4_5_7_b___f_2fa02_6___8_b___11_6___8;
-    b_f0_usets[8] = F0_2f802_4_8_a_b_e___11_4_6_9_c_d_f_21___3_5___8_c___33_5___a_e___40_2_5___9_b___d_50_4___8_c___e_60_3_4_9___b_71_3_5_6_a_80___2_4_7_8_a_e_90_6_8___b_d___f_a4___a_f___b1_4_6_7_a_b_d_e_c1_2_5_a_e___d0_2___6_8___a_e0_2_4___7_9_b_c_e___f0_4___8_b_c_f_2f901___4_9_b___10_2_7___9_c_d_22_8_e___30_2_8_d_e_43___7_9_a_c_d_f_52_4_6_8_d_e_60_1_4_5_7_a_b_d_f_71_2_7_8_a_c_e_80_1_e_96_8_a_e___a3_5_6_8_9_b_c_e_f_b1___6_a_b_d_f_c1_8_a_b_d_f_d1_3_4_6_8_9_b_f_e2_4___7_c_e___f0_4_5_7_b___f_2fa02_6___8_b___11_6___8_uset;
+    b_f0_vars[7] = F0_2f802_4_8_a_b_e___11_4_6_9_c_d_f_21___3_5___8_c___33_5___a_e___40_2_5___9_b___d_50_4___8_c___e_60_3_4_9___b_71_3_5_6_a_80___2_4_7_8_a_e_90_6_8___b_d___f_a4___a_f___b1_4_6_7_a_b_d_e_c1_2_5_a_e___d0_2___6_8___a_e0_2_4___7_9_b_c_e___f0_4___8_b_c_f_2f901___4_9_b___10_2_7___9_c_d_22_8_e___30_2_8_d_e_43___7_9_a_c_d_f_52_4_6_8_d_e_60_1_4_5_7_a_b_d_f_71_2_7_8_a_c_e_80_1_e_96_8_a_e___a3_5_6_8_9_b_c_e_f_b1___6_a_b_d_f_c1_8_a_b_d_f_d1_3_4_6_8_9_b_f_e2_4___7_c_e___f0_4_5_7_b___f_2fa02_6___8_b___11_6___8;
+    b_f0_usets[7] = F0_2f802_4_8_a_b_e___11_4_6_9_c_d_f_21___3_5___8_c___33_5___a_e___40_2_5___9_b___d_50_4___8_c___e_60_3_4_9___b_71_3_5_6_a_80___2_4_7_8_a_e_90_6_8___b_d___f_a4___a_f___b1_4_6_7_a_b_d_e_c1_2_5_a_e___d0_2___6_8___a_e0_2_4___7_9_b_c_e___f0_4___8_b_c_f_2f901___4_9_b___10_2_7___9_c_d_22_8_e___30_2_8_d_e_43___7_9_a_c_d_f_52_4_6_8_d_e_60_1_4_5_7_a_b_d_f_71_2_7_8_a_c_e_80_1_e_96_8_a_e___a3_5_6_8_9_b_c_e_f_b1___6_a_b_d_f_c1_8_a_b_d_f_d1_3_4_6_8_9_b_f_e2_4___7_c_e___f0_4_5_7_b___f_2fa02_6___8_b___11_6___8_uset;
     Var * F0_2f803___6_e___12_4___8_a___d_24_9___33_6___a_42___b_d_52_3_5_c___f_62_5_9___72_4_6_b___82_4_9_f_91_2_4_5_8___a_c___f_a1_2_6___b1_7___9_b___e_c0_1_8_9_b_e_d0_2___4_7___e0_6___a_f_f1_3___6_8_f_2f908_9_b___d_13___5_7___a_d_20___5_7_a_c___32_5_7_a_d_f___42_9_b___52_4_5_9___b_d___60_4___9_f_70_2_3_5_a_b_d_f_82_4_6_b_c_e___96_8_f_a4_6_8_9_b1_3___8_a_c1_3___b_d___d0_2___5_9_d_e_e2_3_7___a_c_f3_7___9_b___f_2fa01_3___a_f_12_6_9___c = b_f0.createVar("F0_2f803___6_e___12_4___8_a___d_24_9___33_6___a_42___b_d_52_3_5_c___f_62_5_9___72_4_6_b___82_4_9_f_91_2_4_5_8___a_c___f_a1_2_6___b1_7___9_b___e_c0_1_8_9_b_e_d0_2___4_7___e0_6___a_f_f1_3___6_8_f_2f908_9_b___d_13___5_7___a_d_20___5_7_a_c___32_5_7_a_d_f___42_9_b___52_4_5_9___b_d___60_4___9_f_70_2_3_5_a_b_d_f_82_4_6_b_c_e___96_8_f_a4_6_8_9_b1_3___8_a_c1_3___b_d___d0_2___5_9_d_e_e2_3_7___a_c_f3_7___9_b___f_2fa01_3___a_f_12_6_9___c", All0);
-    b_f0_vars[9] = F0_2f803___6_e___12_4___8_a___d_24_9___33_6___a_42___b_d_52_3_5_c___f_62_5_9___72_4_6_b___82_4_9_f_91_2_4_5_8___a_c___f_a1_2_6___b1_7___9_b___e_c0_1_8_9_b_e_d0_2___4_7___e0_6___a_f_f1_3___6_8_f_2f908_9_b___d_13___5_7___a_d_20___5_7_a_c___32_5_7_a_d_f___42_9_b___52_4_5_9___b_d___60_4___9_f_70_2_3_5_a_b_d_f_82_4_6_b_c_e___96_8_f_a4_6_8_9_b1_3___8_a_c1_3___b_d___d0_2___5_9_d_e_e2_3_7___a_c_f3_7___9_b___f_2fa01_3___a_f_12_6_9___c;
-    b_f0_usets[9] = F0_2f803___6_e___12_4___8_a___d_24_9___33_6___a_42___b_d_52_3_5_c___f_62_5_9___72_4_6_b___82_4_9_f_91_2_4_5_8___a_c___f_a1_2_6___b1_7___9_b___e_c0_1_8_9_b_e_d0_2___4_7___e0_6___a_f_f1_3___6_8_f_2f908_9_b___d_13___5_7___a_d_20___5_7_a_c___32_5_7_a_d_f___42_9_b___52_4_5_9___b_d___60_4___9_f_70_2_3_5_a_b_d_f_82_4_6_b_c_e___96_8_f_a4_6_8_9_b1_3___8_a_c1_3___b_d___d0_2___5_9_d_e_e2_3_7___a_c_f3_7___9_b___f_2fa01_3___a_f_12_6_9___c_uset;
+    b_f0_vars[8] = F0_2f803___6_e___12_4___8_a___d_24_9___33_6___a_42___b_d_52_3_5_c___f_62_5_9___72_4_6_b___82_4_9_f_91_2_4_5_8___a_c___f_a1_2_6___b1_7___9_b___e_c0_1_8_9_b_e_d0_2___4_7___e0_6___a_f_f1_3___6_8_f_2f908_9_b___d_13___5_7___a_d_20___5_7_a_c___32_5_7_a_d_f___42_9_b___52_4_5_9___b_d___60_4___9_f_70_2_3_5_a_b_d_f_82_4_6_b_c_e___96_8_f_a4_6_8_9_b1_3___8_a_c1_3___b_d___d0_2___5_9_d_e_e2_3_7___a_c_f3_7___9_b___f_2fa01_3___a_f_12_6_9___c;
+    b_f0_usets[8] = F0_2f803___6_e___12_4___8_a___d_24_9___33_6___a_42___b_d_52_3_5_c___f_62_5_9___72_4_6_b___82_4_9_f_91_2_4_5_8___a_c___f_a1_2_6___b1_7___9_b___e_c0_1_8_9_b_e_d0_2___4_7___e0_6___a_f_f1_3___6_8_f_2f908_9_b___d_13___5_7___a_d_20___5_7_a_c___32_5_7_a_d_f___42_9_b___52_4_5_9___b_d___60_4___9_f_70_2_3_5_a_b_d_f_82_4_6_b_c_e___96_8_f_a4_6_8_9_b1_3___8_a_c1_3___b_d___d0_2___5_9_d_e_e2_3_7___a_c_f3_7___9_b___f_2fa01_3___a_f_12_6_9___c_uset;
     Var * F0_2f803_7___18_a___33_5___7_9___50_2_3_5_9_60_1_7_8_76_89_f_91___3_7_8_a0_3___b7_9___d_f___c1_3___6_8___d_f_d2___d_f_e0_3_c_2f913___5_7___26_8_9_b_e___32_4_6_8___a_d_f___4d_51_2_4_5_8_60_4_7_d_71___5_7_a___85_7___c_e___96_8___a3_7___c_e_f_b1___c0_2_5_8_a_d_e_e0___c_e_f0_3_5___7_a_b_d_2fa01_10_2___4_d = b_f0.createVar("F0_2f803_7___18_a___33_5___7_9___50_2_3_5_9_60_1_7_8_76_89_f_91___3_7_8_a0_3___b7_9___d_f___c1_3___6_8___d_f_d2___d_f_e0_3_c_2f913___5_7___26_8_9_b_e___32_4_6_8___a_d_f___4d_51_2_4_5_8_60_4_7_d_71___5_7_a___85_7___c_e___96_8___a3_7___c_e_f_b1___c0_2_5_8_a_d_e_e0___c_e_f0_3_5___7_a_b_d_2fa01_10_2___4_d", All0);
-    b_f0_vars[10] = F0_2f803_7___18_a___33_5___7_9___50_2_3_5_9_60_1_7_8_76_89_f_91___3_7_8_a0_3___b7_9___d_f___c1_3___6_8___d_f_d2___d_f_e0_3_c_2f913___5_7___26_8_9_b_e___32_4_6_8___a_d_f___4d_51_2_4_5_8_60_4_7_d_71___5_7_a___85_7___c_e___96_8___a3_7___c_e_f_b1___c0_2_5_8_a_d_e_e0___c_e_f0_3_5___7_a_b_d_2fa01_10_2___4_d;
-    b_f0_usets[10] = F0_2f803_7___18_a___33_5___7_9___50_2_3_5_9_60_1_7_8_76_89_f_91___3_7_8_a0_3___b7_9___d_f___c1_3___6_8___d_f_d2___d_f_e0_3_c_2f913___5_7___26_8_9_b_e___32_4_6_8___a_d_f___4d_51_2_4_5_8_60_4_7_d_71___5_7_a___85_7___c_e___96_8___a3_7___c_e_f_b1___c0_2_5_8_a_d_e_e0___c_e_f0_3_5___7_a_b_d_2fa01_10_2___4_d_uset;
+    b_f0_vars[9] = F0_2f803_7___18_a___33_5___7_9___50_2_3_5_9_60_1_7_8_76_89_f_91___3_7_8_a0_3___b7_9___d_f___c1_3___6_8___d_f_d2___d_f_e0_3_c_2f913___5_7___26_8_9_b_e___32_4_6_8___a_d_f___4d_51_2_4_5_8_60_4_7_d_71___5_7_a___85_7___c_e___96_8___a3_7___c_e_f_b1___c0_2_5_8_a_d_e_e0___c_e_f0_3_5___7_a_b_d_2fa01_10_2___4_d;
+    b_f0_usets[9] = F0_2f803_7___18_a___33_5___7_9___50_2_3_5_9_60_1_7_8_76_89_f_91___3_7_8_a0_3___b7_9___d_f___c1_3___6_8___d_f_d2___d_f_e0_3_c_2f913___5_7___26_8_9_b_e___32_4_6_8___a_d_f___4d_51_2_4_5_8_60_4_7_d_71___5_7_a___85_7___c_e___96_8___a3_7___c_e_f_b1___c0_2_5_8_a_d_e_e0___c_e_f0_3_5___7_a_b_d_2fa01_10_2___4_d_uset;
     Var * F0_2f805_6_9___c_13_5_7___d_f_25___8_36_7_9_a_c_40_1_5___a_51___3_5_8___b_60___2_5_7_8_c___70_2_6_9___b_d_80_3_5___8_a_91___5_9_a_a1_2_6___a_b2___4_7___9_b_f_c2___4_6___a_d_e_d0_4_8___c_e_e1_3_5_6_8_e_f_f1___3_8_a_e_f_2f905_b___e_11_2_6_a_e_f_24_5_9___d_31_2_7_9_b_c_e_40___2_a_c_f___51_4___7_d___f_61___3_5___9_b_e_75_8_9_b_e_80_3___5_b_c_e_97_9_a_c_f_a0_4_5_7_a_c___f_b2___6_9_b___d_c1_3___5_8_c_d2_6___9_f_e4___7_a_c_f1_5___9_b_e_f_2fa01_2_5___8_c___e_10_1_4_5_7_8 = b_f0.createVar("F0_2f805_6_9___c_13_5_7___d_f_25___8_36_7_9_a_c_40_1_5___a_51___3_5_8___b_60___2_5_7_8_c___70_2_6_9___b_d_80_3_5___8_a_91___5_9_a_a1_2_6___a_b2___4_7___9_b_f_c2___4_6___a_d_e_d0_4_8___c_e_e1_3_5_6_8_e_f_f1___3_8_a_e_f_2f905_b___e_11_2_6_a_e_f_24_5_9___d_31_2_7_9_b_c_e_40___2_a_c_f___51_4___7_d___f_61___3_5___9_b_e_75_8_9_b_e_80_3___5_b_c_e_97_9_a_c_f_a0_4_5_7_a_c___f_b2___6_9_b___d_c1_3___5_8_c_d2_6___9_f_e4___7_a_c_f1_5___9_b_e_f_2fa01_2_5___8_c___e_10_1_4_5_7_8", All0);
-    b_f0_vars[11] = F0_2f805_6_9___c_13_5_7___d_f_25___8_36_7_9_a_c_40_1_5___a_51___3_5_8___b_60___2_5_7_8_c___70_2_6_9___b_d_80_3_5___8_a_91___5_9_a_a1_2_6___a_b2___4_7___9_b_f_c2___4_6___a_d_e_d0_4_8___c_e_e1_3_5_6_8_e_f_f1___3_8_a_e_f_2f905_b___e_11_2_6_a_e_f_24_5_9___d_31_2_7_9_b_c_e_40___2_a_c_f___51_4___7_d___f_61___3_5___9_b_e_75_8_9_b_e_80_3___5_b_c_e_97_9_a_c_f_a0_4_5_7_a_c___f_b2___6_9_b___d_c1_3___5_8_c_d2_6___9_f_e4___7_a_c_f1_5___9_b_e_f_2fa01_2_5___8_c___e_10_1_4_5_7_8;
-    b_f0_usets[11] = F0_2f805_6_9___c_13_5_7___d_f_25___8_36_7_9_a_c_40_1_5___a_51___3_5_8___b_60___2_5_7_8_c___70_2_6_9___b_d_80_3_5___8_a_91___5_9_a_a1_2_6___a_b2___4_7___9_b_f_c2___4_6___a_d_e_d0_4_8___c_e_e1_3_5_6_8_e_f_f1___3_8_a_e_f_2f905_b___e_11_2_6_a_e_f_24_5_9___d_31_2_7_9_b_c_e_40___2_a_c_f___51_4___7_d___f_61___3_5___9_b_e_75_8_9_b_e_80_3___5_b_c_e_97_9_a_c_f_a0_4_5_7_a_c___f_b2___6_9_b___d_c1_3___5_8_c_d2_6___9_f_e4___7_a_c_f1_5___9_b_e_f_2fa01_2_5___8_c___e_10_1_4_5_7_8_uset;
+    b_f0_vars[10] = F0_2f805_6_9___c_13_5_7___d_f_25___8_36_7_9_a_c_40_1_5___a_51___3_5_8___b_60___2_5_7_8_c___70_2_6_9___b_d_80_3_5___8_a_91___5_9_a_a1_2_6___a_b2___4_7___9_b_f_c2___4_6___a_d_e_d0_4_8___c_e_e1_3_5_6_8_e_f_f1___3_8_a_e_f_2f905_b___e_11_2_6_a_e_f_24_5_9___d_31_2_7_9_b_c_e_40___2_a_c_f___51_4___7_d___f_61___3_5___9_b_e_75_8_9_b_e_80_3___5_b_c_e_97_9_a_c_f_a0_4_5_7_a_c___f_b2___6_9_b___d_c1_3___5_8_c_d2_6___9_f_e4___7_a_c_f1_5___9_b_e_f_2fa01_2_5___8_c___e_10_1_4_5_7_8;
+    b_f0_usets[10] = F0_2f805_6_9___c_13_5_7___d_f_25___8_36_7_9_a_c_40_1_5___a_51___3_5_8___b_60___2_5_7_8_c___70_2_6_9___b_d_80_3_5___8_a_91___5_9_a_a1_2_6___a_b2___4_7___9_b_f_c2___4_6___a_d_e_d0_4_8___c_e_e1_3_5_6_8_e_f_f1___3_8_a_e_f_2f905_b___e_11_2_6_a_e_f_24_5_9___d_31_2_7_9_b_c_e_40___2_a_c_f___51_4___7_d___f_61___3_5___9_b_e_75_8_9_b_e_80_3___5_b_c_e_97_9_a_c_f_a0_4_5_7_a_c___f_b2___6_9_b___d_c1_3___5_8_c_d2_6___9_f_e4___7_a_c_f1_5___9_b_e_f_2fa01_2_5___8_c___e_10_1_4_5_7_8_uset;
     Var * F0_2f800___3_5___7_a_d___f_14_6_9_c_e_20_1_4_6_7_c_30_2_5_8_a_b_d_f_41_4_5_8_b_e___51_3_4_9_d_f_61_4_5_7_9_b_70___7_9___d_84___6_b___d_f_92_5___7_9_a_e_a0_1_3_7_9_b_d___f_b1_4_7_b___c0_6___9_e_d1_5_6_8_a___c_e___e2_b_c_f0_1_3___6_8_9_b_c_e_f_2f902_7___a_c_e_f_11_7_8_a_c_23_6_7_d___30_5_7_d_f_44___6_a_b_f_53_6_8_9_e_f_64_5_7_b_c_e___71_4_7___d_f_80_4___6_8_d_e_90_2_4_7_8_a_c_e_a0_1_3_6_8_b_d_e_b0___3_6_9_c0_2___4_6___b_d___d4_6_8___b_d_f_e4___9_c___e_f0_6_7_9_b_d_e_2fa00_1_4_7_9_b___e_11___4_a___d = b_f0.createVar("F0_2f800___3_5___7_a_d___f_14_6_9_c_e_20_1_4_6_7_c_30_2_5_8_a_b_d_f_41_4_5_8_b_e___51_3_4_9_d_f_61_4_5_7_9_b_70___7_9___d_84___6_b___d_f_92_5___7_9_a_e_a0_1_3_7_9_b_d___f_b1_4_7_b___c0_6___9_e_d1_5_6_8_a___c_e___e2_b_c_f0_1_3___6_8_9_b_c_e_f_2f902_7___a_c_e_f_11_7_8_a_c_23_6_7_d___30_5_7_d_f_44___6_a_b_f_53_6_8_9_e_f_64_5_7_b_c_e___71_4_7___d_f_80_4___6_8_d_e_90_2_4_7_8_a_c_e_a0_1_3_6_8_b_d_e_b0___3_6_9_c0_2___4_6___b_d___d4_6_8___b_d_f_e4___9_c___e_f0_6_7_9_b_d_e_2fa00_1_4_7_9_b___e_11___4_a___d", All0);
-    b_f0_vars[12] = F0_2f800___3_5___7_a_d___f_14_6_9_c_e_20_1_4_6_7_c_30_2_5_8_a_b_d_f_41_4_5_8_b_e___51_3_4_9_d_f_61_4_5_7_9_b_70___7_9___d_84___6_b___d_f_92_5___7_9_a_e_a0_1_3_7_9_b_d___f_b1_4_7_b___c0_6___9_e_d1_5_6_8_a___c_e___e2_b_c_f0_1_3___6_8_9_b_c_e_f_2f902_7___a_c_e_f_11_7_8_a_c_23_6_7_d___30_5_7_d_f_44___6_a_b_f_53_6_8_9_e_f_64_5_7_b_c_e___71_4_7___d_f_80_4___6_8_d_e_90_2_4_7_8_a_c_e_a0_1_3_6_8_b_d_e_b0___3_6_9_c0_2___4_6___b_d___d4_6_8___b_d_f_e4___9_c___e_f0_6_7_9_b_d_e_2fa00_1_4_7_9_b___e_11___4_a___d;
-    b_f0_usets[12] = F0_2f800___3_5___7_a_d___f_14_6_9_c_e_20_1_4_6_7_c_30_2_5_8_a_b_d_f_41_4_5_8_b_e___51_3_4_9_d_f_61_4_5_7_9_b_70___7_9___d_84___6_b___d_f_92_5___7_9_a_e_a0_1_3_7_9_b_d___f_b1_4_7_b___c0_6___9_e_d1_5_6_8_a___c_e___e2_b_c_f0_1_3___6_8_9_b_c_e_f_2f902_7___a_c_e_f_11_7_8_a_c_23_6_7_d___30_5_7_d_f_44___6_a_b_f_53_6_8_9_e_f_64_5_7_b_c_e___71_4_7___d_f_80_4___6_8_d_e_90_2_4_7_8_a_c_e_a0_1_3_6_8_b_d_e_b0___3_6_9_c0_2___4_6___b_d___d4_6_8___b_d_f_e4___9_c___e_f0_6_7_9_b_d_e_2fa00_1_4_7_9_b___e_11___4_a___d_uset;
+    b_f0_vars[11] = F0_2f800___3_5___7_a_d___f_14_6_9_c_e_20_1_4_6_7_c_30_2_5_8_a_b_d_f_41_4_5_8_b_e___51_3_4_9_d_f_61_4_5_7_9_b_70___7_9___d_84___6_b___d_f_92_5___7_9_a_e_a0_1_3_7_9_b_d___f_b1_4_7_b___c0_6___9_e_d1_5_6_8_a___c_e___e2_b_c_f0_1_3___6_8_9_b_c_e_f_2f902_7___a_c_e_f_11_7_8_a_c_23_6_7_d___30_5_7_d_f_44___6_a_b_f_53_6_8_9_e_f_64_5_7_b_c_e___71_4_7___d_f_80_4___6_8_d_e_90_2_4_7_8_a_c_e_a0_1_3_6_8_b_d_e_b0___3_6_9_c0_2___4_6___b_d___d4_6_8___b_d_f_e4___9_c___e_f0_6_7_9_b_d_e_2fa00_1_4_7_9_b___e_11___4_a___d;
+    b_f0_usets[11] = F0_2f800___3_5___7_a_d___f_14_6_9_c_e_20_1_4_6_7_c_30_2_5_8_a_b_d_f_41_4_5_8_b_e___51_3_4_9_d_f_61_4_5_7_9_b_70___7_9___d_84___6_b___d_f_92_5___7_9_a_e_a0_1_3_7_9_b_d___f_b1_4_7_b___c0_6___9_e_d1_5_6_8_a___c_e___e2_b_c_f0_1_3___6_8_9_b_c_e_f_2f902_7___a_c_e_f_11_7_8_a_c_23_6_7_d___30_5_7_d_f_44___6_a_b_f_53_6_8_9_e_f_64_5_7_b_c_e___71_4_7___d_f_80_4___6_8_d_e_90_2_4_7_8_a_c_e_a0_1_3_6_8_b_d_e_b0___3_6_9_c0_2___4_6___b_d___d4_6_8___b_d_f_e4___9_c___e_f0_6_7_9_b_d_e_2fa00_1_4_7_9_b___e_11___4_a___d_uset;
     Var * F0_2f800_4_6_7_a_b_d_10___2_6_8___b_e_21_3_6_9___33_5_6_b_d___f_41_4_7_b_e_50___3_5___9_b_d___f_62_5_8_a___e_72___8_a___c_f_80_3_5_7_a_c_e___90_4_5_7_c_f_a2_3_6_8_9_b_c_b1_5_7___a_c_e___c0_2_8_9_c___f_d1_3_4_7_8_b___e0_2_3_c___f2_5_6_a_b_2f900_1_4_8_9_d_e_10___2_5_7___b_d_f_21_4_a___d_31_7_9_c_f_40_4_b_50_2___4_7_8_b_62_5___7_b___d_f___71_3___6_8_a_c___81_4_8_a_e_f_91_4_8_9_b_c_a2_3_5_7_a_f_b6_7_9_c_d_c4_8_b_f_d0_2_4___6_8_9_b_c_f_e1_2_4_6___8_a_d_e_f0___2_4_5_7___9_c_e_f_2fa01_4_6_8_10_2___5_7___d = b_f0.createVar("F0_2f800_4_6_7_a_b_d_10___2_6_8___b_e_21_3_6_9___33_5_6_b_d___f_41_4_7_b_e_50___3_5___9_b_d___f_62_5_8_a___e_72___8_a___c_f_80_3_5_7_a_c_e___90_4_5_7_c_f_a2_3_6_8_9_b_c_b1_5_7___a_c_e___c0_2_8_9_c___f_d1_3_4_7_8_b___e0_2_3_c___f2_5_6_a_b_2f900_1_4_8_9_d_e_10___2_5_7___b_d_f_21_4_a___d_31_7_9_c_f_40_4_b_50_2___4_7_8_b_62_5___7_b___d_f___71_3___6_8_a_c___81_4_8_a_e_f_91_4_8_9_b_c_a2_3_5_7_a_f_b6_7_9_c_d_c4_8_b_f_d0_2_4___6_8_9_b_c_f_e1_2_4_6___8_a_d_e_f0___2_4_5_7___9_c_e_f_2fa01_4_6_8_10_2___5_7___d", All0);
-    b_f0_vars[13] = F0_2f800_4_6_7_a_b_d_10___2_6_8___b_e_21_3_6_9___33_5_6_b_d___f_41_4_7_b_e_50___3_5___9_b_d___f_62_5_8_a___e_72___8_a___c_f_80_3_5_7_a_c_e___90_4_5_7_c_f_a2_3_6_8_9_b_c_b1_5_7___a_c_e___c0_2_8_9_c___f_d1_3_4_7_8_b___e0_2_3_c___f2_5_6_a_b_2f900_1_4_8_9_d_e_10___2_5_7___b_d_f_21_4_a___d_31_7_9_c_f_40_4_b_50_2___4_7_8_b_62_5___7_b___d_f___71_3___6_8_a_c___81_4_8_a_e_f_91_4_8_9_b_c_a2_3_5_7_a_f_b6_7_9_c_d_c4_8_b_f_d0_2_4___6_8_9_b_c_f_e1_2_4_6___8_a_d_e_f0___2_4_5_7___9_c_e_f_2fa01_4_6_8_10_2___5_7___d;
-    b_f0_usets[13] = F0_2f800_4_6_7_a_b_d_10___2_6_8___b_e_21_3_6_9___33_5_6_b_d___f_41_4_7_b_e_50___3_5___9_b_d___f_62_5_8_a___e_72___8_a___c_f_80_3_5_7_a_c_e___90_4_5_7_c_f_a2_3_6_8_9_b_c_b1_5_7___a_c_e___c0_2_8_9_c___f_d1_3_4_7_8_b___e0_2_3_c___f2_5_6_a_b_2f900_1_4_8_9_d_e_10___2_5_7___b_d_f_21_4_a___d_31_7_9_c_f_40_4_b_50_2___4_7_8_b_62_5___7_b___d_f___71_3___6_8_a_c___81_4_8_a_e_f_91_4_8_9_b_c_a2_3_5_7_a_f_b6_7_9_c_d_c4_8_b_f_d0_2_4___6_8_9_b_c_f_e1_2_4_6___8_a_d_e_f0___2_4_5_7___9_c_e_f_2fa01_4_6_8_10_2___5_7___d_uset;
+    b_f0_vars[12] = F0_2f800_4_6_7_a_b_d_10___2_6_8___b_e_21_3_6_9___33_5_6_b_d___f_41_4_7_b_e_50___3_5___9_b_d___f_62_5_8_a___e_72___8_a___c_f_80_3_5_7_a_c_e___90_4_5_7_c_f_a2_3_6_8_9_b_c_b1_5_7___a_c_e___c0_2_8_9_c___f_d1_3_4_7_8_b___e0_2_3_c___f2_5_6_a_b_2f900_1_4_8_9_d_e_10___2_5_7___b_d_f_21_4_a___d_31_7_9_c_f_40_4_b_50_2___4_7_8_b_62_5___7_b___d_f___71_3___6_8_a_c___81_4_8_a_e_f_91_4_8_9_b_c_a2_3_5_7_a_f_b6_7_9_c_d_c4_8_b_f_d0_2_4___6_8_9_b_c_f_e1_2_4_6___8_a_d_e_f0___2_4_5_7___9_c_e_f_2fa01_4_6_8_10_2___5_7___d;
+    b_f0_usets[12] = F0_2f800_4_6_7_a_b_d_10___2_6_8___b_e_21_3_6_9___33_5_6_b_d___f_41_4_7_b_e_50___3_5___9_b_d___f_62_5_8_a___e_72___8_a___c_f_80_3_5_7_a_c_e___90_4_5_7_c_f_a2_3_6_8_9_b_c_b1_5_7___a_c_e___c0_2_8_9_c___f_d1_3_4_7_8_b___e0_2_3_c___f2_5_6_a_b_2f900_1_4_8_9_d_e_10___2_5_7___b_d_f_21_4_a___d_31_7_9_c_f_40_4_b_50_2___4_7_8_b_62_5___7_b___d_f___71_3___6_8_a_c___81_4_8_a_e_f_91_4_8_9_b_c_a2_3_5_7_a_f_b6_7_9_c_d_c4_8_b_f_d0_2_4___6_8_9_b_c_f_e1_2_4_6___8_a_d_e_f0___2_4_5_7___9_c_e_f_2fa01_4_6_8_10_2___5_7___d_uset;
     Var * F0_2f800_1_5_6_a_f_12_3_5_6_8_b_d_e_20_6_9___b_d_f___34_6___8_a_b_47_9___f_51_2_4_5_9___c_e___63_5_7_d_f_71_2_9_b___d_80_3___9_b___d_f_90_7_9_b_e_a1_2_6_7_c_d_b3_4_c___f_c1___5_7_b_f_d0_5___8_a_c_d_e3___5_7___9_c_f_f2_4___7_e___2f900_3_4_6_a_c_d_10_1_3___5_7_9_b___d_20_3_b_e_32_3_6_8_a_b_d_43_5___7_b_c_50_4_6_7_9_d_e_61_3_9___f_72_4___8_a_c_d_f_80_4_5_8_9_b_c_f___91_5_7_8_a_c_e_f_a1___3_5_7___a_c_f_b2_4_6_7_a_e_f_c2_7_8_c_e___d1_3_4_6_9_c_e_e1_5___8_c_f_f7_9_a_c_d_2fa00_4_7_9___b_f___11_3_5_7_9_b_d = b_f0.createVar("F0_2f800_1_5_6_a_f_12_3_5_6_8_b_d_e_20_6_9___b_d_f___34_6___8_a_b_47_9___f_51_2_4_5_9___c_e___63_5_7_d_f_71_2_9_b___d_80_3___9_b___d_f_90_7_9_b_e_a1_2_6_7_c_d_b3_4_c___f_c1___5_7_b_f_d0_5___8_a_c_d_e3___5_7___9_c_f_f2_4___7_e___2f900_3_4_6_a_c_d_10_1_3___5_7_9_b___d_20_3_b_e_32_3_6_8_a_b_d_43_5___7_b_c_50_4_6_7_9_d_e_61_3_9___f_72_4___8_a_c_d_f_80_4_5_8_9_b_c_f___91_5_7_8_a_c_e_f_a1___3_5_7___a_c_f_b2_4_6_7_a_e_f_c2_7_8_c_e___d1_3_4_6_9_c_e_e1_5___8_c_f_f7_9_a_c_d_2fa00_4_7_9___b_f___11_3_5_7_9_b_d", All0);
-    b_f0_vars[14] = F0_2f800_1_5_6_a_f_12_3_5_6_8_b_d_e_20_6_9___b_d_f___34_6___8_a_b_47_9___f_51_2_4_5_9___c_e___63_5_7_d_f_71_2_9_b___d_80_3___9_b___d_f_90_7_9_b_e_a1_2_6_7_c_d_b3_4_c___f_c1___5_7_b_f_d0_5___8_a_c_d_e3___5_7___9_c_f_f2_4___7_e___2f900_3_4_6_a_c_d_10_1_3___5_7_9_b___d_20_3_b_e_32_3_6_8_a_b_d_43_5___7_b_c_50_4_6_7_9_d_e_61_3_9___f_72_4___8_a_c_d_f_80_4_5_8_9_b_c_f___91_5_7_8_a_c_e_f_a1___3_5_7___a_c_f_b2_4_6_7_a_e_f_c2_7_8_c_e___d1_3_4_6_9_c_e_e1_5___8_c_f_f7_9_a_c_d_2fa00_4_7_9___b_f___11_3_5_7_9_b_d;
-    b_f0_usets[14] = F0_2f800_1_5_6_a_f_12_3_5_6_8_b_d_e_20_6_9___b_d_f___34_6___8_a_b_47_9___f_51_2_4_5_9___c_e___63_5_7_d_f_71_2_9_b___d_80_3___9_b___d_f_90_7_9_b_e_a1_2_6_7_c_d_b3_4_c___f_c1___5_7_b_f_d0_5___8_a_c_d_e3___5_7___9_c_f_f2_4___7_e___2f900_3_4_6_a_c_d_10_1_3___5_7_9_b___d_20_3_b_e_32_3_6_8_a_b_d_43_5___7_b_c_50_4_6_7_9_d_e_61_3_9___f_72_4___8_a_c_d_f_80_4_5_8_9_b_c_f___91_5_7_8_a_c_e_f_a1___3_5_7___a_c_f_b2_4_6_7_a_e_f_c2_7_8_c_e___d1_3_4_6_9_c_e_e1_5___8_c_f_f7_9_a_c_d_2fa00_4_7_9___b_f___11_3_5_7_9_b_d_uset;
+    b_f0_vars[13] = F0_2f800_1_5_6_a_f_12_3_5_6_8_b_d_e_20_6_9___b_d_f___34_6___8_a_b_47_9___f_51_2_4_5_9___c_e___63_5_7_d_f_71_2_9_b___d_80_3___9_b___d_f_90_7_9_b_e_a1_2_6_7_c_d_b3_4_c___f_c1___5_7_b_f_d0_5___8_a_c_d_e3___5_7___9_c_f_f2_4___7_e___2f900_3_4_6_a_c_d_10_1_3___5_7_9_b___d_20_3_b_e_32_3_6_8_a_b_d_43_5___7_b_c_50_4_6_7_9_d_e_61_3_9___f_72_4___8_a_c_d_f_80_4_5_8_9_b_c_f___91_5_7_8_a_c_e_f_a1___3_5_7___a_c_f_b2_4_6_7_a_e_f_c2_7_8_c_e___d1_3_4_6_9_c_e_e1_5___8_c_f_f7_9_a_c_d_2fa00_4_7_9___b_f___11_3_5_7_9_b_d;
+    b_f0_usets[13] = F0_2f800_1_5_6_a_f_12_3_5_6_8_b_d_e_20_6_9___b_d_f___34_6___8_a_b_47_9___f_51_2_4_5_9___c_e___63_5_7_d_f_71_2_9_b___d_80_3___9_b___d_f_90_7_9_b_e_a1_2_6_7_c_d_b3_4_c___f_c1___5_7_b_f_d0_5___8_a_c_d_e3___5_7___9_c_f_f2_4___7_e___2f900_3_4_6_a_c_d_10_1_3___5_7_9_b___d_20_3_b_e_32_3_6_8_a_b_d_43_5___7_b_c_50_4_6_7_9_d_e_61_3_9___f_72_4___8_a_c_d_f_80_4_5_8_9_b_c_f___91_5_7_8_a_c_e_f_a1___3_5_7___a_c_f_b2_4_6_7_a_e_f_c2_7_8_c_e___d1_3_4_6_9_c_e_e1_5___8_c_f_f7_9_a_c_d_2fa00_4_7_9___b_f___11_3_5_7_9_b_d_uset;
     Var * F0_2f800_1_6_8_9_c_d_f_10_4___6_8___a_e_20_2___4_8_b_d___f_34_6_8_9_b_e_f_41___3_7_9_b_d___52_4_5_8_9_c_e_f_63_5_8_a_b_e_73_5___80_4_6_a___d_f_93___6_9___b_d_a1___4_a_c_f_b8_b___d_f_c4___6_c_e___d1_4_6_a_d_e_e1_5___7_d_e_f0_2_7_8_a_d_e_2f900_1_4_6_7_a_d_e_11_2_7_a___d_f_21_2_5___8_c_d_f_31_2_4_b_d_f___47_9_c_d_50___2_5___b_d___f_66_70_2_3_a_c___e_80___2_5_6_8___a_d_f_90_6_8_a___c_e_a0_3_4_6_8___a_e_b2_5___a_c___e_c2_6___a_d_d0_1_3___5_8___a_e0_2___4_6___d_f_f2_3_5_6_8_a_b_e_f_2fa01_3_7_9_a_c_10_2_3_9_a_d = b_f0.createVar("F0_2f800_1_6_8_9_c_d_f_10_4___6_8___a_e_20_2___4_8_b_d___f_34_6_8_9_b_e_f_41___3_7_9_b_d___52_4_5_8_9_c_e_f_63_5_8_a_b_e_73_5___80_4_6_a___d_f_93___6_9___b_d_a1___4_a_c_f_b8_b___d_f_c4___6_c_e___d1_4_6_a_d_e_e1_5___7_d_e_f0_2_7_8_a_d_e_2f900_1_4_6_7_a_d_e_11_2_7_a___d_f_21_2_5___8_c_d_f_31_2_4_b_d_f___47_9_c_d_50___2_5___b_d___f_66_70_2_3_a_c___e_80___2_5_6_8___a_d_f_90_6_8_a___c_e_a0_3_4_6_8___a_e_b2_5___a_c___e_c2_6___a_d_d0_1_3___5_8___a_e0_2___4_6___d_f_f2_3_5_6_8_a_b_e_f_2fa01_3_7_9_a_c_10_2_3_9_a_d", All0);
-    b_f0_vars[15] = F0_2f800_1_6_8_9_c_d_f_10_4___6_8___a_e_20_2___4_8_b_d___f_34_6_8_9_b_e_f_41___3_7_9_b_d___52_4_5_8_9_c_e_f_63_5_8_a_b_e_73_5___80_4_6_a___d_f_93___6_9___b_d_a1___4_a_c_f_b8_b___d_f_c4___6_c_e___d1_4_6_a_d_e_e1_5___7_d_e_f0_2_7_8_a_d_e_2f900_1_4_6_7_a_d_e_11_2_7_a___d_f_21_2_5___8_c_d_f_31_2_4_b_d_f___47_9_c_d_50___2_5___b_d___f_66_70_2_3_a_c___e_80___2_5_6_8___a_d_f_90_6_8_a___c_e_a0_3_4_6_8___a_e_b2_5___a_c___e_c2_6___a_d_d0_1_3___5_8___a_e0_2___4_6___d_f_f2_3_5_6_8_a_b_e_f_2fa01_3_7_9_a_c_10_2_3_9_a_d;
-    b_f0_usets[15] = F0_2f800_1_6_8_9_c_d_f_10_4___6_8___a_e_20_2___4_8_b_d___f_34_6_8_9_b_e_f_41___3_7_9_b_d___52_4_5_8_9_c_e_f_63_5_8_a_b_e_73_5___80_4_6_a___d_f_93___6_9___b_d_a1___4_a_c_f_b8_b___d_f_c4___6_c_e___d1_4_6_a_d_e_e1_5___7_d_e_f0_2_7_8_a_d_e_2f900_1_4_6_7_a_d_e_11_2_7_a___d_f_21_2_5___8_c_d_f_31_2_4_b_d_f___47_9_c_d_50___2_5___b_d___f_66_70_2_3_a_c___e_80___2_5_6_8___a_d_f_90_6_8_a___c_e_a0_3_4_6_8___a_e_b2_5___a_c___e_c2_6___a_d_d0_1_3___5_8___a_e0_2___4_6___d_f_f2_3_5_6_8_a_b_e_f_2fa01_3_7_9_a_c_10_2_3_9_a_d_uset;
+    b_f0_vars[14] = F0_2f800_1_6_8_9_c_d_f_10_4___6_8___a_e_20_2___4_8_b_d___f_34_6_8_9_b_e_f_41___3_7_9_b_d___52_4_5_8_9_c_e_f_63_5_8_a_b_e_73_5___80_4_6_a___d_f_93___6_9___b_d_a1___4_a_c_f_b8_b___d_f_c4___6_c_e___d1_4_6_a_d_e_e1_5___7_d_e_f0_2_7_8_a_d_e_2f900_1_4_6_7_a_d_e_11_2_7_a___d_f_21_2_5___8_c_d_f_31_2_4_b_d_f___47_9_c_d_50___2_5___b_d___f_66_70_2_3_a_c___e_80___2_5_6_8___a_d_f_90_6_8_a___c_e_a0_3_4_6_8___a_e_b2_5___a_c___e_c2_6___a_d_d0_1_3___5_8___a_e0_2___4_6___d_f_f2_3_5_6_8_a_b_e_f_2fa01_3_7_9_a_c_10_2_3_9_a_d;
+    b_f0_usets[14] = F0_2f800_1_6_8_9_c_d_f_10_4___6_8___a_e_20_2___4_8_b_d___f_34_6_8_9_b_e_f_41___3_7_9_b_d___52_4_5_8_9_c_e_f_63_5_8_a_b_e_73_5___80_4_6_a___d_f_93___6_9___b_d_a1___4_a_c_f_b8_b___d_f_c4___6_c_e___d1_4_6_a_d_e_e1_5___7_d_e_f0_2_7_8_a_d_e_2f900_1_4_6_7_a_d_e_11_2_7_a___d_f_21_2_5___8_c_d_f_31_2_4_b_d_f___47_9_c_d_50___2_5___b_d___f_66_70_2_3_a_c___e_80___2_5_6_8___a_d_f_90_6_8_a___c_e_a0_3_4_6_8___a_e_b2_5___a_c___e_c2_6___a_d_d0_1_3___5_8___a_e0_2___4_6___d_f_f2_3_5_6_8_a_b_e_f_2fa01_3_7_9_a_c_10_2_3_9_a_d_uset;
     Var * F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c = b_f0.createVar("F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c", All0);
-    b_f0_vars[16] = F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c;
-    b_f0_usets[16] = F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c_uset;
+    b_f0_vars[15] = F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c;
+    b_f0_usets[15] = F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c_uset;
     Var * F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c = b_f0.createVar("F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c", All0);
-    b_f0_vars[17] = F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c;
-    b_f0_usets[17] = F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c_uset;
+    b_f0_vars[16] = F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c;
+    b_f0_usets[16] = F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c_uset;
 
     b_f0_compiler.compile(b_f0_vars, b_f0_usets);
     PabloAST * F0_2f800___6_d_12_6_9_34_8_89_f_91___3_8_a0_3___c1_3___6_8_9_b___d_f_d4___c_f___e2_4___6_8___b_d_f_f1_3___6_a_c___2f905_7___9_b_c_e_f_12_b_d_f_23_6_7_35_7_9_b_c_f_49_b_c_51_8_60_4_7_d_71___5_7_a___f_81___5_7_8_b___91_3___aa_c___b0_2___c4_6___9_d___d2_4___7_9___e1_5_d_f_f1_2_8_9_c_2fa03_8_d_e_10___4_6_d_adv1 = b_f0.createAdvance(F0_2f800___6_d_12_6_9_34_8_89_f_91___3_8_a0_3___c1_3___6_8_9_b___d_f_d4___c_f___e2_4___6_8___b_d_f_f1_3___6_a_c___2f905_7___9_b_c_e_f_12_b_d_f_23_6_7_35_7_9_b_c_f_49_b_c_51_8_60_4_7_d_71___5_7_a___f_81___5_7_8_b___91_3___aa_c___b0_2___c4_6___9_d___d2_4___7_9___e1_5_d_f_f1_2_8_9_c_2fa03_8_d_e_10___4_6_d, 1);
@@ -1598,7 +1640,7 @@ void SingletonCanonicalization::generatePabloMethod() {
     xfrm_f0[5] = b_f0.createOr(xfrm_f0[5], F0_2f800_1_3___6_8_a_d_10_1_3_4_8_a_b_d_21_4___6_9___e_36_7_b_c_e_40_1_4_8_9_f_51_3_6___b_e_f_63_5_9_c___e_71_3_4_6_9_a_c_80___8_a___d_90___2_4_5_7_9___b_f_a0_2___9_b_f_b2___4_6___8_c_c1___4_6_7_9_b_c_d1_6_a_f___e2_4___8_d_e_f1_2_4_7_8_a_d_f___2f901_3_4_7___a_e_f_13_8___b_d_f_22___5_7_9_e_f_31___3_7_9_a_d_f___42_4_9_51_2_7_8_c___60_2_3_5_6_a_b_d___70_3___5_8_a_b_82_5___8_e_92___8_a___e_a0___3_6_a_b_e_b1_3_4_8_9_e___c0_2___5_8___d_f_d0_3_4_7_8_b_c_f_e0_2_4_6_8_9_c_e_f_f3_6_7_b_d___2fa05_7_9_c_e_f_11_5_7_8_c_adv3);
     PabloAST * F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c_adv3 = b_f0.createAdvance(F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c, 3);
     xfrm_f0[1] = b_f0.createOr(xfrm_f0[1], F0_2f802_5_8_c___f_11___4_a___c_20_1_5___8_31_8___a_c_e___42_4_6___9_c___51_3_5_7_c_d_61_2_4_d_e_70_4___8_a___d_86___d_90_2___5_7___9_c_f_a1___3_5___8_c_b0___2_6_7_a___c_e_c3_4_7_8_e_f_d3_6___a_c___e_e1___9_b___f0_4_5_7___9_b_c_2f900___3_7___9_c_e_10_1_3___5_9___b_d_e_22_3_6___b_f_35_9___b_e_f_41_3___5_8_c_f_51_4_8_d_60_1_3_4_7_9_a_c_72_9_a_c_e___80_4___6_9___b_d_f_90_3_4_7_b_c_a0___6_9_e_f_b1_3_5___7_9_b_d_c2___5_9_c_d_f_d1___4_8_b_d___e0_2_3_5_7_8_a_b_d_f___f1_4___6_8___a_c_d_2fa01_5_8_b_d_e_10_2_5_7_8_c_adv3);
-    del_f0 = b_f0.createOr(del_f0, F0_2f800);
+    del_f0 = b_f0.createOr(del_f0, F0_2f800___2_4___c_e___11_3___5_7___b_d___33_5___7_9___58_a___f_62___b_d___70_2___a_c_e___88_a___e_90_3___6_9___a3_5___b7_9___d_f___c9_b___dc_e___e2_4___b_d___f_f1___6_a_c___2f905_7___c_e_f_12___a_c_e_20___2_4_5_8___34_6_8_a_e___40_5___c_e___51_3_6___b_f_60_2___4_6___a_c___71_4_6_8___a_d_f_81___6_b___96_8___a3_7___a_c_e_f_b2___c4_6___a_d___d2_4___7_a___c_e_f_e2___4_6___c_e___f0_2___5_8___a_c_e___2fa00_2___8_a___f_11_5___c);
 
     for (unsigned i = 0; i < 8; i++) {
         b_f0.createAssign(XfrmVar[i], b_f0.createOr(XfrmVar[i], xfrm_f0[i]));
@@ -1609,6 +1651,7 @@ void SingletonCanonicalization::generatePabloMethod() {
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
+        //  pb.createAssign(xfrm_out, XfrmVar[i]);
         pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
     }
     Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
@@ -2863,7 +2906,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_BIXNUM(XfrmedBasis);
 
     StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, DelPrior, SelectionMask0);
+    P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, CanonSelectionMask, DelPrior, SelectionMask0);
     SHOW_STREAM(SelectionMask0);
 
     StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
@@ -2892,9 +2935,10 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
         //  Hangul composable characters are of three types, L, V, LV and T.
         //  Compute a set of 4 parallel bit streams, one for each character class.
-        auto L_V_T_sets = Hangul_Composables();
-        StreamSet * L_V_T =  P.CreateStreamSet(L_V_T_sets.size());
-        P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, U21, L_V_T);
+        //auto L_V_T_sets = Hangul_Composables();
+        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
+        P.CreateKernelCall<Hangul_Composables>(U21, L_V_T);
+        //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, U21, L_V_T);
         SHOW_BIXNUM(L_V_T);
 
         StreamSet * TranslatedBasis = P.CreateStreamSet(21, 1);
@@ -2912,9 +2956,11 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         U21_to_UTF8(P, NFC_Basis, OutputBasis);
         SHOW_BIXNUM(OutputBasis);
     } else {
-        auto L_V_T_sets = Hangul_Composables();
-        StreamSet * L_V_T =  P.CreateStreamSet(L_V_T_sets.size());
-        P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
+        
+        //auto L_V_T_sets = Hangul_Composables();
+        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
+        P.CreateKernelCall<Hangul_Composables>(FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
+        //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
         SHOW_BIXNUM(L_V_T);
 
         StreamSet * TranslatedBasis = P.CreateStreamSet(8, 1);
