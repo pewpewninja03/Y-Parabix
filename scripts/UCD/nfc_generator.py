@@ -255,8 +255,8 @@ class U8_Translation_Generator:
         if len(deletion_bixnum_usets) > 0:
             self.builder.install_uset_family(skey + "_delete_basis_%i", deletion_bixnum_usets)
 
-    def print_uset_definitions(self):
-        print(self.builder.generate_uset_definitions("uset_%i"))
+    def get_uset_definitions(self):
+        return self.builder.generate_uset_definitions("uset_%i")
 
 def get_pfx_code(cp):
     initial = u8_code_unit(cp, 1)
@@ -294,15 +294,6 @@ def range_usets_from_cps(cp_list):
     return rg_sets
 
 singleton_header = r"""//
-class SingletonCanonicalization : public PabloKernel {
-public:
-    SingletonCanonicalization
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * SelectMask, StreamSet * XfrmBasis);
-protected:
-    void generatePabloMethod() override;
-};
-
 SingletonCanonicalization::SingletonCanonicalization
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * SelectMask, StreamSet * XfrmBasis)
@@ -351,7 +342,7 @@ mark_deletion_template = r"""    del_${code_str} = b_${code_str}.createOr(del_${
 """
 
 def generate_singleton_code(code_str, cp, canon, cp_var, Num0s, ToDel):
-    xlate_code = CharacterTranslationLogic(cp, canon, Num0s, cp_var, "xfrm_%s" % code_str, "b_%s" % code_str)
+    xlate_code = CharacterTranslationLogic(cp, canon, cp_var, "xfrm_%s" % code_str, "b_%s" % code_str)
     if ToDel > 0:
         t = string.Template(mark_deletion_template)
         xlate_code += t.substitute(code_str = code_str, del_marker = cp_var)
@@ -487,15 +478,6 @@ def finalize_nfc_stage(pass_no):
     return s.substitute(pass_no = pass_no)
 
 short_composable_header = r"""//
-class ShortComposableTranslation : public PabloKernel {
-public:
-    ShortComposableTranslation
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * DeletePrior, StreamSet * XfrmBasis);
-protected:
-    void generatePabloMethod() override;
-};
-
 ShortComposableTranslation::ShortComposableTranslation
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * DeletePrior, StreamSet * XfrmBasis)
@@ -540,7 +522,7 @@ short_composable_case_template = r"""//     ${cp1} + ${cp2} => ${precomposed}
     del_prior_${code_str} = b_${code_str}.createOr(del_prior_${code_str}, found_${cp1}_${cp2});
 """
 
-def generate_short_case_code(code_str, cp1, cp2, generated, precomposed, Num0s):
+def generate_short_case_code(code_str, cp1, cp2, generated, precomposed):
     t = string.Template(short_composable_case_template)
     s = t.substitute(code_str = code_str,
                         cp1 = "%x" % cp1,
@@ -549,7 +531,7 @@ def generate_short_case_code(code_str, cp1, cp2, generated, precomposed, Num0s):
                         cp2_var = generated[cp2],
                         cp1_len=u8_encoded_length(cp1),
                         precomposed = "%x" % precomposed)
-    xlate_code = CharacterTranslationLogic(cp2, precomposed, Num0s, "found_%x_%x" % (cp1, cp2), "xfrm_%s" % code_str, "b_%s" % code_str)
+    xlate_code = CharacterTranslationLogic(cp2, precomposed, "found_%x_%x" % (cp1, cp2), "xfrm_%s" % code_str, "b_%s" % code_str)
     #xlate_code = add_u8_bit_translation_case(code_str, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
     return s + xlate_code
 
@@ -601,27 +583,26 @@ short_composable_final_code = r"""
 #  UTF-8 character translation using Xor method for cp1 -> cp2.
 #  Assumptions:
 #    - marker is a bit stream marking the first byte of any cp1
-#    - Num0s zero bytes have been inserted the first byte of cp1
-#    - Num0s + u8_encoded_length(cp1) >= u8_encoded_length(cp2)
-#    - excess = Num0s + u8_encoded_length(cp1) - u8_encoded_length(cp2)
-#    - If excess > 0, the first excess positions are don't cares
-#      and will ultimately be deleted
+#    - if u8_encoded_length(cp2) > u8_encoded_length(cp1):
+#      zeroes have been inserted after the last byte of cp1
+#    - if u8_encoded_length(cp2) < u8_encoded_length(cp1):
+#      excess = u8_encoded_length(cp1) - u8_encoded_length(cp2)
+#      The first excess positions are don't cares and will
+#      ultimately be deleted
 #    - pb is the PabloBuilder for logic
 #
-def CharacterTranslationLogic(cp1, cp2, Num0s, marker, basis_var, pb):
+def CharacterTranslationLogic(cp1, cp2, marker, basis_var, pb):
     s = ""
     len1 = u8_encoded_length(cp1)
     len2 = u8_encoded_length(cp2)
-    excess = Num0s + len1 - len2
+    excess = len1 - len2
     for i in range(len2):
         # position for cp2 byte
         cp2_byte = u8_code_unit(cp2, i + 1)
         pos = excess + i
         cp1_byte = 0 # default for positions corresponding to inserted zeroes
-        if pos == 0:
-            cp1_byte = u8_code_unit(cp1, 1)
-        elif pos > Num0s:
-            cp1_byte = u8_code_unit(cp1, pos - Num0s + 1)
+        if pos < len1:
+            cp1_byte = u8_code_unit(cp1, pos + 1)
         if cp1_byte != cp2_byte:
             diff = cp1_byte ^ cp2_byte
             # advance marker to pos
@@ -669,16 +650,16 @@ def u8_bit_transform_sets(translation_map, zero_insertion_map):
         Num0s = 0
         if cp1 in zero_insertion_map.keys():
             Num0s = zero_insertion_map[cp1]
-        excess = Num0s + len1 - len2
+        excess = 0
+        if len1 > len2:
+            excess = len1 - len2
         for i in range(len2):
             # position for cp2 byte
             cp2_byte = u8_code_unit(cp2, i + 1)
             pos = excess + i # position relative to cp1 starter
             cp1_byte = 0 # default for positions corresponding to inserted zeroes
-            if pos == 0:
-                cp1_byte = u8_code_unit(cp1, 1)
-            elif pos > Num0s:
-                cp1_byte = u8_code_unit(cp1, pos - Num0s + 1)
+            if pos < len1:
+                cp1_byte = u8_code_unit(cp1, pos + 1)
             if cp1_byte != cp2_byte:
                 diff = cp1_byte ^ cp2_byte
                 if not pos in bit_xfrm_sets.keys():
@@ -691,15 +672,6 @@ def u8_bit_transform_sets(translation_map, zero_insertion_map):
     return bit_xfrm_sets
 
 nonstarter_decomposition_template = r"""//
-class NonStarterDecomposition : public PabloKernel {
-public:
-    NonStarterDecomposition
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * NSD_Basis);
-protected:
-    void generatePabloMethod() override;
-};
-
 NonStarterDecomposition::NonStarterDecomposition
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * NSD_Basis)
@@ -739,7 +711,7 @@ def generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2):
     basis_var = "xfrm_%x" % cp
     if Num0s != u8_encoded_length(cp2):
         raise Exception("Num0s != u8_encoded_length(cp2)")
-    cp1_logic = CharacterTranslationLogic(cp, cp1, 0, cp_var, basis_var, builder)
+    cp1_logic = CharacterTranslationLogic(cp, cp1, cp_var, basis_var, builder)
     adv = u8_encoded_length(cp1)
     cp2_logic = CharacterInsertionLogic(cp2, "ins_%x" % cp2, basis_var, builder)
     s = t.substitute(builder = builder,
@@ -753,23 +725,14 @@ def generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2):
     return s
 
 u8_insertion_bixnum_template = r"""//
-class U8_InsertionBixNum : public PabloKernel {
-public:
-    U8_InsertionBixNum
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * InsertionBixNum);
-protected:
-    void generatePabloMethod() override;
-};
-
-U8_InsertionBixNum::U8_InsertionBixNum
+NFC_Initial_Insertion::NFC_Initial_Insertion
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
                                    StreamSet * InsertionBixNum)
-: PabloKernel(ts, "U8_InsertionBixNum" + Basis->shapeString(),
+: PabloKernel(ts, "NFC_Initial_Insertion" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
 {Binding{"InsertionBixNum", InsertionBixNum}}) {}
 
-void U8_InsertionBixNum::generatePabloMethod() {
+void NFC_Initial_Insertion::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
@@ -795,6 +758,35 @@ def insert_map_to_bixnum_usets(ins_map):
             i += 1
             bit = 1 << i
     return bixnum_usets
+
+
+nfc_generated_cpp_template = r"""/*
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
+ *
+ *  This file is auto-generated by scripts/UCD/nfc_generator.py and must
+ *  be regenerated for each update to the Unicode standard.
+ *  DO NOT EDIT - manual edits will be lost.
+ */
+
+#include <kernel/unicode/normalization.h>
+#include <unicode/core/unicode_set.h>
+#include <unicode/algo/normalization.h>
+#include <unicode/utf/utf_compiler.h>
+#include <pablo/builder.hpp>
+#include <pablo/pe_ones.h>
+#include <pablo/pe_zeroes.h>
+#include <pablo/bixnum/bixnum.h>
+
+using namespace pablo;
+using namespace kernel;
+using namespace llvm;
+using namespace UCD;
+
+${uset_declarations}
+
+${kernels}
+"""
 
 
 class NFC_generator(U8_Translation_Generator):
@@ -890,7 +882,6 @@ class NFC_generator(U8_Translation_Generator):
 
     def create_max_insert_map(self):
         self.max_insert_map = {}
-        self.post_insert_map = {}
         for cp in self.singleton_map.keys():
             canon = self.singleton_map[cp]
             ldiff = u8_encoded_length(canon) - u8_encoded_length(cp)
@@ -914,10 +905,9 @@ class NFC_generator(U8_Translation_Generator):
                 raise Exception("Unexpected further decomposition for %x" % cp1)
             if uset_member(ucd.dt_map['Can'], cp2):
                 raise Exception("Unexpected further decomposition for %x" % cp2)
-            ldiff = u8_encoded_length(cp1) - u8_encoded_length(cp)
+            ldiff = u8_encoded_length(cp1) + u8_encoded_length(cp2) - u8_encoded_length(cp)
             if ldiff > 0:
                 self.update_max_insert_map(cp, ldiff)
-            self.post_insert_map[cp] = u8_encoded_length(cp2)
 
     def display_max_insert_map(self):
         for cp in sorted(self.max_insert_map.keys()):
@@ -1126,10 +1116,7 @@ class NFC_generator(U8_Translation_Generator):
             for cp1 in cp1_list:
                 for cp2 in self.short_composable_map[cp1].keys():
                     precomposed = self.short_composable_map[cp1][cp2]
-                    Num0s = 0
-                    if cp2 in self.max_insert_map.keys():
-                        Num0s = self.max_insert_map[cp2]
-                    case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, precomposed, Num0s)
+                    case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, precomposed)
                     if precomposed in cp1_list:
                         deferred.append(precomposed)
             precomposed_generated = {}
@@ -1159,28 +1146,17 @@ class NFC_generator(U8_Translation_Generator):
         return s
 
     def generate_u8_insertion_kernel(self):
-        expansion_usets = insert_map_to_bixnum_usets(self.max_insert_map)
-        insertion_usets = insert_map_to_bixnum_usets(self.post_insert_map)
-        bixnum_bits = max(len(expansion_usets), len(insertion_usets))
+        insertion_usets = insert_map_to_bixnum_usets(self.max_insert_map)
+        bixnum_bits = len(insertion_usets)
         t = string.Template(u8_insertion_bixnum_template)
         s = t.substitute(insertion_bixnum_bits = bixnum_bits)
         self.builder.open_scope("pb")
-        expansions = []
-        for i in range(len(expansion_usets)):
-            expansions.append(self.builder.install_uset(expansion_usets[i]))
-        s += self.builder.generate_scope_compilations()
-        self.builder.open_scope("pb")
         insertions = []
-        for i in range(len(insertion_usets)):
+        for i in range(bixnum_bits):
             insertions.append(self.builder.install_uset(insertion_usets[i]))
         s += self.builder.generate_scope_compilations("Advance")
-        for i in range(len(expansion_usets)):
-            s += "    insertions[%s] = %s;\n" % (i, expansions[i])
-        for i in range(len(insertion_usets)):
-            if i >= len(expansion_usets):
-                s += "    insertions[%s] = %s;\n" % (i, insertions[i])
-            else:
-                s += "    insertions[%s] = pb.createOr(insertions[%s], %s);\n" % (i, i, insertions[i])
+        for i in range(bixnum_bits):
+            s += "    insertions[%s] = %s;\n" % (i, insertions[i])
         s += u8_insertion_final_code
         return s
 
@@ -1197,12 +1173,27 @@ class NFC_generator(U8_Translation_Generator):
                 raise Exception("Unexpected further decomposition for %x" % cp1)
             if uset_member(ucd.dt_map['Can'], cp2):
                 raise Exception("Unexpected further decomposition for %x" % cp2)
-            Num0s = self.post_insert_map[cp]
+            Num0s = self.max_insert_map[cp]
             cp_var = generated[cp]
             code += generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2)
         s = t.substitute(pablo_code = code)
         return s
 
+    def emit_normalization_cpp(self):
+        basename = 'normalization-generated'
+        f = cformat.open_cpp_file_for_write(basename)
+        kernels = ""
+        kernels += generator.generate_singleton_stage2()
+        #print(generator.generate_nfc_stage(0))
+        kernels += generator.generate_short_composable_stage()
+        #print(generator.generate_insertions_for_nonstarter_decompositions())
+        kernels += generator.generate_u8_insertion_kernel()
+        kernels += generator.generate_nonstarter_decompositions()
+        uset_definitions = generator.get_uset_definitions()
+        t = string.Template(nfc_generated_cpp_template)
+        s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
+        f.write(s)
+        cformat.close_cpp_file(f)
 
 if __name__ == "__main__":
     ucd = UCD_database()
@@ -1216,13 +1207,4 @@ if __name__ == "__main__":
     #generator.display_short_composables()
     #generator.display_long_composables()
     #generator.display_max_insert_map()
-    kernels = ""
-    kernels += generator.generate_singleton_stage2()
-    #print(generator.generate_nfc_stage(0))
-    #kernels += generator.generate_short_composable_stage()
-    #generator.print_uset_definitions()
-    #print(generator.generate_insertions_for_nonstarter_decompositions())
-    #kernels += generator.generate_u8_insertion_kernel()
-    #kernels += generator.generate_nonstarter_decompositions()
-    generator.print_uset_definitions()
-    print(kernels)
+    generator.emit_normalization_cpp()

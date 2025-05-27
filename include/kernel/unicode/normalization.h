@@ -70,4 +70,71 @@ protected:
     void generatePabloMethod() override;
 };
 
+//
+//  Although NFC generally compresses text by replacing decomposed
+//  character sequences by their precomposed equivalents, there are
+//  two cases where expansion is required.   The first is that any
+//  precomposed characters with non-starter decompositions must be
+//  decomposed and left in decomposed form.   The second is that
+//  when the UTF-8 length of a precomposed character is longer than
+//  the starter of its decomposed sequence.   The NFC_Initial_Insertion
+//  kernel produces an insertion bixnum that indicates the maximum
+//  insertion required at each position.
+//
+class NFC_Initial_Insertion : public pablo::PabloKernel {
+public:
+    NFC_Initial_Insertion
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * InsertionBixNum);
+protected:
+    void generatePabloMethod() override;
+};
+
+//
+//  Apply the logic of nonstarter decomposition to any relevant
+//  precomposed characters.   This kernel assumes that the Basis
+//  bit streams have had sufficient zeroes inserted for the decomposed
+//  sequence.
+//
+class NonStarterDecomposition : public pablo::PabloKernel {
+public:
+    NonStarterDecomposition
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * NSD_Basis);
+protected:
+    void generatePabloMethod() override;
+};
+
+//
+//  Short composable sequences are those involving non reorderable
+//  characters.   In this case, precomposition is only applied when
+//  the characters are adjacent.   This kernel replaces the
+//  second character of such short composable sequences with
+//  the resulting precomposed character.   In addition a marker
+//  bit stream DeletePrior is produced identifying that the
+//  previous character must be deleted.
+//
+class ShortComposableTranslation : public pablo::PabloKernel {
+public:
+    ShortComposableTranslation
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * DeletePrior, StreamSet * XfrmBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
+//
+//  Transform any characters with a singleton decomposition to their
+//  canonical form.   In the case of UTF-8, if the singleton decomposition
+//  produces a shorter transformed sequence, the extra positions will be
+//  marked with zeroes for deletion using FilterByMask.
+//
+class SingletonCanonicalization : public pablo::PabloKernel {
+public:
+    SingletonCanonicalization
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                       StreamSet * SelectMask, StreamSet * XfrmBasis);
+protected:
+    void generatePabloMethod() override;
+};
 

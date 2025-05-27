@@ -10,6 +10,7 @@ SRC
     charclasses.cpp
     boundary_kernels.cpp
     normalization.cpp
+    normalization-generated.cpp
     UCD_property_kernel.cpp
     utf8gen.cpp
     utf8_decoder.cpp
