@@ -78,6 +78,7 @@ bool LLVM_READONLY AnyAssertionOptionIsSet();
 const std::string OmittedOption = ".";
 extern std::string ShowUnoptimizedIROption;
 extern std::string ShowIROption;
+extern std::string ShowIRFilter;
 extern std::string TraceOption;
 extern std::string CCCOption;
 extern PipelineCompilationModeOptions PipelineCompilationMode;

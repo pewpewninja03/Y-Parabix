@@ -80,9 +80,16 @@ std::string ShowIROption = OmittedOption;
 static cl::opt<std::string, true> IROutputOption("ShowIR", cl::location(ShowIROption), cl::ValueOptional,
                                                          cl::desc("Print optimized LLVM IR to stderr (by omitting =<filename>) or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
 
+
 std::string ShowUnoptimizedIROption = OmittedOption;
 static cl::opt<std::string, true> UnoptimizedIROutputOption("ShowUnoptimizedIR", cl::location(ShowUnoptimizedIROption), cl::ValueOptional,
                                                          cl::desc("Print generated LLVM IR to stderr (by omitting =<filename> or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
+
+
+std::string ShowIRFilter = "";
+static cl::opt<std::string, true> ToShowIRFilerOption("ToShow", cl::location(ShowIRFilter), cl::ValueOptional,
+                                                            cl::desc("Regex filter to choose which kernels to display when showing LLVM IR "), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+
 
 #ifdef ENABLE_PAPI
 std::string PapiCounterOptions = OmittedOption;
