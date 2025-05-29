@@ -109,10 +109,11 @@ public:
 
 class TracePass : public PassInfoMixin<TracePass> {
 public:
-    TracePass(KernelBuilder & b) : b(b) {}
+    TracePass(KernelBuilder & b) : b(b), TraceFilter(codegen::TraceOption) {}
     PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 private:
     KernelBuilder & b;
+    const boost::regex TraceFilter;
 };
 
 using AttrId = Attribute::KindId;
@@ -203,6 +204,32 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief FilteredPrintFunctionPass
+ ** ------------------------------------------------------------------------------------------------------------- */
+class FilteredPrintFunctionPass : public PrintFunctionPass {
+public:
+    FilteredPrintFunctionPass(raw_ostream & OS,
+                  const std::string & Banner = "")
+    : PrintFunctionPass(OS, Banner)
+    , RegexFilter(codegen::ShowIRFilter) {
+
+    }
+
+    PreservedAnalyses run(Function &F, AnalysisManager<Function> & A) {
+        if (LLVM_UNLIKELY(boost::regex_search(F.getName().data(), RegexFilter))) {
+            return PrintFunctionPass::run(F, A);
+        } else {
+            return PreservedAnalyses::all();
+        }
+    }
+
+    static bool isRequired() { return true; }
+private:
+    const boost::regex RegexFilter;
+};
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief runAllOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::SelectedOptimizationPasses & passes) {
@@ -263,7 +290,11 @@ void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::Selecte
             std::error_code unoptimizedErr;
             unoptimizedOut = std::make_unique<raw_fd_ostream>(options, unoptimizedErr, sys::fs::OpenFlags::OF_None);
         }
-        FPM.addPass(PrintFunctionPass(*unoptimizedOut));
+        if (codegen::ShowIRFilter.empty()) {
+            FPM.addPass(PrintFunctionPass(*unoptimizedOut));
+        } else {
+            FPM.addPass(FilteredPrintFunctionPass(*unoptimizedOut));
+        }
     }
 
     if (ADD_VERIFY_IR_PASS) {
@@ -339,6 +370,8 @@ void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::Selecte
 
     std::unique_ptr<raw_fd_ostream> optimizedOut;
 
+    // ShowIRFilter
+
     if (LLVM_UNLIKELY(codegen::ShowIROption != codegen::OmittedOption)) {
         const auto & options = codegen::ShowIROption;
         if (options.empty()) {
@@ -347,7 +380,11 @@ void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::Selecte
             std::error_code optimizedErr;
             optimizedOut = std::make_unique<raw_fd_ostream>(options, optimizedErr, sys::fs::OpenFlags::OF_None);
         }
-        FPM.addPass(PrintFunctionPass(*optimizedOut));
+        if (codegen::ShowIRFilter.empty()) {
+            FPM.addPass(PrintFunctionPass(*optimizedOut));
+        } else {
+            FPM.addPass(FilteredPrintFunctionPass(*optimizedOut));
+        }
     }
 
     if (ADD_VERIFY_IR_PASS) {
@@ -362,85 +399,6 @@ void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::Selecte
     }
 
 }
-
-#if 0
-
-inline void CPUDriver::preparePassManager() {
-
-    if (mPassManager) return;
-
-    mPassManager = std::make_unique<legacy::PassManager>();
-
-    PassRegistry * Registry = PassRegistry::getPassRegistry();
-    initializeCore(*Registry);
-    initializeCodeGen(*Registry);
-    initializeLowerIntrinsicsPass(*Registry);
-    if (LLVM_UNLIKELY(codegen::ShowUnoptimizedIROption != codegen::OmittedOption)) {
-        if (LLVM_LIKELY(mIROutputStream == nullptr)) {
-            if (!codegen::ShowUnoptimizedIROption.empty()) {
-                std::error_code error;
-                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::OF_None);
-            } else {
-                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
-            }
-        }
-        mPassManager->add(createPrintModulePass(*mUnoptimizedIROutputStream));
-    }
-    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
-        mPassManager->add(createVerifierPass());
-    }
-    if (LLVM_UNLIKELY(!codegen::TraceOption.empty())) {
-        mPassManager->add(createTracePass(mBuilder.get(), codegen::TraceOption));
-    }
-    if (LLVM_UNLIKELY(codegen::ShowIROption != codegen::OmittedOption)) {
-        if (LLVM_LIKELY(mIROutputStream == nullptr)) {
-            if (!codegen::ShowIROption.empty()) {
-                std::error_code error;
-                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::OF_None);
-            } else {
-                mIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
-            }
-        }
-        mPassManager->add(createPrintModulePass(*mIROutputStream));
-    }
-    mPassManager->add(createPromoteMemoryToRegisterPass());    // Promote stack variables to constants or PHI nodes
-    mPassManager->add(createSROAPass());                       // Promote elements of aggregate allocas whose addresses are not taken to registers.
-
-
-
-    mPassManager->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
-    mPassManager->add(createEarlyCSEPass());                   // Simple common subexpression elimination pass
-    mPassManager->add(createInstructionCombiningPass());       // Simple peephole optimizations and bit-twiddling.
-    mPassManager->add(createReassociatePass());                // Canonicalizes commutative expressions
-    mPassManager->add(createGVNPass());                        // Global value numbering redundant expression elimination pass
-    mPassManager->add(createCFGSimplificationPass());          // Repeat CFG Simplification to "clean up" any newly found redundant phi nodes
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        mPassManager->add(createRemoveRedundantAssertionsPass());
-    }
-    if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
-        if (!codegen::ShowASMOption.empty()) {
-            std::error_code error;
-            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::OF_None);
-        } else {
-            mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
-        }
-        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
-        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
-        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
-        #else
-        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile);
-        #endif
-        if (r) {
-            report_fatal_error("LLVM error: could not add emit assembly pass");
-        }
-    }
-    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
-        mPassManager->add(createVerifierPass());
-    }
-}
-
-#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructStreamSetBuffers
@@ -2242,15 +2200,13 @@ keep_phi_node:
  ** ------------------------------------------------------------------------------------------------------------- */
 PreservedAnalyses TracePass::run(Function &F, FunctionAnalysisManager & AM) {
 
-    const boost::regex ex(codegen::TraceOption);
-
     SmallVector<Instruction *, 16> toTrace;
     for (auto & B : F) {
 
         assert (toTrace.empty());
 
         for (Instruction & inst : B) {
-            if (LLVM_UNLIKELY(boost::regex_match(inst.getName().data(), ex))) {
+            if (LLVM_UNLIKELY(boost::regex_search(inst.getName().data(), TraceFilter))) {
                 toTrace.push_back(&inst);
             }
         }
