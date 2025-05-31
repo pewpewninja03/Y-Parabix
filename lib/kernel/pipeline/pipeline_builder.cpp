@@ -466,8 +466,9 @@ Kernel * PipelineBuilder::makeKernel() {
             obj->ensureLoaded();
             if (K.isFamilyCall()) {
                 numOfNestedKernelFamilyCalls++;
+            } else {
+                numOfNestedKernelFamilyCalls += obj->getNumOfNestedKernelFamilyCalls();
             }
-            numOfNestedKernelFamilyCalls += obj->getNumOfNestedKernelFamilyCalls();
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
                 for (const auto r : obj->getInternallyGeneratedStreamSets()) {
                     addInternallyGenerated(r);
