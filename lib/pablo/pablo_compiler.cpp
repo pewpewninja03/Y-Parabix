@@ -684,16 +684,10 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             value = compileExpression(b, cast<Assign>(stmt)->getValue());
             if (cast<Var>(expr)->isKernelParameter()) {
                 Value * const ptr = compileExpression(b, expr, false);
-
-                size_t align = 0;
-                Type * type = expr->getType();
-                if (type->isIntegerTy()) {
-                    align = cast<IntegerType>(type)->getBitWidth() / 8;
-                } else {
-                    type = b.getBitBlockType();
-                    align = b.getBitBlockWidth() / 8;
-                }
-                b.CreateAlignedStore(b.CreateZExt(value, type), ptr, align);
+                Type * const type = value->getType();
+                auto & dl = b.getModule()->getDataLayout();
+                const auto align = dl.getABITypeAlign(type).value();
+                b.CreateAlignedStore(value, ptr, align);
                 value = ptr;
             }
         } else if (const InFile * e = dyn_cast<InFile>(stmt)) {

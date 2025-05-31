@@ -535,10 +535,14 @@ UTF8_index::UTF8_index(LLVMTypeSystemInterface & ts, StreamSet * Source, StreamS
 }
 
 void GrepKernelOptions::setBarrier(StreamSet * b) {
+    assert (b);
+    assert (mBarrierStream == nullptr || mBarrierStream == b);
     mBarrierStream = b;
 }
 
 void GrepKernelOptions::setIndexing(StreamSet * idx) {
+    assert (idx);
+    assert (mIndexStream == nullptr || mIndexStream == idx);
     mIndexStream = idx;
 }
 
@@ -569,7 +573,7 @@ void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned
     mExternalLengths.push_back(lengthRange);
 }
 
-Bindings GrepKernelOptions::streamSetInputBindings() {
+Bindings GrepKernelOptions::makeStreamSetInputBindings() {
     Bindings inputs;
     if (mBarrierStream) {
         inputs.emplace_back("mBarrier", mBarrierStream);
@@ -589,16 +593,8 @@ Bindings GrepKernelOptions::streamSetInputBindings() {
     return inputs;
 }
 
-Bindings GrepKernelOptions::streamSetOutputBindings() {
+Bindings GrepKernelOptions::makeStreamSetOutputBindings() {
     return {Binding{"matches", mResults, FixedRate(), Add1()}};
-}
-
-Bindings GrepKernelOptions::scalarInputBindings() {
-    return {};
-}
-
-Bindings GrepKernelOptions::scalarOutputBindings() {
-    return {};
 }
 
 GrepKernelOptions::GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet)
@@ -610,44 +606,61 @@ std::string GrepKernelOptions::makeSignature() {
     std::string tmp;
     std::vector<std::string> externals;
     std::set<std::string> canon_externals;
-    raw_string_ostream sig(mSignature);
-    std::string alpha_prefix = "";
-    for (const auto & a: mAlphabets) {
-        sig << alpha_prefix << a.second->getNumElements() << "xi" << a.second->getFieldWidth();
-        alpha_prefix = "!";
+    raw_string_ostream sig(tmp);
+    if (mBarrierStream == nullptr) {
+        sig << "-B";
     }
-    if (mBarrierStream == nullptr) sig << "-barrier";
-    if (mIndexStream) sig << "+ix";
+    if (mIndexStream) {
+        assert (mIndexStream->getFieldWidth() == 1 && mIndexStream->getNumElements() == 1);
+        sig << "+X";
+    }
+    for (const auto & a: mAlphabets) {
+        sig << '!' << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+    }
+    assert (mExternalLengths.size() == mExternalLengths.size());
+    assert (mExternalBindings.size() == mExternalLengths.size());
     for (unsigned i = 0; i < mExternalBindings.size(); i++) {
         auto & e = mExternalBindings[i];
-        std::string canon = "@" + std::to_string(i);
+        sig << "+E";
         if (e.hasLookahead()) {
-            canon += std::to_string(round_up_to_blocksize(e.getLookahead()));
+            assert (round_up_to_blocksize(e.getLookahead()) == e.getLookahead());
+            sig << e.getLookahead();
         }
+        sig << ':' << e.getName();
         externals.push_back(e.getName());
-        canon_externals.insert(canon);
     }
     if (mCombiningType == GrepCombiningType::Exclude) {
         sig << "&~";
     } else if (mCombiningType == GrepCombiningType::Include) {
         sig << "|=";
     }
-    RE * canonRE = canonicalizeExternals(mRE, externals);
-    sig << ':' << Printer_RE::PrintRE(canonRE, canon_externals);
+    sig << ':' << Printer_RE::PrintRE(canonicalizeExternals(mRE, externals));
     sig.flush();
-    return mSignature;
+    return tmp;
 }
 
 ICGrepKernel::ICGrepKernel(LLVMTypeSystemInterface & ts, std::unique_ptr<GrepKernelOptions> && options)
-: PabloKernel(ts, AnnotateWithREflags("ic") + getStringHash(options->makeSignature()),
-options->streamSetInputBindings(),
-options->streamSetOutputBindings(),
-options->scalarInputBindings(),
-options->scalarOutputBindings()),
+: ICGrepKernel(ts, options->makeSignature(),
+               options->makeStreamSetInputBindings(),
+               options->makeStreamSetOutputBindings(),
+               std::move(options)) {
+
+}
+
+ICGrepKernel::ICGrepKernel(LLVMTypeSystemInterface & ts,
+                           std::string && optionsSignature,
+                           Bindings && inputStreamSetBindings,
+                           Bindings && outputStreamSetBindings,
+                           std::unique_ptr<GrepKernelOptions> && options)
+: PabloKernel(ts, AnnotateWithREflags("ic") + getStringHash(optionsSignature),
+std::move(inputStreamSetBindings),
+std::move(outputStreamSetBindings),
+{},
+{}),
 mOptions(std::move(options)),
-mSignature(mOptions->getSignature()) {
+mSignature(std::move(optionsSignature)),
+mOffset(grepOffset(mOptions->mRE)) {
     addAttribute(InfrequentlyUsed());
-    mOffset = grepOffset(mOptions->mRE);
     if (grep::ShowExternals) {
         errs() << "ICGrep signature: " << mSignature << "\n";
         errs() << "signature hash:" << getStringHash(mSignature) << "\n";
@@ -1079,7 +1092,7 @@ void kernel::GraphemeClusterLogic(PipelineBuilder & P, StreamSet * Source, Strea
     auto GCB_basis = GCB_mpx->getMultiplexedCCs();
     StreamSet * const GCB_Classes = P.CreateStreamSet(GCB_basis.size());
     P.CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
-    std::unique_ptr<GrepKernelOptions> options = std::make_unique<GrepKernelOptions>();
+    auto options = std::make_unique<GrepKernelOptions>();
     options->setIndexing(U8index);
     options->setRE(GCB);
     options->addAlphabet(GCB_mpx, GCB_Classes);

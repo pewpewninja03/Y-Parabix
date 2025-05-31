@@ -171,6 +171,8 @@ private:
 
     void recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const final;
 
+    void recursivelyListFamilyKernels(llvm::raw_ostream & familyName) const final;
+
     void linkExternalMethods(KernelBuilder & b) final;
 
     void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) final;

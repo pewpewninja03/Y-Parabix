@@ -541,7 +541,6 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                     assert (!st->isOpaque());
                     assert (!st->isEmptyTy());
                 } else {
-                    st->print(errs()); errs() << "\n\n";
                     assert (st->isOpaque());
                     st->setBody(structTypes);
                 }
@@ -1488,6 +1487,13 @@ void Kernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & arg
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recursivelyListFamilyKernels
+ ** ------------------------------------------------------------------------------------------------------------- */
+void Kernel::recursivelyListFamilyKernels(llvm::raw_ostream & familyName) const {
+    /* do nothing */
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const {
@@ -1566,7 +1572,6 @@ void SegmentOrientedKernel::generateKernelMethod(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 bool Kernel::hasInternalScalars(const ScalarType type) const {
     for (const InternalScalar & s : mInternalScalars) {
-        errs() << " --- " << getName() << ':' << s.getName() << ' ' << (int)s.getScalarType() << "\n";
         if (s.getScalarType() == type) {
             return true;
         }
@@ -1605,6 +1610,7 @@ std::string Kernel::getFamilyName() const {
     for (const Binding & output : mOutputScalars) {
         out << ",OV("; output.print(this, out); out << ')';
     }
+    recursivelyListFamilyKernels(out);
     out.flush();
     return tmp;
 }

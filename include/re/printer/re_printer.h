@@ -15,9 +15,6 @@ namespace re {
 class Printer_RE
 {
 public:
-    static const std::string PrintRE(const re::RE *re, std::set<std::string> externals);
     static const std::string PrintRE(const re::RE *re);
-private:
-    std::set<std::string> mExternals;
 };
 

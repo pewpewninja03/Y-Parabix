@@ -15,6 +15,10 @@ namespace re {
 using length_t = std::string::size_type;
 class Name : public RE {
 public:
+    enum NameFlags {
+        None = 0,
+        External = 1
+    };
     static inline bool classof(const RE * re) {
         return re->getClassTypeId() == ClassTypeId::Name;
     }
@@ -26,6 +30,12 @@ public:
     std::string getName() const;
     std::string getFullName() const;
     RE * getDefinition() const;
+    void setExternal() {
+        mFlags |= NameFlags::External;
+    }
+    bool isExternal() const {
+        return (mFlags & NameFlags::External) != 0;
+    }
     bool operator<(const Name & other) const;
     bool operator<(const CC & other) const;
     bool operator>(const CC & other) const;
@@ -43,7 +53,8 @@ protected:
     , mNamespace(replicateString(nameSpace, namespaceLength))
     , mNameLength(nameLength)
     , mName(replicateString(name, nameLength))
-    , mDefinition(defn) {
+    , mDefinition(defn)
+    , mFlags(NameFlags::None) {
 
     }
 
@@ -53,6 +64,7 @@ private:
     const length_t      mNameLength;
     const char * const  mName;
     RE *                mDefinition;
+    size_t              mFlags;
 };
 
 inline std::string Name::getNamespace() const {

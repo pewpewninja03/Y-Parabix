@@ -899,7 +899,8 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setHandle(handle);
         } else {
             assert (isa<ExternalBuffer>(buffer));
-            Value * const virtualBaseAddress = b.CreatePointerCast(nextArg(), buffer->getPointerType());
+            Value * const ptr = nextArg(); assert (ptr->getType()->isPointerTy());
+            Value * const virtualBaseAddress = b.CreatePointerCast(ptr, buffer->getPointerType());
             Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
