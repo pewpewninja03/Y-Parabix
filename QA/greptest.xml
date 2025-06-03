@@ -1084,6 +1084,13 @@ Unterminated</datafile>
 <grepcase regexp="7{4}" datafile="." flags="-include=7* -l -r" grepcount="7777"/>
 <grepcase regexp="7{4}" datafile="." flags="-include=7* -L -r" grepcount="7890"/>
 -->
+<datafile id="emoji">AIRPLANE emoji: &#x2708;
+WHITE SMILING FACE:  &#x263A;
+Down-pointing, Left-pointing AIRPLANEs &#x1CDF8; &#x1CDF9;
+</datafile>
+
+<grepcase regexp="AIRPLANE" datafile="emoji" greplines="1 3"/>
+
 
 <grepcase regexp="[AI].*(?i:[AI])" datafile="simple1" greplines="2"/>
 
