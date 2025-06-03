@@ -11,6 +11,11 @@ import UCD_config
 from unicode_set import *
 from UCD_parser import *
 
+import math
+
+def ceil_log2(x):
+    return math.ceil(math.log2(x))
+
 class UCD_database():
     def __init__(self):
         self.supported_props = []
@@ -727,59 +732,6 @@ def u8_bit_transform_sets(char2string_map):
                         bit_xfrm_sets[pos][j] = uset_union(bit_xfrm_sets[pos][j], cp_uset)
     return bit_xfrm_sets
 
-nonstarter_decomposition_template = r"""//
-NonStarterDecomposition::NonStarterDecomposition
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * NSD_Basis)
-: PabloKernel(ts, "NonStarterDecomposition" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"NSD_Basis", NSD_Basis}}) {}
-
-void NonStarterDecomposition::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * All0 = pb.createZeroes();
-    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<Var *> NSD_Var(Basis.size());
-    for (unsigned i = 0; i < Basis.size(); i++) {
-        NSD_Var[i] = pb.createVar("NSD_Basis" + std::to_string(i), Basis[i]);
-    }
-${pablo_code}
-    writeOutputStreamSet("NSD_Basis", NSD_Var);
-}
-"""
-
-nonstarter_decomposition_case_template = r"""//  Case for ${cp}
-    auto ${builder} = pb.createScope();
-    pb.createIf(${cp_var}, ${builder});
-    std::vector<PabloAST *> ${basis_var}(8, All0);
-${cp1_logic}
-    PabloAST * ins_${cp2} = ${builder}.createAdvance(${cp_var}, ${adv});
-${cp2_logic}
-    for (unsigned i = 0; i < 8; i++) {
-        ${builder}.createAssign(NSD_Var[i], ${builder}.createXor(NSD_Var[i], ${basis_var}[i]));
-    }
-"""
-
-
-def generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2):
-    t = string.Template(nonstarter_decomposition_case_template)
-    builder = "b_%x" % cp
-    basis_var = "xfrm_%x" % cp
-    if Num0s != u8_encoded_length(cp2):
-        raise Exception("Num0s != u8_encoded_length(cp2)")
-    cp1_logic = CharacterTranslationLogic(cp, cp1, cp_var, basis_var, builder)
-    adv = u8_encoded_length(cp1)
-    cp2_logic = CharacterInsertionLogic(cp2, "ins_%x" % cp2, basis_var, builder)
-    s = t.substitute(builder = builder,
-                        cp = "%x" % cp,
-                        cp2 = "%x" % cp2,
-                        cp_var = cp_var,
-                        basis_var = basis_var,
-                        adv = adv,
-                        cp1_logic = cp1_logic,
-                        cp2_logic = cp2_logic)
-    return s
-
 u8_insertion_bixnum_template = r"""//
 NFC_Initial_Insertion::NFC_Initial_Insertion
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
@@ -903,7 +855,6 @@ class NFC_generator(U8_Translation_Generator):
         self.singleton_map = {}
         self.short_composable_map = {}
         self.long_composable_map = {}
-        self.non_starter_decomposition_map = {}
         self.excluded_composite_map = {}
         for precomposed in ucd.decomp_map.keys():
             if uset_member(ucd.dt_map['Can'], precomposed):
@@ -932,6 +883,51 @@ class NFC_generator(U8_Translation_Generator):
                             self.long_composable_map[cp2][cp1] = precomposed
                 else:
                     raise Exception("Unexpected: decomposition length(%x) = %i" % (precomposed, len(decomp)))
+
+    def cp_with_ccc(self, cp):
+        return "%x(%s)" % (cp, self.ccc_val_map[cp])
+
+    def display_singletons(self):
+        for cp in sorted(self.singleton_map.keys()):
+            canon_cp = self.singleton_map[cp]
+            print("%s => %s" % (self.cp_with_ccc(cp), self.cp_with_ccc(canon_cp)))
+
+    def display_excluded_composites(self):
+        for cp in sorted(self.excluded_composite_map.keys()):
+            decomp = self.excluded_composite_map[cp]
+            print("%s => %s" % (self.cp_with_ccc(cp), " ".join([self.cp_with_ccc(ord(c)) for c in decomp])))
+
+    def display_short_composables(self):
+        for cp1 in sorted(self.short_composable_map.keys()):
+            print("%s: " % self.cp_with_ccc(cp1))
+            for cp2 in sorted(self.short_composable_map[cp1].keys()):
+                cp = self.short_composable_map[cp1][cp2]
+                print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
+
+    def display_long_composables(self):
+        by_starter = {}
+        for cp2 in sorted(self.long_composable_map.keys()):
+            for cp1 in self.long_composable_map[cp2].keys():
+                cp = self.long_composable_map[cp2][cp1]
+                if not cp1 in by_starter.keys():
+                    by_starter[cp1] = {}
+                by_starter[cp1][cp2] = cp
+        for cp1 in sorted(by_starter.keys()):
+            print("%s: " % self.cp_with_ccc(cp1))
+            for cp2 in sorted(by_starter[cp1].keys()):
+                cp = by_starter[cp1][cp2]
+                print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
+
+    def display_recursive_decomposables(self):
+        for precomposed in sorted(ucd.decomp_map.keys()):
+            if uset_member(ucd.dt_map['Can'], precomposed):
+                decomp = ucd.decomp_map[precomposed]
+                if ord(decomp[0]) in ucd.decomp_map.keys():
+                    if uset_member(ucd.dt_map['Can'], ord(decomp[0])):
+                        decomp_str1 = " ".join(["%x" % ord(c) for c in decomp])
+                        decomp2 = ucd.decomp_map[ord(decomp[0])] + decomp[1:]
+                        decomp_str2 = " ".join(["%x" % ord(c) for c in decomp2])
+                        print ("%x => %s => %s" % (precomposed, decomp_str1, decomp_str2))
 
     def update_max_insert_map(self, cp, insert_len):
         if cp in self.max_insert_map.keys():
@@ -1015,55 +1011,63 @@ class NFC_generator(U8_Translation_Generator):
         for k in sorted(self.ccc_pass_allocation.keys()):
             print("ccc = %s (%s) allocated to pass %i." % (k, self.ccc_enum_rmap[k], self.ccc_pass_allocation[k]))
 
-    def cp_with_ccc(self, cp):
-        return "%x(%s)" % (cp, self.ccc_val_map[cp])
+    def create_conditional_mark_codes(self):
+        self.conditional_mark_codes = {}
+        self.max_conditional_code_bits = {}
+        for pass_no in range(self.pass_count):
+            self.max_conditional_code_bits[pass_no] = 0
+        ccc_data = {}
+        for mark in self.long_composable_map.keys():
+            ccc = self.ccc_val_map[mark]
+            ccc_code = self.ccc_enum_map[ccc]
+            if not ccc_code in ccc_data.keys():
+                ccc_data[ccc_code] = {}
+            starter_rg_set_map = range_usets_from_cps(self.long_composable_map[mark].keys())
+            for pfx_code in starter_rg_set_map.keys():
+                if not pfx_code in ccc_data[ccc_code].keys():
+                    ccc_data[ccc_code][pfx_code] = []
+                ccc_data[ccc_code][pfx_code].append(mark)
+        for ccc_code in ccc_data.keys():
+            for pfx_code in ccc_data[ccc_code].keys():
+                mark_list = ccc_data[ccc_code][pfx_code]
+                if len(mark_list) == 1: continue  # unconditional mark for this starter range
+                if not ccc_code in self.conditional_mark_codes.keys():
+                    self.conditional_mark_codes[ccc_code] = {}
+                if not pfx_code in self.conditional_mark_codes[ccc_code].keys():
+                    self.conditional_mark_codes[ccc_code][pfx_code] = {}
+                bits = ceil_log2(len(mark_list))
+                mask = (1 << bits) - 1
+                unallocated = []
+                for mark in mark_list:
+                    potential_code = mark & mask
+                    if potential_code in self.conditional_mark_codes[ccc_code][pfx_code].keys():
+                        unallocated.append(mark)
+                    else:
+                        self.conditional_mark_codes[ccc_code][pfx_code][potential_code] = mark
+                for mark in unallocated:
+                    for code in range(1 << bits):
+                        if code in self.conditional_mark_codes[ccc_code][pfx_code].keys():
+                            continue
+                        self.conditional_mark_codes[ccc_code][pfx_code][code] = mark
+                        break
+                pass_no = self.ccc_pass_allocation[ccc_code]
+                if self.max_conditional_code_bits[pass_no] < bits:
+                    self.max_conditional_code_bits[pass_no] = bits
 
-    def display_singletons(self):
-        for cp in sorted(self.singleton_map.keys()):
-            canon_cp = self.singleton_map[cp]
-            print("%s => %s" % (self.cp_with_ccc(cp), self.cp_with_ccc(canon_cp)))
-
-    def display_non_starter_decomps(self):
-        for cp in sorted(self.non_starter_decomposition_map.keys()):
-            (cp1, cp2) = self.non_starter_decomposition_map[cp]
-            print("%s => %s %s" % (self.cp_with_ccc(cp), self.cp_with_ccc(cp1), self.cp_with_ccc(cp2)))
-
-    def display_excluded_composites(self):
-        for cp in sorted(self.excluded_composite_map.keys()):
-            decomp = self.excluded_composite_map[cp]
-            print("%s => %s" % (self.cp_with_ccc(cp), " ".join([self.cp_with_ccc(ord(c)) for c in decomp])))
-
-    def display_short_composables(self):
-        for cp1 in sorted(self.short_composable_map.keys()):
-            print("%s: " % self.cp_with_ccc(cp1))
-            for cp2 in sorted(self.short_composable_map[cp1].keys()):
-                cp = self.short_composable_map[cp1][cp2]
-                print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
-
-    def display_long_composables(self):
-        by_starter = {}
-        for cp2 in sorted(self.long_composable_map.keys()):
-            for cp1 in self.long_composable_map[cp2].keys():
-                cp = self.long_composable_map[cp2][cp1]
-                if not cp1 in by_starter.keys():
-                    by_starter[cp1] = {}
-                by_starter[cp1][cp2] = cp
-        for cp1 in sorted(by_starter.keys()):
-            print("%s: " % self.cp_with_ccc(cp1))
-            for cp2 in sorted(by_starter[cp1].keys()):
-                cp = by_starter[cp1][cp2]
-                print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
-
-    def display_recursive_decomposables(self):
-        for precomposed in sorted(ucd.decomp_map.keys()):
-            if uset_member(ucd.dt_map['Can'], precomposed):
-                decomp = ucd.decomp_map[precomposed]
-                if ord(decomp[0]) in ucd.decomp_map.keys():
-                    if uset_member(ucd.dt_map['Can'], ord(decomp[0])):
-                        decomp_str1 = " ".join(["%x" % ord(c) for c in decomp])
-                        decomp2 = ucd.decomp_map[ord(decomp[0])] + decomp[1:]
-                        decomp_str2 = " ".join(["%x" % ord(c) for c in decomp2])
-                        print ("%x => %s => %s" % (precomposed, decomp_str1, decomp_str2))
+    def show_conditional_codes(self):
+        ccc_enum_rmap = ucd.property_object_map['ccc'].enum_integer_to_value_map
+        for pass_no in range(self.pass_count):
+            print("Pass %i, max_conditional_code_bits =  %i" % (pass_no, self.max_conditional_code_bits[pass_no]))
+            for ccc_code in sorted(self.ccc_pass_allocation.keys()):
+                ccc = ccc_enum_rmap[ccc_code]
+                if self.ccc_pass_allocation[ccc_code] == pass_no:
+                    if not ccc_code in self.conditional_mark_codes.keys():
+                        print("  ccc %s (%i): no conditional marks" % (ccc, ccc_code))
+                        continue
+                    for pfx_code in self.conditional_mark_codes[ccc_code].keys():
+                        assignments = self.conditional_mark_codes[ccc_code][pfx_code]
+                        codes = ["%i => %x" % (c, assignments[c]) for c in sorted(assignments.keys())]
+                        print("  ccc %s (%i), pfx_code %s: %s" % (ccc, ccc_code, pfx_code_string(pfx_code), " ".join(codes)))
 
     def generate_singleton_stage(self):
         s = singleton_header
@@ -1247,25 +1251,6 @@ class NFC_generator(U8_Translation_Generator):
         s += u8_insertion_final_code
         return s
 
-    def generate_nonstarter_decompositions(self):
-        self.builder.open_scope("pb")
-        t = string.Template(nonstarter_decomposition_template)
-        generated = {}
-        for cp in self.non_starter_decomposition_map.keys():
-            generated[cp] = self.builder.install_uset(singleton_uset(cp))
-        code = self.builder.generate_scope_compilations()
-        for cp in self.non_starter_decomposition_map.keys():
-            (cp1, cp2) = self.non_starter_decomposition_map[cp]
-            if uset_member(ucd.dt_map['Can'], cp1):
-                raise Exception("Unexpected further decomposition for %x" % cp1)
-            if uset_member(ucd.dt_map['Can'], cp2):
-                raise Exception("Unexpected further decomposition for %x" % cp2)
-            Num0s = self.max_insert_map[cp]
-            cp_var = generated[cp]
-            code += generate_nonstarter_decomposition_case(cp, cp_var, Num0s, cp1, cp2)
-        s = t.substitute(pablo_code = code)
-        return s
-
     def emit_normalization_cpp(self):
         basename = 'normalization-generated'
         f = cformat.open_cpp_file_for_write(basename)
@@ -1276,7 +1261,6 @@ class NFC_generator(U8_Translation_Generator):
         kernels += generator.generate_short_composable_stage()
         #print(generator.generate_insertions_for_nonstarter_decompositions())
         kernels += generator.generate_u8_insertion_kernel()
-        #kernels += generator.generate_nonstarter_decompositions()
         kernels += generator.generate_excluded_composite_stage()
         uset_definitions = generator.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
@@ -1290,7 +1274,9 @@ if __name__ == "__main__":
     generator.create_mappings()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
+    generator.create_conditional_mark_codes()
     generator.show_ccc_pass_allocation()
+    generator.show_conditional_codes()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
     #generator.display_short_composables()
@@ -1298,4 +1284,4 @@ if __name__ == "__main__":
     #generator.display_excluded_composites()
     #generator.display_recursive_decomposables()
     #generator.display_max_insert_map()
-    generator.emit_normalization_cpp()
+    #generator.emit_normalization_cpp()
