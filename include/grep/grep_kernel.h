@@ -432,18 +432,15 @@ public:
                      std::pair<int, int> lengthRange = std::make_pair<int,int>(1, 1));
     void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
     void setRE(re::RE * re);
-    std::string getSignature() {return mSignature;}
 
 protected:
-    Bindings streamSetInputBindings();
-    Bindings streamSetOutputBindings();
-    Bindings scalarInputBindings();
-    Bindings scalarOutputBindings();
+    Bindings makeStreamSetInputBindings();
+    Bindings makeStreamSetOutputBindings();
     std::string makeSignature();
 
 private:
 
-    const cc::Alphabet *        mCodeUnitAlphabet;
+    const cc::Alphabet *        mCodeUnitAlphabet = nullptr;
     StreamSet *                 mBarrierStream = nullptr;
     StreamSet *                 mIndexStream = nullptr;
     GrepCombiningType           mCombiningType = GrepCombiningType::None;
@@ -454,7 +451,6 @@ private:
     std::vector<std::pair<int, int>>       mExternalLengths;
     Alphabets                   mAlphabets;
     re::RE *                    mRE = nullptr;
-    std::string                 mSignature;
 };
 
 
@@ -468,9 +464,15 @@ public:
 protected:
     void generatePabloMethod() override;
 private:
-    std::unique_ptr<GrepKernelOptions>  mOptions;
-    std::string                         mSignature;
-    unsigned                            mOffset;
+    ICGrepKernel(LLVMTypeSystemInterface & ts,
+                 std::string && optionsSignature,
+                 Bindings && inputStreamSetBindings,
+                 Bindings && outputStreamSetBindings,
+                 std::unique_ptr<GrepKernelOptions> && options);
+private:
+    const std::unique_ptr<GrepKernelOptions>  mOptions;
+    const std::string                         mSignature;
+    const unsigned                            mOffset;
 };
 
 class MatchedLinesKernel : public pablo::PabloKernel {

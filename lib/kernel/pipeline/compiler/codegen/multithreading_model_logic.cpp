@@ -6,7 +6,6 @@ enum PipelineStateObjectField : unsigned {
     SHARED_STATE_PARAM
     , THREAD_LOCAL_PARAM
     , PIPELINE_PARAMS
-    , PIPELINE_PARAM_PADDING
     , INITIAL_SEG_NUMBER
     , FIXED_NUMBER_OF_THREADS
     , ACCUMULATED_SEGMENT_TIME
@@ -1003,8 +1002,12 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
     // NOTE: both the shared and thread local objects are parameters to the kernel.
     // They get automatically set by reading in the appropriate params.
 
+    size_t currentOffset = 0;
+    auto & dl = b.getModule()->getDataLayout();
+
     if (LLVM_LIKELY(mTarget->isStateful())) {
         fields[SHARED_STATE_PARAM] = getHandle()->getType();
+        currentOffset +=  b.getTypeSize(dl, fields[SHARED_STATE_PARAM]);
         assert (fields[SHARED_STATE_PARAM]->isPointerTy());
     } else {
         fields[SHARED_STATE_PARAM] = emptyTy;
@@ -1012,23 +1015,30 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
 
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         fields[THREAD_LOCAL_PARAM] = getThreadLocalHandle()->getType();
+        currentOffset +=  b.getTypeSize(dl, fields[THREAD_LOCAL_PARAM]);
         assert (fields[THREAD_LOCAL_PARAM]->isPointerTy());
     } else {
         fields[THREAD_LOCAL_PARAM] = emptyTy;
     }
 
     const auto n = props.size();
-    std::vector<Type *> paramType(n);
+    std::vector<Type *> paramType(n * 2 + 1);
 
-    DataLayout dl(b.getModule());
-    for (unsigned i = 0; i < n; ++i) {
-        paramType[i] = props[i]->getType();
-    }
-    fields[PIPELINE_PARAMS] = StructType::get(b.getContext(), paramType);
-    const auto sizeTyWidth = sizeTy->getIntegerBitWidth();
-    const auto paramPaddingBytes = sizeTyWidth - (b.getTypeSize(dl,fields[PIPELINE_PARAMS]) % sizeTyWidth);
     IntegerType * const int8Ty = b.getInt8Ty();
-    fields[PIPELINE_PARAM_PADDING] = ArrayType::get(int8Ty, paramPaddingBytes);
+
+    for (unsigned i = 0; i < n; ++i) {
+        Type * const ty = props[i]->getType();
+        const auto align = dl.getABITypeAlign(ty).value();
+        const auto padding = align - (currentOffset % align);
+        paramType[i * 2] = ArrayType::get(int8Ty, padding);
+        currentOffset += padding;
+        paramType[i * 2 + 1] = ty;
+        currentOffset += b.getTypeSize(dl, ty);
+    }
+    const auto padding = SizeTyABIAlignment - (currentOffset % SizeTyABIAlignment);
+    paramType[n * 2] = ArrayType::get(int8Ty, padding);
+    fields[PIPELINE_PARAMS] = StructType::get(b.getContext(), paramType, true);
+
     if (mUseDynamicMultithreading) {
         fields[INITIAL_SEG_NUMBER] = emptyTy;
         fields[FIXED_NUMBER_OF_THREADS] = emptyTy;
@@ -1065,6 +1075,7 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
     fields[THREAD_STRUCT_SIZE] = ArrayType::get(int8Ty, paddingBytes);
     StructType * const sty = StructType::get(C, fields, true);
     assert (b.getTypeSize(dl, sty) == (structSize + paddingBytes));
+
     return sty;
 }
 
@@ -1082,14 +1093,18 @@ void PipelineCompiler::writeThreadStructObject(KernelBuilder & b,
     indices2[0] = b.getInt32(0);
     if (LLVM_LIKELY(mTarget->isStateful())) {
         indices2[1] = b.getInt32(SHARED_STATE_PARAM);
+        assert (shared->getType() == mTarget->getSharedStateType()->getPointerTo());
+        assert (threadStateTy->getStructElementType(SHARED_STATE_PARAM) == shared->getType());
         b.CreateAlignedStore(shared, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), PtrTyABIAlignment);
     }
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         indices2[1] = b.getInt32(THREAD_LOCAL_PARAM);
+        assert (threadLocal->getType() == mTarget->getThreadLocalStateType()->getPointerTo());
+        assert (threadStateTy->getStructElementType(THREAD_LOCAL_PARAM) == threadLocal->getType());
         b.CreateAlignedStore(threadLocal, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), PtrTyABIAlignment);
     }
     const auto n = props.size();
-    assert (threadStateTy->getStructElementType(PIPELINE_PARAMS)->getStructNumElements() == n);
+    assert (threadStateTy->getStructElementType(PIPELINE_PARAMS)->getStructNumElements() == n * 2 + 1);
     FixedArray<Value *, 3> indices3;
     indices3[0] = indices2[0];
     indices3[1] = b.getInt32(PIPELINE_PARAMS);
@@ -1097,21 +1112,26 @@ void PipelineCompiler::writeThreadStructObject(KernelBuilder & b,
     Type * const paramStructTy = threadStateTy->getStructElementType(PIPELINE_PARAMS);
     const DataLayout & DL = b.getModule()->getDataLayout();
     for (unsigned i = 0; i < n; ++i) {
-        indices3[2] = b.getInt32(i);
-        const auto align = DL.getABITypeAlign(paramStructTy->getStructElementType(i)).value();
+        indices3[2] = b.getInt32(i * 2 + 1);
+        const auto align = DL.getABITypeAlign(paramStructTy->getStructElementType(i * 2 + 1)).value();
+        assert (props[i]->getType() == paramStructTy->getStructElementType(i * 2 + 1));
         b.CreateAlignedStore(props[i], b.CreateInBoundsGEP(threadStateTy, threadState, indices3), align);
     }
 
     if (mUseDynamicMultithreading) {
         Constant * const sz_ZERO = b.getSize(0);
         indices2[1] = b.getInt32(ACCUMULATED_SEGMENT_TIME);
+        assert (sz_ZERO->getType() == threadStateTy->getStructElementType(INITIAL_SEG_NUMBER));
         b.CreateAlignedStore(sz_ZERO, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
         indices2[1] = b.getInt32(ACCUMULATED_SYNCHRONIZATION_TIME);
+        assert (sz_ZERO->getType() == threadStateTy->getStructElementType(ACCUMULATED_SYNCHRONIZATION_TIME));
         b.CreateAlignedStore(sz_ZERO, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
     } else {
         indices2[1] = b.getInt32(INITIAL_SEG_NUMBER);
+        assert (threadNum->getType() == threadStateTy->getStructElementType(INITIAL_SEG_NUMBER));
         b.CreateAlignedStore(threadNum, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
         indices2[1] = b.getInt32(FIXED_NUMBER_OF_THREADS);
+        assert (numOfThreads->getType() == threadStateTy->getStructElementType(FIXED_NUMBER_OF_THREADS));
         b.CreateAlignedStore(numOfThreads, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
     }
 }
@@ -1127,11 +1147,13 @@ void PipelineCompiler::readThreadStructObject(KernelBuilder & b, StructType * co
     if (mTarget->isStateful()) {
         indices2[1] = b.getInt32(SHARED_STATE_PARAM);
         Type * ty = mTarget->getSharedStateType()->getPointerTo();
+        assert (threadStateTy->getStructElementType(SHARED_STATE_PARAM) == mTarget->getSharedStateType()->getPointerTo());
         setHandle(b.CreateAlignedLoad(ty, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), PtrTyABIAlignment));
     }
     if (mTarget->hasThreadLocal()) {
         indices2[1] = b.getInt32(THREAD_LOCAL_PARAM);
         Type * ty = mTarget->getThreadLocalStateType()->getPointerTo();
+        assert (threadStateTy->getStructElementType(THREAD_LOCAL_PARAM) == mTarget->getThreadLocalStateType()->getPointerTo());
         setThreadLocalHandle(b.CreateAlignedLoad(ty, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), PtrTyABIAlignment));
     }
     if (mUseDynamicMultithreading) {
@@ -1405,7 +1427,6 @@ std::vector<Value *> PipelineCompiler::storeDoSegmentState() const {
     return S;
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief restoreInternalState
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1414,9 +1435,11 @@ void PipelineCompiler::readDoSegmentState(KernelBuilder & b, StructType * const 
     indices3[0] = b.getInt32(0);
     indices3[1] = b.getInt32(PIPELINE_PARAMS);
 
+    assert (threadStructTy && propertyState);
+
     StructType * const paramType = cast<StructType>(threadStructTy->getStructElementType(PIPELINE_PARAMS));
 
-    unsigned i = 0;
+    unsigned i = 1;
     #ifndef NDEBUG
     const auto n = paramType->getStructNumElements();
     #endif
@@ -1430,8 +1453,10 @@ void PipelineCompiler::readDoSegmentState(KernelBuilder & b, StructType * const 
             Value * ptr = b.CreateInBoundsGEP(threadStructTy, propertyState, indices3);
             Type * const ty = paramType->getStructElementType(i);
             const auto align = DL.getABITypeAlign(ty).value();
-            v = b.CreateAlignedLoad(paramType->getStructElementType(i), ptr, align);
-            ++i;
+            Value * const newVal = b.CreateAlignedLoad(ty, ptr, align);
+            assert (v == nullptr || v->getType() == newVal->getType());
+            v = newVal;
+            i += 2;
         }
     };
 
@@ -1473,6 +1498,7 @@ void PipelineCompiler::readDoSegmentState(KernelBuilder & b, StructType * const 
     assert (i == n);
 
 }
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief restoreInternalState

@@ -636,7 +636,7 @@ unsigned GrepEngine::RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * i
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
         if (mLengthAlphabet == &cc::Unicode) {
-            indexStream = mU8index;
+            indexStream = mU8index; assert (mU8index);
             options->setIndexing(indexStream);
         }
     }
@@ -1418,6 +1418,7 @@ InternalSearchEngine::~InternalSearchEngine() { }
 
 
 void InternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
+    assert ((((uintptr_t)search_buffer) % (512 / 8)) == 0);
     mMainMethod(search_buffer, bufferLength, &accum);
 }
 
@@ -1503,6 +1504,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
 }
 
 void InternalMultiSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
+    assert ((((uintptr_t)search_buffer) % (512 / 8)) == 0);
     mMainMethod(search_buffer, bufferLength, &accum);
 }
 
@@ -1525,6 +1527,7 @@ std::vector<uint64_t> lineNumGrep(re::RE * pattern, const char * buffer, size_t 
     grep::InternalSearchEngine engine(driver);
     engine.setRecordBreak(grep::GrepRecordBreakKind::LF);
     engine.grepCodeGen(pattern);
+    assert ((((uintptr_t)buffer) % (512 / 8)) == 0);
     engine.doGrep(buffer, bufSize, accum);
     return accum.getAccumulatedLines();
 }
@@ -1548,6 +1551,7 @@ bool matchOnlyGrep(re::RE * pattern, const char * buffer, size_t bufSize) {
     grep::InternalSearchEngine engine(driver);
     engine.setRecordBreak(grep::GrepRecordBreakKind::Null);
     engine.grepCodeGen(pattern);
+    assert ((((uintptr_t)buffer) % (512 / 8)) == 0);
     engine.doGrep(buffer, bufSize, accum);
     return accum.foundAnyMatches();
 }

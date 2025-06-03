@@ -65,6 +65,6 @@ private:
     std::string genSym();
 };
 
-RE * canonicalizeExternals(RE * r, std::vector<std::string> & external_names);
+RE * canonicalizeExternals(RE * r, const std::vector<std::string> & external_names);
 
 }

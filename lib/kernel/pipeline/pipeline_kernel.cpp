@@ -216,7 +216,11 @@ void PipelineKernel::addAdditionalInitializationArgTypes(KernelBuilder & b, Init
         // If this is a kernel family call, the "main" will pass in the required pointers.
         // However, a non-family call could still refer to a kernel that has nested family
         // calls of its own. During initialization, we pass in the pointers that that
-        m += k.isFamilyCall() ? 1U : k.Object->getNumOfNestedKernelFamilyCalls();
+        if (k.isFamilyCall()) {
+            ++m;
+        } else {
+            m += k.Object->getNumOfNestedKernelFamilyCalls();
+        }
     }
     assert ("reported number of nested kernels does not match actual?" && (m == n));
     #endif
@@ -245,6 +249,21 @@ void PipelineKernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitAr
             kernel->constructFamilyKernels(b, args, params, toFree);
         } else if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls() > 0)) {
             kernel->recursivelyConstructFamilyKernels(b, args, params, toFree);
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recursivelyListFamilyKernels
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineKernel::recursivelyListFamilyKernels(llvm::raw_ostream & familyName) const {
+    assert (mKernels.size() > 0);
+    for (const auto & k : mKernels) {
+        const Kernel * const kernel = k.Object;
+        if (LLVM_UNLIKELY(k.isFamilyCall())) {
+            familyName << '\n' << kernel->getFamilyName();
+        } else if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls() > 0)) {
+            kernel->recursivelyListFamilyKernels(familyName);
         }
     }
 }

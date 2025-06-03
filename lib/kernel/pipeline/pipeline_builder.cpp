@@ -197,38 +197,35 @@ Kernel * PipelineBuilder::makeKernel() {
             }
         };
 
-        if (mExternallySynchronized) {
-            mTarget->addAttribute(InternallySynchronized());
-        } else {
-            mTarget->setStride(codegen::SegmentSize);
-        }
-
         signature.reserve(4096);
-        raw_string_ostream out(signature);
+        raw_string_ostream sig(signature);
 
-        out << 'P';
+        sig << 'P';
         if (mExternallySynchronized) {
-            out << 'E';
-        } else {
-            out << mTarget->getStride();
+            sig << 'E';
+            mTarget->addAttribute(InternallySynchronized());
         }
+        sig << mTarget->getStride();
+
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            out << '_';
             const auto & K = kernels[i];
             auto obj = K.Object;
             obj->ensureLoaded();
+            sig << '\n';
             if (K.isFamilyCall()) {
-                // this differs for icgrep kernel?
-                out << 'F' << obj->getFamilyName();
-                numOfNestedKernelFamilyCalls++;
+                ++numOfNestedKernelFamilyCalls;
+                sig << 'F';
             } else {
-                out << 'K';
                 const auto m = obj->getNumOfNestedKernelFamilyCalls();
                 numOfNestedKernelFamilyCalls += m;
+                if (LLVM_UNLIKELY(m > 0)) {
+                    sig << 'f' << m;
+                }
+                sig << 'K';
                 if (obj->hasSignature()) {
-                    out << obj->getSignature();
+                    sig << obj->getSignature();
                 } else {
-                    out << obj->getName();
+                    sig << obj->getName();
                 }
             }
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
@@ -239,6 +236,12 @@ Kernel * PipelineBuilder::makeKernel() {
                 }
             }
         }
+
+        if (numOfNestedKernelFamilyCalls) {
+            sig << '\n';
+            mTarget->recursivelyListFamilyKernels(sig);
+        }
+        sig << '\n';
 
         auto enumerateProducerBindings = [&](const Vertex producer, const Bindings & bindings) {
             const auto n = bindings.size();
@@ -366,9 +369,9 @@ Kernel * PipelineBuilder::makeKernel() {
         enumerateConsumerBindings(pipelineOutput, mTarget->mOutputStreamSets);
 
         for (unsigned i = 0; i < numOfCalls; ++i) {
-            out << "_C" << calls[i].Name;
+            sig << "_C" << calls[i].Name;
         }
-        out << '@';
+        sig << '@';
 
         const auto firstRelationship = pipelineOutput + 1;
         const auto lastRelationship = num_vertices(G);
@@ -389,12 +392,12 @@ Kernel * PipelineBuilder::makeKernel() {
 
             assert ((unsigned)r->getClassTypeId() < (unsigned)TypeId::__Count);
 
-            out << typeCode[(unsigned)r->getClassTypeId()];
+            sig << typeCode[(unsigned)r->getClassTypeId()];
 
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
                 const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
                 if (rs->isUnaligned()) {
-                    out << 'U';
+                    sig << 'U';
                 }
                 if (LLVM_LIKELY(rs->isDynamic())) {
                     const auto j = addAndMapInternallyGenerated(r);
@@ -407,7 +410,7 @@ Kernel * PipelineBuilder::makeKernel() {
                     for (unsigned i = 0;;) {
                         assert (i < numElements);
                         const auto & vec = rs->getPattern(i);
-                        out << ':';
+                        sig << ':';
                         // write to hex code
                         for (auto v : vec) {
                             unsigned j = 0;
@@ -422,10 +425,10 @@ Kernel * PipelineBuilder::makeKernel() {
                                 ++j;
                             }
                             for (auto k = j; k < width; ++k) {
-                                out << '0';
+                                sig << '0';
                             }
                             while (j) {
-                                out << tmp[--j];
+                                sig << tmp[--j];
                             }
                         }
                         if ((++i) == numElements) {
@@ -433,28 +436,27 @@ Kernel * PipelineBuilder::makeKernel() {
                         }
                     }
                 }
-                out << ':';
+                sig << ':';
             } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
                 auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
                 if (LLVM_UNLIKELY(f == M.end())) {
                     report_fatal_error("Truncated streamset data has no producer");
                 }
-                out << f->second << ':';
+                sig << f->second << ':';
             }
 
             if (LLVM_LIKELY(out_degree(i, G) != 0)) {
                 const auto e = out_edge(i, G);
                 const auto j = target(e, G);
-                out << j << '.' << G[e];
+                sig << j << '.' << G[e];
             }
 
             for (const auto e : make_iterator_range(in_edges(i, G))) {
                 const auto k = source(e, G);
-                out << '_' << k << '.' << G[e];
+                sig << '_' << k << '.' << G[e];
             }
         }
-
-        out.flush();
+        sig.flush();
 
     } else { // the programmer provided a unique name
 
