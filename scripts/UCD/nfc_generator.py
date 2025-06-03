@@ -22,6 +22,7 @@ class UCD_database():
         parse_UnicodeData_txt(self.property_object_map)
         parse_property_data(self.property_object_map['dt'], 'extracted/DerivedDecompositionType.txt')
         parse_property_data(self.property_object_map['ccc'], 'extracted/DerivedCombiningClass.txt')
+        parse_property_data(self.property_object_map['CE'], 'CompositionExclusions.txt')
         fold_data = parse_CaseFolding_txt(self.property_object_map)
         self.decomp_map = self.property_object_map['dm'].cp_value_map
         self.dt_map = self.property_object_map['dt'].value_map
@@ -118,6 +119,7 @@ class Uset_Builder:
         if not key in self.installed_usets.keys():
             #print("new key: %s" % key)
             self.installed_usets[key] = uset
+        if not key in self.current_scope_roles:
             self.current_scope_roles.append(key)
         return key
 
@@ -314,21 +316,20 @@ void SingletonCanonicalization::generatePabloMethod() {
     }
 """
 
-singleton_pfx_template = r"""
+nested_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
     pb.createIf(${pfx_test_var}, ${builder});
     std::vector<PabloAST *> xfrm_${code_str}(8, All0);
     PabloAST * del_${code_str} = All0;
-
 """
 
-def gen_singleton_pfx_code(pfx_code):
+def gen_nested_pfx_code(pfx_code):
     code_str = pfx_code_string(pfx_code)
     pfx_test_var = "pfx_%s_test" % code_str
     test = prefix_test_logic(pfx_code)
     scope = "b_%s" % code_str
-    t = string.Template(singleton_pfx_template)
+    t = string.Template(nested_pfx_template)
     return t.substitute(builder = scope,
                         code_str = code_str,
                         pfx_test_var = pfx_test_var,
@@ -356,7 +357,7 @@ def generate_singleton_code(code_str, cp, canon, cp_var, Num0s, ToDel):
                         case_logic = xlate_code)
     return s
 
-singleton_pfx_final_template = r"""
+nested_pfx_final_template = r"""
     for (unsigned i = 0; i < 8; i++) {
         ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
     }
@@ -366,10 +367,10 @@ update_del_var_template = r"""
     ${builder}.createAssign(DeleteVar, $builder.createOr(DeleteVar, del_${code_str}));
 """
 
-def finalize_singleton_pfx_code(pfx_code, has_del):
+def finalize_nested_pfx_code(pfx_code, has_del):
     code_str = pfx_code_string(pfx_code)
     scope = "b_%s" % code_str
-    t1 = string.Template(singleton_pfx_final_template)
+    t1 = string.Template(nested_pfx_final_template)
     s = t1.substitute(builder = scope, code_str = code_str)
     if has_del:
         t2 = string.Template(update_del_var_template)
@@ -389,6 +390,40 @@ singleton_final_code = r"""
     pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 """
+
+excluded_composite_header = r"""//
+ExcludedCompositeStage::ExcludedCompositeStage
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+: PabloKernel(ts, "ExcludedCompositeStage" + Basis->shapeString(),
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+
+void ExcludedCompositeStage::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    // DeleteVar will be inverted to produce SelectMask
+    Var * DeleteVar = pb.createVar("DeleteVar", All0);
+    std::vector<Var *> XfrmVar(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        XfrmVar[i] = pb.createVar("XfrmBasis" + std::to_string(i), All0);
+    }
+"""
+
+excluded_composite_final_code = r"""
+    Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
+        //  pb.createAssign(xfrm_out, XfrmVar[i]);
+        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+    }
+    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
+    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
+}
+"""
+
 
 pass_template = r"""//
 class FindComposables${pass_no} : public PabloKernel {
@@ -411,6 +446,7 @@ void FindComposables${pass_no}::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
     PabloAST * eligible_starter = ${eligible};
     Var * composable2nd = pb.createVar("composable2nd", All0);
@@ -441,7 +477,7 @@ def gen_pass_pfx_code(pfx_code):
     pfx_test_var = "pfx_%s_test" % code_str
     test = prefix_test_logic(pfx_code)
     if pfx_code == 0:
-        test = "pb.createAnd(%s, pb.createLookAhead(ccc_NR, 1))" % test
+        test = "pb.createAnd(%s, pb.createLookahead(ccc_NR, 1))" % test
     scope = "b_%s" % code_str
     t = string.Template(pfx_template)
     return t.substitute(builder = scope,
@@ -640,35 +676,55 @@ def CharacterInsertionLogic(cp, marker, basis_var, pb):
                 s += "    %s = %s.createOr(%s, m_%x_%i);\n" % (bv, pb, bv, cp, i)
     return s
 
-def u8_bit_transform_sets(translation_map, zero_insertion_map):
+def u8_deletion_sets(char2string_map):
+    deletion_usets = {}
+    for cp in char2string_map.keys():
+        cp_uset = singleton_uset(cp)
+        len1 = u8_encoded_length(cp)
+        str = char2string_map[cp]
+        str_bytes = []
+        for ch in str:
+            cp1 = ord(ch)
+            for i in range(u8_encoded_length(cp1)):
+                str_bytes.append(u8_code_unit(cp1, i + 1))
+        len2 = len(str_bytes)
+        if len1 > len2:
+            ldiff = len1 - len2
+            if not ldiff in deletion_usets.keys():
+                deletion_usets[ldiff] = empty_uset()
+            deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], cp_uset)
+    return deletion_usets
+
+def u8_bit_transform_sets(char2string_map):
     bit_xfrm_sets = {}
-    for cp1 in translation_map.keys():
-        cp1_uset = singleton_uset(cp1)
-        cp2 = translation_map[cp1]
-        len1 = u8_encoded_length(cp1)
-        len2 = u8_encoded_length(cp2)
-        Num0s = 0
-        if cp1 in zero_insertion_map.keys():
-            Num0s = zero_insertion_map[cp1]
+    for cp in char2string_map.keys():
+        cp_uset = singleton_uset(cp)
+        len1 = u8_encoded_length(cp)
+        str = char2string_map[cp]
+        str_bytes = []
+        for ch in str:
+            cp1 = ord(ch)
+            for i in range(u8_encoded_length(cp1)):
+                str_bytes.append(u8_code_unit(cp1, i + 1))
+        len2 = len(str_bytes)
         excess = 0
         if len1 > len2:
             excess = len1 - len2
         for i in range(len2):
-            # position for cp2 byte
-            cp2_byte = u8_code_unit(cp2, i + 1)
+            xlat_byte = str_bytes[i]
             pos = excess + i # position relative to cp1 starter
-            cp1_byte = 0 # default for positions corresponding to inserted zeroes
+            cp_byte = 0 # default for positions corresponding to inserted zeroes
             if pos < len1:
-                cp1_byte = u8_code_unit(cp1, pos + 1)
-            if cp1_byte != cp2_byte:
-                diff = cp1_byte ^ cp2_byte
+                cp_byte = u8_code_unit(cp, pos + 1)
+            if cp_byte != xlat_byte:
+                diff = cp_byte ^ xlat_byte
                 if not pos in bit_xfrm_sets.keys():
                     bit_xfrm_sets[pos] = {}
                 for j in range(8):
                     if (diff >> j) & 1 == 1:
                         if not j in bit_xfrm_sets[pos].keys():
                             bit_xfrm_sets[pos][j] = empty_uset()
-                        bit_xfrm_sets[pos][j] = uset_union(bit_xfrm_sets[pos][j], cp1_uset)
+                        bit_xfrm_sets[pos][j] = uset_union(bit_xfrm_sets[pos][j], cp_uset)
     return bit_xfrm_sets
 
 nonstarter_decomposition_template = r"""//
@@ -835,41 +891,45 @@ class NFC_generator(U8_Translation_Generator):
             else:
                 print("Range %x-%x, initial_code_unit %x" % (rlo, rhi, ulo))
 
+    def excluded_composite(self, cp):
+        if not uset_member(ucd.dt_map['Can'], cp): return False
+        decomp = ucd.decomp_map[cp]
+        if len(decomp) == 1: return False
+        if uset_member(ucd.CE_map['Y'], cp): return True
+        if not uset_member(ucd.ccc_map['NR'], cp): return True
+        return not uset_member(ucd.ccc_map['NR'], ord(decomp[0]))
+
     def create_mappings(self):
         self.singleton_map = {}
         self.short_composable_map = {}
         self.long_composable_map = {}
         self.non_starter_decomposition_map = {}
+        self.excluded_composite_map = {}
         for precomposed in ucd.decomp_map.keys():
             if uset_member(ucd.dt_map['Can'], precomposed):
                 decomp = ucd.decomp_map[precomposed]
                 if len(decomp) == 1:
                     self.singleton_map[precomposed] = ord(decomp[0])
                 elif len(decomp) == 2:
-                    if uset_member(ucd.CE_map['Y'], precomposed):
-                        # Composition exclusion - skip.
-                        continue
                     cp1 = ord(decomp[0])
                     cp2 = ord(decomp[1])
-                    if uset_member(ucd.ccc_map['NR'], precomposed):
-                        if uset_member(ucd.ccc_map['NR'], cp1):
-                            if uset_member(ucd.ccc_map['NR'], cp2):
-                                # Decomposition to two consecutive starters
-                                if not cp1 in self.short_composable_map.keys():
-                                    # index by the first character of decomposition
-                                    self.short_composable_map[cp1] = {}
-                                self.short_composable_map[cp1][cp2] = precomposed
-                            else:
-                                if not cp2 in self.long_composable_map.keys():
-                                    # index by the mark (second char of decomposition)
-                                    self.long_composable_map[cp2] = {}
-                                self.long_composable_map[cp2][cp1] = precomposed
-                        else:
-                            # non-starter decomposition case 1
-                            self.non_starter_decomposition_map[precomposed] = (cp1, cp2)
+                    if self.excluded_composite(precomposed):
+                        while self.excluded_composite(cp1):
+                            decomp = ucd.decomp_map[cp1] + decomp[1:]
+                            cp1 = ord(decomp[0])
+                        self.excluded_composite_map[precomposed] = decomp
                     else:
-                        # non-starter decomposition case 2
-                        self.non_starter_decomposition_map[precomposed] = (cp1, cp2)
+                        if uset_member(ucd.ccc_map['NR'], cp2):
+                            # Decomposition to two consecutive starters
+                            if not cp1 in self.short_composable_map.keys():
+                                # index by the first character of decomposition
+                                self.short_composable_map[cp1] = {}
+                            self.short_composable_map[cp1][cp2] = precomposed
+                        else:
+                            if not cp2 in self.long_composable_map.keys():
+                                # index by the mark (second char of decomposition)
+                                self.long_composable_map[cp2] = {}
+                            self.long_composable_map[cp2][cp1] = precomposed
                 else:
                     raise Exception("Unexpected: decomposition length(%x) = %i" % (precomposed, len(decomp)))
 
@@ -899,13 +959,12 @@ class NFC_generator(U8_Translation_Generator):
                 ldiff = u8_encoded_length(precomposed) - u8_encoded_length(starter)
                 if ldiff > 0:
                     self.update_max_insert_map(starter, ldiff)
-        for cp in self.non_starter_decomposition_map.keys():
-            (cp1, cp2) = self.non_starter_decomposition_map[cp]
-            if uset_member(ucd.dt_map['Can'], cp1):
-                raise Exception("Unexpected further decomposition for %x" % cp1)
-            if uset_member(ucd.dt_map['Can'], cp2):
-                raise Exception("Unexpected further decomposition for %x" % cp2)
-            ldiff = u8_encoded_length(cp1) + u8_encoded_length(cp2) - u8_encoded_length(cp)
+        for cp in self.excluded_composite_map.keys():
+            decomp = self.excluded_composite_map[cp]
+            decomp_len = 0
+            for c in decomp:
+                decomp_len += u8_encoded_length(ord(c))
+            ldiff = decomp_len - u8_encoded_length(cp)
             if ldiff > 0:
                 self.update_max_insert_map(cp, ldiff)
 
@@ -969,6 +1028,11 @@ class NFC_generator(U8_Translation_Generator):
             (cp1, cp2) = self.non_starter_decomposition_map[cp]
             print("%s => %s %s" % (self.cp_with_ccc(cp), self.cp_with_ccc(cp1), self.cp_with_ccc(cp2)))
 
+    def display_excluded_composites(self):
+        for cp in sorted(self.excluded_composite_map.keys()):
+            decomp = self.excluded_composite_map[cp]
+            print("%s => %s" % (self.cp_with_ccc(cp), " ".join([self.cp_with_ccc(ord(c)) for c in decomp])))
+
     def display_short_composables(self):
         for cp1 in sorted(self.short_composable_map.keys()):
             print("%s: " % self.cp_with_ccc(cp1))
@@ -990,50 +1054,31 @@ class NFC_generator(U8_Translation_Generator):
                 cp = by_starter[cp1][cp2]
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
 
+    def display_recursive_decomposables(self):
+        for precomposed in sorted(ucd.decomp_map.keys()):
+            if uset_member(ucd.dt_map['Can'], precomposed):
+                decomp = ucd.decomp_map[precomposed]
+                if ord(decomp[0]) in ucd.decomp_map.keys():
+                    if uset_member(ucd.dt_map['Can'], ord(decomp[0])):
+                        decomp_str1 = " ".join(["%x" % ord(c) for c in decomp])
+                        decomp2 = ucd.decomp_map[ord(decomp[0])] + decomp[1:]
+                        decomp_str2 = " ".join(["%x" % ord(c) for c in decomp2])
+                        print ("%x => %s => %s" % (precomposed, decomp_str1, decomp_str2))
+
     def generate_singleton_stage(self):
         s = singleton_header
         rg_set_map = range_usets_from_cps(self.singleton_map.keys())
         for pfx_code in rg_set_map.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
-            s += gen_singleton_pfx_code(pfx_code)
-            self.builder.open_scope(scope)
-            generated = {}
-            singleton_list = uset_to_member_list(rg_set_map[pfx_code])
-            for cp in singleton_list:
-                generated[cp] = self.builder.install_uset(singleton_uset(cp))
-            s += self.builder.generate_scope_compilations()
-            DelTotal = 0
-            for cp in singleton_list:
-                canon = self.singleton_map[cp]
-                Num0s = 0
-                ToDel = 0
-                if cp in self.max_insert_map.keys():
-                    Num0s = self.max_insert_map[cp]
-                cp_len = u8_encoded_length(cp)
-                canon_len = u8_encoded_length(canon)
-                if canon_len < cp_len:
-                    ToDel = cp_len - canon_len
-                    DelTotal += ToDel
-                s += generate_singleton_code(code_str, cp, canon, generated[cp], Num0s, ToDel)
-            s += finalize_singleton_pfx_code(pfx_code, DelTotal)
-        s += singleton_final_code
-        return s
-
-    def generate_singleton_stage2(self):
-        s = singleton_header
-        rg_set_map = range_usets_from_cps(self.singleton_map.keys())
-        for pfx_code in rg_set_map.keys():
-            code_str = pfx_code_string(pfx_code)
-            scope = "b_%s" % code_str
-            s += gen_singleton_pfx_code(pfx_code)
+            s += gen_nested_pfx_code(pfx_code)
             self.builder.open_scope(scope)
             pfx_xlate_map = {}
             singleton_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in singleton_list:
-                pfx_xlate_map[cp1] = self.singleton_map[cp1]
-            bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map, self.max_insert_map)
-            del_usets = u8_deletion_usets_from_codepoint_map(pfx_xlate_map)
+                pfx_xlate_map[cp1] = chr(self.singleton_map[cp1])
+            bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
+            del_usets = u8_deletion_sets(pfx_xlate_map)
             del_vars = {}
             for del_amt in del_usets.keys():
                 del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
@@ -1058,8 +1103,50 @@ class NFC_generator(U8_Translation_Generator):
                 s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
                 for d in range(1, del_amt):
                     s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
-            s += finalize_singleton_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+            s += finalize_nested_pfx_code(pfx_code, len(del_usets.keys()) > 0)
         s += singleton_final_code
+        return s
+
+    def generate_excluded_composite_stage(self):
+        s = excluded_composite_header
+        rg_set_map = range_usets_from_cps(self.excluded_composite_map.keys())
+        for pfx_code in rg_set_map.keys():
+            code_str = pfx_code_string(pfx_code)
+            scope = "b_%s" % code_str
+            s += gen_nested_pfx_code(pfx_code)
+            self.builder.open_scope(scope)
+            pfx_xlate_map = {}
+            composite_list = uset_to_member_list(rg_set_map[pfx_code])
+            for cp in composite_list:
+                pfx_xlate_map[cp] = self.excluded_composite_map[cp]
+            bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
+            del_usets = u8_deletion_sets(pfx_xlate_map)
+            del_vars = {}
+            for del_amt in del_usets.keys():
+                del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
+            by_pos = {}
+            for pos in sorted(bit_xfrm_sets.keys()):
+                by_pos[pos] = {}
+                for bit in bit_xfrm_sets[pos].keys():
+                    by_pos[pos][bit] = self.builder.install_uset(bit_xfrm_sets[pos][bit])
+            s += self.builder.generate_scope_compilations()
+            for pos in sorted(bit_xfrm_sets.keys()):
+                adv_markers = {}
+                for bit in bit_xfrm_sets[pos].keys():
+                    marker = by_pos[pos][bit]
+                    if pos > 0:
+                        if not marker in adv_markers.keys():
+                            adv = "%s_adv%i" % (marker, pos)
+                            s += "    PabloAST * %s = %s.createAdvance(%s, %i);\n" % (adv, scope, marker, pos)
+                            adv_markers[marker] = adv
+                        marker = adv_markers[marker]
+                    s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
+            for del_amt in sorted(del_usets.keys()):
+                s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
+                for d in range(1, del_amt):
+                    s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
+            s += finalize_nested_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+        s += excluded_composite_final_code
         return s
 
     def generate_nfc_stage(self, pass_no):
@@ -1183,12 +1270,14 @@ class NFC_generator(U8_Translation_Generator):
         basename = 'normalization-generated'
         f = cformat.open_cpp_file_for_write(basename)
         kernels = ""
-        kernels += generator.generate_singleton_stage2()
-        #print(generator.generate_nfc_stage(0))
+        kernels += generator.generate_singleton_stage()
+        for pass_no in range(5):
+            kernels += generator.generate_nfc_stage(pass_no)
         kernels += generator.generate_short_composable_stage()
         #print(generator.generate_insertions_for_nonstarter_decompositions())
         kernels += generator.generate_u8_insertion_kernel()
-        kernels += generator.generate_nonstarter_decompositions()
+        #kernels += generator.generate_nonstarter_decompositions()
+        kernels += generator.generate_excluded_composite_stage()
         uset_definitions = generator.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
@@ -1201,10 +1290,12 @@ if __name__ == "__main__":
     generator.create_mappings()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
-    #generator.show_ccc_pass_allocation()
+    generator.show_ccc_pass_allocation()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
+    #generator.display_excluded_composites()
+    #generator.display_recursive_decomposables()
     #generator.display_max_insert_map()
     generator.emit_normalization_cpp()
