@@ -108,16 +108,31 @@ assignment_template = r"""    Var * ${role} = ${scope}.createVar("${role}", All0
     ${pfx}_usets[${index}] = ${role}_uset;
 """
 
+external_template = r"""    Var * ${role} = ${scope}.createVar("${role}", All0);
+    ${pfx}_vars[${index}] = ${role};
+    ${pfx}_usets[${index}] = ${external_expr};
+"""
+
 class Uset_Builder:
     def __init__(self):
         self.installed_usets = {}
+        self.external_usets = {}
         self.role_to_key_map = {}
-        self.key_to_role_map = {}
         self.current_scope_roles = []
 
-    def open_scope(self, scope):
+    def open_scope(self, pfx, scope):
+        self.scope_pfx = pfx
         self.current_scope = scope
         self.current_scope_roles = []
+        if pfx != "": return "    {\n"
+
+    def install_external_uset(self, external_key, uset_expr):
+        if not external_key in self.external_usets.keys():
+            #print("new key: %s" % key)
+            self.external_usets[external_key] = uset_expr
+        if not external_key in self.current_scope_roles:
+            self.current_scope_roles.append(external_key)
+        return external_key
 
     def install_uset(self, uset):
         key = uset_structural_key(uset)
@@ -128,47 +143,8 @@ class Uset_Builder:
             self.current_scope_roles.append(key)
         return key
 
-    def install_uset_for_role(self, role_name, uset):
-        key = uset_structural_key(uset)
-        self.role_to_key_map[role_name] = key
-        if not key in self.installed_usets.keys():
-            #print("new key: %s" % key)
-            self.installed_usets[key] = uset
-            self.key_to_role_map[key] = [role_name]
-        else:
-            self.key_to_role_map[key].append(role_name)
-        self.current_scope_roles.append(role_name)
-
-    def install_uset_family(self, role_template, usets):
-        for i in range(len(usets)):
-            self.install_uset_for_role(role_template % i, usets[i])
-
-    def get_uset_key_for_role(self, role_name):
-        if not role_name in self.role_to_key_map.keys():
-            raise Exception("Unknown role name: " + role_name)
-        return self.role_to_key_map[role_name]
-
     def get_installed_usets(self):
         return self.installed_usets
-
-    def get_role_to_key_map(self):
-        return self.role_to_key_map
-
-    def generate_scope_compilations(self, movement_mode = "LookAhead"):
-        pfx = self.current_scope
-        if movement_mode != "LookAhead":
-            pfx = pfx + "_adv"
-        t1 = string.Template(scoped_compiler_template)
-        t2 = string.Template(assignment_template)
-        assigs = ""
-        for i in range(len(self.current_scope_roles)):
-            assigs += t2.substitute(pfx = pfx, scope = self.current_scope, index = i, role = self.current_scope_roles[i])
-        defs = t1.substitute(pfx = pfx,
-                             scope = self.current_scope,
-                             movement = movement_mode,
-                             num_roles = len(self.current_scope_roles),
-                             assignments = assigs)
-        return defs
 
     def generate_uset_definitions(self, name_template):
         defs = ""
@@ -182,6 +158,35 @@ class Uset_Builder:
             i += 1
             defs += "    const UnicodeSet & %s_uset = %s;\n" % (key, generated[key])
         return defs
+
+    def get_uset_definitions(self):
+        return self.generate_uset_definitions("uset_%i")
+
+    def generate_scope_compilations(self, movement_mode = "LookAhead"):
+        pfx = ""
+        if movement_mode != "LookAhead":
+            pfx = pfx + "_adv"
+        t1 = string.Template(scoped_compiler_template)
+        t2 = string.Template(assignment_template)
+        t3 = string.Template(external_template)
+        assigs = ""
+        for i in range(len(self.current_scope_roles)):
+            k = self.current_scope_roles[i]
+            if k in self.installed_usets.keys():
+                assigs += t2.substitute(pfx = pfx, scope = self.current_scope, index = i, role = k)
+            else:
+                expr = self.external_usets[k]
+                assigs += t3.substitute(pfx = pfx, scope = self.current_scope, index = i, role = k, external_expr = expr)
+        defs = t1.substitute(pfx = pfx,
+                             scope = self.current_scope,
+                             movement = movement_mode,
+                             num_roles = len(self.current_scope_roles),
+                             assignments = assigs)
+        return defs
+
+    def close_scope(self):
+        return "    }\n"
+
 
 def u8_adjustment_bixnums_from_codepoint_map(translation_map):
     for cp1 in translation_map.keys():
@@ -223,47 +228,6 @@ def u8_deletion_usets_from_codepoint_map(translation_map):
             deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], singleton_uset(cp1))
     return deletion_usets
 
-class U8_Translation_Generator:
-    def __init__(self):
-        self.codepoint_maps = {}
-        self.builder = Uset_Builder()
-
-    def define_codepoint_map(self, skey, map):
-        self.codepoint_maps[skey] = map
-
-    def has_codepoint_map(self, skey):
-        return skey in self.codepoint_maps.keys()
-
-    def generate_basis_bit_translation_usets(self, skey):
-        if not self.has_codepoint_map(skey):
-            raise Exception("Requesting basis bit translations for %s no such codepoint_map" % (skey))
-        translation_map = self.codepoint_maps[skey]
-        translation_sets = []
-        for cp1 in translation_map.keys():
-            cp2 = translation_map[cp1]
-            bit_diffs = cp1 ^ cp2
-            bit = 0
-            while bit_diffs > 0:
-                if len(translation_sets) <= bit:
-                    translation_sets.append(empty_uset())
-                if bit_diffs & 1 == 1:
-                    translation_sets[bit] = uset_union(translation_sets[bit], singleton_uset(cp1))
-                bit_diffs >>=  1
-                bit += 1
-        self.builder.install_uset_family(skey + "_basis_%02i", translation_sets)
-
-    def generate_u8_adjustment_bixnum_usets(self, skey):
-        if not self.has_codepoint_map(skey):
-            raise Exception("Requesting insertion bixnums for %s no such codepoint_map" % (skey))
-        translation_map = self.codepoint_maps[skey]
-        (insertion_bixnum_usets, deletion_bixnum_usets) = u8_adjustment_bixnums_from_codepoint_map(translation_map)
-        if len(insertion_bixnum_usets) > 0:
-            self.builder.install_uset_family(skey + "_insert_basis_%i", insertion_bixnum_usets)
-        if len(deletion_bixnum_usets) > 0:
-            self.builder.install_uset_family(skey + "_delete_basis_%i", deletion_bixnum_usets)
-
-    def get_uset_definitions(self):
-        return self.builder.generate_uset_definitions("uset_%i")
 
 def get_pfx_code(cp):
     initial = u8_code_unit(cp, 1)
@@ -280,6 +244,15 @@ def pfx_code_string(pfx_code):
     if pfx_code <= 0xDF:
         return "%x_%x" % (pfx_code, pfx_code | 0x03)
     return "%x" % pfx_code
+
+def pfx_code_lgth(pfx_code):
+    if pfx_code == 0:
+        return 1
+    elif pfx_code <= 0xDF:
+        return 2
+    elif pfx_code <= 0xEF:
+        return 3
+    return 4
 
 # TODO: consider possible optimization based on exact initial byte range
 def prefix_test_logic(pfx_code):
@@ -434,82 +407,89 @@ pass_template = r"""//
 class FindComposables${pass_no} : public PabloKernel {
 public:
     FindComposables${pass_no}
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR${extra_inputs},
-                                       StreamSet * MarksFound, StreamSet * Index_ccc_NR_or_MarksFound);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
+                                       StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound);
 protected:
     void generatePabloMethod() override;
 };
 
 FindComposables${pass_no}::FindComposables${pass_no}
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR${extra_inputs},
-                                   StreamSet * MarksFound, StreamSet * Index_ccc_NR_or_MarksFound) :
-: PabloKernel(ts, "FindComposables${pass_no}" + Basis->shapeString(),
-{Binding{"Basis", Basis}, Binding{"ccc_NR", ccc_NR}${extra_bindings}},
-{Binding{"MarksFound", MarksFound}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
+                                   StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
+: PabloKernel(ts, "FindComposables${pass_no}_" + Basis->shapeString(),
+{Binding{"Basis", Basis}, Binding{"ccc_NR", ccc_NR}},
+{Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables${pass_no}::generatePabloMethod() {
+    EnumeratedPropertyObject * cccObj = cast<EnumeratedPropertyObject>(getPropertyObject(ccc));
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
-    PabloAST * eligible_starter = ${eligible};
-    Var * composable2nd = pb.createVar("composable2nd", All0);
+    const unsigned markCodeBits = ${markCodeBits};
+    std::vector<Var *> markCode(markCodeBits);
+    for (unsigned i = 0; i < markCodeBits; i++) {
+        markCode[i] = pb.createVar("markCode" + std::to_string(i), All0);
+    }
 """
 
-def gen_pass_header_code(pass_no):
+def gen_pass_header_code(pass_no, mark_code_bits):
     s = string.Template(pass_template)
     extra_inputs = ""
     extra_bindings = ""
-    eligible = "pb.createOnes()"
-    if (pass_no > 0):
-        extra_inputs = ", StreamSet * priorFound"
-        extra_bindings = r""", Binding{"priorFound", priorFound}"""
-        eligible = r"""pb.createNot(getInputStreamSet("priorFound")[0])"""
     return s.substitute(pass_no = pass_no,
-                        extra_inputs = extra_inputs,
-                        extra_bindings = extra_bindings,
-                        eligible = eligible)
+                        markCodeBits = mark_code_bits)
 
-pfx_template = r"""
+pass_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
-    pb.createIf(pb.createAnd(${pfx_test_var}, eligible_starter), ${builder});
+    pb.createIf(pb.createAnd(${pfx_test_var}, mark_ahead_${mark_lookahead}), ${builder});
 """
 
 def gen_pass_pfx_code(pfx_code):
     code_str = pfx_code_string(pfx_code)
     pfx_test_var = "pfx_%s_test" % code_str
     test = prefix_test_logic(pfx_code)
-    if pfx_code == 0:
-        test = "pb.createAnd(%s, pb.createLookahead(ccc_NR, 1))" % test
     scope = "b_%s" % code_str
-    t = string.Template(pfx_template)
+    t = string.Template(pass_pfx_template)
     return t.substitute(builder = scope,
                         pfx_test_var = pfx_test_var,
+                        mark_lookahead = pfx_code_lgth(pfx_code),
                         logic = test)
-
 
 mark_case_template = r"""
 //  Case for mark ${mark}
-    PabloAST * possible_${mark}_pos = ${builder}.createScanTo(${mark_starters}, ${ccc_enum}_or_NR);
-    PabloAST * found_${mark} = ${builder}.createAnd(possible_${mark}_pos, ${mark_var});
-    ${builder}.createAssign(composable2nd, ${builder}.createOr(composable2nd, found_${mark}));
+    PabloAST * ${builder}_possible_${mark}_pos = ${builder}.createScanTo(${mark_starters}, ${ccc_v}_or_NR);
+    PabloAST * ${builder}_found_${mark} = ${builder}.createAnd(${builder}_possible_${mark}_pos, ${mark_var});
 """
 
-def gen_mark_case_logic(mark, starters_var, mark_var, ccc_enum, code_str):
+mark_code_template = r"""    ${builder}.createAssign(markCode[${code_bit}], ${builder}.createOr(markCode[${code_bit}], ${builder}_found_${mark}));
+"""
+
+def gen_mark_case_logic(mark, starters_var, mark_var, ccc_enum, code_str, mark_code):
     t = string.Template(mark_case_template)
-    return t.substitute(builder = "b_%s" % code_str,
+    s = t.substitute(builder = "b_%s" % code_str,
                         mark="%x" % mark,
                         mark_var = mark_var,
                         mark_starters=starters_var,
-                        ccc_enum=ccc_enum)
+                        ccc_v= "ccc_%s_%s" % (ccc_enum, code_str))
+    t2 = string.Template(mark_code_template)
+    i = 0
+    while mark_code > 0:
+        if (mark_code & 1) == 1:
+            s += t2.substitute(builder = "b_%s" % code_str, mark="%x" % mark, code_bit = "%i" % i)
+        i += 1
+        mark_code = mark_code >> 1
+    return s
 
 finalize_nfc_template = r"""// Generate combined outputs for pass ${pass_no}.
-    Var * marksFoundVar = pb.getOutputStreamVar("MarksFound");
-    pb.createAssign(pb.createExtract(marksFoundVar, pb.getInteger(0)), composable2nd);
+    Var * markOutputVar = getOutputStreamVar("MarkCode");
+    for (unsigned i = 0; i < markCodeBits; i++) {
+        pb.createAssign(pb.createExtract(markOutputVar, pb.getInteger(i)), markCode[i]);
+    }
     PabloAST * updatedIndexStrm = pb.createOr(ccc_NR, composable2nd);
-    Var * indexVar = pb.getOutputStreamVar("Index_ccc_NR_or_MarksFound");
+    Var * indexVar = getOutputStreamVar("Index_ccc_NR_or_MarkFound");
     pb.createAssign(pb.createExtract(indexVar, pb.getInteger(0)), updatedIndexStrm);
 }
 """
@@ -768,17 +748,9 @@ def insert_map_to_bixnum_usets(ins_map):
     return bixnum_usets
 
 
-nfc_generated_cpp_template = r"""/*
- *  Part of the Parabix Project, under the Open Software License 3.0.
- *  SPDX-License-Identifier: OSL-3.0
- *
- *  This file is auto-generated by scripts/UCD/nfc_generator.py and must
- *  be regenerated for each update to the Unicode standard.
- *  DO NOT EDIT - manual edits will be lost.
- */
-
-#include <kernel/unicode/normalization.h>
+nfc_generated_cpp_template = r"""#include <kernel/unicode/normalization.h>
 #include <unicode/core/unicode_set.h>
+#include <unicode/data/PropertyObjectTable.h>
 #include <unicode/algo/normalization.h>
 #include <unicode/utf/utf_compiler.h>
 #include <pablo/builder.hpp>
@@ -797,10 +769,11 @@ ${kernels}
 """
 
 
-class NFC_generator(U8_Translation_Generator):
+class NFC_generator:
     def __init__(self, ucd):
         super().__init__()
         self.ucd = ucd
+        self.builder = Uset_Builder()
         self.ccc_val_map = ucd.property_object_map['ccc'].cp_value_map
         self.ccc_enum_map = ucd.property_object_map['ccc'].property_value_enum_integer
         self.ccc_enum_rmap = ucd.property_object_map['ccc'].enum_integer_to_value_map
@@ -1015,42 +988,47 @@ class NFC_generator(U8_Translation_Generator):
         self.conditional_mark_codes = {}
         self.max_conditional_code_bits = {}
         for pass_no in range(self.pass_count):
-            self.max_conditional_code_bits[pass_no] = 0
-        ccc_data = {}
+            self.conditional_mark_codes[pass_no] = {}
+            self.max_conditional_code_bits[pass_no] = 1 # default
+        pass_data = {}
         for mark in self.long_composable_map.keys():
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
-            if not ccc_code in ccc_data.keys():
-                ccc_data[ccc_code] = {}
+            pass_code = self.ccc_pass_allocation[ccc_code]
+            if not pass_code in pass_data.keys():
+                pass_data[pass_code] = {}
             starter_rg_set_map = range_usets_from_cps(self.long_composable_map[mark].keys())
             for pfx_code in starter_rg_set_map.keys():
-                if not pfx_code in ccc_data[ccc_code].keys():
-                    ccc_data[ccc_code][pfx_code] = []
-                ccc_data[ccc_code][pfx_code].append(mark)
-        for ccc_code in ccc_data.keys():
-            for pfx_code in ccc_data[ccc_code].keys():
-                mark_list = ccc_data[ccc_code][pfx_code]
+                if not pfx_code in pass_data[pass_code].keys():
+                    pass_data[pass_code][pfx_code] = []
+                pass_data[pass_code][pfx_code].append(mark)
+        for pass_no in range(self.pass_count):
+            for pfx_code in pass_data[pass_no].keys():
+                mark_list = pass_data[pass_no][pfx_code]
                 if len(mark_list) == 1: continue  # unconditional mark for this starter range
-                if not ccc_code in self.conditional_mark_codes.keys():
-                    self.conditional_mark_codes[ccc_code] = {}
-                if not pfx_code in self.conditional_mark_codes[ccc_code].keys():
-                    self.conditional_mark_codes[ccc_code][pfx_code] = {}
-                bits = ceil_log2(len(mark_list))
+                if not pass_code in self.conditional_mark_codes.keys():
+                    self.conditional_mark_codes[pass_no] = {}
+                if not pfx_code in self.conditional_mark_codes[pass_no].keys():
+                    self.conditional_mark_codes[pass_no][pfx_code] = {}
+                bits = ceil_log2(len(mark_list) + 1)  # code 0 reserved
                 mask = (1 << bits) - 1
-                unallocated = []
+                allocated = {}
+                allocated[0] = 0  # code 0 is reserved 
+                unassigned_marks = []
                 for mark in mark_list:
                     potential_code = mark & mask
-                    if potential_code in self.conditional_mark_codes[ccc_code][pfx_code].keys():
-                        unallocated.append(mark)
+                    if potential_code in allocated:
+                        unassigned_marks.append(mark)
                     else:
-                        self.conditional_mark_codes[ccc_code][pfx_code][potential_code] = mark
-                for mark in unallocated:
-                    for code in range(1 << bits):
-                        if code in self.conditional_mark_codes[ccc_code][pfx_code].keys():
+                        self.conditional_mark_codes[pass_no][pfx_code][mark] = potential_code
+                        allocated[potential_code] = mark
+                for mark in unassigned_marks:
+                    for code in range(1, 1 << bits):
+                        if code in allocated:
                             continue
-                        self.conditional_mark_codes[ccc_code][pfx_code][code] = mark
+                        self.conditional_mark_codes[pass_no][pfx_code][mark] = code
+                        allocated[code] = mark
                         break
-                pass_no = self.ccc_pass_allocation[ccc_code]
                 if self.max_conditional_code_bits[pass_no] < bits:
                     self.max_conditional_code_bits[pass_no] = bits
 
@@ -1058,16 +1036,10 @@ class NFC_generator(U8_Translation_Generator):
         ccc_enum_rmap = ucd.property_object_map['ccc'].enum_integer_to_value_map
         for pass_no in range(self.pass_count):
             print("Pass %i, max_conditional_code_bits =  %i" % (pass_no, self.max_conditional_code_bits[pass_no]))
-            for ccc_code in sorted(self.ccc_pass_allocation.keys()):
-                ccc = ccc_enum_rmap[ccc_code]
-                if self.ccc_pass_allocation[ccc_code] == pass_no:
-                    if not ccc_code in self.conditional_mark_codes.keys():
-                        print("  ccc %s (%i): no conditional marks" % (ccc, ccc_code))
-                        continue
-                    for pfx_code in self.conditional_mark_codes[ccc_code].keys():
-                        assignments = self.conditional_mark_codes[ccc_code][pfx_code]
-                        codes = ["%i => %x" % (c, assignments[c]) for c in sorted(assignments.keys())]
-                        print("  ccc %s (%i), pfx_code %s: %s" % (ccc, ccc_code, pfx_code_string(pfx_code), " ".join(codes)))
+            for pfx_code in self.conditional_mark_codes[pass_no].keys():
+                assignments = self.conditional_mark_codes[pass_no][pfx_code]
+                codes = ["%x => %i" % (c, assignments[c]) for c in sorted(assignments.keys())]
+                print("  pfx_code %s: %s" % (pfx_code_string(pfx_code), ", ".join(codes)))
 
     def generate_singleton_stage(self):
         s = singleton_header
@@ -1076,7 +1048,7 @@ class NFC_generator(U8_Translation_Generator):
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
             s += gen_nested_pfx_code(pfx_code)
-            self.builder.open_scope(scope)
+            s += self.builder.open_scope(code_str, scope)
             pfx_xlate_map = {}
             singleton_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in singleton_list:
@@ -1108,6 +1080,7 @@ class NFC_generator(U8_Translation_Generator):
                 for d in range(1, del_amt):
                     s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
             s += finalize_nested_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+            s += self.builder.close_scope()
         s += singleton_final_code
         return s
 
@@ -1118,7 +1091,7 @@ class NFC_generator(U8_Translation_Generator):
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
             s += gen_nested_pfx_code(pfx_code)
-            self.builder.open_scope(scope)
+            s += self.builder.open_scope(code_str, scope)
             pfx_xlate_map = {}
             composite_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp in composite_list:
@@ -1150,12 +1123,15 @@ class NFC_generator(U8_Translation_Generator):
                 for d in range(1, del_amt):
                     s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
             s += finalize_nested_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+            s += self.builder.close_scope()
         s += excluded_composite_final_code
         return s
 
     def generate_nfc_stage(self, pass_no):
-        s = gen_pass_header_code(pass_no)
+        mark_code_bits = self.max_conditional_code_bits[pass_no]
+        s = gen_pass_header_code(pass_no, mark_code_bits)
         pass_data = {}
+        pfx_lgths = []
         for mark in self.long_composable_map.keys():
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
@@ -1164,24 +1140,44 @@ class NFC_generator(U8_Translation_Generator):
                 for pfx_code in rg_set_map.keys():
                     if not pfx_code in pass_data.keys():
                         pass_data[pfx_code] = {}
+                        pfx_lgth = pfx_code_lgth(pfx_code)
+                        if not pfx_lgth in pfx_lgths:
+                            pfx_lgths.append(pfx_lgth)
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
+        for pfx_lgth in sorted(pfx_lgths):
+            s += "    PabloAST * mark_ahead_%i = pb.createNot(pb.createLookahead(ccc_NR, %i));\n" % (pfx_lgth, pfx_lgth)
         for pfx_code in pass_data.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
             s += gen_pass_pfx_code(pfx_code)
-
             starters_var = {}
             mark_var = {}
-            self.builder.open_scope(scope)
+            s += self.builder.open_scope(code_str, scope)
+            external_cccs = {}
+            ccc_or_NR_defs = ""
             for mark in sorted(pass_data[pfx_code].keys()):
                 starters_var[mark] = self.builder.install_uset(pass_data[pfx_code][mark])
                 mark_var[mark] = self.builder.install_uset(singleton_uset(mark))
+                ccc = self.ccc_val_map[mark] 
+                if not ccc in external_cccs.keys():
+                    ccc_v = "ccc_%s_%s" % (ccc, code_str)
+                    self.builder.install_external_uset(ccc_v, "cccObj->GetCodepointSet(CCC_ns::%s)" % ccc)
+                    external_cccs[ccc] = ccc_v
+                    ccc_or_NR_defs += "    PabloAST * %s_or_NR = %s.createOr(%s, ccc_NR);\n" % (ccc_v, scope, ccc_v)
             s += self.builder.generate_scope_compilations()
-
+            s += ccc_or_NR_defs
             for mark in sorted(pass_data[pfx_code].keys()):
                 ccc_enum = self.ccc_val_map[mark]
-                s += gen_mark_case_logic(mark, starters_var[mark], mark_var[mark], ccc_enum, code_str)
-
+                ccc_code = self.ccc_enum_map[ccc_enum]
+                mark_code = 1 # default
+                if pass_no in self.conditional_mark_codes.keys():
+                    if pfx_code in self.conditional_mark_codes[pass_no].keys():
+                        mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
+                s += gen_mark_case_logic(mark, starters_var[mark], mark_var[mark], ccc_enum, code_str, mark_code)
+            s += self.builder.close_scope()
+        s += "    PabloAST * composable2nd = markCode[0];\n"
+        for i in range(1, mark_code_bits):
+            s += "    composable2nd = pb.createOr(composable2nd, markCode[%i]);\n" % i
         s+=finalize_nfc_stage(pass_no)
         return s
 
@@ -1192,7 +1188,7 @@ class NFC_generator(U8_Translation_Generator):
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
             s += gen_short_composable_pfx_code(pfx_code)
-            self.builder.open_scope(scope)
+            s += self.builder.open_scope(code_str, scope)
             generated = {}
             cp1_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in cp1_list:
@@ -1233,6 +1229,7 @@ class NFC_generator(U8_Translation_Generator):
                     else: next_deferred.append(cp1)
                 deferred = next_deferred
             s += finalize_short_composable_pfx_code(pfx_code)
+            s += self.builder.close_scope()
         s += short_composable_final_code
         return s
 
@@ -1241,7 +1238,7 @@ class NFC_generator(U8_Translation_Generator):
         bixnum_bits = len(insertion_usets)
         t = string.Template(u8_insertion_bixnum_template)
         s = t.substitute(insertion_bixnum_bits = bixnum_bits)
-        self.builder.open_scope("pb")
+        self.builder.open_scope("", "pb")
         insertions = []
         for i in range(bixnum_bits):
             insertions.append(self.builder.install_uset(insertion_usets[i]))
@@ -1255,14 +1252,13 @@ class NFC_generator(U8_Translation_Generator):
         basename = 'normalization-generated'
         f = cformat.open_cpp_file_for_write(basename)
         kernels = ""
-        kernels += generator.generate_singleton_stage()
+        kernels += self.generate_u8_insertion_kernel()
+        kernels += self.generate_singleton_stage()
+        kernels += self.generate_excluded_composite_stage()
+        kernels += self.generate_short_composable_stage()
         for pass_no in range(5):
-            kernels += generator.generate_nfc_stage(pass_no)
-        kernels += generator.generate_short_composable_stage()
-        #print(generator.generate_insertions_for_nonstarter_decompositions())
-        kernels += generator.generate_u8_insertion_kernel()
-        kernels += generator.generate_excluded_composite_stage()
-        uset_definitions = generator.get_uset_definitions()
+            kernels += self.generate_nfc_stage(pass_no)
+        uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
         f.write(s)
@@ -1275,7 +1271,7 @@ if __name__ == "__main__":
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
     generator.create_conditional_mark_codes()
-    generator.show_ccc_pass_allocation()
+    #generator.show_ccc_pass_allocation()
     generator.show_conditional_codes()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
@@ -1284,4 +1280,4 @@ if __name__ == "__main__":
     #generator.display_excluded_composites()
     #generator.display_recursive_decomposables()
     #generator.display_max_insert_map()
-    #generator.emit_normalization_cpp()
+    generator.emit_normalization_cpp()
