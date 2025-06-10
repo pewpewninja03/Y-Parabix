@@ -498,6 +498,81 @@ def finalize_nfc_stage(pass_no):
     s = string.Template(finalize_nfc_template)
     return s.substitute(pass_no = pass_no)
 
+long_composable_application_template = r"""//
+class ApplyLongComposition${pass_no} : public PabloKernel {
+public:
+    ApplyLongComposition${pass_no}
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+                                       StreamSet * OutputBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
+ApplyLongComposition${pass_no}::ApplyLongComposition${pass_no}
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+                                   StreamSet * OutputBasis)
+: PabloKernel(ts, "ApplyLongComposition${pass_no}_" + Basis->shapeString(),
+{Binding{"Basis", Basis}, Binding{"MarkCode", MarkCode}},
+{Binding{"OutputBasis", OutputBasis}}) {}
+
+void ApplyLongComposition${pass_no}::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    const unsigned markCodeBits = ${markCodeBits};
+    PabloAST * markFound = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        markFound = pb.createOr(markFound, markCode[i]);
+    }
+    std::vector<Var *> XfrmVar(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        XfrmVar[i] = pb.createVar("XfrmBasis" + std::to_string(i), All0);
+    }
+    Var * DeleteVar = pb.createVar("DeleteVar", All0);
+"""
+
+def gen_long_composition_xfrm_header_code(pass_no, mark_code_bits):
+    s = string.Template(long_composable_application_template)
+    return s.substitute(pass_no = pass_no,
+                        markCodeBits = mark_code_bits)
+
+long_composition_pfx_template = r"""
+    auto ${builder} = pb.createScope();
+    PabloAST * ${pfx_test_var} = ${logic};
+    pb.createIf(pb.createAnd(${pfx_test_var}, markFound), ${builder});
+    std::vector<PabloAST *> xfrm_${code_str}(8, All0);
+    PabloAST * del_${code_str} = All0;
+"""
+
+def gen_long_composition_pfx_code(pfx_code):
+    code_str = pfx_code_string(pfx_code)
+    pfx_test_var = "pfx_%s_test" % code_str
+    test = prefix_test_logic(pfx_code)
+    scope = "b_%s" % code_str
+    t = string.Template(long_composition_pfx_template)
+    return t.substitute(builder = scope,
+                        code_str = code_str,
+                        pfx_test_var = pfx_test_var,
+                        logic = test)
+
+long_composable_pfx_final_template = r"""
+    for (unsigned i = 0; i < 8; i++) {
+        ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
+    }
+    ${builder}.createAssign(DeleteVar, $builder.createOr(DeleteVar, del_${code_str}));
+"""
+
+def finalize_long_composable_pfx_code(pfx_code):
+    code_str = pfx_code_string(pfx_code)
+    scope = "b_%s" % code_str
+    t = string.Template(long_composable_pfx_final_template)
+    return t.substitute(builder = scope,
+                        code_str = code_str)
+
+
+
 short_composable_header = r"""//
 ShortComposableTranslation::ShortComposableTranslation
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
@@ -1181,6 +1256,72 @@ class NFC_generator:
         s+=finalize_nfc_stage(pass_no)
         return s
 
+    def generate_long_composition_xfrm_stage(self, pass_no):
+        mark_code_bits = self.max_conditional_code_bits[pass_no]
+        s = gen_long_composition_xfrm_header_code(pass_no, mark_code_bits)
+        pass_data = {}
+        pfx_lgths = []
+        for mark in self.long_composable_map.keys():
+            ccc = self.ccc_val_map[mark]
+            ccc_code = self.ccc_enum_map[ccc]
+            if self.ccc_pass_allocation[ccc_code] == pass_no:
+                rg_set_map = range_usets_from_cps(self.long_composable_map[mark].keys())
+                for pfx_code in rg_set_map.keys():
+                    if not pfx_code in pass_data.keys():
+                        pass_data[pfx_code] = {}
+                        pfx_lgth = pfx_code_lgth(pfx_code)
+                        if not pfx_lgth in pfx_lgths:
+                            pfx_lgths.append(pfx_lgth)
+                    pass_data[pfx_code][mark] = rg_set_map[pfx_code]
+        del_vars = {}
+        by_pos = {}
+        for pfx_code in pass_data.keys():
+            code_str = pfx_code_string(pfx_code)
+            scope = "b_%s" % code_str
+            s += gen_long_composition_pfx_code(pfx_code)
+            s += self.builder.open_scope(code_str, scope)
+
+            del_vars[pfx_code] = {}
+            by_pos[pfx_code] = {}
+            for mark in pass_data[pfx_code].keys():
+                starters = uset_to_member_list(pass_data[pfx_code][mark])
+                pfx_xlate_map = {}
+                for cp1 in starters:
+                    pfx_xlate_map[cp1] = chr(self.long_composable_map[mark][cp1])
+                bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
+                del_usets = u8_deletion_sets(pfx_xlate_map)
+                del_vars[pfx_code][mark] = {}
+                for del_amt in del_usets.keys():
+                    del_vars[pfx_code][mark][del_amt] = self.builder.install_uset(del_usets[del_amt])
+                by_pos[pfx_code][mark] = {}
+                for pos in sorted(bit_xfrm_sets.keys()):
+                    by_pos[pfx_code][mark][pos] = {}
+                    for bit in bit_xfrm_sets[pos].keys():
+                        by_pos[pfx_code][mark][pos][bit] = self.builder.install_uset(bit_xfrm_sets[pos][bit])
+            s += self.builder.generate_scope_compilations()
+
+            for mark in sorted(pass_data[pfx_code].keys()):
+                mark_code = 1 # default
+                if pass_no in self.conditional_mark_codes.keys():
+                    if pfx_code in self.conditional_mark_codes[pass_no].keys():
+                        mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
+                s += "    PabloAST * foundMark_%x = bnc.EQ(markCode, %i);\n" % (mark, mark_code)
+                for pos in sorted(by_pos[pfx_code][mark].keys()):
+                    for bit in sorted(by_pos[pfx_code][mark][pos].keys()):
+                        bit_xfrm = by_pos[pfx_code][mark][pos][bit]
+                        bit_xfrm = "%s.createAnd(%s, %s)" % (scope, bit_xfrm, "foundMark_%x" % mark)
+                        if (pos > 0):
+                            bit_xfrm = "%s.createAdvance(%s, %i)" % (scope, bit_xfrm, pos)
+                        s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, bit_xfrm)
+                for del_amt in sorted(del_vars[pfx_code][mark].keys()):
+                    s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[pfx_code][mark][del_amt])
+                    for d in range(1, del_amt):
+                        s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[pfx_code][mark][del_amt], d)
+            s += finalize_long_composable_pfx_code(pfx_code)
+            s += self.builder.close_scope()
+        s += singleton_final_code  # long_composable and singleton have common final code
+        return s
+
     def generate_short_composable_stage(self):
         s = short_composable_header
         rg_set_map = range_usets_from_cps(self.short_composable_map.keys())
@@ -1258,6 +1399,7 @@ class NFC_generator:
         kernels += self.generate_short_composable_stage()
         for pass_no in range(5):
             kernels += self.generate_nfc_stage(pass_no)
+            kernels += self.generate_long_composition_xfrm_stage(pass_no)
         uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
