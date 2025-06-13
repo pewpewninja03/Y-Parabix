@@ -417,7 +417,7 @@ FindComposables${pass_no}::FindComposables${pass_no}
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables${pass_no}_" + Basis->shapeString(),
-{Binding{"Basis", Basis}, Binding{"ccc_NR", ccc_NR}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables${pass_no}::generatePabloMethod() {
@@ -512,7 +512,7 @@ ApplyLongComposition${pass_no}::ApplyLongComposition${pass_no}
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition${pass_no}_" + Basis->shapeString(),
-{Binding{"Basis", Basis}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition${pass_no}::generatePabloMethod() {
@@ -571,6 +571,52 @@ def finalize_long_composable_pfx_code(pfx_code):
     return t.substitute(builder = scope,
                         code_str = code_str)
 
+any_mark_template = r"""    std::vector<PabloAST *> MarkCodes${pass_no} = getInputStreamSet("MarkCode${pass_no}");
+    for (unsigned i = 0; i < MarkCodes${pass_no}.size(), i++) {
+        anyMark = pb.createOr(anyMark, MarkCodes${pass_no}[i]);
+    }
+"""
+mark_deletion_template = r"""//
+class MarkDeletion : public pablo::PabloKernel {
+public:
+MarkDeletion
+    (LLVMTypeSystemInterface & ts, 
+     StreamSet * Basis,
+${mark_code_streamsets}    StreamSet * DeletionMask);
+protected:
+    void generatePabloMethod() override;
+};
+
+MarkDeletion::MarkDeletion
+    (LLVMTypeSystemInterface & ts,
+     StreamSet * Basis,
+${mark_code_streamsets}    StreamSet * DeletionMask);
+: PabloKernel(ts, 'MarkDeletion',
+{Binding{"Basis", Basis}${mark_code_bindings}},
+{Binding{"DeletionMask", DeletionMask}}) {}
+
+MarkDeletion::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * anyMark = pb.createZeroes();
+${mark_accumulation}
+    PabloAST * pfxmark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xC2));
+    PabloAST * pfx3or4mark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xE0));
+    Var * markVar = pb.createVar("MarkVar", pb.createZeroes());
+    pb.createAssign(markVar, pb.createOr(anyMark, pb.createAdvance(pfxmark, 1)));
+    auto nested = pb.createScope();
+    pb.createIf(pfx3or4mark, nested);
+    BixNumCompiler bnc2(nested);
+    nested.createAssign(markVar, nested.createOr(markVar, nested.createAdvance(pfx3or4mark, 2));
+    PabloAST * pfx4mark = nested.createAnd(anyMark, bnc2.UGE(Basis, 0xF0));
+    auto nested2 = nested.createScope();
+    nested.createIf(pfx4mark, nested2);
+    nested2.createAssign(markVar, nested2.createOr(markVar, nested2.createAdvance(pfx4mark, 3));
+    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("DeletionMask"), pb.getInteger(0));
+    pb.createAssign(MaskOutputVar, markVar);
+}
+"""
 
 
 short_composable_header = r"""//
@@ -1130,6 +1176,7 @@ class NFC_generator:
                 pfx_xlate_map[cp1] = chr(self.singleton_map[cp1])
             bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
             del_usets = u8_deletion_sets(pfx_xlate_map)
+            has_del = len(del_usets.keys()) > 0
             del_vars = {}
             for del_amt in del_usets.keys():
                 del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
@@ -1150,11 +1197,12 @@ class NFC_generator:
                             adv_markers[marker] = adv
                         marker = adv_markers[marker]
                     s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
-            for del_amt in sorted(del_usets.keys()):
-                s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
-                for d in range(1, del_amt):
-                    s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
-            s += finalize_nested_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+            if has_del:
+                for del_amt in sorted(del_usets.keys()):
+                    s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
+                    for d in range(1, del_amt):
+                        s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
+            s += finalize_nested_pfx_code(pfx_code, has_del)
             s += self.builder.close_scope()
         s += singleton_final_code
         return s
@@ -1322,6 +1370,21 @@ class NFC_generator:
         s += singleton_final_code  # long_composable and singleton have common final code
         return s
 
+    def long_composable_mark_deletion(self):
+        t = string.Template(mark_deletion_template)
+        t2 = string.Template(any_mark_template)
+        stream_sets = ""
+        bindings = ""
+        mark_stmts = ""
+        for pass_no in range(self.pass_count):
+            stream_sets += "     StreamSet * MarkCodes%i,\n" % pass_no
+            bindings += r"""%s Binding{"MarkCodes%i", MarkCodes%i}""" % (",\n", pass_no, pass_no)
+            mark_code_bits = self.max_conditional_code_bits[pass_no]
+            mark_stmts += t2.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits)
+        return t.substitute(mark_code_streamsets = stream_sets,
+                            mark_code_bindings = bindings,
+                            mark_accumulation = mark_stmts)
+
     def generate_short_composable_stage(self):
         s = short_composable_header
         rg_set_map = range_usets_from_cps(self.short_composable_map.keys())
@@ -1400,6 +1463,7 @@ class NFC_generator:
         for pass_no in range(5):
             kernels += self.generate_nfc_stage(pass_no)
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
+        kernels += self.long_composable_mark_deletion()
         uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
