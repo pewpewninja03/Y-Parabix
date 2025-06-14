@@ -625,6 +625,30 @@ ${mark_accumulation}
 }
 """
 
+long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify long composable sequences and transform to precomposed characters.
+    StreamSet * MarkCode${pass_no} = P.CreateStreamSet(${mark_code_bits});
+    StreamSet * Index_ccc_NR_or_MarksFound${pass_no} = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<FindComposables${pass_no}>(${basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
+    SHOW_BIXNUM(MarkCode${pass_no});
+    SHOW_STREAM(Index_ccc_NR_or_MarksFound${pass_no});
+
+    StreamSet * MarkCodeAtStarter${pass_no} = P.CreateStreamSet(${mark_code_bits}, 1);
+    P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${pass_no}, MarkCode${pass_no}, MarkCodeAtStarter${pass_no});
+    SHOW_BIXNUM(MarkCodeAtStarter${pass_no});
+
+    StreamSet * XfrmedBasis${pass_no} = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${basis}, MarkCodeAtStarter${pass_no}, XfrmedBasis${pass_no});
+    SHOW_BIXNUM(XfrmedBasis${pass_no});
+"""
+
+long_composable_pipeline_template = r"""void LongComposablePipeline(PipelineBuilder & P,
+                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis, StreamSet * DeletionMask) {
+${pipeline_logic}
+    FinalBasis = XfrmedBasis${final_pass_no};
+    DeletionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<MarkDeletion>(Basis, ${mark_code_parms}, DeletionMask);
+}
+"""
 
 short_composable_header = r"""//
 ShortComposableTranslation::ShortComposableTranslation
@@ -891,11 +915,18 @@ nfc_generated_cpp_template = r"""#include <kernel/unicode/normalization.h>
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>
 #include <pablo/bixnum/bixnum.h>
+#include <kernel/streamutils/stream_shift.h>
+#include <toolchain/toolchain.h>
+#include <kernel/pipeline/pipeline_builder.h>
 
 using namespace pablo;
 using namespace kernel;
 using namespace llvm;
 using namespace UCD;
+
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 ${uset_declarations}
 
@@ -1386,6 +1417,18 @@ class NFC_generator:
                             mark_code_bindings = bindings,
                             mark_accumulation = mark_stmts)
 
+    def generate_long_composable_pipeline(self):
+        t = string.Template(long_composable_pipeline_step_template)
+        t2 = string.Template(long_composable_pipeline_template)
+        logic = ""
+        input_basis = "Basis"
+        for pass_no in range(self.pass_count):
+            mark_code_bits = self.max_conditional_code_bits[pass_no]
+            logic += t.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits, basis = input_basis)
+            input_basis = "XfrmedBasis%i" % pass_no
+        mark_streamsets = ", " .join(["XfrmedBasis%i" % i for i in range(self.pass_count)])
+        return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
+
     def generate_short_composable_stage(self):
         s = short_composable_header
         rg_set_map = range_usets_from_cps(self.short_composable_map.keys())
@@ -1465,6 +1508,7 @@ class NFC_generator:
             kernels += self.generate_nfc_stage(pass_no)
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
         kernels += self.long_composable_mark_deletion()
+        kernels += self.generate_long_composable_pipeline()
         uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
