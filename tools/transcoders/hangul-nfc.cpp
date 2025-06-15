@@ -36,6 +36,8 @@
 #include <unicode/algo/normalization.h>
 #include <unicode/utf/utf_compiler.h>
 #include <re/toolchain/toolchain.h>
+#include <re/unicode/resolve_properties.h>
+#include <kernel/unicode/UCD_property_kernel.h>
 
 using namespace kernel;
 using namespace llvm;
@@ -149,7 +151,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    StreamSet * InsertionBixNum = P.CreateStreamSet(2, 1);
+    StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
     SHOW_BIXNUM(InsertionBixNum);
 
@@ -160,13 +162,22 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
-    StreamSet * NSD_Basis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<NonStarterDecomposition>(ExpandedBasis, NSD_Basis);
-    SHOW_BIXNUM(NSD_Basis);
+    StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
+    StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<ExcludedCompositeStage>(ExpandedBasis, EC_SelectionMask, EC_Basis);
+    SHOW_BIXNUM(EC_Basis);
+
+    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+    re::Name * CCC0_Name = re::makeName("CCC", "NR");
+    CCC0_Name->setDefinition(CCC0_Prop);
+    StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, EC_Basis, ccc_NR, BitMovementMode::LookAhead);
+    SHOW_STREAM(ccc_NR);
 
     StreamSet * Canon_Basis = P.CreateStreamSet(8, 1);
     StreamSet * CanonSelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<SingletonCanonicalization>(NSD_Basis, CanonSelectionMask, Canon_Basis);
+    P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonSelectionMask, Canon_Basis);
     SHOW_BIXNUM(Canon_Basis);
     SHOW_STREAM(CanonSelectionMask);
 
@@ -184,8 +195,13 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, CanonSelectionMask, DelPrior, SelectionMask0);
     SHOW_STREAM(SelectionMask0);
 
+    StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
+    StreamSet * MarkDeletion = P.CreateStreamSet(1, 1);
+    LongComposablePipeline(P, XfrmedBasis, ccc_NR, FinalBasis, MarkDeletion);
+    SHOW_STREAM(MarkDeletion);
+
     StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
-    FilterByMask(P, SelectionMask0, XfrmedBasis, FilteredBasis);
+    FilterByMask(P, SelectionMask0, FinalBasis, FilteredBasis);
     SHOW_BIXNUM(FilteredBasis);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);

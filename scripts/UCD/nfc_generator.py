@@ -489,7 +489,7 @@ finalize_nfc_template = r"""// Generate combined outputs for pass ${pass_no}.
         pb.createAssign(pb.createExtract(markOutputVar, pb.getInteger(i)), markCode[i]);
     }
     PabloAST * updatedIndexStrm = pb.createOr(ccc_NR, composable2nd);
-    Var * indexVar = getOutputStreamVar("Index_ccc_NR_or_MarkFound");
+    Var * indexVar = getOutputStreamVar("Index_ccc_NR_or_MarksFound");
     pb.createAssign(pb.createExtract(indexVar, pb.getInteger(0)), updatedIndexStrm);
 }
 """
@@ -542,6 +542,7 @@ long_composition_pfx_template = r"""
     PabloAST * ${pfx_test_var} = ${logic};
     pb.createIf(pb.createAnd(${pfx_test_var}, markFound), ${builder});
     std::vector<PabloAST *> xfrm_${code_str}(8, All0);
+    BixNumCompiler ${builder}_bnc(${builder});
 """
 
 def gen_long_composition_pfx_code(pfx_code):
@@ -569,7 +570,7 @@ def finalize_long_composable_pfx_code(pfx_code):
                         code_str = code_str)
 
 long_composable_final_code = r"""
-    Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
@@ -578,7 +579,7 @@ long_composable_final_code = r"""
 }
 """
 
-any_mark_template = r"""    std::vector<PabloAST *> MarkCodes${pass_no} = getInputStreamSet("MarkCode${pass_no}");
+any_mark_template = r"""    std::vector<PabloAST *> MarkCodes${pass_no} = getInputStreamSet("MarkCodes${pass_no}");
     for (unsigned i = 0; i < MarkCodes${pass_no}.size(); i++) {
         anyMark = pb.createOr(anyMark, MarkCodes${pass_no}[i]);
     }
@@ -1389,7 +1390,7 @@ class NFC_generator:
                 if pass_no in self.conditional_mark_codes.keys():
                     if pfx_code in self.conditional_mark_codes[pass_no].keys():
                         mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
-                s += "    PabloAST * foundMark_%x = bnc.EQ(markCode, %i);\n" % (mark, mark_code)
+                s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCode, %i);\n" % (mark, scope, mark_code)
                 for pos in sorted(by_pos[pfx_code][mark].keys()):
                     for bit in sorted(by_pos[pfx_code][mark][pos].keys()):
                         bit_xfrm = by_pos[pfx_code][mark][pos][bit]
