@@ -31,7 +31,6 @@ void PipelineCompiler::addConsumerKernelProperties(KernelBuilder & b, const unsi
 //    const auto addInternallySynchronizedInternalCounters = mIsInternallySynchronized.test(kernelId) && !mIsStatelessKernel.test(kernelId) ;
 
     const auto groupId = getCacheLineGroupId(kernelId);
-
     for (const auto e : make_iterator_range(out_edges(kernelId, mConsumerGraph))) {
         const auto streamSet = target(e, mConsumerGraph);
         // If the out-degree for this buffer is zero, then we've proven that its consumption rate
@@ -133,7 +132,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
 
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate.
-        Value * produced = mInitiallyProducedItemCount[streamSet];
+        Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
         assert (isFromCurrentFunction(b, produced, false));
         const auto e = in_edge(streamSet, mBufferGraph);
         const BufferPort & port = mBufferGraph[e];
@@ -302,10 +301,12 @@ void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t stre
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateExternalConsumedItemCounts(KernelBuilder & b) {
     for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-        const auto streamSet = target(input, mBufferGraph);
-        Value * const consumed = readConsumedItemCount(b, streamSet);
         const BufferPort & inputPort = mBufferGraph[input];
-        b.CreateAlignedStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number), SizeTyABIAlignment);
+        if (LLVM_LIKELY(inputPort.Port.Reason == ReasonType::Explicit)) {
+            const auto streamSet = target(input, mBufferGraph);
+            Value * const consumed = readConsumedItemCount(b, streamSet);
+            b.CreateAlignedStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number), SizeTyABIAlignment);
+        }
     }
 }
 

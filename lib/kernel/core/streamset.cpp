@@ -268,8 +268,6 @@ Type * StreamSetBuffer::resolveType(KernelBuilder & b, Type * const streamSetTyp
  * @brief isItemAlignedAccessWithinStreamSetMemory
  ** ------------------------------------------------------------------------------------------------------------- */
 void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Constant * name, Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const {
-#if 0
-    // TODO: to do this right, we need a "total space" parameter passed from the pipeline to this
 
     assert (codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts));
 
@@ -286,7 +284,7 @@ void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Con
     valid = b.CreateAnd(valid, b.CreateICmpULE(outPtr, endPtr));
     b.CreateAssert(valid, "streamset \"%s\" memory access [%" PRIx64 ",%" PRIx64 ") is outside of valid memory boundaries [%" PRIx64 ",%" PRIx64 ")",
                    name, ptr, outPtr, startPtr, endPtr);
-#endif
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -221,6 +221,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
         Value * const selected = accessibleItems[inputPort.Number];
+
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
 
 
@@ -448,20 +449,22 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         assert (ic.numerator() > 0);
         args[1] = b.getSize(ic.numerator());
         Value * processed = nullptr;
+        Value * max = mCurrentProcessedItemCountPhi[inputPort];
         if (port.isDeferred()) {
             processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
         } else {
-            processed = mCurrentProcessedItemCountPhi[inputPort];
+            processed = max;
         }
-        args[2] = processed;
-        args[3] = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], selected);
-        args[4] = buffer->getStreamSetCount(b);
-        args[5] = b.CreateGEP(traceArTy, base, indices);
+        max = b.CreateAdd(max, selected);
 
         #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + " truncating item count from %" PRIu64 " to %" PRIu64,
-                  totalNumOfItems, selected);
+        debugPrint(b, prefix + " truncating input item count from %" PRIu64 " to %" PRIu64, totalNumOfItems, max);
         #endif
+
+        args[2] = processed;
+        args[3] = max;
+        args[4] = buffer->getStreamSetCount(b);
+        args[5] = b.CreateGEP(traceArTy, base, indices);
 
         Value * const maskedAddress = b.CreatePointerCast(b.CreateCall(maskInput->getFunctionType(), maskInput, args), bufferType);
         BasicBlock * const maskedInputLoopExit = b.GetInsertBlock();
@@ -474,7 +477,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         }
         phi->addIncoming(maskedAddress, maskedInputLoopExit);
         inputBaseAddresses[inputPort.Number] = phi;
-
     }
     #endif
 }

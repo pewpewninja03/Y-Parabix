@@ -293,7 +293,7 @@ bool LLVM_READONLY AnyAssertionOptionIsSet() {
     #ifdef FORCE_ASSERTIONS
     return true;
     #endif
-    return DebugOptions.isSet(DebugFlags::EnableAsserts) || DebugOptions.isSet(DebugFlags::EnablePipelineAsserts);
+    return DebugOptions.isSet(DebugFlags::EnableAsserts) || DebugOptions.isSet(DebugFlags::EnableStreamSetAsserts) || DebugOptions.isSet(DebugFlags::EnablePipelineAsserts);
 }
 
 const char * ProgramName;

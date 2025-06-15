@@ -171,14 +171,9 @@ Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        const auto & in = COMPILER->getInputStreamSetBinding(entry.Index);
-        const auto max = in.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * const end = CreateAdd(processed, total);
-        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, processed, end);
+        Value * const start = CreateRoundDownRational(processed, getBitBlockWidth());
+        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(entry.Index);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, start, end);
     }
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     return CreateAlignedLoad(getBitBlockType(), ptr, unaligned ? 1U : dataWidth);
@@ -202,14 +197,9 @@ Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const s
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        const auto & in = COMPILER->getInputStreamSetBinding(entry.Index);
-        const auto max = in.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * const end = CreateAdd(processed, total);
-        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, processed, end);
+        Value * const start = CreateRoundDownRational(processed, getBitBlockWidth());
+        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(entry.Index);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, start, end);
     }
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     return CreateAlignedLoad(getBitBlockType(), ptr, unaligned ? 1U : dataWidth);
@@ -263,17 +253,9 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        const auto & out = COMPILER->getOutputStreamSetBinding(entry.Index);
-        const auto max = out.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * end = CreateAdd(produced, total);
-        if (LLVM_UNLIKELY(out.hasAttribute(Attribute::KindId::EmptyWriteOverflow))) {
-            end = CreateAdd(end, getSize(getBitBlockWidth()));
-        }
-        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, produced, end);
+        Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
+        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, start, end);
     }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     return CreateAlignedStore(toStore, ptr, unaligned ? 1U : dataWidth);
@@ -297,17 +279,9 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        const auto & out = COMPILER->getOutputStreamSetBinding(entry.Index);
-        const auto max = out.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * end = CreateAdd(produced, total);
-        if (LLVM_UNLIKELY(out.hasAttribute(Attribute::KindId::EmptyWriteOverflow))) {
-            end = CreateAdd(end, getSize(getBitBlockWidth()));
-        }
-        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, produced, end);
+        Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
+        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, dataWidth, start, end);
     }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     return CreateAlignedStore(toStore, ptr, unaligned ? 1U : dataWidth);
@@ -342,13 +316,7 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
         CreateAssert(sanityCheck, "stream index must be explicit");
         Value * startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        const auto & in = COMPILER->getInputStreamSetBinding(binding.Index);
-        const auto max = in.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * const end = CreateAdd(start, total);
+        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(binding.Index);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     const auto fw = buf->getFieldWidth();
@@ -379,17 +347,9 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        Value * startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
+        Value * const startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-
-        const auto & in = COMPILER->getInputStreamSetBinding(binding.Index);
-        const auto max = in.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * const end = CreateAdd(start, total);
-
+        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(binding.Index);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
 
@@ -438,18 +398,9 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * absol
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
         CreateAssert(sanityCheck, "stream index must be explicit");
-        Value * startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
+        Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        const auto & out = COMPILER->getOutputStreamSetBinding(binding.Index);
-        const auto max = out.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * end = CreateAdd(start, total);
-        if (LLVM_UNLIKELY(out.hasAttribute(Attribute::KindId::EmptyWriteOverflow))) {
-            end = CreateAdd(end, getSize(getBitBlockWidth()));
-        }
+        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(binding.Index);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
@@ -468,18 +419,9 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
-        Value * startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
+        Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        const auto & out = COMPILER->getOutputStreamSetBinding(binding.Index);
-        const auto max = out.getRate().getUpperBound() * COMPILER->mTarget->getStride();
-        assert (max.denominator() == 1);
-        auto limit = max.denominator();
-        Value * strides = CreateSelect(COMPILER->isFinal(), getSize(1), COMPILER->getNumOfStrides());
-        Value * total = CreateMul(strides, getSize(limit));
-        Value * end = CreateAdd(start, total);
-        if (LLVM_UNLIKELY(out.hasAttribute(Attribute::KindId::EmptyWriteOverflow))) {
-            end = CreateAdd(end, getSize(getBitBlockWidth()));
-        }
+        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(binding.Index);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));

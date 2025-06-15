@@ -1274,9 +1274,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         assert (i <= currentPartition.Repetitions.size());
 
         const auto strideSize =
-            std::max(currentPartition.Repetitions[i - 1U], Rational{1})
+            std::max(currentPartition.Repetitions[i - 1U], 1U)
             * node.Kernel->getStride();
-        assert (strideSize > Rational{0});
+        assert (strideSize > 0);
 
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
             const auto binding = source(e, Relationships);
@@ -1393,9 +1393,9 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
         const RelationshipNode & node = Relationships[u];
         assert (node.Type == RelationshipNode::IsKernel);
         const auto strideSize =
-            std::max(currentPartition.Repetitions[i - 1U], Rational{1})
+            std::max(currentPartition.Repetitions[i - 1U], 1U)
             * node.Kernel->getStride();
-        assert (strideSize > Rational{0});
+        assert (strideSize > 0);
 
         for (const auto e : make_iterator_range(in_edges(u, Relationships))) {
             const auto binding = source(e, Relationships);

@@ -155,6 +155,14 @@ struct Attribute {
         // Similar to Deferred, a consumer of a stream of N items with a Delayed attribute
         // of K indicates only N - K items can be safely read.
 
+        EmptyReadOverflow,
+
+        // To avoid branching, some kernels (e.g., StreamExpand) will read blocks of
+        // input data without incrementing the processed position. Although the data
+        // read after the processed position is discarded, when such reads occur after
+        // the end of a streamset, this could cause a segfault if pipeline
+        // has not created an overflow region for it to read from.
+
         EmptyWriteOverflow,
 
         // To avoid branching, some kernels (e.g., StreamCompress) will write zeros to
@@ -457,6 +465,9 @@ inline Attribute Delayed(const unsigned k) {
     return Attribute(Attribute::KindId::Delayed, k);
 }
 
+inline Attribute EmptyReadOverflow() {
+    return Attribute(Attribute::KindId::EmptyReadOverflow, 0);
+}
 
 inline Attribute EmptyWriteOverflow() {
     return Attribute(Attribute::KindId::EmptyWriteOverflow, 0);

@@ -1023,6 +1023,8 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
 
+    const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
+
     for (unsigned i = 0; i < n; ++i) {
         const Binding & input = mInputStreamSets[i];
         // virtual base input address
@@ -1041,6 +1043,9 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         if (isMainPipeline || requiresItemCount(input)) {
             fields.push_back(sizeTy);
         }
+        if (LLVM_UNLIKELY(checkStreamSet)) {
+            fields.push_back(sizeTy); // safe read limit
+        }
     }
 
     const auto hasTerminationSignal = canSetTerminateSignal();
@@ -1058,7 +1063,6 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         } else {
             fields.push_back(voidPtrTy);
         }
-
         assert (!isLocal.isManaged() || hasThreadLocal());
 
         //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
@@ -1078,8 +1082,13 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         // that we are not using an old buffer allocation.
         if (isLocal.any()) {
             fields.push_back(sizeTy); // consumed
-        } else if (isMainPipeline || requiresItemCount(output)) {
-            fields.push_back(sizeTy); // writable item count
+        } else {
+            if (isMainPipeline || requiresItemCount(output)) {
+                fields.push_back(sizeTy); // writable item count
+            }
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                fields.push_back(sizeTy); // safe write limit
+            }
         }
     }    
     return fields;
@@ -1148,6 +1157,8 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             setNextArgName("segmentSize");
         }
 
+        const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
+
         for (unsigned i = 0; i < mInputStreamSets.size(); ++i) {
             const Binding & input = mInputStreamSets[i];
             setNextArgName(input.getName());
@@ -1159,6 +1170,9 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             }
             if (isMainPipeline || requiresItemCount(input)) {
                 setNextArgName(input.getName() + "_accessible");
+            }
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                setNextArgName(input.getName() + "_capacity");
             }
         }
 
@@ -1172,10 +1186,14 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             }
             if (LLVM_UNLIKELY(isLocalBuffer(output).any())) {
                 setNextArgName(output.getName() + "_consumed");
-            } else if (isMainPipeline || requiresItemCount(output)) {
-                setNextArgName(output.getName() + "_writable");
+            } else {
+                if (isMainPipeline || requiresItemCount(output)) {
+                    setNextArgName(output.getName() + "_writable");
+                }
+                if (LLVM_UNLIKELY(checkStreamSet)) {
+                    setNextArgName(output.getName() + "_capacity");
+                }
             }
-
         }
     }
     return doSegment;
@@ -1620,10 +1638,15 @@ std::string Kernel::getFamilyName() const {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
-    } else if (LLVM_UNLIKELY(id == Kernel::TypeId::Pipeline)) {
-        // TODO: look into cleaner method for this
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
-            buffer << "_EA";
+    } else {
+        if (LLVM_UNLIKELY(id == Kernel::TypeId::Pipeline)) {
+            // TODO: look into cleaner method for this
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
+                buffer << "_EP";
+            }
+        }
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts))) {
+            buffer << "_ES";
         }
     }
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {

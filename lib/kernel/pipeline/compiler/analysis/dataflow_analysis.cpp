@@ -177,6 +177,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
         const auto n = K.size();
         N.Repetitions.resize(n);
+        assert (n > 0);
+
         for (unsigned i = 0; i < n; ++i) {
             Z3_ast var = VarList[K[i]]; assert (var);
             Z3_ast value;
@@ -192,6 +194,15 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
             N.Repetitions[i] = num;
         }
 
+        auto gcdRepCount = N.Repetitions[0];
+        for (unsigned i = 1; i < n; ++i) {
+            gcdRepCount = boost::gcd(gcdRepCount, N.Repetitions[i]);
+        }
+        if (gcdRepCount != 1) {
+            for (unsigned i = 0; i < n; ++i) {
+                N.Repetitions[i] /= gcdRepCount;
+            }
+        }
     }
 
     Z3_model_dec_ref(ctx, model);
@@ -236,6 +247,18 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
 
 }
 
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief identifyInterPartitionSymbolicRates
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
+
+
+
+}
+
+#if 0
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyInterPartitionSymbolicRates
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -250,8 +273,8 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
 
     std::vector<BitSet> portRateSet(m + LastStreamSet - FirstStreamSet + 1U);
 
-    unsigned portNum = 0;
-    unsigned nextRateId = PartitionCount;
+    unsigned portNum = 1;
+    unsigned nextRateId = PartitionCount + 1;
 
     for (auto kernel = firstKernel; kernel <= lastKernel; ++kernel) {
         auto updateEdgeRate = [&](const BufferGraph::edge_descriptor & e, const size_t streamSet) {
@@ -259,7 +282,10 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
             assert (portNum < m);
             port.SymbolicRateId = portNum++;
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.isConstant())) return;
+            if (LLVM_UNLIKELY(bn.isConstant())) {
+                port.SymbolicRateId = 0;
+                return;
+            }
             if (bn.isNonThreadLocal()) {
                 const Binding & binding = port.Binding;
                 if (isNonSynchronousRate(binding)) {
@@ -268,17 +294,6 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
                     bs.resize(nextRateId);
                     bs.set(rateId);
                 }
-            }
-            if (!bn.IsLinear) {
-                // TODO: this is overly strict but we'd need to prove that for all
-                // mutually reachable I/O states of both the producer and consumer,
-                // they would be at the same mod'ed position.
-                const auto k = m + streamSet - FirstStreamSet;
-                assert (k < portRateSet.size());
-                BitSet & bs = portRateSet[k];
-                const auto rateId = nextRateId++;
-                bs.resize(nextRateId);
-                bs.set(rateId);
             }
         };
 
@@ -361,6 +376,8 @@ void PipelineAnalysis::identifyInterPartitionSymbolicRates() {
     }
 
 }
+
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief calculatePartialSumStepFactors

@@ -36,6 +36,8 @@ static cl::opt<bool> optAllowUnaligned("allow-unaligned", cl::desc("Allow unalig
 
 static cl::opt<unsigned> optUseNestedPipeline("nested", cl::desc("Depth of nested pipeline before repeating streamset comparison (0, 1 or 2)"), cl::init(0));
 
+static cl::opt<unsigned> optNumOfTrials("trials", cl::desc("Number of tests to perform (default: 10)"), cl::init(10));
+
 static cl::opt<bool> optUseFamilyCall("family", cl::desc("Execute nested pipeline using family kernel call"), cl::init(false));
 
 static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
@@ -449,7 +451,6 @@ void StreamEq::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStr
             Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
             // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
             Value * const comp = b.CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-        //    b.CallPrintInt("comp", comp);
             // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
             nextAccum = b.CreateAnd(nextAccum, comp);
 
@@ -737,7 +738,8 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    for (unsigned rounds = 0; rounds < 10; ++rounds) {
+    const unsigned maxRounds = optNumOfTrials;
+    for (unsigned rounds = 0; rounds < maxRounds; ++rounds) {
         testResult |= runRepeatingStreamSetTest(driver, rng);
     }
     return testResult ? -1 : 0;

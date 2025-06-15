@@ -1032,7 +1032,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         for (unsigned j = 0; j < m; ++j) {
             const auto k = D.Kernels[j];
             assert (Relationships[k].Type == RelationshipNode::IsKernel);
-            const auto reps = D.Repetitions[j] * exp;
+            const auto reps = exp * D.Repetitions[j];
             assert (Relationships[k].Kernel == mPipelineKernel || reps > Rational{0});
             update.emplace(std::make_pair(k, Expected{reps, D.StridesPerSegmentCoV}));
         }
@@ -1048,7 +1048,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             const auto f = update.find(N.Kernels[j]);
             assert (f != update.end());
             const Expected & E = f->second;
-            N.Repetitions[j] = E.Reps;
+            N.Repetitions[j] = E.Reps.numerator();
             N.StridesPerSegmentCoV += E.CoV;
             #ifndef NDEBUG
             update.erase(f);

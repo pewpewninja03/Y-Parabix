@@ -142,8 +142,8 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 case ReasonType::ImplicitTruncatedSource:
                     out << " (truncated)";
                     break;
-                case ReasonType::ImplicitRegionSelector:
-                    out << " (region)";
+                case ReasonType::ImplicitRepeatingStreamSet:
+                    out << " (repeating)";
                     break;
                 case ReasonType::Reference:
                     out << " (ref)";
@@ -165,7 +165,7 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
             case ReasonType::Explicit:
                 break;
             case ReasonType::ImplicitPopCount:
-            case ReasonType::ImplicitRegionSelector:
+            case ReasonType::ImplicitRepeatingStreamSet:
                 out << joiner << "color=blue";
                 break;
             case ReasonType::Reference:
@@ -261,6 +261,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                     assert (bn.isExternal() || bn.isThreadLocal() || bn.isUnowned());
                     break;
                 case BufferId::RepeatingBuffer:
+                    assert (bn.isConstant() || bn.isTruncated());
                     out << 'R'; break;
                 default: llvm_unreachable("unknown streamset type");
             }
@@ -272,7 +273,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << 'R';
         }
         if (bn.isTruncated()) {
-            out << 'T';
+            out << 'K';
         }
         if (bn.isShared()) {
             out << '*';
@@ -287,14 +288,43 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << ty->getIntegerBitWidth();
         }
 
-//        #ifndef USE_SIMPLE_BUFFER_GRAPH
-//        if (bn.Locality == BufferLocality::ThreadLocal) {
-//            out << " [0x";
-//            out.write_hex(bn.BufferStart);
-//            out << "]";
+        #ifndef USE_SIMPLE_BUFFER_GRAPH
+//        if (bn.isThreadLocal()) {
+//            assert (num_vertices(ThreadLocalPlacement) > 0);
+//            if (LLVM_LIKELY(num_vertices(ThreadLocalPlacement) > 0)) {
+//                auto id = streamSet;
+//                while (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) > 0)) {
+//                    id = parent(id, InOutStreamSetReplacement);
+//                }
+//                const auto src = PartitionCount + id - FirstStreamSet;
+//                out << " [OFFSET:";
+//                size_t offset = 0;
+//                assert (in_degree(src, ThreadLocalPlacement) > 0);
+//                auto joiner = '[';
+//                for (auto before : make_iterator_range(in_edges(src, ThreadLocalPlacement)))  {
+//                    const auto j = source(before, ThreadLocalPlacement);
+//                    const auto & v = ThreadLocalPlacement[before];
+//                    if (j < PartitionCount) {
+//                        continue;
+//                    }
+//                    const auto k = FirstStreamSet + j - PartitionCount;
+//                    out << joiner << k;
+//                    joiner = ',';
+//                }
+//                if (joiner == ',') {
+//                    out << "]+";
+//                }
+//                Rational O(offset, StrideRepetitionVector[parent(streamSet, mBufferGraph)]);
+//                out << O.numerator();
+//                if (O.denominator() > 1) {
+//                    out << '/' << O.denominator();
+//                }
+//                out << "]";
+//            }
 //        }
-//        #endif
-        out << "|{" << bn.MaxQuantityPerSegment;
+        #endif
+
+        out << "}|{" << bn.MaxQuantityPerSegment;
 
         #ifndef USE_SIMPLE_BUFFER_GRAPH
         if (bn.LookBehind) {
@@ -302,6 +332,11 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         }
         if (bn.MaxAdd) {
             out << "|+" << bn.MaxAdd;
+        }
+        const auto & IO = StreamSetIORate[streamSet - FirstStreamSet];
+        if (IO.numerator() > 0) {
+            out << "|IO:";
+            print_rational(IO);
         }
         #endif
 

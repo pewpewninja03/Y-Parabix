@@ -1022,7 +1022,7 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
 
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         fields[THREAD_LOCAL_PARAM] = getThreadLocalHandle()->getType();
-        currentOffset +=  b.getTypeSize(dl, fields[SHARED_STATE_PARAM]);
+        currentOffset +=  b.getTypeSize(dl, fields[THREAD_LOCAL_PARAM]);
         assert (fields[THREAD_LOCAL_PARAM]->isPointerTy());
     } else {
         fields[THREAD_LOCAL_PARAM] = emptyTy;
@@ -1036,7 +1036,7 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
     for (unsigned i = 0; i < n; ++i) {
         Type * const ty = props[i]->getType();
         const auto align = dl.getABITypeAlign(ty).value();
-        const auto padding = align - (currentOffset % align);
+        const auto padding = (align > 1U) ? (align - (currentOffset % align)) : 0U;
         paramType[i * 2] = ArrayType::get(int8Ty, padding);
         currentOffset += padding;
         paramType[i * 2 + 1] = ty;

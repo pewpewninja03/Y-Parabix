@@ -257,6 +257,7 @@ public:
 // flow control functions
 
     void addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId);
+    Rational calculateBufferScalingFactor(const unsigned kernelId) const;
     void initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor);
     void initializeFlowControl(KernelBuilder & b);
     void detemineMaximumNumberOfStrides(KernelBuilder & b);
@@ -391,7 +392,6 @@ public:
     void addBufferHandlesToPipelineKernel(KernelBuilder & b, const unsigned index, const unsigned groupId);
     void allocateOwnedBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
     void loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal);
-    void remapThreadLocalBufferMemory(KernelBuilder & b);
     void releaseOwnedBuffers(KernelBuilder & b);
     void freePendingFreeableDynamicBuffers(KernelBuilder & b);
     void resetInternalBufferHandles();
@@ -491,6 +491,12 @@ public:
 // thread local functions
 
     Value * getThreadLocalHandlePtr(KernelBuilder & b, const unsigned kernelIndex, const bool commonThreadLocal = false) const;
+
+// thread local buffer management
+
+    void initializeThreadLocalMemory(KernelBuilder & b, Value * const segmentSize);
+    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b);
+    void remapThreadLocalBufferMemory(KernelBuilder & b);
 
 // optimization branch functions
     bool isEitherOptimizationBranchKernelInternallySynchronized() const;
@@ -714,6 +720,7 @@ protected:
 
     FixedVector<Value *>                        mScalarValue;
     FixedVector<Value *>                        mThreadLocalStartOffset;
+    FixedVector<Value *>                        mThreadLocalEndOffset;
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
     BitVector                                   mKernelProducesCrossThreadedData;
@@ -786,7 +793,6 @@ protected:
     PHINode *                                   mStrideStepSizeAtLoopEntryPhi = nullptr;
     Value *                                     mStrideStepSize = nullptr;
     Value *                                     mAnyClosed = nullptr;
-    Value *                                     mPrincipalFixedRateFactor = nullptr;
     Value *                                     mHasExhaustedClosedInput = nullptr;
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
@@ -994,7 +1000,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
-, mThreadLocalStartOffset(0, PartitionCount + LastStreamSet - FirstStreamSet + 1, mAllocator)
+, mThreadLocalStartOffset(FirstStreamSet, LastStreamSet, mAllocator)
+, mThreadLocalEndOffset(FirstStreamSet, LastStreamSet, mAllocator)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
 , mKernelProducesCrossThreadedData(PipelineOutput - PipelineInput + 1)

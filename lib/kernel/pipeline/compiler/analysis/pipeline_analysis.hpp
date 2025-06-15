@@ -61,7 +61,7 @@ public:
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(initialGraph, partitionGraph);
 
-        P.generateInitialBufferGraph();
+        P.generateInitialBufferGraph(b);
 
         P.updateInterPartitionThreadLocalBuffers();
 
@@ -106,11 +106,6 @@ public:
         // Finish the buffer graph
 
         P.addStreamSetsToBufferGraph(b);
-
-        if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
-            assert (b.getModule() == pipelineKernel->getModule());
-            P.printBufferGraph(b, errs());
-        }
 
         P.determineInitialThreadLocalBufferLayout(b, rng);
 
@@ -200,11 +195,9 @@ private:
 
     void addStreamSetsToBufferGraph(KernelBuilder & b);
 
-    void generateInitialBufferGraph();
+    void generateInitialBufferGraph(KernelBuilder & b);
 
     void estimateInitialBufferSizes(KernelBuilder & b);
-
-    void determineRequiredBufferSizes(KernelBuilder & b);
 
     void identifyOwnedBuffers();
 

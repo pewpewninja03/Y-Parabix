@@ -19,14 +19,17 @@ void PipelineAnalysis::makeConsumerGraph() {
         // returned to the outside environment, we cannot ever release data from it
         // even if it has an internal consumer.
 
-        auto id = streamSet;
 
-        const BufferNode & bn = mBufferGraph[id];
-        if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || in_degree(id, InOutStreamSetReplacement) != 0) {
+
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || in_degree(streamSet, InOutStreamSetReplacement) != 0) {
             continue;
         }
 
+        auto id = streamSet;
+
         if (LLVM_UNLIKELY(bn.isTruncated())) {
+
             for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
                 const auto & v = mStreamGraph[ref];
                 if (v.Reason == ReasonType::Reference) {
@@ -36,23 +39,22 @@ void PipelineAnalysis::makeConsumerGraph() {
                     break;
                 }
             }
-
+            assert (id != streamSet);
             const BufferNode & sn = mBufferGraph[id];
             if (sn.isThreadLocal() || sn.isConstant() || sn.isReturned()) {
                 continue;
             }
 
-        } else {
-            // copy the producing edge
+        } else { // copy the producing edge
             const auto pe = in_edge(streamSet, mBufferGraph);
             const BufferPort & output = mBufferGraph[pe];
             const auto producer = source(pe, mBufferGraph);
             assert (producer >= PipelineInput && producer <= LastKernel);
             add_edge(producer, streamSet, ConsumerEdge{output.Port, 0, ConsumerEdge::None}, mConsumerGraph);
         }
+
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
-
 
         unsigned index = out_degree(id, mConsumerGraph);
 
@@ -97,7 +99,6 @@ void PipelineAnalysis::makeConsumerGraph() {
         // the same amount of data so we only need to update this value after invoking the last one.
 
         size_t lastConsumer = PipelineInput;
-
         for (const auto ce : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
             const auto consumer = target(ce, mConsumerGraph);
             lastConsumer = std::max<size_t>(lastConsumer, consumer);
@@ -117,17 +118,20 @@ void PipelineAnalysis::makeConsumerGraph() {
     }
 
     // If this is a pipeline input, we want to update the count at the end of the loop.
-    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        ConsumerGraph::edge_descriptor f;
-        bool exists;
-        std::tie(f, exists) = edge(streamSet, PipelineOutput, mConsumerGraph);
-        if (exists) {
-            ConsumerEdge & cn = mConsumerGraph[f];
-            cn.Flags |= ConsumerEdge::UpdateExternalCount;
-        } else {
-            const BufferPort & br = mBufferGraph[e];
-            add_edge(streamSet, PipelineOutput, ConsumerEdge{br.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
+    for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+        const BufferPort & bp = mBufferGraph[input];
+        if (LLVM_LIKELY(bp.Port.Reason == ReasonType::Explicit)) {
+            const auto streamSet = target(input, mBufferGraph);
+            ConsumerGraph::edge_descriptor f;
+            bool exists;
+            std::tie(f, exists) = edge(streamSet, PipelineOutput, mConsumerGraph);
+            if (exists) {
+                ConsumerEdge & cn = mConsumerGraph[f];
+                cn.Flags |= ConsumerEdge::UpdateExternalCount;
+            } else {
+                const BufferPort & br = mBufferGraph[input];
+                add_edge(streamSet, PipelineOutput, ConsumerEdge{br.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
+            }
         }
     }
 
@@ -136,7 +140,17 @@ void PipelineAnalysis::makeConsumerGraph() {
     auto & out = errs();
     out << "digraph \"ConsumerGraph\" {\n";
     for (auto v : make_iterator_range(vertices(mConsumerGraph))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
+        out << "v" << v << " [label=\"";
+        if (v == PipelineInput) {
+            out << "Pin";
+        } else if (v < PipelineOutput) {
+            out << "K_" << v;
+        } else if (v == PipelineOutput) {
+            out << "Pout";
+        } else {
+            out << "S_" << v;
+        }
+        out << "\"];\n";
     }
     for (auto e : make_iterator_range(edges(mConsumerGraph))) {
         const auto s = source(e, mConsumerGraph);

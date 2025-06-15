@@ -132,7 +132,7 @@ enum class ReasonType : unsigned {
     // -----------------------------
     , Explicit
     // -----------------------------
-    , ImplicitRegionSelector
+    , ImplicitRepeatingStreamSet
     , ImplicitPopCount
     , ImplicitTruncatedSource
     // -----------------------------
@@ -277,7 +277,7 @@ enum BufferType : unsigned {
     // ------------------
     , HasIllustratedStreamset = 512
     , StartsNestedSynchronizationRegion = 1024
-    , RequiresEmptyWriteOverflow = 2048
+    , RequiresEmptyOverflow = 2048
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -369,8 +369,8 @@ struct BufferNode {
         return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;
     }
 
-    bool requiresEmptyWriteOverflow() const {
-        return (Type & BufferType::RequiresEmptyWriteOverflow) != 0;
+    bool requiresEmptyOverflow() const {
+        return (Type & BufferType::RequiresEmptyOverflow) != 0;
     }
 
     bool isThreadLocal() const {
@@ -424,6 +424,7 @@ struct BufferPort {
     unsigned Delay = 0;
     unsigned LookAhead = 0;
     unsigned LookBehind = 0;
+    unsigned EmptyOverflow = 0;
 
     //bool mCanModifySegmentLength = false;
 
@@ -561,7 +562,7 @@ using OrderingDAWG = adjacency_list<vecS, vecS, bidirectionalS, no_property, uns
 struct PartitionData {
 
     KernelIdVector          Kernels;
-    std::vector<Rational>   Repetitions;
+    std::vector<unsigned>   Repetitions;
     OrderingDAWG            Orderings;
     Rational                ExpectedStridesPerSegment{1};
     Rational                StridesPerSegmentCoV{0};
@@ -671,7 +672,7 @@ using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsign
 
 using InOutGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
-using ThreadLocalPlacementGraph = adjacency_list<vecS, vecS, bidirectionalS, size_t, size_t>;
+using ThreadLocalPlacementGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, Rational>;
 
 }
 

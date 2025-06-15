@@ -1,5 +1,4 @@
 #include "../pipeline_compiler.hpp"
-#include <queue>
 
 namespace kernel {
 
@@ -414,16 +413,7 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         return;
     }
 
-    Rational S{mTarget->getStride(), b.getBitBlockWidth()};
-
-    Value * allocScale = b.CreateCeilUDivRational(segmentSize, S);
-
-    initializeInitialSlidingWindowSegmentLengths(b, allocScale);
-
-    if (LLVM_LIKELY(!mIsNestedPipeline)) {
-        Value * const threadCount = b.getScalarField(MAXIMUM_NUM_OF_THREADS);
-        allocScale = b.CreateMul(allocScale, threadCount);
-    }
+    initializeInitialSlidingWindowSegmentLengths(b, segmentSize);
 
     bool hasAnyReturnedBuffer = false;
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
@@ -455,6 +445,11 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         }
     }
 
+    const Rational T{mTarget->getStride(), b.getBitBlockWidth()};
+    Value * allocScale = b.CreateCeilUMulRational(segmentSize, T);
+    if (LLVM_LIKELY(!mIsNestedPipeline)) {
+        allocScale = b.CreateMul(allocScale, b.getScalarField(MAXIMUM_NUM_OF_THREADS));
+    }
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
     initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
@@ -489,83 +484,11 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Kerne
         return;
     }
     getABIAlignments(b);
-
     assert (LastStreamSet >= FirstStreamSet);
     assert (PartitionCount > 0);
-
-    const auto m = PartitionCount + (LastStreamSet - FirstStreamSet) + 1;
-
-    assert (num_vertices(ThreadLocalPlacement) == m);
-
-    std::vector<unsigned> toVisit(m);
-    for (unsigned i = PartitionCount; i < m; ++i) {
-        toVisit[i] = in_degree(i, ThreadLocalPlacement);
-    }
-
-    mThreadLocalStartOffset.reset(0, m);
-
-    const auto pageSize = getPageSize();
-    const auto log2PageSize = floor_log2(pageSize);
-    const auto useShift = is_pow2(pageSize);
-    ConstantInt * PAGE_SIZE = b.getSize(useShift ? log2PageSize : pageSize);
-
-    std::queue<unsigned> Q;
-
-    Value * memorySize = nullptr;
-
-    assert (segmentSize);
-
-    Rational S{mTarget->getStride(), b.getBitBlockWidth()};
-
-    Value * allocScale = b.CreateCeilUDivRational(segmentSize, S);
-
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        for (auto u = i;;) {
-            for (auto e : make_iterator_range(out_edges(u, ThreadLocalPlacement))) {
-                const auto v = target(e, ThreadLocalPlacement);
-                assert (toVisit[v] > 0);
-                if (--toVisit[v] == 0) {
-                    const auto streamSet = FirstStreamSet + v - PartitionCount;
-                    assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
-                    const auto producer = parent(streamSet, mBufferGraph);
-                    const auto firstKernel = FirstKernelInPartition[KernelPartitionId[producer]];
-                    Rational R{ThreadLocalPlacement[e], StrideStepLength[firstKernel]};
-                    Value * off = b.CreateCeilUMulRational(allocScale, R);
-                    if (LLVM_LIKELY(useShift)) {
-                        off = b.CreateShl(off, PAGE_SIZE);
-                    } else {
-                        off = b.CreateMul(off, PAGE_SIZE);
-                    }
-                    if (mThreadLocalStartOffset[u]) {
-                        off = b.CreateAdd(mThreadLocalStartOffset[u], off);
-                    }
-                    mThreadLocalStartOffset[v] = off;
-                    if (out_degree(v, ThreadLocalPlacement) == 0) {
-                        memorySize = b.CreateUMax(memorySize, off);
-                    } else {
-                        Q.push(v);
-                    }
-                }
-            }
-            if (Q.empty()) {
-                break;
-            }
-            u = Q.front();
-            Q.pop();
-        }
-    }
-
-    assert (mTarget->hasThreadLocal());
-    if (memorySize) {
-        #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-        memorySize = b.CreateMul(memorySize, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
-        #endif
-        Value * const base = b.CreatePageAlignedMalloc(memorySize);
-        PointerType * const int8PtrTy = b.getInt8PtrTy();
-        b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b.CreatePointerCast(base, int8PtrTy));
-        b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
-    }
-    allocateOwnedBuffers(b, allocScale, nullptr, false);
+    initializeThreadLocalMemory(b, segmentSize);
+    const Rational T{mTarget->getStride(), b.getBitBlockWidth()};
+    allocateOwnedBuffers(b, b.CreateCeilUMulRational(segmentSize, T), nullptr, false);
     resetInternalBufferHandles();
 }
 

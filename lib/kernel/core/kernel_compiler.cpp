@@ -130,8 +130,6 @@ constexpr static auto TERMINATION_SIGNAL = "__termination_signal";
 // TODO: this check is a bit too strict in general; if the pipeline could request data/
 // EOF padding from the MemorySource kernel, it would be possible to re-enable.
 
-// #define CHECK_IO_ADDRESS_RANGE
-
 // TODO: split the init/final into two methods each, one to do allocation/init, and the
 // other final/deallocate? Would potentially allow us to reuse the kernel/stream set
 // memory in the nested engine if each init method memzero'ed them. Would need to change
@@ -799,42 +797,9 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
     // to access a stream set from a LLVM function call. We could create a stream-set aware function creation
     // and call system here but that is not an ideal way of handling this.
 
-    #ifdef CHECK_IO_ADDRESS_RANGE
-    auto checkStreamRange = [&](const StreamSetBuffer * const buffer, const Binding & binding, Value * const startItemCount) {
-
-        SmallVector<char, 256> tmp;
-        raw_svector_ostream out(tmp);
-        out << "StreamSet " << getName() << ":" << binding.getName();
-
-        DataLayout DL(b.getModule());
-        Type * const intPtrTy = DL.getIntPtrType(b.getInt8PtrTy());
-
-        ConstantInt * const ZERO = b.getSize(0);
-        ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
-
-        Value * const fromIndex = b.CreateUDiv(startItemCount, BLOCK_WIDTH);
-        Value * const baseAddress = buffer->getBaseAddress(b);
-        Value * const startPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, fromIndex);
-        Value * const start = b.CreatePtrToInt(startPtr, intPtrTy);
-
-        Value * const endPos = b.CreateAdd(startItemCount, buffer->getCapacity(b));
-        Value * const toIndex = b.CreateCeilUDiv(endPos, BLOCK_WIDTH);
-        Value * const endPtr = buffer->getStreamBlockPtr(b, baseAddress, ZERO, toIndex);
-        Value * const end = b.CreatePtrToInt(endPtr, intPtrTy);
-
-        Value * const length = b.CreateSub(end, start);
-
-        b.CreateAssert(b.CreateICmpULE(start, end),
-                        "%s: illegal kernel I/O address range [0x%" PRIx64 ", 0x%" PRIx64 ")",
-                        b.GetString(out.str()), start, end);
-
-        b.CheckAddress(startPtr, length, out.str());
-
-
-    };
-    #endif
-
     const auto numOfInputs = getNumOfStreamInputs();
+
+    const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
 
     IntegerType * const sizeTy = b.getSizeTy();
     for (unsigned i = 0; i < numOfInputs; i++) {
@@ -895,18 +860,18 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         assert (accessible);
         assert (accessible->getType() == sizeTy);
         mAccessibleInputItems[i] = accessible;
-
         Value * avail = b.CreateAdd(processed, accessible);
         mAvailableInputItems[i] = avail;
         if (input.hasLookahead()) {
             avail = b.CreateAdd(avail, b.getSize(input.getLookahead()));
         }
         buffer->setCapacity(b, avail);
-        #ifdef CHECK_IO_ADDRESS_RANGE
-        if (LLVM_UNLIKELY(enableAsserts)) {
-            checkStreamRange(buffer, input, processed);
+        /// ----------------------------------------------------
+        /// capacity
+        /// ----------------------------------------------------
+        if (LLVM_UNLIKELY(checkStreamSet)) {
+            mInputItemCapacity[i] = nextArg();
         }
-        #endif
     }
 
     // set all of the output buffers
@@ -993,14 +958,15 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             if (writable) {
                 capacity = b.CreateAdd(produced, writable);
                 buffer->setCapacity(b, capacity);
-                #ifdef CHECK_IO_ADDRESS_RANGE
-                if (LLVM_UNLIKELY(enableAsserts)) {
-                    checkStreamRange(buffer, output, produced);
-                }
-                #endif
             } else {
                 capacity = ConstantExpr::getNeg(b.getSize(1));
                 buffer->setCapacity(b, capacity);
+            }
+            /// ----------------------------------------------------
+            /// capacity
+            /// ----------------------------------------------------
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                mOutputItemCapacity[i] = nextArg();
             }
         }
         mWritableOutputItems[i] = writable;
@@ -1031,6 +997,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
     // setDoSegmentProperties, and PipelineCompiler::writeKernelCall
 
     std::vector<Value *> props;
+    props.reserve(mTarget->getDoSegmentFunction(b)->getNumOperands());
     if (LLVM_LIKELY(mTarget->isStateful())) {
         props.push_back(mSharedHandle); assert (mSharedHandle);
     }
@@ -1057,6 +1024,8 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         }
         #endif
     }
+
+    const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
     IntegerType * const sizeTy = b.getSizeTy();
@@ -1087,6 +1056,12 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         if (isMainPipeline || requiresItemCount(input)) {
             props.push_back(mAccessibleInputItems[i]);
+        }
+        /// ----------------------------------------------------
+        /// capacity
+        /// ----------------------------------------------------
+        if (LLVM_UNLIKELY(checkStreamSet)) {
+            props.push_back(mInputItemCapacity[i]);
         }
     }
 
@@ -1128,8 +1103,16 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         if (LLVM_UNLIKELY(isLocal.any())) {
             props.push_back(mConsumedOutputItems[i]);
-        } else if (isMainPipeline || requiresItemCount(output)) {
-            props.push_back(mWritableOutputItems[i]);
+        } else {
+            if (isMainPipeline || requiresItemCount(output)) {
+                props.push_back(mWritableOutputItems[i]);
+            }
+            /// ----------------------------------------------------
+            /// capacity
+            /// ----------------------------------------------------
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                props.push_back(mOutputItemCapacity[i]);
+            }
         }
     }
     return props;
@@ -1948,11 +1931,13 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     reset(mProcessedInputItemPtr, numOfInputs);
     reset(mAccessibleInputItems, numOfInputs);
     reset(mAvailableInputItems, numOfInputs);
+    reset(mInputItemCapacity, numOfInputs);
     const auto numOfOutputs = getNumOfStreamOutputs();
     reset(mProducedOutputItemPtr, numOfOutputs);
     reset(mInitiallyProducedOutputItems, numOfOutputs);
     reset(mWritableOutputItems, numOfOutputs);
     reset(mConsumedOutputItems, numOfOutputs);
+    reset(mOutputItemCapacity, numOfOutputs);
     reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
     for (const auto & buffer : mStreamSetInputBuffers) {
         buffer->setHandle(nullptr);

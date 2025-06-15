@@ -106,6 +106,8 @@ void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(KernelBuild
                 Value * const handle = b.getScalarFieldPtr(handleName).first;
                 const BufferNode & bn = mBufferGraph[streamSet];
                 #ifndef NDEBUG
+                assert (bn.isConstant());
+                assert (!bn.isTruncated());
                 const RelationshipNode & rn = mStreamGraph[streamSet];
                 assert (rn.Type == RelationshipNode::IsStreamSet);
                 assert (isa<RepeatingStreamSet>(rn.Relationship));
@@ -221,7 +223,7 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b
 void PipelineCompiler::addRepeatingStreamSetBufferProperties(KernelBuilder & b) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isConstant())) {
+        if (LLVM_UNLIKELY(bn.isConstant() && !bn.isTruncated())) {
             auto & S = mStreamGraph[streamSet];
             assert (S.Type == RelationshipNode::IsStreamSet);
             assert (isa<RepeatingStreamSet>(S.Relationship));
@@ -235,9 +237,6 @@ void PipelineCompiler::addRepeatingStreamSetBufferProperties(KernelBuilder & b) 
                     REPEATING_STREAMSET_LENGTH_PREFIX + std::to_string(streamSet),
                                            getCacheLineGroupId(PipelineOutput));
             }
-//            mTarget->addInternalScalar(b.getVoidPtrTy(),
-//                REPEATING_STREAMSET_MALLOCED_DATA_PREFIX + std::to_string(streamSet),
-//                                       getCacheLineGroupId(PipelineOutput));
         }
     }
 }

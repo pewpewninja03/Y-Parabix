@@ -15,7 +15,7 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng) {
 
-    using NonFixedTaintGraph = adjacency_list<hash_setS, vecS, bidirectionalS, bool, bool>;
+    using NonFixedTaintGraph = adjacency_list<hash_setS, vecS, bidirectionalS, bool>;
 
     const auto cfg = Z3_mk_config();
     Z3_set_param_value(cfg, "model", "true");
@@ -88,26 +88,8 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
             const auto k = K[i];
             VarList[k] = multiply(rootVar, N.Repetitions[i]);
             assert (Relationships[k].Type == RelationshipNode::IsKernel);
-//            for (const auto e : make_iterator_range(in_edges(k, Relationships))) {
-//                const auto binding = source(e, Relationships);
-//                if (Relationships[binding].Type == RelationshipNode::IsBinding) {
-//                    goto not_source_input;
-//                }
-//            }
-//            for (const auto e : make_iterator_range(out_edges(k, Relationships))) {
-//                const auto binding = target(e, Relationships);
-//                if (Relationships[binding].Type == RelationshipNode::IsBinding) {
-//                    auto ioVar = Z3_mk_fresh_const(ctx, nullptr, varType);
-//                    hard_assert(Z3_mk_gt(ctx, ioVar, z3_ZERO));
-//                    VarList[binding] = ioVar;
-//                    ioVars.push_back(ioVar);
-//                }
-//            }
-//not_source_input:
-//            continue;
         }
     }
-//    assert (ioVars.size() > 0);
 
     if (out_degree(0, P) == 0) {
         Z3_ast args[2];
@@ -138,8 +120,8 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
     }
 
     NonFixedTaintGraph T(numOfPartitions);
-    for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
-        T[partId] = false;
+    for (unsigned prodId = 0; prodId < numOfPartitions; ++prodId) {
+        T[prodId] = false;
     }
 
     for (unsigned prodId = 0; prodId < numOfPartitions; ++prodId) {
@@ -181,6 +163,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                     }
 
                     VarList[streamSet] = expOutRate; assert (expOutRate);
+                    hard_assert(Z3_mk_gt(ctx, expOutRate, z3_ZERO));
 
                     for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
                         const auto binding = target(e, Relationships);
@@ -214,14 +197,16 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
                             Z3_ast constraint = Z3_mk_eq(ctx, expOutRate, expInRate);
                             if (prodId != consumerPartitionId) {
+                                soft_assert(constraint);
 
-                                // mark that there is non-fixed dataflow between these
-                                const auto e = add_edge(prodId, consumerPartitionId, false, T).first;
-                                if (!oRate.isFixed() || !iRate.isFixed()) {
-                                    T[e] = true;
+                                 // mark that there is non-fixed dataflow between these
+                                if (prodId != PipelineInput) {
+                                    add_edge(prodId, consumerPartitionId, T);
+                                    if (!oRate.isFixed() || !iRate.isFixed()) {
+                                        T[consumerPartitionId] = true;
+                                    }
                                 }
 
-                                soft_assert(constraint);
                             } else {
                                 hard_assert(constraint);
                             }
@@ -242,13 +227,9 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
     // iterate through the graph in topological order to determine what portions of
     // the program are not strictly fixed rate
     for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
-        for (const auto e : make_iterator_range(in_edges(partId, T))) {
-            if (T[e]) {
-                T[partId] = true;
-                for (const auto f : make_iterator_range(out_edges(partId, T))) {
-                    T[f] = true;
-                }
-                break;
+        if (T[partId]) {
+            for (const auto output : make_iterator_range(out_edges(partId, T))) {
+                T[target(output, T)] = true;
             }
         }
     }
@@ -290,8 +271,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
         assert (denom > 0);
         assert (num > 0);
-        assert (N.Repetitions[0].numerator() > 0);
-        assert (N.Repetitions[0].denominator() > 0);
+        assert (N.Repetitions[0] > 0);
 
         N.ExpectedStridesPerSegment = Rational{pipelineInputDenom * num, pipelineInputNum * denom} / N.Repetitions[0];
         const auto m = N.ExpectedStridesPerSegment.denominator();
@@ -305,7 +285,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
     assert (lcmOfDenom > 0);
 
-    SmallVector<unsigned, 16> approx;
+    pipelineInputDenom *= lcmOfDenom;
 
     for (unsigned prodId = 0; prodId < numOfPartitions; ++prodId) {
         PartitionData & N = P[prodId];
@@ -337,7 +317,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
                     assert (denom > 0);
 
-                    StreamSetIORateMap.emplace(streamSet, Rational{pipelineInputDenom * num * lcmOfDenom, pipelineInputNum * denom});
+                    StreamSetIORateMap.emplace(streamSet, Rational{pipelineInputDenom * num, pipelineInputNum * denom});
                 }
             }
         }
@@ -348,13 +328,8 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
     Z3_del_context(ctx);
     Z3_reset_memory();
 
-//    PartitionData & N = P[0];
-//    Rational scale{N.ExpectedStridesPerSegment.denominator() * lcmOfDenom, N.ExpectedStridesPerSegment.numerator()};
-
-
     for (unsigned partId = 0; partId < numOfPartitions; ++partId) {
         PartitionData & N = P[partId];
-
         N.ExpectedStridesPerSegment *= lcmOfDenom;
     }
 

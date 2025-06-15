@@ -55,6 +55,7 @@ SRC
     compiler/codegen/streamdata_illustrator_logic.cpp
     compiler/codegen/synchronization_logic.cpp
     compiler/codegen/termination_logic.cpp
+    compiler/codegen/thread_local_management_logic.cpp
     compiler/internal/popcount_kernel.cpp
     compiler/internal/regionselectionkernel.cpp
     compiler/statistics/cycle_counter_logic.cpp

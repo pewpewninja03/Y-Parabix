@@ -729,6 +729,8 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         toFree.push_back(threadLocalHandle);
     }
 
+#warning this is being compiled into the kernel, not passed in
+
     const auto segLength = (codegen::SegmentSize + getStride()  - 1U) / getStride();
 
     segmentArgs[argCount++] = b.getSize(segLength);

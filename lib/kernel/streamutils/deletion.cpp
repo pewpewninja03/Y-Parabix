@@ -131,12 +131,14 @@ void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value
         Type * fieldTy = b.getIntNTy(mFW);
         const unsigned fieldsPerBlock = b.getBitBlockWidth()/mFW;
         Value * extractionMask = b.fwCast(mFW, maskVec[0]);
+        b.CallPrintRegister("extractionMask", maskVec[0]);
         std::vector<Value *> mask(fieldsPerBlock);
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
             mask[i] = b.CreateExtractElement(extractionMask, b.getInt32(i));
         }
         for (unsigned j = 0; j < input.size(); ++j) {
             Value * fieldVec = b.fwCast(mFW, input[j]);
+            b.CallPrintRegister("input[" + std::to_string(j) + "]", input[j]);
             Value * output = UndefValue::get(extractionMask->getType());
             for (unsigned i = 0; i < fieldsPerBlock; i++) {
                 Value * field = b.CreateExtractElement(fieldVec, b.getInt32(i));
@@ -146,6 +148,7 @@ void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value
                 output = b.CreateInsertElement(output, compressed, b.getInt32(i));
             }
             output = b.CreateBitCast(output, b.getBitBlockType());
+            b.CallPrintRegister("output[" + std::to_string(j) + "]", output);
             b.storeOutputStreamBlock("outputStreamSet", b.getInt32(j), blockOffsetPhi, output);
         }
     } else {
@@ -335,6 +338,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     SmallVector<Value *, 8> shftBack(strideBlocks);
     for (unsigned blk = 0; blk < strideBlocks; blk++) {
         Value * const extractionMask = b.loadInputStreamBlock("extractionMask", ZERO, inputOffset[blk]);
+        b.CallPrintRegister("extractionMask", extractionMask);
         Value * const fieldPopCounts = b.simd_popcount(mFW, extractionMask);
         // For each field determine the (partial) sum popcount of all fields up to and
         // including the current field.
@@ -422,6 +426,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         SmallVector<Value *, 16> sourceBlock(mStreamCount);
         for (unsigned i = 0; i < mStreamCount; i++) {
             sourceBlock[i] = b.loadInputStreamBlock("sourceStreamSet", b.getInt32(i), inputOffset[blk]);
+            b.CallPrintRegister("sourceBlock[" + std::to_string(i) + "]", sourceBlock[i] );
         }
         // Now separate the bits of each field into ones that go into the current field
         // and ones that go into the overflow field.   Extract the first field separately,
@@ -465,6 +470,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         // Write the pendingOutput data to outputStream.
         // Note: this data may be overwritten later, but we avoid branching.
         for (unsigned i = 0; i < mStreamCount; i++) {
+            b.CallPrintRegister("pendingOutput[" + std::to_string(i) + "]", pendingOutput[i] );
             b.storeOutputStreamBlock("compressedOutput", b.getInt32(i), outputOffset[blk], pendingOutput[i]);
         }
         for (unsigned i = 0; i < mStreamCount; i++) {

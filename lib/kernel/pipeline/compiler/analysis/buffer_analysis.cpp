@@ -30,7 +30,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitialBufferGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::generateInitialBufferGraph() {
+void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
     mBufferGraph = BufferGraph(LastStreamSet + 1U);
 
@@ -42,7 +42,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
 
 
-    Rational largestSourceStreamSetIORate{1};
+    Rational lowestSourceStreamSetIORate{std::numeric_limits<unsigned>::max()};
 
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
@@ -179,8 +179,21 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         bn.Type |= BufferType::Returned;
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
+                    case AttrId::EmptyReadOverflow:
+                        // TODO: thread local buffers could technically read into the next buffer here as long
+                        // as the final buffer has one block padding.
                     case AttrId::EmptyWriteOverflow:
-                        bn.Type |= BufferType::RequiresEmptyWriteOverflow;
+                        BEGIN_SCOPED_REGION
+                        auto width = b.getBitBlockWidth();
+                        if (binding.getNumElements() == 1) {
+                            const auto fw = binding.getFieldWidth();
+                            assert ((width % fw) == 0);
+                            width /= fw;
+                        }
+                        bp.EmptyOverflow = width;
+                        END_SCOPED_REGION
+                        bn.Type |= BufferType::RequiresEmptyOverflow;
+                        bn.Overflow = std::max(bn.Overflow, bp.EmptyOverflow);
                         break;
                     case AttrId::InOut:
                         if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
@@ -222,7 +235,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 }
             }
 
-            if (LLVM_UNLIKELY(bn.Type & BufferType::RequiresEmptyWriteOverflow)) {
+            if (LLVM_UNLIKELY(bn.Type & BufferType::RequiresEmptyOverflow)) {
                 auto id = streamSet;
                 for (;;) {
                     if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
@@ -230,7 +243,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     }
                     id = parent(id, InOutStreamSetReplacement);
                     BufferNode & bi = mBufferGraph[id];
-                    bi.Type |= BufferType::RequiresEmptyWriteOverflow;
+                    bi.Type |= BufferType::RequiresEmptyOverflow;
                 }
             }
 
@@ -238,7 +251,6 @@ void PipelineAnalysis::generateInitialBufferGraph() {
             assert (sn.Type == RelationshipNode::IsStreamSet);
             assert (sn.Relationship);
             const StreamSet * ss = static_cast<const StreamSet *>(sn.Relationship);
-
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(ss))) {
                 bn.Locality = BufferLocality::ConstantShared;
                 bn.IsLinear = true;
@@ -440,13 +452,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
                 if (numOfInputs == 0) {
                     const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
-                    largestSourceStreamSetIORate = std::max(largestSourceStreamSetIORate, R);
+                    lowestSourceStreamSetIORate = std::min(lowestSourceStreamSetIORate, R);
                 }
             }
         }
-
-
-
 
         // If this kernel is not a source kernel but all inputs have a zero lower bound, it doesnot have
         // explicit termination condition. Report an error if this is the case.
@@ -460,9 +469,10 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         }
     }
 
-    for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
-        auto & R = StreamSetIORate[i - FirstStreamSet];
-        R /= largestSourceStreamSetIORate;
+    if (LLVM_LIKELY(FirstKernel != PipelineInput)) {
+        for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
+            StreamSetIORate[i - FirstStreamSet] /= lowestSourceStreamSetIORate;
+        }
     }
 
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
@@ -556,12 +566,14 @@ void PipelineAnalysis::identifyOutputNodeIds() {
 void PipelineAnalysis::identifyOwnedBuffers() {
 
     // fill in any unmanaged pipeline input buffers
-    for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        BufferNode & bn = mBufferGraph[streamSet];
-        bn.Type |= BufferType::External;
-        bn.Type |= BufferType::Unowned;
-        bn.Locality = BufferLocality::GloballyShared;
+    for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+        const BufferPort & bp = mBufferGraph[input];
+        if (LLVM_LIKELY(bp.Port.Reason == ReasonType::Explicit)) {
+            const auto streamSet = target(input, mBufferGraph);
+            BufferNode & bn = mBufferGraph[streamSet];
+            bn.Type |= BufferType::External | BufferType::Unowned;
+            bn.Locality = BufferLocality::GloballyShared;
+        }
     }
 
     // fill in any known managed buffers
@@ -581,14 +593,18 @@ void PipelineAnalysis::identifyOwnedBuffers() {
     }
 
     // and pipeline output buffers ...
-    for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        BufferNode & bn = mBufferGraph[streamSet];
-        bn.Type |= BufferType::External;
-        if (LLVM_LIKELY(!IsNestedPipeline)) {
-            bn.Type |= BufferType::Returned;
+    for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+        const BufferPort & bp = mBufferGraph[output];
+        if (LLVM_LIKELY(bp.Port.Reason == ReasonType::Explicit)) {
+            const auto streamSet = source(output, mBufferGraph);
+            BufferNode & bn = mBufferGraph[streamSet];
+            bn.Type |= BufferType::External;
+            if (LLVM_LIKELY(!IsNestedPipeline)) {
+                bn.Type |= BufferType::Returned;
+            }
+            assert (bn.Locality != BufferLocality::ConstantShared);
+            bn.Locality = BufferLocality::GloballyShared;
         }
-        bn.Locality = BufferLocality::GloballyShared;
     }
 
 }
@@ -602,7 +618,9 @@ void PipelineAnalysis::identifyLinearBuffers() {
     for (const auto e : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
         BufferNode & N = mBufferGraph[streamSet];
-        N.IsLinear = true;
+        if (!N.isConstant()) {
+            N.IsLinear = true;
+        }
         assert (!N.isReturned());
     }
 
@@ -660,11 +678,11 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
         currentPartitionId = partitionId;
         #endif
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+            const auto streamSet = source(e, mBufferGraph);            
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             #else
-            const auto streamSet = source(e, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
             if (isPartitionRoot || !N.IsLinear || N.isConstant()) {
                 inputRate.Flags |= BufferPortType::CanModifySegmentLength;
@@ -809,7 +827,7 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
 
         currentNode.MaxQuantityPerSegment = std::max<unsigned>(amount.numerator(), maxOverflow + maxLookBehind);
         assert (currentNode.MaxQuantityPerSegment > 0);
-        currentNode.Overflow = maxOverflow;
+        currentNode.Overflow = std::max(currentNode.Overflow, maxOverflow);
 
         END_SCOPED_REGION
 
@@ -820,102 +838,6 @@ unhandled_streamset:
     }
 
 }
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineRequiredBufferSizes
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineRequiredBufferSizes(KernelBuilder & b) {
-
-    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
-        return;
-    }
-
-    const auto blockWidth = b.getBitBlockWidth();
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-
-        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
-            continue;
-        }
-
-        BufferNode & bn = mBufferGraph[streamSet];
-
-        if (LLVM_UNLIKELY(bn.isConstant() || bn.isInOutRedirect())) {
-            continue;
-        }
-
-        unsigned maxLookBehind = 0;
-
-        Rational bMin{0};
-        Rational bMax{0};
-
-        auto id = streamSet;
-
-        for (;;) {
-
-            if (LLVM_LIKELY(!bn.isConstant())) {
-
-                const auto producerOutput = in_edge(id, mBufferGraph);
-                const BufferPort & producerRate = mBufferGraph[producerOutput];
-                maxLookBehind = producerRate.LookBehind;
-                const auto producer = source(producerOutput, mBufferGraph);
-                bMin = producerRate.Minimum * MinimumNumOfStrides[producer];
-                const auto max = std::max(MaximumNumOfStrides[producer], 1U);
-                const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
-                bMax = (producerRate.Maximum * max) + extra;
-
-            }
-
-            for (const auto e : make_iterator_range(out_edges(id, mBufferGraph))) {
-
-                const BufferPort & consumerRate = mBufferGraph[e];
-
-                const auto consumer = target(e, mBufferGraph);
-
-                const auto min = MinimumNumOfStrides[consumer];
-                const auto cMin = consumerRate.Minimum * min;
-                const auto max = std::max(MaximumNumOfStrides[consumer], 1U);
-                const auto extra = std::max(consumerRate.LookAhead, consumerRate.Add);
-                const auto cMax = (consumerRate.Maximum * max) + extra;
-
-                assert (cMax >= cMin);
-
-                bMin = std::min(bMin, cMin);
-                bMax = std::max(bMax, cMax);
-
-                maxLookBehind = std::max(maxLookBehind, consumerRate.LookBehind);
-            }
-
-            if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
-                break;
-            }
-            id = child(id, InOutStreamSetReplacement);
-        }
-
-        bn.LookBehind = maxLookBehind;
-
-        // A buffer can only be Linear or Circular. Linear buffers only require a set amount
-        // of space and automatically handle under/overflow issues.
-
-        const auto rs = 2 * ceiling(bMax) - floor(bMin);
-
-        auto reqSize = round_up_to(rs, blockWidth) / blockWidth;
-
-        if (bn.PartialSumSpanLength) {
-            reqSize = std::max(reqSize, bn.PartialSumSpanLength);
-        }
-        if (maxLookBehind) {
-            bn.RequiresUnderflow = !bn.IsLinear;
-            const auto underflowSize = round_up_to(maxLookBehind, blockWidth) / blockWidth;
-            reqSize = std::max(reqSize, underflowSize);
-        }
-        assert (reqSize > 0);
-        bn.MaxQuantityPerSegment = reqSize;
-
-    }
-
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addStreamSetsToBufferGraph
@@ -941,12 +863,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             assert (FirstStreamSet <= src && src < streamSet);
             bn.Buffer = mBufferGraph[src].Buffer;
             continue;
+        } else if (LLVM_UNLIKELY(bn.isTruncated())) {
+            continue;
         } else if (LLVM_UNLIKELY(bn.isConstant())) {
             const auto ss = cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
             buffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
-        } else if (LLVM_UNLIKELY(bn.isTruncated())) {
-            continue;
         } else {
+            assert (!isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
@@ -981,13 +904,18 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             for (const auto e : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
                 if (mStreamGraph[e].Reason == ReasonType::Reference) {
                     const auto sourceStreamSet = source(e, mStreamGraph);
-                    buffer = mBufferGraph[sourceStreamSet].Buffer;
+                    const auto & src = mBufferGraph[sourceStreamSet];
+                    if (src.isConstant()) {
+                        bn.Locality = BufferLocality::ConstantShared;
+                    }
+                    buffer = src.Buffer;
                     break;
                 }
             }
             assert ("missing source buffer for truncated streamset?" && buffer);
             bn.Buffer = buffer;
         }
+        assert (bn.Buffer);
     }
 
 }

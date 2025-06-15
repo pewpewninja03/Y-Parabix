@@ -1,5 +1,4 @@
 #include "../pipeline_compiler.hpp"
-#include <queue>
 
 // Each partition root determines how much data that it (and consequently its partition) can
 // process in a single segment / pipeline iteration. However, it does not necessarily need to
@@ -25,6 +24,30 @@ void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuild
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief calculateBufferScalingFactor
+ ** ------------------------------------------------------------------------------------------------------------- */
+Rational PipelineCompiler::calculateBufferScalingFactor(const unsigned kernelId) const {
+    assert (kernelId == FirstKernelInPartition[KernelPartitionId[kernelId]]);
+    if (in_degree(kernelId, mBufferGraph) == 0) {
+//        auto largestSourceKernel = MaximumNumOfStrides[PipelineInput];
+//        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+//            if (in_degree(kernel, mBufferGraph) == 0) {
+//                largestSourceKernel = std::max(largestSourceKernel, MaximumNumOfStrides[kernel]);
+//            }
+//        }
+//        return Rational{largestSourceKernel, MaximumNumOfStrides[mKernelId]};
+        return Rational{1};
+    } else {
+        Rational scale{0};
+        for (auto input : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = source(input, mBufferGraph);
+            scale = std::max(scale, StreamSetIORate[streamSet - FirstStreamSet]);
+        }
+        return scale;
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeInitialSlidingWindowSegmentLengths
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor) {
@@ -32,10 +55,16 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilde
         b.CreateAssert(segmentLengthScalingFactor, "segmentLengthScalingFactor cannot be zero %s", mCurrentKernelName);
     }
 
+   // b.CallPrintInt(mTarget->getName() + ".segmentLengthScalingFactor", segmentLengthScalingFactor);
+
     for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
         const auto f = FirstKernelInPartition[i];
         if (MinimumNumOfStrides[f] != MaximumNumOfStrides[f] || mIsNestedPipeline) {
-            Value * const init = b.CreateMulRational(segmentLengthScalingFactor, MaximumNumOfStrides[f]);
+
+            const auto factor = calculateBufferScalingFactor(f);
+            Value * init = b.CreateMulRational(segmentLengthScalingFactor, factor);
+            init = b.CreateRoundUpRational(init, StrideStepLength[f]);
+
             b.setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
         } else {
             assert (!b.hasScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f)));
@@ -69,141 +98,30 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
 
     if (mIsPartitionRoot) {
         assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
-        assert (mKernelId == FirstKernelInPartition[KernelPartitionId[mKernelId]]);
-        const auto firstKernelOfNextPartition = FirstKernelInPartition[mCurrentPartitionId + 1];
-
+        assert (mKernelId == FirstKernelInPartition[mCurrentPartitionId]);
 
         // If the min and max num of strides is equal, we almost certainly have strictly fixed
         // rate input into this partition. However if this a nested pipeline, we cannot assume
         // that the outer pipeline will feed data to this at a fixed rate.
-        if (mBufferGraph[mKernelId].permitSlidingWindow()) {
+
+        const auto hasSlidingWindow = mBufferGraph[mKernelId].permitSlidingWindow();
+
+        if (hasSlidingWindow) {
             assert (!mIsIOProcessThread);
-
             mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
-
-            if (LLVM_UNLIKELY(CheckAssertions)) {
-                Value * check = b.CreateOr(b.CreateICmpNE(mMaximumNumOfStrides, b.getSize(0)), mInitiallyTerminated);
-                b.CreateAssert(check, "Maximum number of strides cannot be zero %s (A)", mCurrentKernelName);
-            }
-
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, "%s.maxNumOfStrides=%" PRIu64, mCurrentKernelName, mMaximumNumOfStrides);
-            #endif
-
-            // calculate how much memory is required by this partition relative to max num of strides
-            // and determine if the current thread local buffer can fit it.
-
         } else {
 
-            if (LLVM_UNLIKELY(CheckAssertions)) {
-                Value * check = b.CreateOr(b.CreateICmpNE(mExpectedNumOfStridesMultiplier, b.getSize(0)), mInitiallyTerminated);
-                b.CreateAssert(check, "Expected number of strides multipler cannot be zero %s (B)", mCurrentKernelName);
-            }
+            const auto factor = calculateBufferScalingFactor(mKernelId);
 
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, getName() + "_mExpectedNumOfStridesMultiplier = %" PRIu64, mExpectedNumOfStridesMultiplier);
-            #endif
+//            Rational factor {mTarget->getStride() * MaximumNumOfStrides[mKernelId], mKernel->getStride() * largestSourceKernel};
+//#warning scale the initial multiplier by the max step size to eliminate the roundup?
 
-            const Rational factor{mTarget->getStride(), mKernel->getStride()}; assert (factor > 0);
             mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
+            mMaximumNumOfStrides = b.CreateRoundUpRational(mMaximumNumOfStrides, StrideStepLength[mKernelId]);
         }
 
+        allocateThreadLocalMemoryForMaximumNumOfStrides(b);
 
-
-        const auto hasThreadLocal = out_degree(mCurrentPartitionId, ThreadLocalPlacement);
-
-        Value * threadLocalPtr = nullptr;
-        Type * threadLocalTy = nullptr;
-        if (hasThreadLocal) {
-            std::tie(threadLocalPtr, threadLocalTy) = b.getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
-
-            const auto m = PartitionCount + LastStreamSet - FirstStreamSet + 1;
-            assert (num_vertices(ThreadLocalPlacement) == m);
-            std::vector<unsigned> toVisit(m, 0);
-            #ifndef NDEBUG
-            for (unsigned i = 0; i < PartitionCount; ++i) {
-                assert(in_degree(i, ThreadLocalPlacement) == 0);
-            }
-            #endif
-            for (unsigned i = PartitionCount; i < m; ++i) {
-                toVisit[i] = in_degree(i, ThreadLocalPlacement);
-            }
-
-            const auto pageSize = getPageSize();
-            const auto log2PageSize = floor_log2(pageSize);
-            const auto useShift = is_pow2(pageSize);
-            ConstantInt * PAGE_SIZE = b.getSize(useShift ? log2PageSize : pageSize);
-
-            std::queue<unsigned> Q;
-            std::vector<Value *> endPosition(m);
-
-            assert (in_degree(mCurrentPartitionId, ThreadLocalPlacement) == 0);
-            endPosition[mCurrentPartitionId] = b.getSize(0);
-
-            assert (mMaximumNumOfStrides);
-
-            Value * memoryForSegment = nullptr;
-            for (auto u = mCurrentPartitionId;;) {
-                for (auto e : make_iterator_range(out_edges(u, ThreadLocalPlacement))) {
-                    const auto v = target(e, ThreadLocalPlacement);
-                    assert (v >= PartitionCount);
-                    assert (toVisit[v] > 0);
-                    if (--toVisit[v] == 0) {
-                        Rational R{ThreadLocalPlacement[e], StrideStepLength[mKernelId]};
-                        Value * off = b.CreateCeilUMulRational(mMaximumNumOfStrides, R);
-                        if (LLVM_LIKELY(useShift)) {
-                            off = b.CreateShl(off, PAGE_SIZE);
-                        } else {
-                            off = b.CreateMul(off, PAGE_SIZE);
-                        }
-                        assert (endPosition[u]);
-                        mThreadLocalStartOffset[v] = endPosition[u];
-                        endPosition[v] = b.CreateAdd(endPosition[u], off);
-                        if (out_degree(v, ThreadLocalPlacement) == 0) {
-                            memoryForSegment = b.CreateUMax(memoryForSegment, endPosition[v]);
-                        } else {
-                            Q.push(v);
-                        }
-                    }
-                }
-                if (Q.empty()) {
-                    break;
-                }
-                assert (Q.front() != u);
-                u = Q.front();
-                assert (toVisit[u] == 0);
-                Q.pop();
-                assert (Q.front() != u);
-            }
-
-            if (mBufferGraph[mKernelId].permitSlidingWindow()) {
-                BasicBlock * const expandThreadLocalMemory = b.CreateBasicBlock();
-                BasicBlock * const afterExpansion = b.CreateBasicBlock();
-                Value * currentMem = b.CreateAlignedLoad(b.getSizeTy(), mThreadLocalMemorySizePtr, SizeTyABIAlignment);
-                Value * const needsExpansion = b.CreateICmpUGT(memoryForSegment, currentMem);
-                b.CreateCondBr(needsExpansion, expandThreadLocalMemory, afterExpansion);
-
-                b.SetInsertPoint(expandThreadLocalMemory);
-
-                b.CreateFree(b.CreateAlignedLoad(threadLocalTy, threadLocalPtr, PtrTyABIAlignment));
-                // At minimum, we want to double the required space to minimize future reallocs
-                Value * expanded = b.CreateRoundUp(memoryForSegment, currentMem);
-                b.CreateAlignedStore(expanded, mThreadLocalMemorySizePtr, SizeTyABIAlignment);
-                #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-                expanded = b.CreateMul(expanded, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
-                #endif
-                Value * const base = b.CreatePageAlignedMalloc(expanded);
-                b.CreateAlignedStore(base, threadLocalPtr, PtrTyABIAlignment);
-                b.CreateBr(afterExpansion);
-
-                b.SetInsertPoint(afterExpansion);
-            }
-
-            mThreadLocalStreamSetBaseAddress = b.CreateAlignedLoad(threadLocalTy, threadLocalPtr, PtrTyABIAlignment);
-        } else {
-            mThreadLocalStreamSetBaseAddress = nullptr;
-//            mThreadLocalScalingFactor = nullptr;
-        }
 
     } else {
         assert (!mIsIOProcessThread);
@@ -212,6 +130,8 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         assert (factor.numerator() > 0);
         mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
     }
+
+  //  b.CallPrintInt("mMaximumNumOfStrides" , mMaximumNumOfStrides);
 }
 
 

@@ -323,7 +323,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mStrideStepSize = nullptr;
     mAnyClosed = nullptr;
 
-    mPrincipalFixedRateFactor = nullptr;
     mHasExhaustedClosedInput = nullptr;
     mStrideStepSizeAtLoopEntryPhi = nullptr;
     mKernelInsufficientInput = nullptr;

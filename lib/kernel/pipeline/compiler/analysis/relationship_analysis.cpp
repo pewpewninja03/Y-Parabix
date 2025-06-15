@@ -41,6 +41,8 @@ using CommandLineScalarVec = std::array<Relationship *, (unsigned)CommandLineSca
 
 using RedundantStreamSetMap = PipelineAnalysis::RedundantStreamSetMap;
 
+using StreamSetVertexMap = flat_map<Relationship *, ProgramGraph::Vertex>;
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitialPipelineGraph
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -119,6 +121,9 @@ struct RelationshipGraphBuilder {
             assert (isa<RepeatingStreamSet>(rel) || isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
             auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel, addRelationship || isa<RepeatingStreamSet>(rel));
             add_edge(relationship, binding, RelationshipType{portType, i}, G);
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel))) {
+                RepeatingStreamSets.emplace(rel, relationship);
+            }
         }
     }
 
@@ -149,18 +154,6 @@ struct RelationshipGraphBuilder {
             const auto relationship = G.find(RelationshipNode::IsScalar, array[i]);
             add_edge(relationship, callFunc, RelationshipType{portType, i}, G);
         }
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief prioritizePipelineIOTransfers
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void prioritizePipelineIOTransfers() {
-
-        // If we have any kernels that produce
-
-
-        // PipelineInput, PipelineOutput
-
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -281,13 +274,26 @@ struct RelationshipGraphBuilder {
         }
     }
 
-
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief associateRepeatingStreamSets
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void associateRepeatingStreamSets(const unsigned pipelineInput) {
+        const auto m = RepeatingStreamSets.size();
+        for (unsigned i = 0; i < m; ++i) {
+            const auto r = RepeatingStreamSets.nth(i);
+            const unsigned outDeg = mPipelineKernel->getNumOfStreamInputs() + i;
+            Binding * const repeating = new Binding("#repeating" + std::to_string(outDeg), r->first, GreedyRate(0));
+            mInternalBindings.emplace_back(repeating);
+            const auto repeatingBinding = G.add(RelationshipNode::IsBinding, repeating, RelationshipNodeFlag::ImplicitlyAdded);
+            add_edge(pipelineInput, repeatingBinding, RelationshipType{PortType::Output, outDeg, ReasonType::ImplicitRepeatingStreamSet}, G);
+            add_edge(repeatingBinding, r->second, RelationshipType{PortType::Output, outDeg, ReasonType::ImplicitRepeatingStreamSet}, G);
+        }
+    }
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief mapInOutStreamSets
      ** ------------------------------------------------------------------------------------------------------------- */
     void mapInOutStreamSets(KernelVertexVec & kernelList) {
-
 
         assert (!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes));
         assert (kernelList.size() == mKernels.size());
@@ -923,7 +929,7 @@ struct RelationshipGraphBuilder {
     RedundantStreamSetMap &         RedundantStreamSets;
     CommandLineScalarVec            CommandLineScalars;
     TruncatedStreamSetVec           TruncatedStreamSets;
-
+    StreamSetVertexMap              RepeatingStreamSets;
 };
 
 
@@ -982,8 +988,6 @@ struct RelationshipGraphBuilder {
     B.addTruncatedStreamSetContraints();
     B.addPopCountKernels(b, mKernels, vertex);
 
-    B.prioritizePipelineIOTransfers();
-
     B.addProducerScalars(PortType::Output, p_in, mPipelineKernel->getInputScalarBindings());
     B.addConsumerScalars(PortType::Input, p_out, mPipelineKernel->getOutputScalarBindings(), true);
     for (unsigned i = 0; i < n; ++i) {
@@ -999,6 +1003,8 @@ struct RelationshipGraphBuilder {
     for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
         B.addConsumerCalls(PortType::Input, C);
     }
+
+    B.associateRepeatingStreamSets(p_in);
 
     #ifndef NDEBUG
     for (auto v : make_iterator_range(vertices(B.G))) {

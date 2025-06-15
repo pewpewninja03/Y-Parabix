@@ -422,7 +422,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     };
 
 
-    args.reserve(4 + (numOfInputs + numOfOutputs) * 4);
+    args.reserve(mKernelDoSegmentFunctionType->getNumParams());
     if (LLVM_LIKELY(mKernelSharedHandle)) {
         addNextArg(mKernelSharedHandle);
     }
@@ -451,6 +451,8 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         addNextArg(PAPIEventSetId);
     }
     #endif
+
+    const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
 
@@ -498,6 +500,20 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 }
                 addNextArg(inputItems);
             }
+
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                const auto streamSet = source(port, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                mInitiallyProducedItemCount[streamSet] = mLocallyAvailableItems[streamSet];
+                Value * max = nullptr;
+                if (bn.isConstant()) {
+                    max = getGuaranteedRepeatingStreamSetLength(b, streamSet);
+                } else {
+                    max = b.CreateAdd(readConsumedItemCount(b, streamSet), bn.Buffer->getInternalCapacity(b));
+                }
+                addNextArg(max);
+            }
+
         }
     }
 
@@ -552,10 +568,20 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
         if (LLVM_UNLIKELY(rt.isShared() || rt.isManaged())) {
             addNextArg(readConsumedItemCount(b, streamSet));
-        } else if (requiresItemCount(rt.Binding)) {
-            addNextArg(mLinearOutputItemsPhi[rt.Port]);
+        } else {
+            if (requiresItemCount(rt.Binding)) {
+                addNextArg(mLinearOutputItemsPhi[rt.Port]);
+            }
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
+                // buffer->getLinearlyWritableItems(b, produced, consumed)
+                Value * cap = b.CreateAdd(consumed, buffer->getInternalCapacity(b));
+                #ifdef PRINT_DEBUG_MESSAGES
+                debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_capacity = %" PRIu64, cap);
+                #endif
+                addNextArg(cap);
+            }
         }
-
     }
     assert (args.size() == mKernelDoSegmentFunctionType->getNumParams());
 }
