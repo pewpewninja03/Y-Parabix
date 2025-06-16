@@ -460,7 +460,7 @@ def gen_pass_pfx_code(pfx_code):
 
 mark_case_template = r"""
 //  Case for mark ${mark}
-    PabloAST * ${builder}_possible_${mark}_pos = ${builder}.createScanTo(${mark_starters}, ${ccc_v}_or_NR);
+    PabloAST * ${builder}_possible_${mark}_pos = ${builder}.createAdvanceThenScanTo(${mark_starters}, ${ccc_v}_or_NR);
     PabloAST * ${builder}_found_${mark} = ${builder}.createAnd(${builder}_possible_${mark}_pos, ${mark_var});
 """
 

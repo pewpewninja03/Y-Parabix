@@ -5256,18 +5256,18 @@ void FindComposables0::generatePabloMethod() {
     PabloAST * ccc_OV_0_7F_or_NR = b_0_7F.createOr(ccc_OV_0_7F, ccc_NR);
 
 //  Case for mark 327
-    PabloAST * b_0_7F_possible_327_pos = b_0_7F.createScanTo(ASC_43___5_7_8_b_c_e_52___4_63___5_7_8_b_c_e_72___4, ccc_ATB_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_327_pos = b_0_7F.createAdvanceThenScanTo(ASC_43___5_7_8_b_c_e_52___4_63___5_7_8_b_c_e_72___4, ccc_ATB_0_7F_or_NR);
     PabloAST * b_0_7F_found_327 = b_0_7F.createAnd(b_0_7F_possible_327_pos, CC_327);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_327));
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_327));
 
 //  Case for mark 328
-    PabloAST * b_0_7F_possible_328_pos = b_0_7F.createScanTo(ASC_41_5_9_f_55_61_5_9_f_75, ccc_ATB_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_328_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_9_f_55_61_5_9_f_75, ccc_ATB_0_7F_or_NR);
     PabloAST * b_0_7F_found_328 = b_0_7F.createAnd(b_0_7F_possible_328_pos, CC_328);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_328));
 
 //  Case for mark 338
-    PabloAST * b_0_7F_possible_338_pos = b_0_7F.createScanTo(ASC_3c___e, ccc_OV_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_338_pos = b_0_7F.createAdvanceThenScanTo(ASC_3c___e, ccc_OV_0_7F_or_NR);
     PabloAST * b_0_7F_found_338 = b_0_7F.createAnd(b_0_7F_possible_338_pos, CC_338);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_338));
     }
@@ -5313,17 +5313,17 @@ void FindComposables0::generatePabloMethod() {
     PabloAST * ccc_VR_e0_or_NR = b_e0.createOr(ccc_VR_e0, ccc_NR);
 
 //  Case for mark 93c
-    PabloAST * b_e0_possible_93c_pos = b_e0.createScanTo(E0_928_30_3, ccc_NK_e0_or_NR);
+    PabloAST * b_e0_possible_93c_pos = b_e0.createAdvanceThenScanTo(E0_928_30_3, ccc_NK_e0_or_NR);
     PabloAST * b_e0_found_93c = b_e0.createAnd(b_e0_possible_93c_pos, E0_93c);
     b_e0.createAssign(markCode[0], b_e0.createOr(markCode[0], b_e0_found_93c));
 
 //  Case for mark c56
-    PabloAST * b_e0_possible_c56_pos = b_e0.createScanTo(E0_c46, ccc_CCC91_e0_or_NR);
+    PabloAST * b_e0_possible_c56_pos = b_e0.createAdvanceThenScanTo(E0_c46, ccc_CCC91_e0_or_NR);
     PabloAST * b_e0_found_c56 = b_e0.createAnd(b_e0_possible_c56_pos, E0_c56);
     b_e0.createAssign(markCode[1], b_e0.createOr(markCode[1], b_e0_found_c56));
 
 //  Case for mark dca
-    PabloAST * b_e0_possible_dca_pos = b_e0.createScanTo(E0_dd9_c, ccc_VR_e0_or_NR);
+    PabloAST * b_e0_possible_dca_pos = b_e0.createAdvanceThenScanTo(E0_dd9_c, ccc_VR_e0_or_NR);
     PabloAST * b_e0_found_dca = b_e0.createAnd(b_e0_possible_dca_pos, E0_dca);
     b_e0.createAssign(markCode[0], b_e0.createOr(markCode[0], b_e0_found_dca));
     b_e0.createAssign(markCode[1], b_e0.createOr(markCode[1], b_e0_found_dca));
@@ -5350,7 +5350,7 @@ void FindComposables0::generatePabloMethod() {
     PabloAST * ccc_OV_e2_or_NR = b_e2.createOr(ccc_OV_e2, ccc_NR);
 
 //  Case for mark 338
-    PabloAST * b_e2_possible_338_pos = b_e2.createScanTo(E2_2190_2_4_d0_2_4_2203_8_b_23_5_3c_43_5_8_d_61_4_5_72_3_6_7_a___d_82_3_6_7_91_2_a2_8_9_b_b2___5, ccc_OV_e2_or_NR);
+    PabloAST * b_e2_possible_338_pos = b_e2.createAdvanceThenScanTo(E2_2190_2_4_d0_2_4_2203_8_b_23_5_3c_43_5_8_d_61_4_5_72_3_6_7_a___d_82_3_6_7_91_2_a2_8_9_b_b2___5, ccc_OV_e2_or_NR);
     PabloAST * b_e2_found_338 = b_e2.createAnd(b_e2_possible_338_pos, CC_338);
     b_e2.createAssign(markCode[0], b_e2.createOr(markCode[0], b_e2_found_338));
     }
@@ -5382,12 +5382,12 @@ void FindComposables0::generatePabloMethod() {
     PabloAST * ccc_KV_e3_or_NR = b_e3.createOr(ccc_KV_e3, ccc_NR);
 
 //  Case for mark 3099
-    PabloAST * b_e3_possible_3099_pos = b_e3.createScanTo(E3_3046_b_d_f_51_3_5_7_9_b_d_f_61_4_6_8_f_72_5_8_b_9d_a6_b_d_f_b1_3_5_7_9_b_d_f_c1_4_6_8_f_d2_5_8_b_ef___f2_d, ccc_KV_e3_or_NR);
+    PabloAST * b_e3_possible_3099_pos = b_e3.createAdvanceThenScanTo(E3_3046_b_d_f_51_3_5_7_9_b_d_f_61_4_6_8_f_72_5_8_b_9d_a6_b_d_f_b1_3_5_7_9_b_d_f_c1_4_6_8_f_d2_5_8_b_ef___f2_d, ccc_KV_e3_or_NR);
     PabloAST * b_e3_found_3099 = b_e3.createAnd(b_e3_possible_3099_pos, E3_3099);
     b_e3.createAssign(markCode[0], b_e3.createOr(markCode[0], b_e3_found_3099));
 
 //  Case for mark 309a
-    PabloAST * b_e3_possible_309a_pos = b_e3.createScanTo(E3_306f_72_5_8_b_cf_d2_5_8_b, ccc_KV_e3_or_NR);
+    PabloAST * b_e3_possible_309a_pos = b_e3.createAdvanceThenScanTo(E3_306f_72_5_8_b_cf_d2_5_8_b, ccc_KV_e3_or_NR);
     PabloAST * b_e3_found_309a = b_e3.createAnd(b_e3_possible_309a_pos, E3_309a);
     b_e3.createAssign(markCode[1], b_e3.createOr(markCode[1], b_e3_found_309a));
     }
@@ -5413,7 +5413,7 @@ void FindComposables0::generatePabloMethod() {
     PabloAST * ccc_NK_f0_or_NR = b_f0.createOr(ccc_NK_f0, ccc_NR);
 
 //  Case for mark 110ba
-    PabloAST * b_f0_possible_110ba_pos = b_f0.createScanTo(F0_11099_b_a5, ccc_NK_f0_or_NR);
+    PabloAST * b_f0_possible_110ba_pos = b_f0.createAdvanceThenScanTo(F0_11099_b_a5, ccc_NK_f0_or_NR);
     PabloAST * b_f0_found_110ba = b_f0.createAnd(b_f0_possible_110ba_pos, F0_110ba);
     b_f0.createAssign(markCode[0], b_f0.createOr(markCode[0], b_f0_found_110ba));
     }
@@ -5872,7 +5872,7 @@ void FindComposables1::generatePabloMethod() {
     PabloAST * ccc_ATAR_0_7F_or_NR = b_0_7F.createOr(ccc_ATAR_0_7F, ccc_NR);
 
 //  Case for mark 31b
-    PabloAST * b_0_7F_possible_31b_pos = b_0_7F.createScanTo(ASC_4f_55_6f_75, ccc_ATAR_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_31b_pos = b_0_7F.createAdvanceThenScanTo(ASC_4f_55_6f_75, ccc_ATAR_0_7F_or_NR);
     PabloAST * b_0_7F_found_31b = b_0_7F.createAnd(b_0_7F_possible_31b_pos, CC_31b);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_31b));
     }
@@ -6073,49 +6073,49 @@ void FindComposables2::generatePabloMethod() {
     PabloAST * ccc_B_0_7F_or_NR = b_0_7F.createOr(ccc_B_0_7F, ccc_NR);
 
 //  Case for mark 323
-    PabloAST * b_0_7F_possible_323_pos = b_0_7F.createScanTo(ASC_41_2_4_5_8_9_b___f_52___7_9_a_61_2_4_5_8_9_b___f_72___7_9_a, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_323_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_2_4_5_8_9_b___f_52___7_9_a_61_2_4_5_8_9_b___f_72___7_9_a, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_323 = b_0_7F.createAnd(b_0_7F_possible_323_pos, CC_323);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_323));
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_323));
 
 //  Case for mark 324
-    PabloAST * b_0_7F_possible_324_pos = b_0_7F.createScanTo(ASC_55_75, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_324_pos = b_0_7F.createAdvanceThenScanTo(ASC_55_75, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_324 = b_0_7F.createAnd(b_0_7F_possible_324_pos, CC_324);
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_324));
 
 //  Case for mark 325
-    PabloAST * b_0_7F_possible_325_pos = b_0_7F.createScanTo(ASC_41_61, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_325_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_61, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_325 = b_0_7F.createAnd(b_0_7F_possible_325_pos, CC_325);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_325));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_325));
 
 //  Case for mark 326
-    PabloAST * b_0_7F_possible_326_pos = b_0_7F.createScanTo(ASC_53_4_73_4, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_326_pos = b_0_7F.createAdvanceThenScanTo(ASC_53_4_73_4, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_326 = b_0_7F.createAnd(b_0_7F_possible_326_pos, CC_326);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_326));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_326));
 
 //  Case for mark 32d
-    PabloAST * b_0_7F_possible_32d_pos = b_0_7F.createScanTo(ASC_44_5_c_e_54_5_64_5_c_e_74_5, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_32d_pos = b_0_7F.createAdvanceThenScanTo(ASC_44_5_c_e_54_5_64_5_c_e_74_5, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_32d = b_0_7F.createAnd(b_0_7F_possible_32d_pos, CC_32d);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_32d));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_32d));
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_32d));
 
 //  Case for mark 32e
-    PabloAST * b_0_7F_possible_32e_pos = b_0_7F.createScanTo(ASC_48_68, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_32e_pos = b_0_7F.createAdvanceThenScanTo(ASC_48_68, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_32e = b_0_7F.createAnd(b_0_7F_possible_32e_pos, CC_32e);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_32e));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_32e));
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_32e));
 
 //  Case for mark 330
-    PabloAST * b_0_7F_possible_330_pos = b_0_7F.createScanTo(ASC_45_9_55_65_9_75, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_330_pos = b_0_7F.createAdvanceThenScanTo(ASC_45_9_55_65_9_75, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_330 = b_0_7F.createAnd(b_0_7F_possible_330_pos, CC_330);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_330));
 
 //  Case for mark 331
-    PabloAST * b_0_7F_possible_331_pos = b_0_7F.createScanTo(ASC_42_4_b_c_e_52_4_a_62_4_8_b_c_e_72_4_a, ccc_B_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_331_pos = b_0_7F.createAdvanceThenScanTo(ASC_42_4_b_c_e_52_4_a_62_4_8_b_c_e_72_4_a, ccc_B_0_7F_or_NR);
     PabloAST * b_0_7F_found_331 = b_0_7F.createAnd(b_0_7F_possible_331_pos, CC_331);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_331));
     }
@@ -6141,7 +6141,7 @@ void FindComposables2::generatePabloMethod() {
     PabloAST * ccc_B_d8_db_or_NR = b_d8_db.createOr(ccc_B_d8_db, ccc_NR);
 
 //  Case for mark 655
-    PabloAST * b_d8_db_possible_655_pos = b_d8_db.createScanTo(D8_627, ccc_B_d8_db_or_NR);
+    PabloAST * b_d8_db_possible_655_pos = b_d8_db.createAdvanceThenScanTo(D8_627, ccc_B_d8_db_or_NR);
     PabloAST * b_d8_db_found_655 = b_d8_db.createAnd(b_d8_db_possible_655_pos, D9_655);
     b_d8_db.createAssign(markCode[0], b_d8_db.createOr(markCode[0], b_d8_db_found_655));
     }
@@ -6167,7 +6167,7 @@ void FindComposables2::generatePabloMethod() {
     PabloAST * ccc_B_c4_c7_or_NR = b_c4_c7.createOr(ccc_B_c4_c7, ccc_NR);
 
 //  Case for mark 323
-    PabloAST * b_c4_c7_possible_323_pos = b_c4_c7.createScanTo(C6_1a0_1_f_b0, ccc_B_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_323_pos = b_c4_c7.createAdvanceThenScanTo(C6_1a0_1_f_b0, ccc_B_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_323 = b_c4_c7.createAnd(b_c4_c7_possible_323_pos, CC_323);
     b_c4_c7.createAssign(markCode[0], b_c4_c7.createOr(markCode[0], b_c4_c7_found_323));
     }
@@ -6769,77 +6769,77 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_0_7F_or_NR = b_0_7F.createOr(ccc_A_0_7F, ccc_NR);
 
 //  Case for mark 300
-    PabloAST * b_0_7F_possible_300_pos = b_0_7F.createScanTo(ASC_41_5_9_e_f_55_7_9_61_5_9_e_f_75_7_9, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_300_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_9_e_f_55_7_9_61_5_9_e_f_75_7_9, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_300 = b_0_7F.createAnd(b_0_7F_possible_300_pos, CC_300);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_300));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_300));
 
 //  Case for mark 301
-    PabloAST * b_0_7F_possible_301_pos = b_0_7F.createScanTo(ASC_41_3_5_7_9_b___50_2_3_5_7_9_a_61_3_5_7_9_b___70_2_3_5_7_9_a, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_301_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_3_5_7_9_b___50_2_3_5_7_9_a_61_3_5_7_9_b___70_2_3_5_7_9_a, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_301 = b_0_7F.createAnd(b_0_7F_possible_301_pos, CC_301);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_301));
 
 //  Case for mark 302
-    PabloAST * b_0_7F_possible_302_pos = b_0_7F.createScanTo(ASC_41_3_5_7___a_f_53_5_7_9_a_61_3_5_7___a_f_73_5_7_9_a, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_302_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_3_5_7___a_f_53_5_7_9_a_61_3_5_7___a_f_73_5_7_9_a, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_302 = b_0_7F.createAnd(b_0_7F_possible_302_pos, CC_302);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_302));
 
 //  Case for mark 303
-    PabloAST * b_0_7F_possible_303_pos = b_0_7F.createScanTo(ASC_41_5_9_e_f_55_6_9_61_5_9_e_f_75_6_9, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_303_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_9_e_f_55_6_9_61_5_9_e_f_75_6_9, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_303 = b_0_7F.createAnd(b_0_7F_possible_303_pos, CC_303);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_303));
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_303));
 
 //  Case for mark 304
-    PabloAST * b_0_7F_possible_304_pos = b_0_7F.createScanTo(ASC_41_5_7_9_f_55_9_61_5_7_9_f_75_9, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_304_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_7_9_f_55_9_61_5_7_9_f_75_9, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_304 = b_0_7F.createAnd(b_0_7F_possible_304_pos, CC_304);
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_304));
 
 //  Case for mark 306
-    PabloAST * b_0_7F_possible_306_pos = b_0_7F.createScanTo(ASC_41_5_7_9_f_55_61_5_7_9_f_75, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_306_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_7_9_f_55_61_5_7_9_f_75, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_306 = b_0_7F.createAnd(b_0_7F_possible_306_pos, CC_306);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_306));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_306));
 
 //  Case for mark 307
-    PabloAST * b_0_7F_possible_307_pos = b_0_7F.createScanTo(ASC_41___9_d___50_2___4_7___a_61___8_d___70_2___4_7___a, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_307_pos = b_0_7F.createAdvanceThenScanTo(ASC_41___9_d___50_2___4_7___a_61___8_d___70_2___4_7___a, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_307 = b_0_7F.createAnd(b_0_7F_possible_307_pos, CC_307);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_307));
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_307));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_307));
 
 //  Case for mark 308
-    PabloAST * b_0_7F_possible_308_pos = b_0_7F.createScanTo(ASC_41_5_8_9_f_55_7___9_61_5_8_9_f_74_5_7___9, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_308_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_8_9_f_55_7___9_61_5_8_9_f_74_5_7___9, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_308 = b_0_7F.createAnd(b_0_7F_possible_308_pos, CC_308);
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_308));
 
 //  Case for mark 309
-    PabloAST * b_0_7F_possible_309_pos = b_0_7F.createScanTo(ASC_41_5_9_f_55_9_61_5_9_f_75_9, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_309_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_9_f_55_9_61_5_9_f_75_9, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_309 = b_0_7F.createAnd(b_0_7F_possible_309_pos, CC_309);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_309));
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_309));
 
 //  Case for mark 30a
-    PabloAST * b_0_7F_possible_30a_pos = b_0_7F.createScanTo(ASC_41_55_61_75_7_9, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_30a_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_55_61_75_7_9, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_30a = b_0_7F.createAnd(b_0_7F_possible_30a_pos, CC_30a);
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_30a));
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_30a));
 
 //  Case for mark 30b
-    PabloAST * b_0_7F_possible_30b_pos = b_0_7F.createScanTo(ASC_4f_55_6f_75, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_30b_pos = b_0_7F.createAdvanceThenScanTo(ASC_4f_55_6f_75, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_30b = b_0_7F.createAnd(b_0_7F_possible_30b_pos, CC_30b);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_30b));
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_30b));
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_30b));
 
 //  Case for mark 30c
-    PabloAST * b_0_7F_possible_30c_pos = b_0_7F.createScanTo(ASC_41_3___5_7___9_b_c_e_f_52___5_a_61_3___5_7___c_e_f_72___5_a, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_30c_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_3___5_7___9_b_c_e_f_52___5_a_61_3___5_7___c_e_f_72___5_a, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_30c = b_0_7F.createAnd(b_0_7F_possible_30c_pos, CC_30c);
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_30c));
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_30c));
 
 //  Case for mark 30f
-    PabloAST * b_0_7F_possible_30f_pos = b_0_7F.createScanTo(ASC_41_5_9_f_52_5_61_5_9_f_72_5, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_30f_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_9_f_52_5_61_5_9_f_72_5, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_30f = b_0_7F.createAnd(b_0_7F_possible_30f_pos, CC_30f);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_30f));
     b_0_7F.createAssign(markCode[1], b_0_7F.createOr(markCode[1], b_0_7F_found_30f));
@@ -6847,7 +6847,7 @@ void FindComposables3::generatePabloMethod() {
     b_0_7F.createAssign(markCode[3], b_0_7F.createOr(markCode[3], b_0_7F_found_30f));
 
 //  Case for mark 311
-    PabloAST * b_0_7F_possible_311_pos = b_0_7F.createScanTo(ASC_41_5_9_f_52_5_61_5_9_f_72_5, ccc_A_0_7F_or_NR);
+    PabloAST * b_0_7F_possible_311_pos = b_0_7F.createAdvanceThenScanTo(ASC_41_5_9_f_52_5_61_5_9_f_72_5, ccc_A_0_7F_or_NR);
     PabloAST * b_0_7F_found_311 = b_0_7F.createAnd(b_0_7F_possible_311_pos, CC_311);
     b_0_7F.createAssign(markCode[0], b_0_7F.createOr(markCode[0], b_0_7F_found_311));
     b_0_7F.createAssign(markCode[2], b_0_7F.createOr(markCode[2], b_0_7F_found_311));
@@ -6914,46 +6914,46 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_c2_c3_or_NR = b_c2_c3.createOr(ccc_A_c2_c3, ccc_NR);
 
 //  Case for mark 300
-    PabloAST * b_c2_c3_possible_300_pos = b_c2_c3.createScanTo(C2_a8_c2_a_d4_c_e2_a_f4_c, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_300_pos = b_c2_c3.createAdvanceThenScanTo(C2_a8_c2_a_d4_c_e2_a_f4_c, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_300 = b_c2_c3.createAnd(b_c2_c3_possible_300_pos, CC_300);
     b_c2_c3.createAssign(markCode[0], b_c2_c3.createOr(markCode[0], b_c2_c3_found_300));
     b_c2_c3.createAssign(markCode[2], b_c2_c3.createOr(markCode[2], b_c2_c3_found_300));
 
 //  Case for mark 301
-    PabloAST * b_c2_c3_possible_301_pos = b_c2_c3.createScanTo(C2_a8_c2_5___7_a_f_d4_5_8_c_e2_5___7_a_f_f4_5_8_c, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_301_pos = b_c2_c3.createAdvanceThenScanTo(C2_a8_c2_5___7_a_f_d4_5_8_c_e2_5___7_a_f_f4_5_8_c, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_301 = b_c2_c3.createAnd(b_c2_c3_possible_301_pos, CC_301);
     b_c2_c3.createAssign(markCode[0], b_c2_c3.createOr(markCode[0], b_c2_c3_found_301));
 
 //  Case for mark 303
-    PabloAST * b_c2_c3_possible_303_pos = b_c2_c3.createScanTo(C3_c2_a_d4_e2_a_f4, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_303_pos = b_c2_c3.createAdvanceThenScanTo(C3_c2_a_d4_e2_a_f4, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_303 = b_c2_c3.createAnd(b_c2_c3_possible_303_pos, CC_303);
     b_c2_c3.createAssign(markCode[0], b_c2_c3.createOr(markCode[0], b_c2_c3_found_303));
     b_c2_c3.createAssign(markCode[1], b_c2_c3.createOr(markCode[1], b_c2_c3_found_303));
 
 //  Case for mark 304
-    PabloAST * b_c2_c3_possible_304_pos = b_c2_c3.createScanTo(C3_c4_6_d5_6_c_e4_6_f5_6_c, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_304_pos = b_c2_c3.createAdvanceThenScanTo(C3_c4_6_d5_6_c_e4_6_f5_6_c, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_304 = b_c2_c3.createAnd(b_c2_c3_possible_304_pos, CC_304);
     b_c2_c3.createAssign(markCode[2], b_c2_c3.createOr(markCode[2], b_c2_c3_found_304));
 
 //  Case for mark 308
-    PabloAST * b_c2_c3_possible_308_pos = b_c2_c3.createScanTo(C3_d5_f5, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_308_pos = b_c2_c3.createAdvanceThenScanTo(C3_d5_f5, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_308 = b_c2_c3.createAnd(b_c2_c3_possible_308_pos, CC_308);
     b_c2_c3.createAssign(markCode[3], b_c2_c3.createOr(markCode[3], b_c2_c3_found_308));
 
 //  Case for mark 309
-    PabloAST * b_c2_c3_possible_309_pos = b_c2_c3.createScanTo(C3_c2_a_d4_e2_a_f4, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_309_pos = b_c2_c3.createAdvanceThenScanTo(C3_c2_a_d4_e2_a_f4, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_309 = b_c2_c3.createAnd(b_c2_c3_possible_309_pos, CC_309);
     b_c2_c3.createAssign(markCode[0], b_c2_c3.createOr(markCode[0], b_c2_c3_found_309));
     b_c2_c3.createAssign(markCode[3], b_c2_c3.createOr(markCode[3], b_c2_c3_found_309));
 
 //  Case for mark 30c
-    PabloAST * b_c2_c3_possible_30c_pos = b_c2_c3.createScanTo(C3_dc_fc, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_30c_pos = b_c2_c3.createAdvanceThenScanTo(C3_dc_fc, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_30c = b_c2_c3.createAnd(b_c2_c3_possible_30c_pos, CC_30c);
     b_c2_c3.createAssign(markCode[2], b_c2_c3.createOr(markCode[2], b_c2_c3_found_30c));
     b_c2_c3.createAssign(markCode[3], b_c2_c3.createOr(markCode[3], b_c2_c3_found_30c));
 
 //  Case for mark 342
-    PabloAST * b_c2_c3_possible_342_pos = b_c2_c3.createScanTo(C2_a8, ccc_A_c2_c3_or_NR);
+    PabloAST * b_c2_c3_possible_342_pos = b_c2_c3.createAdvanceThenScanTo(C2_a8, ccc_A_c2_c3_or_NR);
     PabloAST * b_c2_c3_found_342 = b_c2_c3.createAnd(b_c2_c3_possible_342_pos, CD_342);
     b_c2_c3.createAssign(markCode[1], b_c2_c3.createOr(markCode[1], b_c2_c3_found_342));
     }
@@ -7015,40 +7015,40 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_d0_d3_or_NR = b_d0_d3.createOr(ccc_A_d0_d3, ccc_NR);
 
 //  Case for mark 300
-    PabloAST * b_d0_d3_possible_300_pos = b_d0_d3.createScanTo(D0_415_8_35_8, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_300_pos = b_d0_d3.createAdvanceThenScanTo(D0_415_8_35_8, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_300 = b_d0_d3.createAnd(b_d0_d3_possible_300_pos, CC_300);
     b_d0_d3.createAssign(markCode[1], b_d0_d3.createOr(markCode[1], b_d0_d3_found_300));
 
 //  Case for mark 301
-    PabloAST * b_d0_d3_possible_301_pos = b_d0_d3.createScanTo(D0_413_a_33_a, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_301_pos = b_d0_d3.createAdvanceThenScanTo(D0_413_a_33_a, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_301 = b_d0_d3.createAnd(b_d0_d3_possible_301_pos, CC_301);
     b_d0_d3.createAssign(markCode[0], b_d0_d3.createOr(markCode[0], b_d0_d3_found_301));
 
 //  Case for mark 304
-    PabloAST * b_d0_d3_possible_304_pos = b_d0_d3.createScanTo(D0_418_23_38_43, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_304_pos = b_d0_d3.createAdvanceThenScanTo(D0_418_23_38_43, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_304 = b_d0_d3.createAnd(b_d0_d3_possible_304_pos, CC_304);
     b_d0_d3.createAssign(markCode[2], b_d0_d3.createOr(markCode[2], b_d0_d3_found_304));
 
 //  Case for mark 306
-    PabloAST * b_d0_d3_possible_306_pos = b_d0_d3.createScanTo(D0_410_5_6_8_23_30_5_6_8_43, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_306_pos = b_d0_d3.createAdvanceThenScanTo(D0_410_5_6_8_23_30_5_6_8_43, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_306 = b_d0_d3.createAnd(b_d0_d3_possible_306_pos, CC_306);
     b_d0_d3.createAssign(markCode[1], b_d0_d3.createOr(markCode[1], b_d0_d3_found_306));
     b_d0_d3.createAssign(markCode[2], b_d0_d3.createOr(markCode[2], b_d0_d3_found_306));
 
 //  Case for mark 308
-    PabloAST * b_d0_d3_possible_308_pos = b_d0_d3.createScanTo(D0_406_10_5___8_e_23_7_b_d_30_5___8_e_43_7_b_d_56_d8_9_e8_9, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_308_pos = b_d0_d3.createAdvanceThenScanTo(D0_406_10_5___8_e_23_7_b_d_30_5___8_e_43_7_b_d_56_d8_9_e8_9, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_308 = b_d0_d3.createAnd(b_d0_d3_possible_308_pos, CC_308);
     b_d0_d3.createAssign(markCode[0], b_d0_d3.createOr(markCode[0], b_d0_d3_found_308));
     b_d0_d3.createAssign(markCode[2], b_d0_d3.createOr(markCode[2], b_d0_d3_found_308));
 
 //  Case for mark 30b
-    PabloAST * b_d0_d3_possible_30b_pos = b_d0_d3.createScanTo(D0_423_43, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_30b_pos = b_d0_d3.createAdvanceThenScanTo(D0_423_43, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_30b = b_d0_d3.createAnd(b_d0_d3_possible_30b_pos, CC_30b);
     b_d0_d3.createAssign(markCode[0], b_d0_d3.createOr(markCode[0], b_d0_d3_found_30b));
     b_d0_d3.createAssign(markCode[1], b_d0_d3.createOr(markCode[1], b_d0_d3_found_30b));
 
 //  Case for mark 30f
-    PabloAST * b_d0_d3_possible_30f_pos = b_d0_d3.createScanTo(D1_474_5, ccc_A_d0_d3_or_NR);
+    PabloAST * b_d0_d3_possible_30f_pos = b_d0_d3.createAdvanceThenScanTo(D1_474_5, ccc_A_d0_d3_or_NR);
     PabloAST * b_d0_d3_found_30f = b_d0_d3.createAnd(b_d0_d3_possible_30f_pos, CC_30f);
     b_d0_d3.createAssign(markCode[0], b_d0_d3.createOr(markCode[0], b_d0_d3_found_30f));
     b_d0_d3.createAssign(markCode[1], b_d0_d3.createOr(markCode[1], b_d0_d3_found_30f));
@@ -7115,46 +7115,46 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_c4_c7_or_NR = b_c4_c7.createOr(ccc_A_c4_c7, ccc_NR);
 
 //  Case for mark 300
-    PabloAST * b_c4_c7_possible_300_pos = b_c4_c7.createScanTo(C4_102_3_12_3_4c_d_a0_1_f_b0, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_300_pos = b_c4_c7.createAdvanceThenScanTo(C4_102_3_12_3_4c_d_a0_1_f_b0, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_300 = b_c4_c7.createAnd(b_c4_c7_possible_300_pos, CC_300);
     b_c4_c7.createAssign(markCode[1], b_c4_c7.createOr(markCode[1], b_c4_c7_found_300));
 
 //  Case for mark 301
-    PabloAST * b_c4_c7_possible_301_pos = b_c4_c7.createScanTo(C4_102_3_12_3_4c_d_68_9_a0_1_f_b0, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_301_pos = b_c4_c7.createAdvanceThenScanTo(C4_102_3_12_3_4c_d_68_9_a0_1_f_b0, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_301 = b_c4_c7.createAnd(b_c4_c7_possible_301_pos, CC_301);
     b_c4_c7.createAssign(markCode[0], b_c4_c7.createOr(markCode[0], b_c4_c7_found_301));
 
 //  Case for mark 303
-    PabloAST * b_c4_c7_possible_303_pos = b_c4_c7.createScanTo(C4_102_3_a0_1_f_b0, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_303_pos = b_c4_c7.createAdvanceThenScanTo(C4_102_3_a0_1_f_b0, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_303 = b_c4_c7.createAnd(b_c4_c7_possible_303_pos, CC_303);
     b_c4_c7.createAssign(markCode[0], b_c4_c7.createOr(markCode[0], b_c4_c7_found_303));
     b_c4_c7.createAssign(markCode[1], b_c4_c7.createOr(markCode[1], b_c4_c7_found_303));
 
 //  Case for mark 304
-    PabloAST * b_c4_c7_possible_304_pos = b_c4_c7.createScanTo(C7_1ea_b, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_304_pos = b_c4_c7.createAdvanceThenScanTo(C7_1ea_b, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_304 = b_c4_c7.createAnd(b_c4_c7_possible_304_pos, CC_304);
     b_c4_c7.createAssign(markCode[2], b_c4_c7.createOr(markCode[2], b_c4_c7_found_304));
 
 //  Case for mark 307
-    PabloAST * b_c4_c7_possible_307_pos = b_c4_c7.createScanTo(C5_15a_b_60_1_7f, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_307_pos = b_c4_c7.createAdvanceThenScanTo(C5_15a_b_60_1_7f, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_307 = b_c4_c7.createAnd(b_c4_c7_possible_307_pos, CC_307);
     b_c4_c7.createAssign(markCode[0], b_c4_c7.createOr(markCode[0], b_c4_c7_found_307));
     b_c4_c7.createAssign(markCode[1], b_c4_c7.createOr(markCode[1], b_c4_c7_found_307));
     b_c4_c7.createAssign(markCode[2], b_c4_c7.createOr(markCode[2], b_c4_c7_found_307));
 
 //  Case for mark 308
-    PabloAST * b_c4_c7_possible_308_pos = b_c4_c7.createScanTo(C5_16a_b, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_308_pos = b_c4_c7.createAdvanceThenScanTo(C5_16a_b, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_308 = b_c4_c7.createAnd(b_c4_c7_possible_308_pos, CC_308);
     b_c4_c7.createAssign(markCode[3], b_c4_c7.createOr(markCode[3], b_c4_c7_found_308));
 
 //  Case for mark 309
-    PabloAST * b_c4_c7_possible_309_pos = b_c4_c7.createScanTo(C4_102_3_a0_1_f_b0, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_309_pos = b_c4_c7.createAdvanceThenScanTo(C4_102_3_a0_1_f_b0, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_309 = b_c4_c7.createAnd(b_c4_c7_possible_309_pos, CC_309);
     b_c4_c7.createAssign(markCode[0], b_c4_c7.createOr(markCode[0], b_c4_c7_found_309));
     b_c4_c7.createAssign(markCode[3], b_c4_c7.createOr(markCode[3], b_c4_c7_found_309));
 
 //  Case for mark 30c
-    PabloAST * b_c4_c7_possible_30c_pos = b_c4_c7.createScanTo(C6_1b7, ccc_A_c4_c7_or_NR);
+    PabloAST * b_c4_c7_possible_30c_pos = b_c4_c7.createAdvanceThenScanTo(C6_1b7, ccc_A_c4_c7_or_NR);
     PabloAST * b_c4_c7_found_30c = b_c4_c7.createAnd(b_c4_c7_possible_30c_pos, CC_30c);
     b_c4_c7.createAssign(markCode[2], b_c4_c7.createOr(markCode[2], b_c4_c7_found_30c));
     b_c4_c7.createAssign(markCode[3], b_c4_c7.createOr(markCode[3], b_c4_c7_found_30c));
@@ -7214,41 +7214,41 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_e1_or_NR = b_e1.createOr(ccc_A_e1, ccc_NR);
 
 //  Case for mark 300
-    PabloAST * b_e1_possible_300_pos = b_e1.createScanTo(E1_1f00_1_8_9_10_1_8_9_20_1_8_9_30_1_8_9_40_1_8_9_50_1_9_60_1_8_9_bf_fe, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_300_pos = b_e1.createAdvanceThenScanTo(E1_1f00_1_8_9_10_1_8_9_20_1_8_9_30_1_8_9_40_1_8_9_50_1_9_60_1_8_9_bf_fe, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_300 = b_e1.createAnd(b_e1_possible_300_pos, CC_300);
     b_e1.createAssign(markCode[0], b_e1.createOr(markCode[0], b_e1_found_300));
     b_e1.createAssign(markCode[1], b_e1.createOr(markCode[1], b_e1_found_300));
 
 //  Case for mark 301
-    PabloAST * b_e1_possible_301_pos = b_e1.createScanTo(E1_1f00_1_8_9_10_1_8_9_20_1_8_9_30_1_8_9_40_1_8_9_50_1_9_60_1_8_9_bf_fe, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_301_pos = b_e1.createAdvanceThenScanTo(E1_1f00_1_8_9_10_1_8_9_20_1_8_9_30_1_8_9_40_1_8_9_50_1_9_60_1_8_9_bf_fe, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_301 = b_e1.createAnd(b_e1_possible_301_pos, CC_301);
     b_e1.createAssign(markCode[0], b_e1.createOr(markCode[0], b_e1_found_301));
 
 //  Case for mark 302
-    PabloAST * b_e1_possible_302_pos = b_e1.createScanTo(E1_1ea0_1_b8_9_cc_d, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_302_pos = b_e1.createAdvanceThenScanTo(E1_1ea0_1_b8_9_cc_d, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_302 = b_e1.createAnd(b_e1_possible_302_pos, CC_302);
     b_e1.createAssign(markCode[1], b_e1.createOr(markCode[1], b_e1_found_302));
 
 //  Case for mark 304
-    PabloAST * b_e1_possible_304_pos = b_e1.createScanTo(E1_1e36_7_5a_b, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_304_pos = b_e1.createAdvanceThenScanTo(E1_1e36_7_5a_b, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_304 = b_e1.createAnd(b_e1_possible_304_pos, CC_304);
     b_e1.createAssign(markCode[2], b_e1.createOr(markCode[2], b_e1_found_304));
 
 //  Case for mark 306
-    PabloAST * b_e1_possible_306_pos = b_e1.createScanTo(E1_1ea0_1, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_306_pos = b_e1.createAdvanceThenScanTo(E1_1ea0_1, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_306 = b_e1.createAnd(b_e1_possible_306_pos, CC_306);
     b_e1.createAssign(markCode[1], b_e1.createOr(markCode[1], b_e1_found_306));
     b_e1.createAssign(markCode[2], b_e1.createOr(markCode[2], b_e1_found_306));
 
 //  Case for mark 307
-    PabloAST * b_e1_possible_307_pos = b_e1.createScanTo(E1_1e62_3, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_307_pos = b_e1.createAdvanceThenScanTo(E1_1e62_3, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_307 = b_e1.createAnd(b_e1_possible_307_pos, CC_307);
     b_e1.createAssign(markCode[0], b_e1.createOr(markCode[0], b_e1_found_307));
     b_e1.createAssign(markCode[1], b_e1.createOr(markCode[1], b_e1_found_307));
     b_e1.createAssign(markCode[2], b_e1.createOr(markCode[2], b_e1_found_307));
 
 //  Case for mark 342
-    PabloAST * b_e1_possible_342_pos = b_e1.createScanTo(E1_1f00_1_8_9_20_1_8_9_30_1_8_9_50_1_9_60_1_8_9_bf_fe, ccc_A_e1_or_NR);
+    PabloAST * b_e1_possible_342_pos = b_e1.createAdvanceThenScanTo(E1_1f00_1_8_9_20_1_8_9_30_1_8_9_50_1_9_60_1_8_9_bf_fe, ccc_A_e1_or_NR);
     PabloAST * b_e1_found_342 = b_e1.createAnd(b_e1_possible_342_pos, CD_342);
     b_e1.createAssign(markCode[0], b_e1.createOr(markCode[0], b_e1_found_342));
     b_e1.createAssign(markCode[2], b_e1.createOr(markCode[2], b_e1_found_342));
@@ -7314,47 +7314,47 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_cc_cf_or_NR = b_cc_cf.createOr(ccc_A_cc_cf, ccc_NR);
 
 //  Case for mark 300
-    PabloAST * b_cc_cf_possible_300_pos = b_cc_cf.createScanTo(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_300_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_300 = b_cc_cf.createAnd(b_cc_cf_possible_300_pos, CC_300);
     b_cc_cf.createAssign(markCode[0], b_cc_cf.createOr(markCode[0], b_cc_cf_found_300));
     b_cc_cf.createAssign(markCode[2], b_cc_cf.createOr(markCode[2], b_cc_cf_found_300));
 
 //  Case for mark 301
-    PabloAST * b_cc_cf_possible_301_pos = b_cc_cf.createScanTo(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b_d2, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_301_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b_d2, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_301 = b_cc_cf.createAnd(b_cc_cf_possible_301_pos, CC_301);
     b_cc_cf.createAssign(markCode[0], b_cc_cf.createOr(markCode[0], b_cc_cf_found_301));
 
 //  Case for mark 304
-    PabloAST * b_cc_cf_possible_304_pos = b_cc_cf.createScanTo(CE_391_9_a5_b1_9_c5, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_304_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_9_a5_b1_9_c5, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_304 = b_cc_cf.createAnd(b_cc_cf_possible_304_pos, CC_304);
     b_cc_cf.createAssign(markCode[2], b_cc_cf.createOr(markCode[2], b_cc_cf_found_304));
 
 //  Case for mark 306
-    PabloAST * b_cc_cf_possible_306_pos = b_cc_cf.createScanTo(CE_391_9_a5_b1_9_c5, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_306_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_9_a5_b1_9_c5, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_306 = b_cc_cf.createAnd(b_cc_cf_possible_306_pos, CC_306);
     b_cc_cf.createAssign(markCode[1], b_cc_cf.createOr(markCode[1], b_cc_cf_found_306));
     b_cc_cf.createAssign(markCode[2], b_cc_cf.createOr(markCode[2], b_cc_cf_found_306));
 
 //  Case for mark 308
-    PabloAST * b_cc_cf_possible_308_pos = b_cc_cf.createScanTo(CE_399_a5_b9_c5_d2, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_308_pos = b_cc_cf.createAdvanceThenScanTo(CE_399_a5_b9_c5_d2, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_308 = b_cc_cf.createAnd(b_cc_cf_possible_308_pos, CC_308);
     b_cc_cf.createAssign(markCode[3], b_cc_cf.createOr(markCode[3], b_cc_cf_found_308));
 
 //  Case for mark 313
-    PabloAST * b_cc_cf_possible_313_pos = b_cc_cf.createScanTo(CE_391_5_7_9_f_a9_b1_5_7_9_f_c1_5_9, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_313_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_5_7_9_f_a9_b1_5_7_9_f_c1_5_9, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_313 = b_cc_cf.createAnd(b_cc_cf_possible_313_pos, CC_313);
     b_cc_cf.createAssign(markCode[0], b_cc_cf.createOr(markCode[0], b_cc_cf_found_313));
     b_cc_cf.createAssign(markCode[1], b_cc_cf.createOr(markCode[1], b_cc_cf_found_313));
 
 //  Case for mark 314
-    PabloAST * b_cc_cf_possible_314_pos = b_cc_cf.createScanTo(CE_391_5_7_9_f_a1_5_9_b1_5_7_9_f_c1_5_9, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_314_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_5_7_9_f_a1_5_9_b1_5_7_9_f_c1_5_9, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_314 = b_cc_cf.createAnd(b_cc_cf_possible_314_pos, CC_314);
     b_cc_cf.createAssign(markCode[0], b_cc_cf.createOr(markCode[0], b_cc_cf_found_314));
     b_cc_cf.createAssign(markCode[1], b_cc_cf.createOr(markCode[1], b_cc_cf_found_314));
     b_cc_cf.createAssign(markCode[2], b_cc_cf.createOr(markCode[2], b_cc_cf_found_314));
 
 //  Case for mark 342
-    PabloAST * b_cc_cf_possible_342_pos = b_cc_cf.createScanTo(CE_3b1_7_9_c5_9___b, ccc_A_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_342_pos = b_cc_cf.createAdvanceThenScanTo(CE_3b1_7_9_c5_9___b, ccc_A_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_342 = b_cc_cf.createAnd(b_cc_cf_possible_342_pos, CD_342);
     b_cc_cf.createAssign(markCode[1], b_cc_cf.createOr(markCode[1], b_cc_cf_found_342));
     }
@@ -7392,17 +7392,17 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_c8_cb_or_NR = b_c8_cb.createOr(ccc_A_c8_cb, ccc_NR);
 
 //  Case for mark 304
-    PabloAST * b_c8_cb_possible_304_pos = b_c8_cb.createScanTo(C8_226_7_e_f, ccc_A_c8_cb_or_NR);
+    PabloAST * b_c8_cb_possible_304_pos = b_c8_cb.createAdvanceThenScanTo(C8_226_7_e_f, ccc_A_c8_cb_or_NR);
     PabloAST * b_c8_cb_found_304 = b_c8_cb.createAnd(b_c8_cb_possible_304_pos, CC_304);
     b_c8_cb.createAssign(markCode[0], b_c8_cb.createOr(markCode[0], b_c8_cb_found_304));
 
 //  Case for mark 306
-    PabloAST * b_c8_cb_possible_306_pos = b_c8_cb.createScanTo(C8_228_9, ccc_A_c8_cb_or_NR);
+    PabloAST * b_c8_cb_possible_306_pos = b_c8_cb.createAdvanceThenScanTo(C8_228_9, ccc_A_c8_cb_or_NR);
     PabloAST * b_c8_cb_found_306 = b_c8_cb.createAnd(b_c8_cb_possible_306_pos, CC_306);
     b_c8_cb.createAssign(markCode[1], b_c8_cb.createOr(markCode[1], b_c8_cb_found_306));
 
 //  Case for mark 30c
-    PabloAST * b_c8_cb_possible_30c_pos = b_c8_cb.createScanTo(CA_292, ccc_A_c8_cb_or_NR);
+    PabloAST * b_c8_cb_possible_30c_pos = b_c8_cb.createAdvanceThenScanTo(CA_292, ccc_A_c8_cb_or_NR);
     PabloAST * b_c8_cb_found_30c = b_c8_cb.createAnd(b_c8_cb_possible_30c_pos, CC_30c);
     b_c8_cb.createAssign(markCode[0], b_c8_cb.createOr(markCode[0], b_c8_cb_found_30c));
     b_c8_cb.createAssign(markCode[1], b_c8_cb.createOr(markCode[1], b_c8_cb_found_30c));
@@ -7429,7 +7429,7 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_f0_or_NR = b_f0.createOr(ccc_A_f0, ccc_NR);
 
 //  Case for mark 307
-    PabloAST * b_f0_possible_307_pos = b_f0.createScanTo(F0_105d2_a, ccc_A_f0_or_NR);
+    PabloAST * b_f0_possible_307_pos = b_f0.createAdvanceThenScanTo(F0_105d2_a, ccc_A_f0_or_NR);
     PabloAST * b_f0_found_307 = b_f0.createAnd(b_f0_possible_307_pos, CC_307);
     b_f0.createAssign(markCode[0], b_f0.createOr(markCode[0], b_f0_found_307));
     }
@@ -7461,13 +7461,13 @@ void FindComposables3::generatePabloMethod() {
     PabloAST * ccc_A_d8_db_or_NR = b_d8_db.createOr(ccc_A_d8_db, ccc_NR);
 
 //  Case for mark 653
-    PabloAST * b_d8_db_possible_653_pos = b_d8_db.createScanTo(D8_627, ccc_A_d8_db_or_NR);
+    PabloAST * b_d8_db_possible_653_pos = b_d8_db.createAdvanceThenScanTo(D8_627, ccc_A_d8_db_or_NR);
     PabloAST * b_d8_db_found_653 = b_d8_db.createAnd(b_d8_db_possible_653_pos, D9_653);
     b_d8_db.createAssign(markCode[0], b_d8_db.createOr(markCode[0], b_d8_db_found_653));
     b_d8_db.createAssign(markCode[1], b_d8_db.createOr(markCode[1], b_d8_db_found_653));
 
 //  Case for mark 654
-    PabloAST * b_d8_db_possible_654_pos = b_d8_db.createScanTo(D8_627_48_a_c1_d2_5, ccc_A_d8_db_or_NR);
+    PabloAST * b_d8_db_possible_654_pos = b_d8_db.createAdvanceThenScanTo(D8_627_48_a_c1_d2_5, ccc_A_d8_db_or_NR);
     PabloAST * b_d8_db_found_654 = b_d8_db.createAnd(b_d8_db_possible_654_pos, D9_654);
     b_d8_db.createAssign(markCode[0], b_d8_db.createOr(markCode[0], b_d8_db_found_654));
     }
@@ -9577,7 +9577,7 @@ void FindComposables4::generatePabloMethod() {
     PabloAST * ccc_IS_e1_or_NR = b_e1.createOr(ccc_IS_e1, ccc_NR);
 
 //  Case for mark 345
-    PabloAST * b_e1_possible_345_pos = b_e1.createScanTo(E1_1f00___f_20___f_60___70_4_c_b6_c6_f6, ccc_IS_e1_or_NR);
+    PabloAST * b_e1_possible_345_pos = b_e1.createAdvanceThenScanTo(E1_1f00___f_20___f_60___70_4_c_b6_c6_f6, ccc_IS_e1_or_NR);
     PabloAST * b_e1_found_345 = b_e1.createAnd(b_e1_possible_345_pos, CD_345);
     b_e1.createAssign(markCode[0], b_e1.createOr(markCode[0], b_e1_found_345));
     }
@@ -9603,7 +9603,7 @@ void FindComposables4::generatePabloMethod() {
     PabloAST * ccc_IS_cc_cf_or_NR = b_cc_cf.createOr(ccc_IS_cc_cf, ccc_NR);
 
 //  Case for mark 345
-    PabloAST * b_cc_cf_possible_345_pos = b_cc_cf.createScanTo(CE_391_7_a9_c_e_b1_7_c9_e, ccc_IS_cc_cf_or_NR);
+    PabloAST * b_cc_cf_possible_345_pos = b_cc_cf.createAdvanceThenScanTo(CE_391_7_a9_c_e_b1_7_c9_e, ccc_IS_cc_cf_or_NR);
     PabloAST * b_cc_cf_found_345 = b_cc_cf.createAnd(b_cc_cf_possible_345_pos, CD_345);
     b_cc_cf.createAssign(markCode[0], b_cc_cf.createOr(markCode[0], b_cc_cf_found_345));
     }

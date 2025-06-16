@@ -171,8 +171,12 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
     re::Name * CCC0_Name = re::makeName("CCC", "NR");
     CCC0_Name->setDefinition(CCC0_Prop);
+    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, ccc_NR0, BitMovementMode::LookAhead);
+    SHOW_STREAM(ccc_NR0);
+
     StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, EC_Basis, ccc_NR, BitMovementMode::LookAhead);
+    SpreadByMask(P, SpreadMask, ccc_NR0, ccc_NR);
     SHOW_STREAM(ccc_NR);
 
     StreamSet * Canon_Basis = P.CreateStreamSet(8, 1);
