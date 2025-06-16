@@ -9921,8 +9921,7 @@ void LongComposablePipeline(PipelineBuilder & P,
     SHOW_BIXNUM(MarkCodeAtStarter4);
 
     P.CreateKernelCall<ApplyLongComposition4>(XfrmedBasis3, MarkCodeAtStarter4, FinalBasis);
-    SHOW_BIXNUM(FinalBasis);
 
-    P.CreateKernelCall<MarkDeletion>(Basis, XfrmedBasis0, XfrmedBasis1, XfrmedBasis2, XfrmedBasis3, FinalBasis, DeletionMask);
+    P.CreateKernelCall<MarkDeletion>(FinalBasis, MarkCode0, MarkCode1, MarkCode2, MarkCode3, MarkCode4, DeletionMask);
 }
 

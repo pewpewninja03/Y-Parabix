@@ -92,25 +92,30 @@ void ApplyTransform::generatePabloMethod() {
 class DelPriorToSelectMask : public PabloKernel {
 public:
     DelPriorToSelectMask
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
-                                       StreamSet * SelectMask);
+        (LLVMTypeSystemInterface & ts,
+         StreamSet * Basis, StreamSet * InputMask, StreamSet * MarkDeletion, StreamSet * DeletePrior,
+         StreamSet * SelectMask);
 protected:
     void generatePabloMethod() override;
 };
 
 DelPriorToSelectMask::DelPriorToSelectMask
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
-                                   StreamSet * SelectMask)
+    (LLVMTypeSystemInterface & ts,
+     StreamSet * Basis, StreamSet * InputMask, StreamSet * MarkDeletion, StreamSet * DeletePrior,
+     StreamSet * SelectMask)
 : PabloKernel(ts, "DelPriorToSelectMask",
-{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"MarkDeletion", MarkDeletion}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
 {Binding{"SelectMask", SelectMask}}) {}
 
 void DelPriorToSelectMask::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     PabloAST * InputMask = getInputStreamSet("InputMask")[0];
+    PabloAST * MarkDeletion = getInputStreamSet("MarkDeletion")[0];
     PabloAST * DelPrior = getInputStreamSet("DeletePrior")[0];
     BixNumCompiler bnc(pb);
+    PabloAST * nullDeletion = bnc.EQ(Basis, 0);
+    // TODO: keep Nulls in original basis
     PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
     PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
     PabloAST * pfx = bnc.UGE(Basis, 0xC2);
@@ -123,6 +128,7 @@ void DelPriorToSelectMask::generatePabloMethod() {
     PabloAST * del2 = pb.createAnd(secondlast, pb.createLookahead(DelPrior, 2));
     PabloAST * del1 = pb.createLookahead(DelPrior, 1);
     PabloAST * del = pb.createOr(pb.createOr(delpfx4, del3), pb.createOr(del2, del1));
+    del = pb.createOr3(nullDeletion, MarkDeletion, del);
     std::vector<PabloAST *> select_streamset = {pb.createAnd(InputMask, pb.createInFile(pb.createNot(del)))};
     writeOutputStreamSet("SelectMask", select_streamset);
 }
@@ -195,14 +201,14 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<ApplyTransform>(Canon_Basis, XfrmBasis, XfrmedBasis);
     SHOW_BIXNUM(XfrmedBasis);
 
-    StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, CanonSelectionMask, DelPrior, SelectionMask0);
-    SHOW_STREAM(SelectionMask0);
-
     StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
     StreamSet * MarkDeletion = P.CreateStreamSet(1, 1);
     LongComposablePipeline(P, XfrmedBasis, ccc_NR, FinalBasis, MarkDeletion);
     SHOW_STREAM(MarkDeletion);
+
+    StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<DelPriorToSelectMask>(FinalBasis, CanonSelectionMask, MarkDeletion, DelPrior, SelectionMask0);
+    SHOW_STREAM(SelectionMask0);
 
     StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
     FilterByMask(P, SelectionMask0, FinalBasis, FilteredBasis);

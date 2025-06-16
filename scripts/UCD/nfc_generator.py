@@ -647,7 +647,7 @@ long_composable_pipeline_template = r"""void LongComposablePipeline(PipelineBuil
 ${pipeline_logic}
     FinalBasis = XfrmedBasis${final_pass_no};
     DeletionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<MarkDeletion>(Basis, ${mark_code_parms}, DeletionMask);
+    P.CreateKernelCall<MarkDeletion>(FinalBasis, ${mark_code_parms}, DeletionMask);
 }
 """
 
@@ -1427,7 +1427,7 @@ class NFC_generator:
             mark_code_bits = self.max_conditional_code_bits[pass_no]
             logic += t.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits, basis = input_basis)
             input_basis = "XfrmedBasis%i" % pass_no
-        mark_streamsets = ", " .join(["XfrmedBasis%i" % i for i in range(self.pass_count)])
+        mark_streamsets = ", " .join(["MarkCode%i" % i for i in range(self.pass_count)])
         return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
 
     def generate_short_composable_stage(self):
