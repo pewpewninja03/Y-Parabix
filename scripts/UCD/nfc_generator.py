@@ -629,7 +629,7 @@ ${mark_accumulation}
 long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify long composable sequences and transform to precomposed characters.
     StreamSet * MarkCode${pass_no} = P.CreateStreamSet(${mark_code_bits});
     StreamSet * Index_ccc_NR_or_MarksFound${pass_no} = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<FindComposables${pass_no}>(${basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
+    P.CreateKernelCall<FindComposables${pass_no}>(${input_basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
     SHOW_BIXNUM(MarkCode${pass_no});
     SHOW_STREAM(Index_ccc_NR_or_MarksFound${pass_no});
 
@@ -637,16 +637,13 @@ long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify lon
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${pass_no}, MarkCode${pass_no}, MarkCodeAtStarter${pass_no});
     SHOW_BIXNUM(MarkCodeAtStarter${pass_no});
 
-    StreamSet * XfrmedBasis${pass_no} = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${basis}, MarkCodeAtStarter${pass_no}, XfrmedBasis${pass_no});
-    SHOW_BIXNUM(XfrmedBasis${pass_no});
+    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${input_basis}, MarkCodeAtStarter${pass_no}, ${output_basis});
+    SHOW_BIXNUM(${output_basis});
 """
 
 long_composable_pipeline_template = r"""void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis, StreamSet * DeletionMask) {
 ${pipeline_logic}
-    FinalBasis = XfrmedBasis${final_pass_no};
-    DeletionMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<MarkDeletion>(FinalBasis, ${mark_code_parms}, DeletionMask);
 }
 """
@@ -1424,9 +1421,18 @@ class NFC_generator:
         logic = ""
         input_basis = "Basis"
         for pass_no in range(self.pass_count):
+
+            if pass_no == self.pass_count - 1:
+                output_basis = "FinalBasis"
+            else:
+                output_basis = "XfrmedBasis%i" % pass_no
+                logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
             mark_code_bits = self.max_conditional_code_bits[pass_no]
-            logic += t.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits, basis = input_basis)
-            input_basis = "XfrmedBasis%i" % pass_no
+            logic += t.substitute(pass_no = pass_no, 
+                                  mark_code_bits = mark_code_bits, 
+                                  input_basis = input_basis,
+                                  output_basis = output_basis)
+            input_basis = output_basis # for next pass
         mark_streamsets = ", " .join(["MarkCode%i" % i for i in range(self.pass_count)])
         return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
 
