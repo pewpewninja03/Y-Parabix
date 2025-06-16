@@ -235,6 +235,7 @@ void NestedInternalSearchEngine::pop() {
 void NestedInternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
     assert (mMainMethod.size() > 0);
     auto f = mMainMethod.back(); assert (f);
+    assert ((((uintptr_t)search_buffer) % (512 / 8)) == 0);
     f(search_buffer, bufferLength, accum);
 }
 

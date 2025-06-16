@@ -30,13 +30,11 @@ constexpr static unsigned BUFFER_SIZE_GA_MAX_TIME_SECONDS = 15;
 
 constexpr static unsigned BUFFER_SIZE_GA_STALLS = 50;
 
-// Intel spatial prefetcher pulls cache line pairs, aligned to 128 bytes.
+using ConflictGraph = adjacency_list<hash_setS, vecS, undirectedS>;
 
-using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
+using IntervalSet = interval_set<unsigned>;
 
-using IntervalSet = boost::icl::interval_set<unsigned>;
-
-using Interval = IntervalSet::interval_type; // std::pair<unsigned, unsigned>;
+using Interval = IntervalSet::interval_type;
 
 using Vertex = unsigned;
 
@@ -92,9 +90,9 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
                 const auto b = candidate[j];
                 assert (b < candidateLength);
                 if (edge(a, b, I).second) {
-                    assert (edge(b, a, I).second);
-                    assert (GC_Intervals[b].lower() < GC_Intervals[b].upper());
-                    GC_IntervalSet.insert(GC_Intervals[b]);
+                    GC_IntervalSet.add(GC_Intervals[b]);
+                } else {
+                    assert ("sanity check for undirected graph failed?" && !edge(b, a, I).second);
                 }
             }
 
@@ -103,8 +101,21 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
             size_t start = 0;
             size_t end = w;
             if (!GC_IntervalSet.empty()) {
+                #ifndef NDEBUG
+                auto ii = GC_IntervalSet.begin();
+                assert (ii->lower() < ii->upper());
+                auto lastUpper = ii->upper();
+                while (++ii != GC_IntervalSet.end()) {
+                    assert (lastUpper < ii->lower());
+                    assert (ii->lower() < ii->upper());
+                    lastUpper = ii->upper();
+                }
+                #endif
                 for (const auto & interval : GC_IntervalSet) {
                     if (end <= interval.lower()) {
+                        for (auto i = start; i < end; ++i) {
+                            assert (!boost::icl::contains(GC_IntervalSet, i));
+                        }
                         break;
                     } else {
                         const auto r = interval.upper();
@@ -114,7 +125,6 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
                 }
                 GC_IntervalSet.clear();
             }
-            assert (GC_IntervalSet.iterative_size() == 0);
 
             assert (end > start);
             GC_Intervals[a] = Interval::right_open(start, end);
@@ -159,7 +169,7 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
 
     BufferLayoutOptimizerWorker(const unsigned candidateLength
                                , const size_t partitionCount
-                               , const IntervalGraph & I
+                               , const ConflictGraph & I
                                , const std::vector<size_t> & weight
                                , const std::vector<unsigned> & partitionId
                                , pipeline_random_engine & rng)
@@ -174,7 +184,7 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
 
 private:
 
-    const IntervalGraph & I;
+    const ConflictGraph & I;
     const std::vector<size_t> & weight;
     const std::vector<unsigned> & partitionId;
 
@@ -203,7 +213,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
      ** ------------------------------------------------------------------------------------------------------------- */
     BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
                          , const size_t partitionCount
-                         , const IntervalGraph & I
+                         , const ConflictGraph & I
                          , const std::vector<size_t> & weight
                          , const std::vector<unsigned> & partitionId
                          , pipeline_random_engine & srcRng)
@@ -227,7 +237,7 @@ struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorith
 
 private:
 
-    const IntervalGraph & I;
+    const ConflictGraph & I;
     const std::vector<size_t> & weight;
     const std::vector<unsigned> & partitionId;
     const size_t partitionCount;
@@ -268,8 +278,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
     size_t numOfThreadLocalStreamSets = 0U;
     size_t packedPartitionCount = 0;
 
-//    const size_t pageSize = getPageSize();
-
     const auto bw = b.getBitBlockWidth();
 
     for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
@@ -284,18 +292,31 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 const auto streamSet = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
 
-                if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                    mapping[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
-                    streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
-                    Type * const type = bn.Buffer->getType();
-                    const size_t typeSize = b.getTypeSize(dl, type);
-                    const BufferPort & bp = mBufferGraph[output];
-                    const auto & M = bp.Maximum;
-                    const auto W = Rational{M.numerator() * typeSize * StrideRepetitionVector[kernel], M.denominator() * bw};
-                    assert (W.numerator() > 0);
-                    assert (W.denominator() == 1);
-                    unitWeight[numOfThreadLocalStreamSets] = W.numerator();
-                    ++numOfThreadLocalStreamSets;
+                if (bn.isThreadLocal()) {
+                    if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+                        auto src = parent(streamSet, InOutStreamSetReplacement);
+                        while (LLVM_UNLIKELY(in_degree(src, InOutStreamSetReplacement) != 0)) {
+                            src = parent(src, InOutStreamSetReplacement);
+                            assert (FirstStreamSet <= src && src <= LastStreamSet);
+                        }
+                        assert (FirstStreamSet < src && src < streamSet);
+                        const auto k = mapping[src - FirstStreamSet];
+                        assert (unitWeight[k] > 0);
+                        mapping[streamSet - FirstStreamSet] = k;
+                    } else {
+                        mapping[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
+                        streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
+                        Type * const type = bn.Buffer->getType();
+                        const size_t typeSize = b.getTypeSize(dl, type);
+                        const BufferPort & bp = mBufferGraph[output];
+                        const auto & M = bp.Maximum;
+                        const auto W = Rational{M.numerator() * typeSize * StrideRepetitionVector[kernel], M.denominator() * bw};
+                        assert (W.numerator() > 0);
+                        assert (W.denominator() == 1);
+                        unitWeight[numOfThreadLocalStreamSets] = W.numerator();
+                        ++numOfThreadLocalStreamSets;
+                    }
+
                 }
             }
         }
@@ -310,9 +331,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     if (numOfThreadLocalStreamSets) {
 
-        IntervalGraph I(numOfThreadLocalStreamSets);
+        ConflictGraph I(numOfThreadLocalStreamSets);
 
-        std::vector<int> remaining(numOfThreadLocalStreamSets, 0);
+        std::vector<unsigned> remaining(numOfThreadLocalStreamSets, 0);
         std::vector<unsigned> reverse_mapping(numOfThreadLocalStreamSets, 0);
 
         for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
@@ -326,23 +347,25 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     const auto streamSet = target(output, mBufferGraph);
                     assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
+                    if (bn.isThreadLocal()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j < numOfThreadLocalStreamSets);
-                        const auto k = PartitionCount + streamSet - FirstStreamSet;
-                        reverse_mapping[j] = k;  assert (k > 0);
+                        if (LLVM_LIKELY(!bn.isInOutRedirect())) {
+                            const auto k = PartitionCount + streamSet - FirstStreamSet;
+                            reverse_mapping[j] = k;  assert (k > 0);
+                        }
                         // We add +1 here because some outputs might be unused but still cannot
                         // reuse memory of an input buffer
-                        assert (remaining[j] == 0);
-                        remaining[j] = out_degree(streamSet, mBufferGraph) + 1;
+                        assert ((remaining[j] == 0) ^ bn.isInOutRedirect());
+                        remaining[j] += out_degree(streamSet, mBufferGraph) + 1;
                     }
                 }
 
                 // Mark any overlapping allocations in our interval graph.
                 for (unsigned i = 1; i != numOfThreadLocalStreamSets; ++i) {
-                    if (remaining[i] > 0) {
+                    if (remaining[i]) {
                         for (unsigned j = 0; j != i; ++j) {
-                            if (remaining[j] > 0) {
+                            if (remaining[j]) {
                                 add_edge(j, i, I);
                             }
                         }
@@ -354,7 +377,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     const auto streamSet = target(output, mBufferGraph);
                     assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
+                    if (bn.isThreadLocal()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j < numOfThreadLocalStreamSets);
                         assert (remaining[j] > 0);
@@ -366,7 +389,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     const auto streamSet = source(input, mBufferGraph);
                     assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
+                    if (bn.isThreadLocal()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j < numOfThreadLocalStreamSets);
                         assert (remaining[j] > 0);
@@ -391,21 +414,15 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         auto O = BA.getResult();
 
+
+
         const auto intervals = BA.translate(O, rng);
         assert (intervals.size() == numOfThreadLocalStreamSets);
 
         const auto pageSize = getPageSize();
 
         auto add_edge_to_T = [&](const size_t u, const size_t v, const unsigned num, const unsigned denom) {
-            for (auto e : make_iterator_range(out_edges(u, T))) {
-                if (target(e, T) == v) {
-                    #ifndef NDEBUG
-                    Rational percentOfPagePerStride{num, denom * pageSize};
-                    assert (T[e] == percentOfPagePerStride);
-                    #endif
-                    return;
-                }
-            }
+            assert (!edge(u, v, T).second);
             Rational percentOfPagePerStride{num, denom * pageSize};
             add_edge(u, v, percentOfPagePerStride, T);
             #ifndef NDEBUG
@@ -417,29 +434,21 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         for (unsigned i = 0; i < numOfThreadLocalStreamSets; ++i) {
             const auto u = reverse_mapping[i];
-            if (u) {
-                const auto & C = intervals[i];
-                #ifndef NDEBUG
-                assert (C.upper() > C.lower());
-                #endif
-                if (C.lower() == 0) {
-                    const auto w = FirstStreamSet + u - PartitionCount;
-                    assert (FirstStreamSet <= w && w <= LastStreamSet);
-                    const auto producer = parent(w, mBufferGraph);
-                    assert (FirstKernel <= producer && producer <= LastKernel);
-                    const auto partId = KernelPartitionId[producer];
-                    assert (partId < PartitionCount);
-                    const auto firstKernel = FirstKernelInPartition[partId];
-                    add_edge_to_T(partId, u, C.upper(), StrideRepetitionVector[firstKernel]);
-                }
-            } else {
-                #ifndef NDEBUG
-                assert (intervals[i].lower() == 0);
-                assert (intervals[i].upper() == 0);
-                #endif
+            const auto & C = intervals[i];
+            #ifndef NDEBUG
+            assert (C.upper() > C.lower());
+            #endif
+            if (C.lower() == 0) {
+                const auto w = FirstStreamSet + u - PartitionCount;
+                assert (FirstStreamSet <= w && w <= LastStreamSet);
+                const auto producer = parent(w, mBufferGraph);
+                assert (FirstKernel <= producer && producer <= LastKernel);
+                const auto partId = KernelPartitionId[producer];
+                assert (partId < PartitionCount);
+                const auto firstKernel = FirstKernelInPartition[partId];
+                add_edge_to_T(partId, u, C.upper(), StrideRepetitionVector[firstKernel]);
             }
         }
-
 
         for (auto e : make_iterator_range(edges(I))) {
             const auto a = source(e, I);
@@ -449,8 +458,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             assert (b < numOfThreadLocalStreamSets);
             const auto & B = intervals[b];
 
+            assert (disjoint(A, B));
+
             auto make_edge = [&](const size_t i, const size_t j, const Interval & C) {
-                assert (intervals[i].upper() <= C.lower());
                 const auto u = reverse_mapping[i];
                 const auto v = reverse_mapping[j];
                 const auto w = FirstStreamSet + v - PartitionCount;
@@ -464,15 +474,15 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             };
 
             if (A.lower() < B.lower()) {
+                assert (A.upper() <= B.lower());
                 make_edge(a, b, B);
             } else {
-                assert (B.lower() < A.lower());
+                assert (B.upper() <= A.lower());
                 make_edge(b, a, A);
             }
         }
 
         transitive_reduction_dag(T);
-
 
 #if 0
 
@@ -612,9 +622,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             if (LLVM_UNLIKELY(Z3_get_numeral_int64(ctx, value, &num) != Z3_L_TRUE)) {
                 report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
             }
-
-            errs() << "S_" << i << " := " << num << "\n";
-
         }
 
         Z3_model_dec_ref(ctx, model);
@@ -742,9 +749,6 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
                 }
             }
             #warning why are some of the initial streamsets in a partition not thread local?
-            errs() << "NTL.streamSet" << streamSet << " : " << (int)type << "\n";
-
-
             assert (bn.Locality != BufferLocality::ConstantShared);
             bn.Locality = type;
         }
@@ -785,1243 +789,5 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
     }
 
 }
-
-
-#if 0
-
-struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker<double> {
-
-
-    struct PartitionData {
-        unsigned StreamSetCount = 0;
-        unsigned PageCount = 0;
-        Rational MinStridesPerSegment{};
-        Rational SumOfStridesPerSegment;
-    };
-
-    struct ResultVal {
-        std::vector<Interval> Intervals;
-        std::vector<Rational> ScalingFactors;
-
-        ResultVal(std::vector<Interval> && intervals, std::vector<Rational> && sf)
-        : Intervals(intervals), ScalingFactors(sf) {
-
-        }
-    };
-
-    constexpr static auto MAX_INT = std::numeric_limits<Rational::int_type>::max();
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief newCandidate
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void newCandidate(Candidate & candidate, pipeline_random_engine & rng) final {
-        const auto l = candidate.size();
-        assert (numOfThreadLocalStreamSets <= l);
-        for (unsigned i = 0; i < numOfThreadLocalStreamSets; ++i) {
-            candidate[i] = i;
-        }
-        const auto c = unusedNodeRepetitions.size();
-        auto i = numOfThreadLocalStreamSets;
-        for (unsigned j = 0; j < c; ++j) {
-            const auto m = unusedNodeRepetitions[j];
-            for (auto k = m; k; --k) {
-                assert (i < l);
-                candidate[i++] = numOfThreadLocalStreamSets + j;
-            }
-        }
-        assert (i == l);
-        std::shuffle(candidate.begin(), candidate.begin() + l, rng);
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief repair
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void repair(Candidate & /* candidate */, pipeline_random_engine & /* rng */) final { }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief fitness
-     ** ------------------------------------------------------------------------------------------------------------- */
-    double fitness(const Candidate & candidate, pipeline_random_engine & /* rng */) final {
-
-        const auto partitionCount = PartitionData.size();
-
-        for (unsigned i = 0; i < partitionCount; ++i) {
-            auto & P = PartitionData[i];
-            P.PageCount = 0;
-            P.StreamSetCount = 0;
-            P.MinStridesPerSegment = Rational{0};
-            P.SumOfStridesPerSegment = Rational{0};
-            GC_EmptyIntervals[i].clear();
-        }
-
-        const auto candidateLength = candidate.size();
-
-        size_t maxEnd = 0;
-
-        for (unsigned i = 0; i < candidateLength; ++i) {
-
-            const auto a = candidate[i];
-            assert (a < candidateLength);
-            assert (GC_IntervalSet.empty());
-            for (unsigned j = 0; j != i; ++j) {
-                const auto b = candidate[j];
-                assert (b < candidateLength);
-                if (edge(a, b, I).second) {
-                    if (b < numOfThreadLocalStreamSets) {
-                        GC_IntervalSet.insert(GC_Intervals[b]);
-                    } else {
-                        const auto p = partitionId[a];
-                        for (const auto & S : GC_EmptyIntervals[p]) {
-                            GC_IntervalSet.insert(S);
-                        }
-                    }
-                }
-            }
-
-            const auto w = minimumNumOfPages[a];
-
-            size_t start = 0;
-            size_t end = w;
-            if (!GC_IntervalSet.empty()) {
-                for (const auto & interval : GC_IntervalSet) {
-                    if (end <= interval.lower()) {
-                        break;
-                    } else {
-                        const auto r = interval.upper();
-                        start = r;
-                        end = r + w;
-                    }
-                }
-                GC_IntervalSet.clear();
-            }
-
-            if (a < numOfThreadLocalStreamSets) {
-                GC_Intervals[a] = Interval::right_open(start, end);
-                // we allow "fake" nodes to permit the algorithm to insert unused pages
-                if (a < numOfThreadLocalStreamSets) {
-                    maxEnd = std::max(maxEnd, end);
-                }
-            } else {
-                const auto p = partitionId[a];
-                GC_EmptyIntervals[p].insert(Interval::right_open(start, end));
-            }
-
-
-        }
-
-
-        for (unsigned i = 0; i < candidateLength; ++i) {
-            const auto a = candidate[i];
-            assert (a < candidateLength);
-            if (a < numOfThreadLocalStreamSets) {
-                unsigned closestStartAfterEnd = maxEnd;
-                auto & Ia = GC_Intervals[a];
-                const auto endOfCurrentInterval = Ia.upper();
-                for (const auto b : make_iterator_range(adjacent_vertices(a, I))) {
-                    const auto startOfAdjacentInterval = GC_Intervals[b].lower();
-                    if (startOfAdjacentInterval >= endOfCurrentInterval) {
-                        if (b < numOfThreadLocalStreamSets) {
-                            closestStartAfterEnd = std::min(startOfAdjacentInterval, closestStartAfterEnd);
-                        }
-                    }
-                }
-                assert (closestStartAfterEnd >= Ia.upper());
-                const auto dist = closestStartAfterEnd - Ia.lower();
-                assert (DataSizePerMinimumRepetition[a].numerator() > 0);
-                const auto max = Rational{dist} * DataSizePerMinimumRepetition[a];
-                const auto p = partitionId[a];
-                assert (p < PartitionData.size());
-                auto & P = PartitionData[p];
-                if (P.StreamSetCount == 0) {
-                    P.MinStridesPerSegment = max;
-                    P.SumOfStridesPerSegment = max;
-                } else {
-                    P.MinStridesPerSegment = std::max(P.MinStridesPerSegment, max);
-                    P.SumOfStridesPerSegment += max;
-                }
-
-                const auto d = Ia.upper() - Ia.lower();
-                assert (d > 0);
-                P.PageCount += d;
-                P.StreamSetCount++;
-
-                Ia = Interval::right_open(Ia.lower(), closestStartAfterEnd);
-            }
-        }
-
-
-        Rational C{maxEnd * maxEnd};
-
-        for (unsigned i = 0; i < partitionCount; ++i) {
-            const auto & P = PartitionData[i];
-            assert (P.StreamSetCount > 0);
-            assert (P.MinStridesPerSegment.numerator() > 0);
-            // R = total amount of unusuable space when M is the partition scaling factor
-            const auto D = (P.MinStridesPerSegment * P.StreamSetCount);
-            assert (P.SumOfStridesPerSegment.numerator() > 0);
-            assert (D >= P.SumOfStridesPerSegment);
-            const auto R = ((D - P.SumOfStridesPerSegment) / (P.SumOfStridesPerSegment + D)) + Rational{1};
-            assert (R.numerator() > 0);
-            C *= R;
-        }
-
-        const auto result = (double)C.numerator() / (double)C.denominator();
-
-        errs() << " := " << result << "\n";
-
-        return result;
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief translate
-     ** ------------------------------------------------------------------------------------------------------------- */
-    ResultVal translate(const OrderingDAWG & O, const unsigned candidateLength, pipeline_random_engine & rng) {
-        Candidate chosen;
-        chosen.reserve(candidateLength);
-        Vertex u = 0;
-        while (out_degree(u, O) != 0) {
-            const auto e = first_out_edge(u, O);
-            const auto k = O[e];
-            chosen.push_back(k);
-            u = target(e, O);
-        }
-        fitness(chosen, rng);
-        const auto partitionCount = PartitionData.size();
-        std::vector<Rational> scalingFactors(partitionCount, Rational{-1U, 1});
-        for (unsigned i = 0; i < candidateLength; ++i) {
-            const auto a = chosen[i];
-            assert (a < candidateLength);
-            if (a < numOfThreadLocalStreamSets) {
-                auto & Ia = GC_Intervals[a];
-                const auto p = partitionId[a];
-                assert (p < PartitionData.size());
-                const auto length = Ia.upper() - Ia.lower();
-                assert (length > 0);
-                assert (DataSizePerMinimumRepetition[a].numerator() > 0);
-                const auto sf = Rational{length} / DataSizePerMinimumRepetition[a];
-                scalingFactors[p] = std::min(scalingFactors[p], sf);
-            }
-        }
-
-        return ResultVal{std::move(GC_Intervals), std::move(scalingFactors)};
-    }
-
-
-
-    BufferLayoutOptimizerWorker(const IntervalGraph & I
-                               , const std::vector<Rational> & segmentsPerPage
-                               , const std::vector<unsigned> & minimumNumOfPages
-                               , const std::vector<unsigned> & partitionId
-                               , const std::vector<unsigned> & unusedNodeRepetitions
-                               , const size_t numOfThreadLocalStreamSets
-                               , const size_t partitionCount
-                               , pipeline_random_engine & rng)
-    : I(I)
-    , DataSizePerMinimumRepetition(segmentsPerPage), minimumNumOfPages(minimumNumOfPages)
-    , partitionId(partitionId), unusedNodeRepetitions(unusedNodeRepetitions)
-    , numOfThreadLocalStreamSets(numOfThreadLocalStreamSets)
-    , GC_IntervalSet()
-    , GC_Intervals(numOfThreadLocalStreamSets)
-    , GC_EmptyIntervals(partitionCount)
-    , PartitionData(partitionCount) {
-        assert (numOfThreadLocalStreamSets <= num_vertices(I));
-        assert (numOfThreadLocalStreamSets <= segmentsPerPage.size());
-        assert (numOfThreadLocalStreamSets <= minimumNumOfPages.size());
-        assert (numOfThreadLocalStreamSets <= partitionId.size());
-    }
-
-private:
-
-    const IntervalGraph & I;
-    const std::vector<Rational> & DataSizePerMinimumRepetition;
-    const std::vector<unsigned> & minimumNumOfPages;
-    const std::vector<unsigned> & partitionId;
-    const std::vector<unsigned> & unusedNodeRepetitions;
-
-    const size_t numOfThreadLocalStreamSets;
-
-
-    IntervalSet GC_IntervalSet;
-    std::vector<Interval> GC_Intervals;
-    std::vector<IntervalSet> GC_EmptyIntervals;
-
-    std::vector<Rational> MaxStridesPerStreamSet;
-
-    std::vector<PartitionData> PartitionData;
-
-};
-
-struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm<double> {
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief getIntervals
-     ** ------------------------------------------------------------------------------------------------------------- */
-    BufferLayoutOptimizerWorker::ResultVal translate(const OrderingDAWG & O, pipeline_random_engine & rng) {
-        auto w = (BufferLayoutOptimizerWorker *)mainWorker.get();
-        return w->translate(O, candidateLength, rng);
-    }
-
-    WorkerPtr makeWorker(pipeline_random_engine & rng) final {
-        return std::make_unique<BufferLayoutOptimizerWorker>(I, segmentsPerPage, minimumNumOfPages, partitionId, unusedNodeRepetitions, numOfLocalStreamSets, partitionCount, rng);
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief constructor
-     ** ------------------------------------------------------------------------------------------------------------- */
-    BufferLayoutOptimizer(const unsigned candidateLength
-                         , const unsigned numOfLocalStreamSets
-                         , const size_t partitionCount
-                         , const IntervalGraph & I
-                         , const std::vector<Rational> & segmentsPerPage
-                         , const std::vector<unsigned> & minimumNumOfPages
-                         , const std::vector<unsigned> & partitionId
-                         , const std::vector<unsigned> & unusedNodeRepetitions
-                         , pipeline_random_engine & srcRng)
-    : PermutationBasedEvolutionaryAlgorithm (candidateLength,
-                                             BUFFER_SIZE_GA_MAX_INIT_TIME_SECONDS,
-                                             BUFFER_SIZE_INIT_POPULATION_SIZE,
-                                             BUFFER_SIZE_GA_MAX_TIME_SECONDS,
-                                             BUFFER_SIZE_POPULATION_SIZE,
-                                             BUFFER_SIZE_GA_STALLS,
-                                             std::max(codegen::SegmentThreads, codegen::TaskThreads),
-                                             srcRng)
-    , numOfLocalStreamSets(numOfLocalStreamSets)
-    , partitionCount(partitionCount)
-    , I(I)
-    , segmentsPerPage(segmentsPerPage)
-    , minimumNumOfPages(minimumNumOfPages)
-    , partitionId(partitionId)
-    , unusedNodeRepetitions(unusedNodeRepetitions) {
-
-    }
-
-
-private:
-
-    const size_t numOfLocalStreamSets;
-    const size_t partitionCount;
-    const IntervalGraph & I;
-    const std::vector<Rational> & segmentsPerPage;
-    const std::vector<unsigned> & minimumNumOfPages;
-    const std::vector<unsigned> & partitionId;
-    const std::vector<unsigned> & unusedNodeRepetitions;
-
-
-};
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineInitialThreadLocalBufferLayout
- *
- * Given our buffer graph, we want to identify the best placement to maximize sequential prefetching behavior with
- * the minimal total memory required. Although this assumes that the memory-aware scheduling algorithm was first
- * called, it does not actually use any data from it. The reason for this disconnection is to enable us to explore
- * the impact of static memory allocation independent of the chosen scheduling algorithm.
- *
- * Because the Intel L2 streamer prefetcher has one forward and one reverse monitor per page, a streamset will
- * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng) {
-
-    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
-        assert (LastStreamSet == PipelineOutput);
-        return;
-    }
-
-    // This process serves two purposes: (1) generate the initial memory layout for our thread-local
-    // streamsets. (2) determine how many the number of pages to assign each streamset based on the
-    // number of strides executed by the parition root.
-
-    const auto n = LastStreamSet - FirstStreamSet + 1U;
-
-    std::vector<unsigned> mapping(n);
-    std::vector<Rational> unitWeight(n);
-    std::vector<unsigned> minimumNumOfPages(n);
-    std::vector<unsigned> streamSetPartitionId(n);
-
-    auto & dl = b.getModule()->getDataLayout();
-
-    const size_t pageSize = getPageSize();
-
-    size_t numOfThreadLocalStreamSets = 0U;
-    size_t packedPartitionCount = 0;
-    unsigned largestStreamSet = 0;
-
-    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-        const auto firstKernel = FirstKernelInPartition[partitionId];
-        const auto firstKernelOfNextPartition = FirstKernelInPartition[partitionId + 1];
-
-        const auto startThreadLocalStreamSetCount = numOfThreadLocalStreamSets;
-
-        for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
-
-            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-
-                if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                    mapping[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
-                    streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
-                    Type * const type = bn.Buffer->getType();
-                    const size_t typeSize = b.getTypeSize(dl, type);
-                    const BufferPort & bp = mBufferGraph[output];
-                    const auto & rate = bp.getRate().getUpperBound();
-                    const auto W = rate * Rational{typeSize * StrideRepetitionVector[kernel], pageSize};
-                    assert (W.numerator() > 0);
-                    unitWeight[numOfThreadLocalStreamSets] = W;
-                    assert ((MaximumNumOfStrides[kernel] % StrideRepetitionVector[kernel]) == 0);
-                    assert (MaximumNumOfStrides[kernel] >= StrideRepetitionVector[kernel]);
-                    const auto scale = MaximumNumOfStrides[kernel] / StrideRepetitionVector[kernel];
-                    const auto d = ceiling(W * scale);
-                    largestStreamSet = std::max(largestStreamSet, d);
-                    minimumNumOfPages[numOfThreadLocalStreamSets] = d;
-                    ++numOfThreadLocalStreamSets;
-                }
-            }
-        }
-
-        if (startThreadLocalStreamSetCount != numOfThreadLocalStreamSets) {
-            ++packedPartitionCount;
-        }
-
-    }
-
-    ThreadLocalExpansionThresholdFactor.resize(PartitionCount, Rational{0});
-
-    if (numOfThreadLocalStreamSets) {
-
-        const auto total = numOfThreadLocalStreamSets + packedPartitionCount;
-
-        size_t candidateLength = numOfThreadLocalStreamSets;
-
-        std::vector<unsigned> unusedNodeRepetitions(packedPartitionCount);
-
-        for (unsigned i = 0; i < numOfThreadLocalStreamSets; ++i) {
-            const auto toAdd = largestStreamSet - minimumNumOfPages[i];
-            const auto p = streamSetPartitionId[i];
-            assert (p < packedPartitionCount);
-            unusedNodeRepetitions[p] += toAdd;
-            candidateLength += toAdd;
-        }
-
-        std::vector<int> remaining(n); // NOTE: signed int type is necessary here
-
-        IntervalGraph I(total);
-
-        unitWeight.resize(total, Rational{0});
-
-        minimumNumOfPages.resize(total, 1);
-
-        streamSetPartitionId.resize(total);
-
-        for (unsigned i = numOfThreadLocalStreamSets; i < total; ++i) {
-            streamSetPartitionId[i] = i - numOfThreadLocalStreamSets;
-        }
-
-        for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-            const auto firstKernel = FirstKernelInPartition[partitionId];
-            const auto firstKernelOfNextPartition = FirstKernelInPartition[partitionId + 1];
-
-            // Determine which streamsets are no longer alive
-            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
-
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                        const auto j = mapping[streamSet - FirstStreamSet];
-                        assert (j != -1U);
-                        // We add +1 here because some outputs might be unused but still cannot
-                        // reuse memory of an input buffer
-                        remaining[j] = out_degree(streamSet, mBufferGraph) + 1;
-                    }
-                }
-
-                // Mark any overlapping allocations in our interval graph.
-                for (unsigned i = 0; i != numOfThreadLocalStreamSets; ++i) {
-                    if (remaining[i] > 0) {
-                        for (unsigned j = 0; j != i; ++j) {
-                            if (remaining[j] > 0) {
-                                add_edge(j, i, I);
-                            }
-                        }
-                        const auto partId = streamSetPartitionId[i];
-                        if (unusedNodeRepetitions[partId] > 0) {
-                            add_edge(i, numOfThreadLocalStreamSets + partId, I);
-                        }
-                    }
-                }
-
-
-
-                // Undo the +1 for the produced buffers
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                        const auto j = mapping[streamSet - FirstStreamSet];
-                        assert (j != -1U);
-                        assert (remaining[j] > 0);
-                        remaining[j]--;
-                    }
-                }
-
-                for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = source(input, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                        const auto j = mapping[streamSet - FirstStreamSet];
-                        assert (j != -1U);
-                        assert (remaining[j] > 0);
-                        remaining[j]--;
-                    }
-                }
-
-
-
-            }
-
-        }
-
-        BufferLayoutOptimizer BA(candidateLength, numOfThreadLocalStreamSets, packedPartitionCount,
-                                 I, unitWeight, minimumNumOfPages, streamSetPartitionId, unusedNodeRepetitions,
-                                 rng);
-
-        BA.runGA<true>();
-
-        auto O = BA.getResult();
-
-        const auto result = BA.translate(O, rng);
-
-        size_t packedPartitionIndex = 0;
-
-        for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-            const auto firstKernel = FirstKernelInPartition[partitionId];
-            const auto firstKernelOfNextPartition = FirstKernelInPartition[partitionId + 1];
-            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                        assert (packedPartitionIndex < packedPartitionCount);
-                        const Rational & S = result.ScalingFactors[packedPartitionIndex];
-                        ThreadLocalExpansionThresholdFactor[partitionId] = S / StrideRepetitionVector[firstKernel];
-                        ++packedPartitionIndex;
-                        goto next_partition;
-                    }
-                }
-            }
-next_partition:
-            continue;
-        }
-        assert (packedPartitionIndex == packedPartitionCount);
-
-        bool hasThreadLocalInOut = false;
-
-        unsigned requiredMemory{0};
-
-        const auto & intervals = result.Intervals;
-
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            const auto i = streamSet - FirstStreamSet;
-            BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isThreadLocal()) {
-                if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
-                    hasThreadLocalInOut = true;
-                } else {
-                    const auto j = mapping[i];
-                    assert (j < numOfThreadLocalStreamSets);
-                    const auto & interval = intervals[j];
-                    bn.BufferStart = interval.lower() * pageSize;
-                    bn.BufferEnd = interval.upper() * pageSize;
-                    requiredMemory = std::max(requiredMemory, bn.BufferEnd);
-                }
-
-            }
-        }
-        if (LLVM_UNLIKELY(hasThreadLocalInOut)) {
-            for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-                BufferNode & bn = mBufferGraph[streamSet];
-                assert (bn.isInOutRedirect() ^ (in_degree(streamSet, InOutStreamSetReplacement) == 0));
-                if (LLVM_UNLIKELY(bn.isThreadLocal() && bn.isInOutRedirect())) {
-                    auto src = streamSet;
-                    do {
-                        src = parent(src, InOutStreamSetReplacement);
-                    } while (in_degree(src, InOutStreamSetReplacement) != 0);
-                    const BufferNode & bs = mBufferGraph[src];
-                    bn.BufferStart = bs.BufferStart;
-                    bn.BufferEnd = bs.BufferEnd;
-                }
-            }
-        }
-
-        RequiredThreadLocalStreamSetMemory = requiredMemory;
-
-    }
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateInterPartitionThreadLocalBuffers
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
-
-    // update threadlocal status of sources for truncated buffers
-
-    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
-        assert (LastStreamSet == PipelineOutput);
-        return;
-    }
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) {
-            mNonThreadLocalStreamSets.insert(streamSet);
-            unsigned srcStreamSet = 0;
-            for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
-                const auto & v = mStreamGraph[ref];
-                if (v.Reason == ReasonType::Reference) {
-                    srcStreamSet = source(ref, mBufferGraph);
-                    assert (srcStreamSet >= FirstStreamSet && srcStreamSet <= LastStreamSet);
-                    break;
-                }
-            }
-            assert (srcStreamSet);
-            const BufferNode & bn = mBufferGraph[srcStreamSet];
-            if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-
-            const auto producer = parent(srcStreamSet, mBufferGraph);
-            const auto partId = KernelPartitionId[producer];
-
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                if (partId != KernelPartitionId[consumer]) {
-                    mNonThreadLocalStreamSets.insert(srcStreamSet);
-                    break;
-                }
-            }
-        }
-
-        if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
-            continue;
-        }
-
-        const auto producer = parent(streamSet, mBufferGraph);
-        const auto partId = KernelPartitionId[producer];
-
-        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(input, mBufferGraph);
-            if (partId != KernelPartitionId[consumer]) {
-                mNonThreadLocalStreamSets.insert(streamSet);
-                break;
-            }
-        }
-    }
-
-    if (num_edges(InOutStreamSetReplacement) > 0) {
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) >0 && in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
-                auto toCheck = streamSet;
-                bool isNonThreadLocal = false;
-                for (;;) {
-                    assert (FirstStreamSet <= toCheck && toCheck <= LastStreamSet);
-                    if (mNonThreadLocalStreamSets.count(toCheck)) {
-                        isNonThreadLocal = true;
-                        break;
-                    }
-                    if (out_degree(toCheck, InOutStreamSetReplacement) == 0) {
-                        break;
-                    }
-                    toCheck = child(toCheck, InOutStreamSetReplacement);
-                }
-
-                if (isNonThreadLocal) {
-                    auto toUpdate = streamSet;
-                    for (;;) {
-                        assert (FirstStreamSet <= toUpdate && toUpdate <= LastStreamSet);
-                        mNonThreadLocalStreamSets.insert(toUpdate);
-                        if (out_degree(toUpdate, InOutStreamSetReplacement) == 0) {
-                            break;
-                        }
-                        toUpdate = child(toUpdate, InOutStreamSetReplacement);
-                    }
-                }
-
-            }
-        }
-    }
-
-    for (;;) {
-
-        for (const auto streamSet : mNonThreadLocalStreamSets) {
-            BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-            const auto producer = parent(streamSet, mBufferGraph);
-            const auto partId = KernelPartitionId[producer];
-            auto type = BufferLocality::PartitionLocal;
-            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(e, mBufferGraph);
-                if (KernelPartitionId[consumer] != partId) {
-                    type = BufferLocality::GloballyShared;
-                    break;
-                }
-            }
-
-            bn.Locality = type;
-        }
-
-        mNonThreadLocalStreamSets.clear();
-
-        // If any inter-partition input to a kernel is not thread local, none of its
-        // inter-partition inputs can be safely made to be thread local.
-        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-            bool hasNonThreadLocalInput = false;
-            for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                const auto streamSet = source(e, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isNonThreadLocal()) {
-                    hasNonThreadLocalInput = true;
-                    break;
-                }
-            }
-            if (hasNonThreadLocalInput) {
-                const auto partId = KernelPartitionId[kernel];
-                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = source(e, mBufferGraph);
-                    BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
-                        const auto producer = parent(streamSet, mBufferGraph);
-                        if (partId != KernelPartitionId[producer]) {
-                            mNonThreadLocalStreamSets.insert(streamSet);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (mNonThreadLocalStreamSets.empty()) {
-            break;
-        }
-
-    }
-
-}
-
-#endif
-
-#if 0
-
-
-// TODO: nested pipeline kernels could report how much internal memory they require
-// and reason about that here (and in the scheduling phase)
-
-constexpr static unsigned BUFFER_SIZE_INIT_POPULATION_SIZE = 15;
-
-constexpr static unsigned BUFFER_SIZE_GA_MAX_INIT_TIME_SECONDS = 2;
-
-constexpr static unsigned BUFFER_SIZE_POPULATION_SIZE = 30;
-
-constexpr static unsigned BUFFER_SIZE_GA_MAX_TIME_SECONDS = 15;
-
-constexpr static unsigned BUFFER_SIZE_GA_STALLS = 50;
-
-// Intel spatial prefetcher pulls cache line pairs, aligned to 128 bytes.
-
-using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
-
-using IntervalSet = interval_set<unsigned>;
-
-using Interval = IntervalSet::interval_type; // std::pair<unsigned, unsigned>;
-
-using Vertex = unsigned;
-
-struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief repair
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void repair(Candidate & /* candidate */, pipeline_random_engine & rng) final { }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief fitness
-     ** ------------------------------------------------------------------------------------------------------------- */
-    size_t fitness(const Candidate & candidate, pipeline_random_engine & rng) final {
-
-        const auto candidateLength = candidate.size();
-
-        size_t max_colours = 0;
-        for (unsigned i = 0; i < candidateLength; ++i) {
-            const auto a = candidate[i];
-            assert (a < candidateLength);
-            size_t w = weight[a];
-
-            assert (GC_IntervalSet.empty());
-
-            for (unsigned j = 0; j != i; ++j) {
-                assert (j < candidateLength);
-                const auto b = candidate[j];
-                assert (b < candidateLength);
-                if (edge(a, b, I).second) {
-                    const auto & interval = GC_Intervals[b];
-                    auto l = interval.lower();
-                    auto r = interval.upper();
-                    GC_IntervalSet.insert(Interval::right_open(l, r));
-                }
-            }
-
-            size_t start = 0;
-            auto end = w;
-            if (!GC_IntervalSet.empty()) {
-//                auto d = w;
-                for (const auto & interval : GC_IntervalSet) {
-                    if (end < interval.lower()) {
-                        break;
-                    } else {
-//                        const auto l = interval.lower();
-                        const auto r = interval.upper();
-                        // We want memory to be laid out s.t. when we expand it at run time,
-                        // we're guaranteed that we won't overlap another buffer and ideally
-                        // optimize to a solution that won't require a huge amount of
-                        // additional space. To do so, we increase the weight (bytes required)
-                        // so that the size of each placement in sequence is non-decreasing.
-
-                        // NOTE: this is not the final size of the placement.
-
-                        // TODO: is max sufficient? do we need a LCM?
-//                        const auto m = r - l;
-//                        if (d < m) {
-//                            d = m;
-//                        }
-                        start = r;
-                        end = r + w;
-                    }
-                }
-                GC_IntervalSet.clear();
-            }
-            assert (a < candidateLength);
-//            const auto end = start + w;
-            GC_Intervals[a] = Interval::right_open(start, end);
-            max_colours = std::max(max_colours, end);
-        }
-
-        return max_colours;
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief getIntervals
-     ** ------------------------------------------------------------------------------------------------------------- */
-    const std::vector<Interval> & getIntervals(const OrderingDAWG & O, const unsigned candidateLength, pipeline_random_engine & rng) {
-        Candidate chosen;
-        chosen.reserve(candidateLength);
-        Vertex u = 0;
-        while (out_degree(u, O) != 0) {
-            const auto e = first_out_edge(u, O);
-            const auto k = O[e];
-            chosen.push_back(k);
-            u = target(e, O);
-        }
-        fitness(chosen, rng);
-        return GC_Intervals;
-    }
-
-    BufferLayoutOptimizerWorker(const IntervalGraph & I, const std::vector<unsigned> & weight,
-                                const unsigned candidateLength, pipeline_random_engine & rng)
-    : I(I), weight(weight), GC_Intervals(candidateLength) {
-        assert (num_vertices(I) == candidateLength);
-        assert (weight.size() >= candidateLength);
-    }
-
-private:
-    const IntervalGraph & I;
-    const std::vector<unsigned> & weight;
-
-    IntervalSet GC_IntervalSet;
-    std::vector<Interval> GC_Intervals;
-};
-
-struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief getIntervals
-     ** ------------------------------------------------------------------------------------------------------------- */
-    const std::vector<Interval> & getIntervals(const OrderingDAWG & O, pipeline_random_engine & rng) {
-        auto w = (BufferLayoutOptimizerWorker *)mainWorker.get();
-        return w->getIntervals(O, candidateLength, rng);
-    }
-
-    std::unique_ptr<PermutationBasedEvolutionaryAlgorithmWorker> makeWorker(pipeline_random_engine & rng) final {
-        return std::make_unique<BufferLayoutOptimizerWorker>(I, weight, candidateLength, rng);
-    }
-
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief constructor
-     ** ------------------------------------------------------------------------------------------------------------- */
-    BufferLayoutOptimizer(const unsigned numOfLocalStreamSets
-                         , IntervalGraph && I
-                         , std::vector<unsigned> && weight
-                         , pipeline_random_engine & srcRng)
-    : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
-                                             BUFFER_SIZE_GA_MAX_INIT_TIME_SECONDS,
-                                             BUFFER_SIZE_INIT_POPULATION_SIZE,
-                                             BUFFER_SIZE_GA_MAX_TIME_SECONDS,
-                                             BUFFER_SIZE_POPULATION_SIZE,
-                                             BUFFER_SIZE_GA_STALLS,
-                                             std::max(codegen::SegmentThreads, codegen::TaskThreads),
-                                             srcRng)
-    , I(std::move(I))
-    , weight(weight) {
-
-    }
-
-
-private:
-
-    const IntervalGraph I;
-    const std::vector<unsigned> weight;
-
-};
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief determineInitialThreadLocalBufferLayout
- *
- * Given our buffer graph, we want to identify the best placement to maximize sequential prefetching behavior with
- * the minimal total memory required. Although this assumes that the memory-aware scheduling algorithm was first
- * called, it does not actually use any data from it. The reason for this disconnection is to enable us to explore
- * the impact of static memory allocation independent of the chosen scheduling algorithm.
- *
- * Because the Intel L2 streamer prefetcher has one forward and one reverse monitor per page, a streamset will
- * only be placed in a page in which no other streamset accesses it during the same kernel invocation.
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng) {
-
-    // This process serves two purposes: (1) generate the initial memory layout for our thread-local
-    // streamsets. (2) determine how many the number of pages to assign each streamset based on the
-    // number of strides executed by the parition root.
-
-    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
-        assert (LastStreamSet == PipelineOutput);
-        return;
-    }
-
-    const auto n = LastStreamSet - FirstStreamSet + 1U;
-
-    // TODO: can we insert a zero-extension region rather than having a secondary buffer?
-
-    std::vector<unsigned> mapping(n, -1U);
-
-    RequiredThreadLocalStreamSetMemory = 0;
-
-//    PartitionRootStridesPerThreadLocalPage.resize(PartitionCount);
-
-//    NumOfPartialOverflowStridesPerPartitionRootStride.resize(PartitionCount);
-
-    unsigned numOfThreadLocalStreamSets = 0U;
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-            mapping[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
-            ++numOfThreadLocalStreamSets;
-        }
-    }
-
-    if (LLVM_UNLIKELY(numOfThreadLocalStreamSets == 0)) {
-        return;
-    }
-
-    DataLayout DL(b.getModule());
-
-    const auto blockWidth = b.getBitBlockWidth();
-
-    IntervalGraph I(numOfThreadLocalStreamSets);
-
-    std::vector<unsigned> weight(numOfThreadLocalStreamSets, 0);
-    std::vector<int> remaining(numOfThreadLocalStreamSets, 0); // NOTE: signed int type is necessary here
-    std::vector<Rational> streamSetFactor(numOfThreadLocalStreamSets);
-
-    for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
-        const auto firstKernel = FirstKernelInPartition[partitionId];
-        const auto firstKernelOfNextPartition = FirstKernelInPartition[partitionId + 1];
-
-        bool hasThreadLocal = false;
-
-        for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
-
-            const auto strideLength = getKernel(kernel)->getStride();
-
-            const Rational rateFactor{strideLength * MaximumNumOfStrides[kernel], blockWidth};
-
-            // Because data is layed out in a "strip mined" format within streamsets, the type of
-            // each "chunk" will be blockwidth items in length.
-
-            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-
-
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                    assert (in_degree(streamSet, InOutStreamSetReplacement) == 0);
-
-                    // determine the number of bytes this streamset requires per *root kernel* stride
-                    const BufferPort & producerRate = mBufferGraph[output];
-                    const Binding & outputRate = producerRate.Binding;
-                    Type * const type = StreamSetBuffer::resolveType(b, outputRate.getType());
-                    const auto typeSize = b.getTypeSize(DL, type);
-                    const auto j = mapping[streamSet - FirstStreamSet];
-                    assert (j != -1U);
-                    weight[j] = typeSize * bn.ExtimatedPerStrideCapacity;
-                    // record how many consumers exist before the streamset memory can be reused
-                    // (NOTE: the +1 is to indicate this kernel requires each output streamset
-                    // to be distinct even if one or more of the outputs is not used later.)
-                    remaining[j] = out_degree(streamSet, mBufferGraph) + 1U;
-
-                    hasThreadLocal = true;
-                }
-            }
-        }
-
-        if (hasThreadLocal) {
-            // Mark any overlapping allocations in our interval graph.
-            for (unsigned i = 0; i != numOfThreadLocalStreamSets; ++i) {
-                if (remaining[i] > 0) {
-                    for (unsigned j = 0; j != i; ++j) {
-                        if (remaining[j] > 0) {
-                            add_edge(j, i, I);
-                        }
-                    }
-                }
-            }
-
-            // Determine which streamsets are no longer alive
-            for (auto kernel = firstKernel; kernel < firstKernelOfNextPartition; ++kernel) {
-
-                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = target(output, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                        const auto j = mapping[streamSet - FirstStreamSet];
-                        assert (j != -1U);
-                        assert (remaining[j] > 0);
-                        remaining[j]--;
-                    }
-                }
-                for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = source(input, mBufferGraph);
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
-                        const auto j = mapping[streamSet - FirstStreamSet];
-                        assert (j != -1U);
-                        assert (remaining[j] > 0);
-                        remaining[j]--;
-                    }
-                }
-            }
-        }
-    }
-
-    BufferLayoutOptimizer BA(numOfThreadLocalStreamSets, std::move(I), std::move(weight), rng);
-    BA.runGA();
-    // TODO: track how many are alive at any one point and allocate that many pages of additional space
-    // to ensure page aligned streamsets.
-    auto requiredMemory = BA.getBestFitnessValue();
-    auto O = BA.getResult();
-
-    // TODO: apart from total memory, when would one layout be better than another?
-    // Can we quantify it based on the buffer graph order? Currently, we just take
-    // the first one.
-    const auto intervals = BA.getIntervals(O, rng);
-
-    bool hasThreadLocalInOut = false;
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const auto i = streamSet - FirstStreamSet;
-        BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal()) {
-            if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
-                hasThreadLocalInOut = true;
-            } else {
-                const auto j = mapping[i];
-                const auto & interval = intervals[j];
-                bn.BufferStart = interval.lower();
-                bn.BufferEnd = interval.upper();
-                assert (bn.BufferEnd <= requiredMemory);
-            }
-
-        }
-    }
-    if (LLVM_UNLIKELY(hasThreadLocalInOut)) {
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            BufferNode & bn = mBufferGraph[streamSet];
-            assert (bn.isInOutRedirect() ^ (in_degree(streamSet, InOutStreamSetReplacement) == 0));
-            if (LLVM_UNLIKELY(bn.isThreadLocal() && bn.isInOutRedirect())) {
-                auto src = streamSet;
-                do {
-                    src = parent(src, InOutStreamSetReplacement);
-                } while (in_degree(src, InOutStreamSetReplacement) != 0);
-                const BufferNode & bs = mBufferGraph[src];
-                bn.BufferStart = bs.BufferStart;
-                bn.BufferEnd = bs.BufferEnd;
-            }
-        }
-    }
-
-    RequiredThreadLocalStreamSetMemory = requiredMemory;
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateInterPartitionThreadLocalBuffers
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
-
-    // update threadlocal status of sources for truncated buffers
-
-    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
-        assert (LastStreamSet == PipelineOutput);
-        return;
-    }
-
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) {
-            mNonThreadLocalStreamSets.insert(streamSet);
-            unsigned srcStreamSet = 0;
-            for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
-                const auto & v = mStreamGraph[ref];
-                if (v.Reason == ReasonType::Reference) {
-                    srcStreamSet = source(ref, mBufferGraph);
-                    assert (srcStreamSet >= FirstStreamSet && srcStreamSet <= LastStreamSet);
-                    break;
-                }
-            }
-            assert (srcStreamSet);
-            const BufferNode & bn = mBufferGraph[srcStreamSet];
-            if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-
-            const auto producer = parent(srcStreamSet, mBufferGraph);
-            const auto partId = KernelPartitionId[producer];
-
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                if (partId != KernelPartitionId[consumer]) {
-                    mNonThreadLocalStreamSets.insert(srcStreamSet);
-                    break;
-                }
-            }
-        }
-
-        if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
-            continue;
-        }
-
-        const auto producer = parent(streamSet, mBufferGraph);
-        const auto partId = KernelPartitionId[producer];
-
-        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(input, mBufferGraph);
-            if (partId != KernelPartitionId[consumer]) {
-                mNonThreadLocalStreamSets.insert(streamSet);
-                break;
-            }
-        }
-    }
-
-    if (num_edges(InOutStreamSetReplacement) > 0) {
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) >0 && in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
-                auto toCheck = streamSet;
-                bool isNonThreadLocal = false;
-                for (;;) {
-                    assert (FirstStreamSet <= toCheck && toCheck <= LastStreamSet);
-                    if (mNonThreadLocalStreamSets.count(toCheck)) {
-                        isNonThreadLocal = true;
-                        break;
-                    }
-                    if (out_degree(toCheck, InOutStreamSetReplacement) == 0) {
-                        break;
-                    }
-                    toCheck = child(toCheck, InOutStreamSetReplacement);
-                }
-
-                if (isNonThreadLocal) {
-                    auto toUpdate = streamSet;
-                    for (;;) {
-                        assert (FirstStreamSet <= toUpdate && toUpdate <= LastStreamSet);
-                        mNonThreadLocalStreamSets.insert(toUpdate);
-                        if (out_degree(toUpdate, InOutStreamSetReplacement) == 0) {
-                            break;
-                        }
-                        toUpdate = child(toUpdate, InOutStreamSetReplacement);
-                    }
-                }
-
-            }
-        }
-    }
-
-    for (;;) {
-
-        for (const auto streamSet : mNonThreadLocalStreamSets) {
-            BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-            const auto producer = parent(streamSet, mBufferGraph);
-            const auto partId = KernelPartitionId[producer];
-            auto type = BufferLocality::PartitionLocal;
-            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(e, mBufferGraph);
-                if (KernelPartitionId[consumer] != partId) {
-                    type = BufferLocality::GloballyShared;
-                    break;
-                }
-            }
-
-            bn.Locality = type;
-        }
-
-        mNonThreadLocalStreamSets.clear();
-
-        // If any inter-partition input to a kernel is not thread local, none of its
-        // inter-partition inputs can be safely made to be thread local.
-        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-            bool hasNonThreadLocalInput = false;
-            for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                const auto streamSet = source(e, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isNonThreadLocal()) {
-                    hasNonThreadLocalInput = true;
-                    break;
-                }
-            }
-            if (hasNonThreadLocalInput) {
-                const auto partId = KernelPartitionId[kernel];
-                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = source(e, mBufferGraph);
-                    BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
-                        const auto producer = parent(streamSet, mBufferGraph);
-                        if (partId != KernelPartitionId[producer]) {
-                            mNonThreadLocalStreamSets.insert(streamSet);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (mNonThreadLocalStreamSets.empty()) {
-            break;
-        }
-
-    }
-
-}
-
-#endif
 
 } // end of kernel namespace

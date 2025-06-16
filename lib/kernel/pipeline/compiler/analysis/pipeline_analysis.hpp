@@ -326,7 +326,6 @@ public:
 
     std::vector<Rational>           StreamSetIORate;
 
-
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;
     ThreadLocalPlacementGraph       ThreadLocalPlacement;

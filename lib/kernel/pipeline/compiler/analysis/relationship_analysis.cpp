@@ -705,7 +705,6 @@ struct RelationshipGraphBuilder {
                         if (LLVM_UNLIKELY(out_degree(i, G) != m)) {
                             error = true;
                         } else {
-
                             // Collect all of the output information from kernel j.
                             outputs.resize(m);
                             scalars.resize(m);

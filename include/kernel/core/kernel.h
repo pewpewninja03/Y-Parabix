@@ -260,7 +260,7 @@ public:
         return mKernelName;
     }
 
-    LLVM_READNONE virtual std::string getFamilyName() const;
+    LLVM_READNONE std::string getFamilyName() const;
 
     virtual bool isCachable() const { return true; }
 
@@ -556,6 +556,8 @@ protected:
     virtual void addAdditionalInitializationArgTypes(KernelBuilder & b, InitArgTypes & argTypes) const;
 
     virtual void recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const;
+
+    virtual void recursivelyListFamilyKernels(llvm::raw_ostream & familyName) const;
 
 protected:
 

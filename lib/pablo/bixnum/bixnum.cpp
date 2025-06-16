@@ -142,6 +142,18 @@ BixNum BixNumCompiler::Select(PabloAST * cond, BixNum val1, BixNum val0) {
     return selected;
 }
 
+BixNum BixNumCompiler::Select(PabloAST * cond, BixNum val1, unsigned val0) {
+    BixNum selected(val1.size());
+    for (unsigned i = 0; i < val1.size(); i++) {
+        if (((val0 >> i) & 1) == 1) {
+            selected[i] = mPB.createOr(val1[i], mPB.createNot(cond));
+        } else {
+            selected[i] = mPB.createAnd(cond, val1[i]);
+        }
+    }
+    return selected;
+}
+
 BixNum BixNumCompiler::ZeroExtend(BixNum value, unsigned extended_size) {
     assert(extended_size >= value.size());
     BixNum extended(extended_size);

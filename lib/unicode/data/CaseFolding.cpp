@@ -425,21 +425,15 @@ UnicodeSet caseInsensitize(const UnicodeSet & cc) {
 
 namespace UCD {
     namespace SCF_ns {
-        /** Code Point Ranges for scf mapping to <none>
-        **/
+        /* Code Point Ranges for scf mapping to <none>
+        */
 
-        
-        namespace {
-        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
-        {Empty, 34816}};
+        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {{Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __null_codepoint_set_quads = nullptr;
-        }
-
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 0, 0};
+        const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 1, __null_codepoint_set_quads, 0};
 
 
-
-        /** Code Point Ranges for scf mapping to <codepoint>
+        /* Code Point Ranges for scf mapping to <codepoint>
         [0000, 0040], [005b, 00b4], [00b6, 00bf], [00d7, 00d7],
         [00df, 00ff], [0101, 0101], [0103, 0103], [0105, 0105],
         [0107, 0107], [0109, 0109], [010b, 010b], [010d, 010d],
@@ -596,10 +590,8 @@ namespace UCD {
         [abc0, fb04], [fb06, ff20], [ff3b, 103ff], [10428, 104af],
         [104d4, 1056f], [1057b, 1057b], [1058b, 1058b], [10593, 10593],
         [10596, 10c7f], [10cb3, 10d4f], [10d66, 1189f], [118c0, 16e3f],
-        [16e60, 1e8ff], [1e922, 10ffff]**/
+        [16e60, 1e8ff], [1e922, 10ffff]*/
 
-        
-        namespace {
         const static UnicodeSet::run_t __reflexive_set_runs[] = {
         {Full, 2}, {Mixed, 1}, {Full, 2}, {Mixed, 2}, {Full, 1},
         {Mixed, 11}, {Full, 7}, {Mixed, 6}, {Empty, 1}, {Mixed, 1},
@@ -614,7 +606,7 @@ namespace UCD {
         {Full, 55}, {Empty, 1}, {Mixed, 1}, {Full, 4}, {Mixed, 2},
         {Full, 89}, {Empty, 1}, {Full, 684}, {Empty, 1}, {Full, 981},
         {Empty, 1}, {Mixed, 1}, {Full, 30902}};
-        const static UnicodeSet::bitquad_t  __reflexive_set_quads[] = {
+        const static UnicodeSet::bitquad_t __reflexive_set_quads[] = {
         0xf8000001, 0xffdfffff, 0x80800000, 0xaaaaaaaa, 0x55abaaaa,
         0xaaaaab55, 0x54aaaaaa, 0x4e243129, 0xee512d2a, 0xb555524f,
         0xaa29aaaa, 0xaaaaaaaa, 0x93faaaaa, 0xffffaa85, 0xffffffdf,
@@ -632,10 +624,7 @@ namespace UCD {
         0x0000ffff, 0xffffffdf, 0xf8000001, 0xffffff00, 0x0000ffff,
         0xfff00000, 0x0800ffff, 0xffc80800, 0xfff80000, 0x0000ffff,
         0xffffffc0, 0xfffffffc};
-        }
-
-        const static UnicodeSet reflexive_set{const_cast<UnicodeSet::run_t *>(__reflexive_set_runs), 63, 0, const_cast<UnicodeSet::bitquad_t *>(__reflexive_set_quads), 82, 0};
-
+        const static UnicodeSet reflexive_set{__reflexive_set_runs, 63, __reflexive_set_quads, 82};
 
 
         const static std::unordered_map<codepoint_t, codepoint_t> explicit_cp_data = {
@@ -1141,7 +1130,7 @@ namespace UCD {
     }
 PropertyObject * get_SCF_PropertyObject() {  return & SCF_ns::property_object; }
     namespace CF_ns {
-        /** Code Point Ranges for cf (possibly overriding values from scf)
+        /* Code Point Ranges for cf (possibly overriding values from scf)
         [00df, 00df], [0130, 0130], [0149, 0149], [01f0, 01f0],
         [0390, 0390], [03b0, 03b0], [0587, 0587], [1e96, 1e9a],
         [1e9e, 1e9e], [1f50, 1f50], [1f52, 1f52], [1f54, 1f54],
@@ -1149,23 +1138,18 @@ PropertyObject * get_SCF_PropertyObject() {  return & SCF_ns::property_object; }
         [1fbc, 1fbc], [1fc2, 1fc4], [1fc6, 1fc7], [1fcc, 1fcc],
         [1fd2, 1fd3], [1fd6, 1fd7], [1fe2, 1fe4], [1fe6, 1fe7],
         [1ff2, 1ff4], [1ff6, 1ff7], [1ffc, 1ffc], [fb00, fb06],
-        [fb13, fb17]**/
+        [fb13, fb17]*/
 
-        
-        namespace {
         const static UnicodeSet::run_t __explicitly_defined_set_runs[] = {
         {Empty, 6}, {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 4},
         {Mixed, 1}, {Empty, 12}, {Mixed, 2}, {Empty, 14}, {Mixed, 1},
         {Empty, 199}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Full, 1}, {Mixed, 3}, {Empty, 1752}, {Mixed, 1}, {Empty, 32807}};
-        const static UnicodeSet::bitquad_t  __explicitly_defined_set_quads[] = {
+        const static UnicodeSet::bitquad_t __explicitly_defined_set_quads[] = {
         0x80000000, 0x00010000, 0x00000200, 0x00010000, 0x00010000,
         0x00010000, 0x00000080, 0x47c00000, 0x00550000, 0x10dcffff,
         0x00cc10dc, 0x10dc00dc, 0x00f8007f};
-        }
-
-        const static UnicodeSet explicitly_defined_set{const_cast<UnicodeSet::run_t *>(__explicitly_defined_set_runs), 20, 0, const_cast<UnicodeSet::bitquad_t *>(__explicitly_defined_set_quads), 13, 0};
-
+        const static UnicodeSet explicitly_defined_set{__explicitly_defined_set_runs, 20, __explicitly_defined_set_quads, 13};
 
 
         const static std::vector<unsigned> buffer_offsets = {

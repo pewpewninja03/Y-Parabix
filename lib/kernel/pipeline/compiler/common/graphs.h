@@ -37,6 +37,8 @@ using boost::container::flat_map;
 
 namespace kernel {
 
+using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
+
 #include <util/enum_flags.hpp>
 
 using BindingRef = RefWrapper<Binding>;

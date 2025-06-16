@@ -15,7 +15,7 @@
 
 namespace UCD {
     namespace BIDI_M_ns {
-        /** Code Point Ranges for Bidi_M
+        /* Code Point Ranges for Bidi_M
         [0028, 0029], [003c, 003c], [003e, 003e], [005b, 005b],
         [005d, 005d], [007b, 007b], [007d, 007d], [00ab, 00ab],
         [00bb, 00bb], [0f3a, 0f3d], [169b, 169c], [2039, 203a],
@@ -44,11 +44,9 @@ namespace UCD {
         [ff08, ff09], [ff1c, ff1c], [ff1e, ff1e], [ff3b, ff3b],
         [ff3d, ff3d], [ff5b, ff5b], [ff5d, ff5d], [ff5f, ff60],
         [ff62, ff63], [1d6db, 1d6db], [1d715, 1d715], [1d74f, 1d74f],
-        [1d789, 1d789], [1d7c3, 1d7c3]**/
+        [1d789, 1d789], [1d7c3, 1d7c3] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Bidi_M_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 115},
         {Mixed, 1}, {Empty, 58}, {Mixed, 1}, {Empty, 76}, {Mixed, 4},
         {Empty, 5}, {Mixed, 1}, {Empty, 5}, {Mixed, 10}, {Empty, 33},
@@ -58,7 +56,7 @@ namespace UCD {
         {Empty, 4}, {Mixed, 4}, {Empty, 1722}, {Mixed, 1}, {Empty, 1},
         {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
         {Empty, 1}, {Mixed, 1}, {Empty, 31041}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Bidi_M_set_quads[] = {
         0x50000300, 0x28000000, 0x28000000, 0x08000800, 0x3c000000,
         0x18000000, 0x06000000, 0x00000060, 0x60000000, 0x00006000,
         0x00000001, 0xbc623f1e, 0xfa0ff857, 0x803c1fff, 0xffffeff5,
@@ -70,11 +68,8 @@ namespace UCD {
         0x7e000000, 0x00000030, 0x50000300, 0x28000000, 0xa8000000,
         0x0000000d, 0x08000000, 0x00200000, 0x00008000, 0x00000200,
         0x00000008};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 43, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 51, 0};
-
-        static BinaryPropertyObject property_object{Bidi_M, std::move(codepoint_set)};
+        const static UnicodeSet Bidi_M_set{__Bidi_M_set_runs, 43, __Bidi_M_set_quads, 51};
+        static BinaryPropertyObject property_object{Bidi_M, std::move(Bidi_M_set)};
     }
 PropertyObject * get_BIDI_M_PropertyObject() {  return & BIDI_M_ns::property_object; }
 }

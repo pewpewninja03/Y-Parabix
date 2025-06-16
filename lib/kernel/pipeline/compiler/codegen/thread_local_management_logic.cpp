@@ -30,8 +30,6 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
 
     Value * memorySize = nullptr;
 
-  //  b.CallPrintInt("tl:segmentSize", segmentSize);
-
     for (unsigned i = 0; i < PartitionCount; ++i) {
 
         for (auto u = i;;) {
@@ -46,27 +44,21 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
 
                     const auto & ioRatio = StreamSetIORate[streamSet - FirstStreamSet];
                     Value * expectedSegSize = b.CreateMulRational(segmentSize, ioRatio);
-
-                  //  b.CallPrintInt("expectedSegSize" + std::to_string(streamSet), expectedSegSize);
-
                     expectedSegSize = b.CreateUMax(expectedSegSize, b.getSize(MaximumNumOfStrides[producer]));
-
-                  //  b.CallPrintInt("expectedSegSize'" + std::to_string(streamSet), expectedSegSize);
-
                     Value * off = b.CreateShl(b.CreateCeilUMulRational(expectedSegSize, ThreadLocalPlacement[e]), LOG_2_PAGE_SIZE);
-
-                  //  b.CallPrintInt("off" + std::to_string(streamSet), off);
-
                     Value * start = nullptr;
                     Value * end = nullptr;
                     if (u < PartitionCount) {
                         start = sz_ZERO;
                         end = off;
                     } else {
-                        const auto src = u + FirstStreamSet - PartitionCount;
-                        start = mThreadLocalEndOffset[src];
+                        for (auto in : make_iterator_range(in_edges(v, ThreadLocalPlacement))) {
+                            const auto src = source(in, ThreadLocalPlacement) + FirstStreamSet - PartitionCount;
+                            start = b.CreateUMax(start, mThreadLocalEndOffset[src]);
+                        }
                         end = b.CreateAdd(start, off);
                     }
+                    mThreadLocalStartOffset[streamSet] = start;
                     mThreadLocalEndOffset[streamSet] = end;
                     if (out_degree(v, ThreadLocalPlacement) == 0) {
                         memorySize = b.CreateUMax(memorySize, end);
@@ -83,7 +75,6 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         }
     }
     assert ((memorySize != nullptr) ^ (num_edges(ThreadLocalPlacement) == 0));
-
     #ifndef NDEBUG
     for (unsigned i = PartitionCount; i < m; ++i) {
         assert (toVisit[i] == 0);
@@ -178,11 +169,9 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 if (LLVM_UNLIKELY(bn.Overflow)) {
                     maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
                 }
+
                 const auto & R = ThreadLocalPlacement[e];
                 Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, R), LOG_2_PAGE_SIZE);
-
-           //     b.CallPrintInt("xmax" + std::to_string(streamSet), maxStrides);
-           //     b.CallPrintInt("xoff" + std::to_string(R.numerator()) + "/" + std::to_string(R.denominator()), off);
 
                 Value * start = nullptr;
                 Value * end = nullptr;
@@ -190,8 +179,10 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                     start = sz_ZERO;
                     end = off;
                 } else {
-                    const auto src = u + FirstStreamSet - PartitionCount;
-                    start = mThreadLocalEndOffset[src];
+                    for (auto in : make_iterator_range(in_edges(v, ThreadLocalPlacement))) {
+                        const auto src = source(in, ThreadLocalPlacement) + FirstStreamSet - PartitionCount;
+                        start = b.CreateUMax(start, mThreadLocalEndOffset[src]);
+                    }
                     end = b.CreateAdd(start, off);
                 }
                 mThreadLocalStartOffset[streamSet] = start;

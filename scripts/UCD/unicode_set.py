@@ -65,29 +65,20 @@ class UCset:
         hex_specifier = "%%#0%ix" % (int(quad_bits / 4) + 2)
         runtype = {-1: "Full", 0: "Empty", 1: "Mixed"}
 
-        str = "\n" + (" " * indent) + "namespace {\n" + \
-              (" " * indent) + "const static UnicodeSet::run_t __%s_runs[] = {\n" % propertyName + \
-              (" " * indent) + cformat.multiline_fill(['{%s, %i}' % (runtype[r[0]], r[1]) for r in self.runs], ',',
-                                                      indent) + \
-              "};\n"
+        str = "const static UnicodeSet::run_t __%s_runs[] = {" % propertyName
+        if len(self.runs) > 3: str += "\n" + (" " * indent)
+        str += cformat.multiline_fill(['{%s, %i}' % (runtype[r[0]], r[1]) for r in self.runs], ',',
+                                                      indent) + "};\n"
 
+        str += (" " * indent) + "const static UnicodeSet::bitquad_t"
         if len(self.quads) == 0:
-            str += (" " * indent) + "const static UnicodeSet::bitquad_t * const __%s_quads = nullptr;\n" % propertyName
+            str += " * const __%s_quads = nullptr;\n" % propertyName
         else:
-            str += (" " * indent) + "const static UnicodeSet::bitquad_t  __%s_quads[] = {\n" % propertyName + \
-                   (" " * indent) + cformat.multiline_fill([hex_specifier % q for q in self.quads], ',', indent) + \
-                   "};\n"
-
-        # Despite being const_cast below, neither runs nor quads will be modified by the UnicodeSet. If any
-        # modifications are made, they first test the run/quad capacity and will observe that they 0 length
-        # and allocate heap memory to make any changes
-
-        str += (" " * indent) + "}\n\n" + \
-               (" " * indent) + \
-               "const static UnicodeSet %s{const_cast<UnicodeSet::run_t *>(__%s_runs), %i, 0, " \
-               "const_cast<UnicodeSet::bitquad_t *>(__%s_quads), %i, 0};\n\n" \
+            str += " __%s_quads[] = {" % propertyName
+            if len(self.quads) > 3: str += "\n" + (" " * indent)
+            str += cformat.multiline_fill([hex_specifier % q for q in self.quads], ',', indent) + "};\n"
+        str += (" " * indent) + "const static UnicodeSet %s{__%s_runs, %i, __%s_quads, %i};\n" \
                % (propertyName, propertyName, len(self.runs), propertyName, len(self.quads))
-
         return str
 
     def bytes(self):
@@ -227,6 +218,54 @@ def uset_complement(s):
                 it.advance(1)
     return iset
 
+def intersects(s1, s2):
+    i1 = Uset_Iterator(s1)
+    i2 = Uset_Iterator(s2)
+    while not i1.at_end():
+        (s1_type, s1_length) = i1.current_run()
+        (s2_type, s2_length) = i2.current_run()
+        n = min(s1_length, s2_length)
+        if s1_type == Empty or s2_type == Empty:
+            i1.advance(n)
+            i2.advance(n)
+        elif s1_type == Full or s2_type == Full:
+            return True
+        else:  # both s1 and s2 have mixed blocks; consider block-by-block
+            for i in range(n):
+                if i1.get_quad() & i2.get_quad() != 0:
+                    return True
+                i1.advance(1)
+                i2.advance(1)
+    return False
+
+def is_empty(s):
+    i1 = Uset_Iterator(s)
+    while not i1.at_end():
+        (s1_type, s1_length) = i1.current_run()
+        if s1_type != Empty:
+            return False
+        i1.advance(s1_length)
+    return True
+
+def is_subset(s1, s2):
+    i1 = Uset_Iterator(s1)
+    i2 = Uset_Iterator(s2)
+    while not i1.at_end():
+        (s1_type, s1_length) = i1.current_run()
+        (s2_type, s2_length) = i2.current_run()
+        n = min(s1_length, s2_length)
+        if s1_type == Empty or s2_type == Full:
+            i1.advance(n)
+            i2.advance(n)
+        elif s1_type == Full or s2_type == Empty:
+            return False
+        else:  # both s1 and s2 have mixed blocks; check block-by-block
+            for i in range(n):
+                if i1.get_quad() | i2.get_quad() != i2.get_quad():
+                    return False
+                i1.advance(1)
+                i2.advance(1)
+    return True
 
 def uset_intersection(s1, s2):
     iset = UCset()

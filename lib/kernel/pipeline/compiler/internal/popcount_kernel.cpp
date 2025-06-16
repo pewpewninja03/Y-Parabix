@@ -30,7 +30,7 @@ bool isNotConstantOne(Value * const value) {
 
 using boost::intrusive::detail::floor_log2;
 
-#define PRINT_POP_COUNTS_TO_STDERR
+// #define PRINT_POP_COUNTS_TO_STDERR
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateMultiBlockLogic

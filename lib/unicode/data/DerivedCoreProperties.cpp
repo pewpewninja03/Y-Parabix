@@ -15,7 +15,7 @@
 
 namespace UCD {
     namespace ALPHA_ns {
-        /** Code Point Ranges for Alpha
+        /* Code Point Ranges for Alpha
         [0041, 005a], [0061, 007a], [00aa, 00aa], [00b5, 00b5],
         [00ba, 00ba], [00c0, 00d6], [00d8, 00f6], [00f8, 02c1],
         [02c6, 02d1], [02e0, 02e4], [02ec, 02ec], [02ee, 02ee],
@@ -205,11 +205,9 @@ namespace UCD {
         [1eeab, 1eebb], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189],
         [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1],
         [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a],
-        [31350, 323af]**/
+        [31350, 323af] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Alpha_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 14},
         {Mixed, 2}, {Empty, 2}, {Mixed, 4}, {Full, 1}, {Mixed, 1},
         {Full, 4}, {Mixed, 1}, {Full, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 5},
@@ -288,7 +286,7 @@ namespace UCD {
         {Full, 180}, {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18},
         {Mixed, 1}, {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47},
         {Full, 154}, {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Alpha_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0x0003ffc3, 0x0000501f, 0x00000020, 0xbcdffff8, 0xffffd740,
         0xfffffffb, 0xffbfffff, 0xfffffc03, 0xfffeffff, 0x027fffff,
@@ -377,15 +375,12 @@ namespace UCD {
         0xffff03ff, 0xffff03ff, 0x000003ff, 0x03ffffff, 0x3fffffff,
         0xffff0003, 0xffff0001, 0x3fffffff, 0x3fffffff, 0xffff07ff,
         0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 402, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 436, 0};
-
-        static BinaryPropertyObject property_object{Alpha, std::move(codepoint_set)};
+        const static UnicodeSet Alpha_set{__Alpha_set_runs, 402, __Alpha_set_quads, 436};
+        static BinaryPropertyObject property_object{Alpha, std::move(Alpha_set)};
     }
 PropertyObject * get_ALPHA_PropertyObject() {  return & ALPHA_ns::property_object; }
     namespace CI_ns {
-        /** Code Point Ranges for CI
+        /* Code Point Ranges for CI
         [0027, 0027], [002e, 002e], [003a, 003a], [005e, 005e],
         [0060, 0060], [00a8, 00a8], [00ad, 00ad], [00af, 00af],
         [00b4, 00b4], [00b7, 00b8], [02b0, 036f], [0374, 0375],
@@ -498,11 +493,9 @@ PropertyObject * get_ALPHA_PropertyObject() {  return & ALPHA_ns::property_objec
         [1e01b, 1e021], [1e023, 1e024], [1e026, 1e02a], [1e030, 1e06d],
         [1e08f, 1e08f], [1e130, 1e13d], [1e2ae, 1e2ae], [1e2ec, 1e2ef],
         [1e4eb, 1e4ef], [1e5ee, 1e5ef], [1e8d0, 1e8d6], [1e944, 1e94b],
-        [1f3fb, 1f3ff], [e0001, e0001], [e0020, e007f], [e0100, e01ef]**/
+        [1f3fb, 1f3ff], [e0001, e0001], [e0020, e007f], [e0100, e01ef] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CI_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 15},
         {Mixed, 1}, {Full, 5}, {Mixed, 2}, {Empty, 7}, {Mixed, 1},
         {Empty, 5}, {Mixed, 1}, {Empty, 1}, {Mixed, 5}, {Empty, 1},
@@ -557,7 +550,7 @@ PropertyObject * get_ALPHA_PropertyObject() {  return & ALPHA_ns::property_objec
         {Empty, 3}, {Mixed, 1}, {Empty, 84}, {Mixed, 1}, {Empty, 24672},
         {Mixed, 1}, {Full, 3}, {Empty, 4}, {Full, 7}, {Mixed, 1},
         {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CI_set_quads[] = {
         0x04004080, 0x40000000, 0x00000001, 0x0190a100, 0xffff0000,
         0x0430ffff, 0x000000b0, 0x000003f8, 0x82000000, 0xfffe0000,
         0xbfffffff, 0x000000b6, 0x00100000, 0x17ff003f, 0xfffff801,
@@ -614,15 +607,12 @@ PropertyObject * get_ALPHA_PropertyObject() {  return & ALPHA_ns::property_objec
         0x00003fff, 0x00008000, 0x3fff0000, 0x00004000, 0x0000f000,
         0x0000f800, 0x0000c000, 0x007f0000, 0x00000ff0, 0xf8000000,
         0x00000002, 0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 266, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 277, 0};
-
-        static BinaryPropertyObject property_object{CI, std::move(codepoint_set)};
+        const static UnicodeSet CI_set{__CI_set_runs, 266, __CI_set_quads, 277};
+        static BinaryPropertyObject property_object{CI, std::move(CI_set)};
     }
 PropertyObject * get_CI_PropertyObject() {  return & CI_ns::property_object; }
     namespace CWCF_ns {
-        /** Code Point Ranges for CWCF
+        /* Code Point Ranges for CWCF
         [0041, 005a], [00b5, 00b5], [00c0, 00d6], [00d8, 00df],
         [0100, 0100], [0102, 0102], [0104, 0104], [0106, 0106],
         [0108, 0108], [010a, 010a], [010c, 010c], [010e, 010e],
@@ -779,11 +769,9 @@ PropertyObject * get_CI_PropertyObject() {  return & CI_ns::property_object; }
         [fb00, fb06], [fb13, fb17], [ff21, ff3a], [10400, 10427],
         [104b0, 104d3], [10570, 1057a], [1057c, 1058a], [1058c, 10592],
         [10594, 10595], [10c80, 10cb2], [10d50, 10d65], [118a0, 118bf],
-        [16e40, 16e5f], [1e900, 1e921]**/
+        [16e40, 16e5f], [1e900, 1e921] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CWCF_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 1},
         {Mixed, 11}, {Empty, 7}, {Mixed, 6}, {Full, 1}, {Mixed, 1},
         {Empty, 1}, {Mixed, 8}, {Empty, 1}, {Mixed, 1}, {Empty, 88},
@@ -798,7 +786,7 @@ PropertyObject * get_CI_PropertyObject() {  return & CI_ns::property_object; }
         {Full, 1}, {Mixed, 1}, {Empty, 4}, {Mixed, 2}, {Empty, 89},
         {Full, 1}, {Empty, 684}, {Full, 1}, {Empty, 981}, {Full, 1},
         {Mixed, 1}, {Empty, 30902}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWCF_set_quads[] = {
         0x07fffffe, 0x00200000, 0xff7fffff, 0x55555555, 0xaa555555,
         0x555556aa, 0xab555555, 0xb1dbced6, 0x11aed2d5, 0x4aaaadb0,
         0x55d65555, 0x55555555, 0x6c055555, 0x0000557a, 0x00000020,
@@ -816,15 +804,12 @@ PropertyObject * get_CI_PropertyObject() {  return & CI_ns::property_object; }
         0xffff0000, 0x00f8007f, 0x07fffffe, 0x000000ff, 0xffff0000,
         0x000fffff, 0xf7ff0000, 0x0037f7ff, 0x0007ffff, 0xffff0000,
         0x0000003f, 0x00000003};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 67, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 82, 0};
-
-        static BinaryPropertyObject property_object{CWCF, std::move(codepoint_set)};
+        const static UnicodeSet CWCF_set{__CWCF_set_runs, 67, __CWCF_set_quads, 82};
+        static BinaryPropertyObject property_object{CWCF, std::move(CWCF_set)};
     }
 PropertyObject * get_CWCF_PropertyObject() {  return & CWCF_ns::property_object; }
     namespace CWCM_ns {
-        /** Code Point Ranges for CWCM
+        /* Code Point Ranges for CWCM
         [0041, 005a], [0061, 007a], [00b5, 00b5], [00c0, 00d6],
         [00d8, 00f6], [00f8, 0137], [0139, 018c], [018e, 01a9],
         [01ac, 01b9], [01bc, 01bd], [01bf, 01bf], [01c4, 0220],
@@ -857,11 +842,9 @@ PropertyObject * get_CWCF_PropertyObject() {  return & CWCF_ns::property_object;
         [10570, 1057a], [1057c, 1058a], [1058c, 10592], [10594, 10595],
         [10597, 105a1], [105a3, 105b1], [105b3, 105b9], [105bb, 105bc],
         [10c80, 10cb2], [10cc0, 10cf2], [10d50, 10d65], [10d70, 10d85],
-        [118a0, 118df], [16e40, 16e7f], [1e900, 1e943]**/
+        [118a0, 118df], [16e40, 16e7f], [1e900, 1e943] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CWCM_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 1},
         {Mixed, 1}, {Full, 2}, {Mixed, 3}, {Full, 2}, {Mixed, 4},
         {Empty, 5}, {Mixed, 6}, {Full, 4}, {Mixed, 1}, {Full, 4},
@@ -880,7 +863,7 @@ PropertyObject * get_CWCF_PropertyObject() {  return & CWCF_ns::property_object;
         {Mixed, 1}, {Empty, 2}, {Mixed, 3}, {Empty, 88}, {Full, 2},
         {Empty, 683}, {Full, 2}, {Empty, 980}, {Full, 2}, {Mixed, 1},
         {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWCM_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x00200000, 0xff7fffff, 0xff7fffff,
         0xfeffffff, 0xffffdfff, 0xb3fff3ff, 0xfffffff0, 0xfc0ffffd,
         0x1adfffff, 0x20269f7b, 0x60041f8d, 0x00000020, 0xb8cf0000,
@@ -896,15 +879,12 @@ PropertyObject * get_CWCF_PropertyObject() {  return & CWCF_ns::property_object;
         0xffff0000, 0xff0fffff, 0x0fffffff, 0xf7ff0000, 0xffb7f7ff,
         0x1bfbfffb, 0x0007ffff, 0x0007ffff, 0xffff0000, 0xffff003f,
         0x0000003f, 0x0000000f};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 86, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 72, 0};
-
-        static BinaryPropertyObject property_object{CWCM, std::move(codepoint_set)};
+        const static UnicodeSet CWCM_set{__CWCM_set_runs, 86, __CWCM_set_quads, 72};
+        static BinaryPropertyObject property_object{CWCM, std::move(CWCM_set)};
     }
 PropertyObject * get_CWCM_PropertyObject() {  return & CWCM_ns::property_object; }
     namespace CWL_ns {
-        /** Code Point Ranges for CWL
+        /* Code Point Ranges for CWL
         [0041, 005a], [00c0, 00d6], [00d8, 00de], [0100, 0100],
         [0102, 0102], [0104, 0104], [0106, 0106], [0108, 0108],
         [010a, 010a], [010c, 010c], [010e, 010e], [0110, 0110],
@@ -1058,11 +1038,9 @@ PropertyObject * get_CWCM_PropertyObject() {  return & CWCM_ns::property_object;
         [a7dc, a7dc], [a7f5, a7f5], [ff21, ff3a], [10400, 10427],
         [104b0, 104d3], [10570, 1057a], [1057c, 1058a], [1058c, 10592],
         [10594, 10595], [10c80, 10cb2], [10d50, 10d65], [118a0, 118bf],
-        [16e40, 16e5f], [1e900, 1e921]**/
+        [16e40, 16e5f], [1e900, 1e921] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CWL_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 1},
         {Mixed, 11}, {Empty, 8}, {Mixed, 5}, {Full, 1}, {Mixed, 1},
         {Empty, 1}, {Mixed, 8}, {Empty, 90}, {Full, 1}, {Mixed, 1},
@@ -1075,7 +1053,7 @@ PropertyObject * get_CWCM_PropertyObject() {  return & CWCM_ns::property_object;
         {Mixed, 2}, {Empty, 55}, {Full, 1}, {Mixed, 1}, {Empty, 4},
         {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684}, {Full, 1},
         {Empty, 981}, {Full, 1}, {Mixed, 1}, {Empty, 30902}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWL_set_quads[] = {
         0x07fffffe, 0x7f7fffff, 0x55555555, 0xaa555555, 0x555554aa,
         0x2b555555, 0xb1dbced6, 0x11aed2d5, 0x4aaaadb0, 0x55d65555,
         0x55555555, 0x6c055555, 0x0000557a, 0x80450000, 0xfffed740,
@@ -1092,15 +1070,12 @@ PropertyObject * get_CWCM_PropertyObject() {  return & CWCM_ns::property_object;
         0x555f7d55, 0x15411af5, 0x00200000, 0x07fffffe, 0x000000ff,
         0xffff0000, 0x000fffff, 0xf7ff0000, 0x0037f7ff, 0x0007ffff,
         0xffff0000, 0x0000003f, 0x00000003};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 59, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 78, 0};
-
-        static BinaryPropertyObject property_object{CWL, std::move(codepoint_set)};
+        const static UnicodeSet CWL_set{__CWL_set_runs, 59, __CWL_set_quads, 78};
+        static BinaryPropertyObject property_object{CWL, std::move(CWL_set)};
     }
 PropertyObject * get_CWL_PropertyObject() {  return & CWL_ns::property_object; }
     namespace CWT_ns {
-        /** Code Point Ranges for CWT
+        /* Code Point Ranges for CWT
         [0061, 007a], [00b5, 00b5], [00df, 00f6], [00f8, 00ff],
         [0101, 0101], [0103, 0103], [0105, 0105], [0107, 0107],
         [0109, 0109], [010b, 010b], [010d, 010d], [010f, 010f],
@@ -1258,11 +1233,9 @@ PropertyObject * get_CWL_PropertyObject() {  return & CWL_ns::property_object; }
         [fb13, fb17], [ff41, ff5a], [10428, 1044f], [104d8, 104fb],
         [10597, 105a1], [105a3, 105b1], [105b3, 105b9], [105bb, 105bc],
         [10cc0, 10cf2], [10d70, 10d85], [118c0, 118df], [16e60, 16e7f],
-        [1e922, 1e943]**/
+        [1e922, 1e943] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CWT_set_runs[] = {
         {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 16}, {Empty, 5},
         {Mixed, 6}, {Empty, 1}, {Mixed, 1}, {Full, 1}, {Mixed, 7},
         {Empty, 1}, {Mixed, 2}, {Empty, 114}, {Mixed, 1}, {Empty, 68},
@@ -1275,7 +1248,7 @@ PropertyObject * get_CWL_PropertyObject() {  return & CWL_ns::property_object; }
         {Empty, 4}, {Mixed, 2}, {Empty, 56}, {Full, 1}, {Mixed, 1},
         {Empty, 3}, {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684},
         {Full, 1}, {Empty, 981}, {Mixed, 2}, {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWT_set_quads[] = {
         0x07fffffe, 0x00200000, 0x80000000, 0xff7fffff, 0xaaaaaaaa,
         0x54aaaaaa, 0xaaaaab55, 0xd4aaaaaa, 0x4e241129, 0xa251212a,
         0xb55556d0, 0xaa2baaaa, 0xaaaaaaaa, 0x900aaaa8, 0x1adfaa85,
@@ -1294,15 +1267,12 @@ PropertyObject * get_CWL_PropertyObject() {  return & CWL_ns::property_object; }
         0x00080000, 0xffff0000, 0x00f8007f, 0x07fffffe, 0xffffff00,
         0x0000ffff, 0xff000000, 0x0fffffff, 0xff800000, 0x1bfbfffb,
         0x0007ffff, 0xffff0000, 0x0000003f, 0xfffffffc, 0x0000000f};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 59, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 90, 0};
-
-        static BinaryPropertyObject property_object{CWT, std::move(codepoint_set)};
+        const static UnicodeSet CWT_set{__CWT_set_runs, 59, __CWT_set_quads, 90};
+        static BinaryPropertyObject property_object{CWT, std::move(CWT_set)};
     }
 PropertyObject * get_CWT_PropertyObject() {  return & CWT_ns::property_object; }
     namespace CWU_ns {
-        /** Code Point Ranges for CWU
+        /* Code Point Ranges for CWU
         [0061, 007a], [00b5, 00b5], [00df, 00f6], [00f8, 00ff],
         [0101, 0101], [0103, 0103], [0105, 0105], [0107, 0107],
         [0109, 0109], [010b, 010b], [010d, 010d], [010f, 010f],
@@ -1460,11 +1430,9 @@ PropertyObject * get_CWT_PropertyObject() {  return & CWT_ns::property_object; }
         [fb00, fb06], [fb13, fb17], [ff41, ff5a], [10428, 1044f],
         [104d8, 104fb], [10597, 105a1], [105a3, 105b1], [105b3, 105b9],
         [105bb, 105bc], [10cc0, 10cf2], [10d70, 10d85], [118c0, 118df],
-        [16e60, 16e7f], [1e922, 1e943]**/
+        [16e60, 16e7f], [1e922, 1e943] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CWU_set_runs[] = {
         {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 16}, {Empty, 5},
         {Mixed, 6}, {Empty, 1}, {Mixed, 1}, {Full, 1}, {Mixed, 7},
         {Empty, 1}, {Mixed, 2}, {Empty, 89}, {Mixed, 2}, {Empty, 23},
@@ -1478,7 +1446,7 @@ PropertyObject * get_CWT_PropertyObject() {  return & CWT_ns::property_object; }
         {Mixed, 2}, {Empty, 56}, {Full, 1}, {Mixed, 1}, {Empty, 3},
         {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684}, {Full, 1},
         {Empty, 981}, {Mixed, 2}, {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWU_set_quads[] = {
         0x07fffffe, 0x00200000, 0x80000000, 0xff7fffff, 0xaaaaaaaa,
         0x54aaaaaa, 0xaaaaab55, 0xd4aaaaaa, 0x4e241129, 0xa251212a,
         0xb5555b60, 0xaa2daaaa, 0xaaaaaaaa, 0x900aaaa8, 0x1adfaa85,
@@ -1498,15 +1466,12 @@ PropertyObject * get_CWT_PropertyObject() {  return & CWT_ns::property_object; }
         0xffffff00, 0x0000ffff, 0xff000000, 0x0fffffff, 0xff800000,
         0x1bfbfffb, 0x0007ffff, 0xffff0000, 0x0000003f, 0xfffffffc,
         0x0000000f};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 63, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 91, 0};
-
-        static BinaryPropertyObject property_object{CWU, std::move(codepoint_set)};
+        const static UnicodeSet CWU_set{__CWU_set_runs, 63, __CWU_set_quads, 91};
+        static BinaryPropertyObject property_object{CWU, std::move(CWU_set)};
     }
 PropertyObject * get_CWU_PropertyObject() {  return & CWU_ns::property_object; }
     namespace CASED_ns {
-        /** Code Point Ranges for Cased
+        /* Code Point Ranges for Cased
         [0041, 005a], [0061, 007a], [00aa, 00aa], [00b5, 00b5],
         [00ba, 00ba], [00c0, 00d6], [00d8, 00f6], [00f8, 01ba],
         [01bc, 01bf], [01c4, 0293], [0295, 02b8], [02c0, 02c1],
@@ -1546,11 +1511,9 @@ PropertyObject * get_CWU_PropertyObject() {  return & CWU_ns::property_object; }
         [1d716, 1d734], [1d736, 1d74e], [1d750, 1d76e], [1d770, 1d788],
         [1d78a, 1d7a8], [1d7aa, 1d7c2], [1d7c4, 1d7cb], [1df00, 1df09],
         [1df0b, 1df1e], [1df25, 1df2a], [1e030, 1e06d], [1e900, 1e943],
-        [1f130, 1f149], [1f150, 1f169], [1f170, 1f189]**/
+        [1f130, 1f149], [1f150, 1f169], [1f170, 1f189] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Cased_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 5},
         {Mixed, 2}, {Full, 5}, {Mixed, 4}, {Empty, 2}, {Mixed, 4},
         {Full, 1}, {Mixed, 1}, {Full, 4}, {Mixed, 1}, {Full, 4}, {Mixed, 2},
@@ -1572,7 +1535,7 @@ PropertyObject * get_CWU_PropertyObject() {  return & CWU_ns::property_object; }
         {Full, 10}, {Mixed, 10}, {Empty, 57}, {Mixed, 2}, {Empty, 7},
         {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 68}, {Full, 2},
         {Mixed, 1}, {Empty, 62}, {Mixed, 4}, {Empty, 30835}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Cased_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0xf7ffffff, 0xfffffff0, 0xffefffff, 0x01ffffff, 0x00000003,
         0x0000001f, 0x00000020, 0xbccf0000, 0xffffd740, 0xfffffffb,
@@ -1592,24 +1555,19 @@ PropertyObject * get_CWU_PropertyObject() {  return & CWU_ns::property_object; }
         0xffff7fff, 0xfffffdff, 0xfffffdff, 0x00000ff7, 0x7ffffbff,
         0x000007e0, 0xffff0000, 0x00003fff, 0x0000000f, 0xffff0000,
         0xffff03ff, 0xffff03ff, 0x000003ff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 107, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 93, 0};
-
-        static BinaryPropertyObject property_object{Cased, std::move(codepoint_set)};
+        const static UnicodeSet Cased_set{__Cased_set_runs, 107, __Cased_set_quads, 93};
+        static BinaryPropertyObject property_object{Cased, std::move(Cased_set)};
     }
 PropertyObject * get_CASED_PropertyObject() {  return & CASED_ns::property_object; }
     namespace DI_ns {
-        /** Code Point Ranges for DI
+        /* Code Point Ranges for DI
         [00ad, 00ad], [034f, 034f], [061c, 061c], [115f, 1160],
         [17b4, 17b5], [180b, 180f], [200b, 200f], [202a, 202e],
         [2060, 206f], [3164, 3164], [fe00, fe0f], [feff, feff],
         [ffa0, ffa0], [fff0, fff8], [1bca0, 1bca3], [1d173, 1d17a],
-        [e0000, e0fff]**/
+        [e0000, e0fff] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __DI_set_runs[] = {
         {Empty, 5}, {Mixed, 1}, {Empty, 20}, {Mixed, 1}, {Empty, 21},
         {Mixed, 1}, {Empty, 89}, {Mixed, 2}, {Empty, 49}, {Mixed, 1},
         {Empty, 2}, {Mixed, 1}, {Empty, 63}, {Mixed, 2}, {Empty, 1},
@@ -1617,20 +1575,17 @@ PropertyObject * get_CASED_PropertyObject() {  return & CASED_ns::property_objec
         {Empty, 6}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Mixed, 1}, {Empty, 1509}, {Mixed, 1}, {Empty, 165}, {Mixed, 1},
         {Empty, 24948}, {Full, 128}, {Empty, 6016}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __DI_set_quads[] = {
         0x00002000, 0x00008000, 0x10000000, 0x80000000, 0x00000001,
         0x00300000, 0x0000f800, 0x0000f800, 0x00007c00, 0x0000ffff,
         0x00000010, 0x0000ffff, 0x80000000, 0x00000001, 0x01ff0000,
         0x0000000f, 0x07f80000};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 33, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 17, 0};
-
-        static BinaryPropertyObject property_object{DI, std::move(codepoint_set)};
+        const static UnicodeSet DI_set{__DI_set_runs, 33, __DI_set_quads, 17};
+        static BinaryPropertyObject property_object{DI, std::move(DI_set)};
     }
 PropertyObject * get_DI_PropertyObject() {  return & DI_ns::property_object; }
     namespace GR_BASE_ns {
-        /** Code Point Ranges for Gr_Base
+        /* Code Point Ranges for Gr_Base
         [0020, 007e], [00a0, 00ac], [00ae, 02ff], [0370, 0377],
         [037a, 037f], [0384, 038a], [038c, 038c], [038e, 03a1],
         [03a3, 0482], [048a, 052f], [0531, 0556], [0559, 058a],
@@ -1854,11 +1809,9 @@ PropertyObject * get_DI_PropertyObject() {  return & DI_ns::property_object; }
         [1face, 1fadc], [1fadf, 1fae9], [1faf0, 1faf8], [1fb00, 1fb92],
         [1fb94, 1fbf9], [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d],
         [2b820, 2cea1], [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d],
-        [30000, 3134a], [31350, 323af]**/
+        [30000, 3134a], [31350, 323af] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Gr_Base_set_runs[] = {
         {Empty, 1}, {Full, 2}, {Mixed, 1}, {Empty, 1}, {Mixed, 1},
         {Full, 18}, {Empty, 3}, {Mixed, 3}, {Full, 6}, {Mixed, 1},
         {Full, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 5}, {Full, 1}, {Mixed, 2},
@@ -1942,7 +1895,7 @@ PropertyObject * get_DI_PropertyObject() {  return & DI_ns::property_object; }
         {Mixed, 1}, {Full, 18}, {Mixed, 1}, {Empty, 77}, {Full, 16},
         {Mixed, 1}, {Empty, 47}, {Full, 154}, {Mixed, 1}, {Full, 130},
         {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Gr_Base_set_quads[] = {
         0x7fffffff, 0xffffdfff, 0xfcff0000, 0xffffd7f0, 0xfffffffb,
         0xfffffc07, 0xfffeffff, 0xfe7fffff, 0x0000e7ff, 0x40000000,
         0xffff0049, 0x001f87ff, 0xe800ffc0, 0x000007ff, 0xfffeffff,
@@ -2042,15 +1995,12 @@ PropertyObject * get_DI_PropertyObject() {  return & DI_ns::property_object; }
         0x1fff3fff, 0xffff83ff, 0x9fffc07f, 0x01ff03ff, 0xfff7ffff,
         0x03ffffff, 0x03ffffff, 0x3fffffff, 0xffff0003, 0xffff0001,
         0x3fffffff, 0x3fffffff, 0xffff07ff, 0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 433, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 494, 0};
-
-        static BinaryPropertyObject property_object{Gr_Base, std::move(codepoint_set)};
+        const static UnicodeSet Gr_Base_set{__Gr_Base_set_runs, 433, __Gr_Base_set_quads, 494};
+        static BinaryPropertyObject property_object{Gr_Base, std::move(Gr_Base_set)};
     }
 PropertyObject * get_GR_BASE_PropertyObject() {  return & GR_BASE_ns::property_object; }
     namespace GR_EXT_ns {
-        /** Code Point Ranges for Gr_Ext
+        /* Code Point Ranges for Gr_Ext
         [0300, 036f], [0483, 0489], [0591, 05bd], [05bf, 05bf],
         [05c1, 05c2], [05c4, 05c5], [05c7, 05c7], [0610, 061a],
         [064b, 065f], [0670, 0670], [06d6, 06dc], [06df, 06e4],
@@ -2144,11 +2094,9 @@ PropertyObject * get_GR_BASE_PropertyObject() {  return & GR_BASE_ns::property_o
         [1e000, 1e006], [1e008, 1e018], [1e01b, 1e021], [1e023, 1e024],
         [1e026, 1e02a], [1e08f, 1e08f], [1e130, 1e136], [1e2ae, 1e2ae],
         [1e2ec, 1e2ef], [1e4ec, 1e4ef], [1e5ee, 1e5ef], [1e8d0, 1e8d6],
-        [1e944, 1e94a], [e0020, e007f], [e0100, e01ef]**/
+        [1e944, 1e94a], [e0020, e007f], [e0100, e01ef] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Gr_Ext_set_runs[] = {
         {Empty, 24}, {Full, 3}, {Mixed, 1}, {Empty, 8}, {Mixed, 1},
         {Empty, 7}, {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 1},
         {Mixed, 2}, {Empty, 2}, {Mixed, 5}, {Empty, 2}, {Mixed, 1},
@@ -2193,7 +2141,7 @@ PropertyObject * get_GR_BASE_PropertyObject() {  return & GR_BASE_ns::property_o
         {Empty, 7}, {Mixed, 1}, {Empty, 22}, {Mixed, 1}, {Empty, 3},
         {Mixed, 1}, {Empty, 24758}, {Full, 3}, {Empty, 4}, {Full, 7},
         {Mixed, 1}, {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Gr_Ext_set_quads[] = {
         0x0000ffff, 0x000003f8, 0xfffe0000, 0xbfffffff, 0x000000b6,
         0x07ff0000, 0xfffff800, 0x00010000, 0x9fc00000, 0x00003d9f,
         0x00020000, 0xffff0000, 0x000007ff, 0x0001ffc0, 0x200ff800,
@@ -2239,11 +2187,8 @@ PropertyObject * get_GR_BASE_PropertyObject() {  return & GR_BASE_ns::property_o
         0xf87fffff, 0x00201fff, 0xf8000010, 0x0000fffe, 0xf9ffff7f,
         0x000007db, 0x00008000, 0x007f0000, 0x00004000, 0x0000f000,
         0x0000f000, 0x0000c000, 0x007f0000, 0x000007f0, 0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 217, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 225, 0};
-
-        static BinaryPropertyObject property_object{Gr_Ext, std::move(codepoint_set)};
+        const static UnicodeSet Gr_Ext_set{__Gr_Ext_set_runs, 217, __Gr_Ext_set_quads, 225};
+        static BinaryPropertyObject property_object{Gr_Ext, std::move(Gr_Ext_set)};
     }
 PropertyObject * get_GR_EXT_PropertyObject() {  return & GR_EXT_ns::property_object; }
     namespace GR_LINK_ns {
@@ -2251,7 +2196,7 @@ PropertyObject * get_GR_EXT_PropertyObject() {  return & GR_EXT_ns::property_obj
     }
 PropertyObject * get_GR_LINK_PropertyObject() {  return & GR_LINK_ns::property_object; }
     namespace IDC_ns {
-        /** Code Point Ranges for IDC
+        /* Code Point Ranges for IDC
         [0030, 0039], [0041, 005a], [005f, 005f], [0061, 007a],
         [00aa, 00aa], [00b5, 00b5], [00b7, 00b7], [00ba, 00ba],
         [00c0, 00d6], [00d8, 00f6], [00f8, 02c1], [02c6, 02d1],
@@ -2450,11 +2395,9 @@ PropertyObject * get_GR_LINK_PropertyObject() {  return & GR_LINK_ns::property_o
         [1eea5, 1eea9], [1eeab, 1eebb], [1fbf0, 1fbf9], [20000, 2a6df],
         [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0],
         [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af],
-        [e0100, e01ef]**/
+        [e0100, e01ef] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __IDC_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Full, 14},
         {Mixed, 2}, {Full, 3}, {Mixed, 3}, {Full, 1}, {Mixed, 1}, {Full, 4},
         {Mixed, 1}, {Full, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 5}, {Full, 2},
@@ -2533,7 +2476,7 @@ PropertyObject * get_GR_LINK_PropertyObject() {  return & GR_LINK_ns::property_o
         {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154}, {Mixed, 1},
         {Full, 130}, {Mixed, 1}, {Empty, 22250}, {Full, 7}, {Mixed, 1},
         {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __IDC_set_quads[] = {
         0x03ff0000, 0x87fffffe, 0x07fffffe, 0x04a00400, 0xff7fffff,
         0xff7fffff, 0x0003ffc3, 0x0000501f, 0xbcdfffff, 0xffffd7c0,
         0xfffffffb, 0xffbfffff, 0xfffffcfb, 0xfffeffff, 0x027fffff,
@@ -2624,15 +2567,12 @@ PropertyObject * get_GR_LINK_PropertyObject() {  return & GR_LINK_ns::property_o
         0x0ffffbee, 0x03ff0000, 0x03ffffff, 0x3fffffff, 0xffff0003,
         0xffff0001, 0x3fffffff, 0x3fffffff, 0xffff07ff, 0x0000ffff,
         0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 402, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 446, 0};
-
-        static BinaryPropertyObject property_object{IDC, std::move(codepoint_set)};
+        const static UnicodeSet IDC_set{__IDC_set_runs, 402, __IDC_set_quads, 446};
+        static BinaryPropertyObject property_object{IDC, std::move(IDC_set)};
     }
 PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
     namespace IDS_ns {
-        /** Code Point Ranges for IDS
+        /* Code Point Ranges for IDS
         [0041, 005a], [0061, 007a], [00aa, 00aa], [00b5, 00b5],
         [00ba, 00ba], [00c0, 00d6], [00d8, 00f6], [00f8, 02c1],
         [02c6, 02d1], [02e0, 02e4], [02ec, 02ec], [02ee, 02ee],
@@ -2802,11 +2742,9 @@ PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
         [1ee8b, 1ee9b], [1eea1, 1eea3], [1eea5, 1eea9], [1eeab, 1eebb],
         [20000, 2a6df], [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1],
         [2ceb0, 2ebe0], [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a],
-        [31350, 323af]**/
+        [31350, 323af] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __IDS_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 14},
         {Mixed, 2}, {Empty, 3}, {Mixed, 3}, {Full, 1}, {Mixed, 1},
         {Full, 4}, {Mixed, 1}, {Full, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 1},
@@ -2883,7 +2821,7 @@ PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
         {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18}, {Mixed, 1},
         {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154},
         {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __IDS_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0x0003ffc3, 0x0000501f, 0xbcdf0000, 0xffffd740, 0xfffffffb,
         0xffbfffff, 0xfffffc03, 0xfffeffff, 0x027fffff, 0x000001ff,
@@ -2970,16 +2908,14 @@ PropertyObject * get_IDC_PropertyObject() {  return & IDC_ns::property_object; }
         0x0af7fe96, 0xaa96ea84, 0x5ef7f796, 0x0ffffbff, 0x0ffffbee,
         0x03ffffff, 0x3fffffff, 0xffff0003, 0xffff0001, 0x3fffffff,
         0x3fffffff, 0xffff07ff, 0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 387, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 428, 0};
-
-        static BinaryPropertyObject property_object{IDS, std::move(codepoint_set)};
+        const static UnicodeSet IDS_set{__IDS_set_runs, 387, __IDS_set_quads, 428};
+        static BinaryPropertyObject property_object{IDS, std::move(IDS_set)};
     }
 PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
   namespace INCB_ns {
     const unsigned independent_prop_values = 4;
-    /** Code Point Ranges for None
+
+    /* Code Point Ranges for None
     [0000, 02ff], [0370, 0482], [048a, 0590], [05be, 05be], [05c0, 05c0],
     [05c3, 05c3], [05c6, 05c6], [05c8, 060f], [061b, 064a], [0660, 066f],
     [0671, 06d5], [06dd, 06de], [06e5, 06e6], [06e9, 06e9], [06ee, 0710],
@@ -3067,10 +3003,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     [1e019, 1e01a], [1e022, 1e022], [1e025, 1e025], [1e02b, 1e08e],
     [1e090, 1e12f], [1e137, 1e2ad], [1e2af, 1e2eb], [1e2f0, 1e4eb],
     [1e4f0, 1e5ed], [1e5f0, 1e8cf], [1e8d7, 1e943], [1e94b, 1f3fa],
-    [1f400, e001f], [e0080, e00ff], [e01f0, 10ffff]**/
-
-
-    namespace {
+    [1f400, e001f], [e0080, e00ff], [e01f0, 10ffff] */
     const static UnicodeSet::run_t __none_Set_runs[] = {
     {Full, 24}, {Empty, 3}, {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 7},
     {Mixed, 3}, {Full, 1}, {Mixed, 1}, {Full, 1}, {Mixed, 2}, {Full, 2},
@@ -3110,7 +3043,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     {Mixed, 1}, {Full, 3}, {Mixed, 1}, {Full, 84}, {Mixed, 1},
     {Full, 24673}, {Empty, 3}, {Full, 4}, {Empty, 7}, {Mixed, 1},
     {Full, 6128}};
-    const static UnicodeSet::bitquad_t  __none_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __none_Set_quads[] = {
     0xffff0000, 0xfffffc07, 0x0001ffff, 0x40000000, 0xffffff49, 0xf800ffff,
     0x000007ff, 0xfffeffff, 0x603fffff, 0xffffc260, 0xfffdffff, 0x0000ffff,
     0xfffff800, 0xfffe003f, 0xdff007ff, 0x043fffff, 0xffffc110, 0xf1ffffff,
@@ -3149,49 +3082,37 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     0x07800000, 0xffdfe000, 0x07ffffef, 0xffff0001, 0x06000080, 0xfffff824,
     0xffff7fff, 0xff80ffff, 0xffffbfff, 0xffff0fff, 0xffff0fff, 0xffff3fff,
     0xff80ffff, 0xfffff80f, 0x07ffffff, 0xffff0000};
-    }
+    const static UnicodeSet none_Set{__none_Set_runs, 219, __none_Set_quads, 226};
 
-    const static UnicodeSet none_Set{const_cast<UnicodeSet::run_t *>(__none_Set_runs), 219, 0, const_cast<UnicodeSet::bitquad_t *>(__none_Set_quads), 226, 0};
-
-    /** Code Point Ranges for Linker
+    /* Code Point Ranges for Linker
     [094d, 094d], [09cd, 09cd], [0acd, 0acd], [0b4d, 0b4d], [0c4d, 0c4d],
-    [0d4d, 0d4d]**/
-
-
-    namespace {
+    [0d4d, 0d4d] */
     const static UnicodeSet::run_t __linker_Set_runs[] = {
     {Empty, 74}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
     {Empty, 3}, {Mixed, 1}, {Empty, 7}, {Mixed, 1}, {Empty, 7}, {Mixed, 1},
     {Empty, 34709}};
-    const static UnicodeSet::bitquad_t  __linker_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __linker_Set_quads[] = {
     0x00002000, 0x00002000, 0x00002000, 0x00002000, 0x00002000, 0x00002000};
-    }
+    const static UnicodeSet linker_Set{__linker_Set_runs, 13, __linker_Set_quads, 6};
 
-    const static UnicodeSet linker_Set{const_cast<UnicodeSet::run_t *>(__linker_Set_runs), 13, 0, const_cast<UnicodeSet::bitquad_t *>(__linker_Set_quads), 6, 0};
-
-    /** Code Point Ranges for Consonant
+    /* Code Point Ranges for Consonant
     [0915, 0939], [0958, 095f], [0978, 097f], [0995, 09a8], [09aa, 09b0],
     [09b2, 09b2], [09b6, 09b9], [09dc, 09dd], [09df, 09df], [09f0, 09f1],
     [0a95, 0aa8], [0aaa, 0ab0], [0ab2, 0ab3], [0ab5, 0ab9], [0af9, 0af9],
     [0b15, 0b28], [0b2a, 0b30], [0b32, 0b33], [0b35, 0b39], [0b5c, 0b5d],
     [0b5f, 0b5f], [0b71, 0b71], [0c15, 0c28], [0c2a, 0c39], [0c58, 0c5a],
-    [0d15, 0d3a]**/
-
-
-    namespace {
+    [0d15, 0d3a] */
     const static UnicodeSet::run_t __consonant_Set_runs[] = {
     {Empty, 72}, {Mixed, 8}, {Empty, 4}, {Mixed, 2}, {Empty, 1}, {Mixed, 5},
     {Empty, 4}, {Mixed, 3}, {Empty, 5}, {Mixed, 2}, {Empty, 34710}};
-    const static UnicodeSet::bitquad_t  __consonant_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __consonant_Set_quads[] = {
     0xffe00000, 0x03ffffff, 0xff000000, 0xff000000, 0xffe00000, 0x03c5fdff,
     0xb0000000, 0x00030000, 0xffe00000, 0x03edfdff, 0x02000000, 0xffe00000,
     0x03edfdff, 0xb0000000, 0x00020000, 0xffe00000, 0x03fffdff, 0x07000000,
     0xffe00000, 0x07ffffff};
-    }
+    const static UnicodeSet consonant_Set{__consonant_Set_runs, 11, __consonant_Set_quads, 20};
 
-    const static UnicodeSet consonant_Set{const_cast<UnicodeSet::run_t *>(__consonant_Set_runs), 11, 0, const_cast<UnicodeSet::bitquad_t *>(__consonant_Set_quads), 20, 0};
-
-    /** Code Point Ranges for Extend
+    /* Code Point Ranges for Extend
     [0300, 036f], [0483, 0489], [0591, 05bd], [05bf, 05bf], [05c1, 05c2],
     [05c4, 05c5], [05c7, 05c7], [0610, 061a], [064b, 065f], [0670, 0670],
     [06d6, 06dc], [06df, 06e4], [06e7, 06e8], [06ea, 06ed], [0711, 0711],
@@ -3273,10 +3194,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     [1e000, 1e006], [1e008, 1e018], [1e01b, 1e021], [1e023, 1e024],
     [1e026, 1e02a], [1e08f, 1e08f], [1e130, 1e136], [1e2ae, 1e2ae],
     [1e2ec, 1e2ef], [1e4ec, 1e4ef], [1e5ee, 1e5ef], [1e8d0, 1e8d6],
-    [1e944, 1e94a], [1f3fb, 1f3ff], [e0020, e007f], [e0100, e01ef]**/
-
-
-    namespace {
+    [1e944, 1e94a], [1f3fb, 1f3ff], [e0020, e007f], [e0100, e01ef] */
     const static UnicodeSet::run_t __extend_Set_runs[] = {
     {Empty, 24}, {Full, 3}, {Mixed, 1}, {Empty, 8}, {Mixed, 1}, {Empty, 7},
     {Mixed, 3}, {Empty, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 2}, {Empty, 2},
@@ -3317,7 +3235,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     {Empty, 22}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 84},
     {Mixed, 1}, {Empty, 24673}, {Full, 3}, {Empty, 4}, {Full, 7},
     {Mixed, 1}, {Empty, 6128}};
-    const static UnicodeSet::bitquad_t  __extend_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __extend_Set_quads[] = {
     0x0000ffff, 0x000003f8, 0xfffe0000, 0xbfffffff, 0x000000b6, 0x07ff0000,
     0xfffff800, 0x00010000, 0x9fc00000, 0x00003d9f, 0x00020000, 0xffff0000,
     0x000007ff, 0x0001ffc0, 0x200ff800, 0xfbc00000, 0x00003eef, 0x0e000000,
@@ -3356,10 +3274,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     0xf87fffff, 0x00201fff, 0xf8000010, 0x0000fffe, 0xf9ffff7f, 0x000007db,
     0x00008000, 0x007f0000, 0x00004000, 0x0000f000, 0x0000f000, 0x0000c000,
     0x007f0000, 0x000007f0, 0xf8000000, 0x0000ffff};
-    }
-
-    const static UnicodeSet extend_Set{const_cast<UnicodeSet::run_t *>(__extend_Set_runs), 219, 0, const_cast<UnicodeSet::bitquad_t *>(__extend_Set_quads), 226, 0};
-
+    const static UnicodeSet extend_Set{__extend_Set_runs, 219, __extend_Set_quads, 226};
     static EnumeratedPropertyObject property_object
         {InCB,
         INCB_ns::independent_prop_values,
@@ -3371,7 +3286,7 @@ PropertyObject * get_IDS_PropertyObject() {  return & IDS_ns::property_object; }
     }
 PropertyObject * get_INCB_PropertyObject() {  return & INCB_ns::property_object; }
     namespace LOWER_ns {
-        /** Code Point Ranges for Lower
+        /* Code Point Ranges for Lower
         [0061, 007a], [00aa, 00aa], [00b5, 00b5], [00ba, 00ba],
         [00df, 00f6], [00f8, 00ff], [0101, 0101], [0103, 0103],
         [0105, 0105], [0107, 0107], [0109, 0109], [010b, 010b],
@@ -3540,11 +3455,9 @@ PropertyObject * get_INCB_PropertyObject() {  return & INCB_ns::property_object;
         [1d6dc, 1d6e1], [1d6fc, 1d714], [1d716, 1d71b], [1d736, 1d74e],
         [1d750, 1d755], [1d770, 1d788], [1d78a, 1d78f], [1d7aa, 1d7c2],
         [1d7c4, 1d7c9], [1d7cb, 1d7cb], [1df00, 1df09], [1df0b, 1df1e],
-        [1df25, 1df2a], [1e030, 1e06d], [1e922, 1e943]**/
+        [1df25, 1df2a], [1e030, 1e06d], [1e922, 1e943] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Lower_set_runs[] = {
         {Empty, 3}, {Mixed, 1}, {Empty, 1}, {Mixed, 14}, {Full, 1},
         {Mixed, 4}, {Empty, 2}, {Mixed, 6}, {Empty, 1}, {Mixed, 1},
         {Full, 1}, {Mixed, 7}, {Empty, 1}, {Full, 1}, {Mixed, 1},
@@ -3561,7 +3474,7 @@ PropertyObject * get_INCB_PropertyObject() {  return & INCB_ns::property_object;
         {Empty, 812}, {Mixed, 31}, {Empty, 57}, {Mixed, 2}, {Empty, 7},
         {Mixed, 1}, {Full, 1}, {Mixed, 1}, {Empty, 69}, {Mixed, 2},
         {Empty, 30901}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Lower_set_quads[] = {
         0x07fffffe, 0x04200400, 0x80000000, 0xff7fffff, 0xaaaaaaaa,
         0x55aaaaaa, 0xaaaaab55, 0xd4aaaaaa, 0x4e243129, 0xe6512d2a,
         0xb5555240, 0xaa29aaaa, 0xaaaaaaaa, 0x93faaaaa, 0xffffaa85,
@@ -3589,15 +3502,12 @@ PropertyObject * get_INCB_PropertyObject() {  return & INCB_ns::property_object;
         0x0fdfffff, 0xffc00000, 0x003f7fff, 0xffff0000, 0x0000fdff,
         0xfffffc00, 0x00000bf7, 0x7ffffbff, 0x000007e0, 0xffff0000,
         0x00003fff, 0xfffffffc, 0x0000000f};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 76, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 133, 0};
-
-        static BinaryPropertyObject property_object{Lower, std::move(codepoint_set)};
+        const static UnicodeSet Lower_set{__Lower_set_runs, 76, __Lower_set_quads, 133};
+        static BinaryPropertyObject property_object{Lower, std::move(Lower_set)};
     }
 PropertyObject * get_LOWER_PropertyObject() {  return & LOWER_ns::property_object; }
     namespace MATH_ns {
-        /** Code Point Ranges for Math
+        /* Code Point Ranges for Math
         [002b, 002b], [003c, 003e], [005e, 005e], [007c, 007c],
         [007e, 007e], [00ac, 00ac], [00b1, 00b1], [00d7, 00d7],
         [00f7, 00f7], [03d0, 03d2], [03d5, 03d5], [03f0, 03f1],
@@ -3632,11 +3542,9 @@ PropertyObject * get_LOWER_PropertyObject() {  return & LOWER_ns::property_objec
         [1ee5d, 1ee5d], [1ee5f, 1ee5f], [1ee61, 1ee62], [1ee64, 1ee64],
         [1ee67, 1ee6a], [1ee6c, 1ee72], [1ee74, 1ee77], [1ee79, 1ee7c],
         [1ee7e, 1ee7e], [1ee80, 1ee89], [1ee8b, 1ee9b], [1eea1, 1eea3],
-        [1eea5, 1eea9], [1eeab, 1eebb], [1eef0, 1eef1]**/
+        [1eea5, 1eea9], [1eeab, 1eebb], [1eef0, 1eef1] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Math_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Empty, 22},
         {Mixed, 2}, {Empty, 16}, {Mixed, 1}, {Empty, 207}, {Mixed, 5},
         {Empty, 1}, {Mixed, 5}, {Empty, 1}, {Mixed, 4}, {Full, 8},
@@ -3648,7 +3556,7 @@ PropertyObject * get_LOWER_PropertyObject() {  return & LOWER_ns::property_objec
         {Mixed, 1}, {Full, 1}, {Mixed, 3}, {Full, 1}, {Mixed, 3},
         {Full, 10}, {Mixed, 1}, {Full, 8}, {Mixed, 1}, {Full, 1},
         {Empty, 176}, {Mixed, 6}, {Empty, 1}, {Mixed, 1}, {Empty, 30856}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Math_set_quads[] = {
         0x70000800, 0x40000000, 0x50000000, 0x00021000, 0x00800000,
         0x00800000, 0x00270000, 0x00730000, 0x000001c0, 0x00400000,
         0x001c0000, 0x00040011, 0x7c00001e, 0x00007c00, 0x1fff0000,
@@ -3662,15 +3570,12 @@ PropertyObject * get_LOWER_PropertyObject() {  return & LOWER_ns::property_objec
         0x7bffffff, 0xfffdfc5f, 0xffffff3f, 0xffffcfff, 0xffffffef,
         0x0af7fe96, 0xaa96ea84, 0x5ef7f796, 0x0ffffbff, 0x0ffffbee,
         0x00030000};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 55, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 61, 0};
-
-        static BinaryPropertyObject property_object{Math, std::move(codepoint_set)};
+        const static UnicodeSet Math_set{__Math_set_runs, 55, __Math_set_quads, 61};
+        static BinaryPropertyObject property_object{Math, std::move(Math_set)};
     }
 PropertyObject * get_MATH_PropertyObject() {  return & MATH_ns::property_object; }
     namespace UPPER_ns {
-        /** Code Point Ranges for Upper
+        /* Code Point Ranges for Upper
         [0041, 005a], [00c0, 00d6], [00d8, 00de], [0100, 0100],
         [0102, 0102], [0104, 0104], [0106, 0106], [0108, 0108],
         [010a, 010a], [010c, 010c], [010e, 010e], [0110, 0110],
@@ -3834,11 +3739,9 @@ PropertyObject * get_MATH_PropertyObject() {  return & MATH_ns::property_object;
         [1d56c, 1d585], [1d5a0, 1d5b9], [1d5d4, 1d5ed], [1d608, 1d621],
         [1d63c, 1d655], [1d670, 1d689], [1d6a8, 1d6c0], [1d6e2, 1d6fa],
         [1d71c, 1d734], [1d756, 1d76e], [1d790, 1d7a8], [1d7ca, 1d7ca],
-        [1e900, 1e921], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189]**/
+        [1e900, 1e921], [1f130, 1f149], [1f150, 1f169], [1f170, 1f189] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Upper_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 3}, {Mixed, 1}, {Empty, 1},
         {Mixed, 11}, {Empty, 8}, {Mixed, 5}, {Full, 1}, {Mixed, 1},
         {Empty, 1}, {Mixed, 8}, {Empty, 90}, {Full, 1}, {Mixed, 1},
@@ -3852,7 +3755,7 @@ PropertyObject * get_MATH_PropertyObject() {  return & MATH_ns::property_object;
         {Mixed, 2}, {Empty, 89}, {Full, 1}, {Empty, 684}, {Full, 1},
         {Empty, 813}, {Mixed, 31}, {Empty, 137}, {Full, 1}, {Mixed, 1},
         {Empty, 63}, {Mixed, 4}, {Empty, 30835}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Upper_set_quads[] = {
         0x07fffffe, 0x7f7fffff, 0x55555555, 0xaa555555, 0x555554aa,
         0x2b555555, 0xb1dbced6, 0x11aed2d5, 0x4aaaa490, 0x55d25555,
         0x55555555, 0x6c055555, 0x0000557a, 0x80450000, 0xfffed740,
@@ -3876,15 +3779,12 @@ PropertyObject * get_MATH_PropertyObject() {  return & MATH_ns::property_object;
         0x00000001, 0x07fffffc, 0xf0000000, 0x001fffff, 0xffc00000,
         0x00007fff, 0xffff0000, 0x000001ff, 0x00000400, 0x00000003,
         0xffff0000, 0xffff03ff, 0xffff03ff, 0x000003ff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 63, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 114, 0};
-
-        static BinaryPropertyObject property_object{Upper, std::move(codepoint_set)};
+        const static UnicodeSet Upper_set{__Upper_set_runs, 63, __Upper_set_quads, 114};
+        static BinaryPropertyObject property_object{Upper, std::move(Upper_set)};
     }
 PropertyObject * get_UPPER_PropertyObject() {  return & UPPER_ns::property_object; }
     namespace XIDC_ns {
-        /** Code Point Ranges for XIDC
+        /* Code Point Ranges for XIDC
         [0030, 0039], [0041, 005a], [005f, 005f], [0061, 007a],
         [00aa, 00aa], [00b5, 00b5], [00b7, 00b7], [00ba, 00ba],
         [00c0, 00d6], [00d8, 00f6], [00f8, 02c1], [02c6, 02d1],
@@ -4084,11 +3984,9 @@ PropertyObject * get_UPPER_PropertyObject() {  return & UPPER_ns::property_objec
         [1ee80, 1ee89], [1ee8b, 1ee9b], [1eea1, 1eea3], [1eea5, 1eea9],
         [1eeab, 1eebb], [1fbf0, 1fbf9], [20000, 2a6df], [2a700, 2b739],
         [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0], [2ebf0, 2ee5d],
-        [2f800, 2fa1d], [30000, 3134a], [31350, 323af], [e0100, e01ef]**/
+        [2f800, 2fa1d], [30000, 3134a], [31350, 323af], [e0100, e01ef] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __XIDC_set_runs[] = {
         {Empty, 1}, {Mixed, 3}, {Empty, 1}, {Mixed, 3}, {Full, 14},
         {Mixed, 2}, {Full, 3}, {Mixed, 3}, {Full, 1}, {Mixed, 1}, {Full, 4},
         {Mixed, 1}, {Full, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 5}, {Full, 2},
@@ -4167,7 +4065,7 @@ PropertyObject * get_UPPER_PropertyObject() {  return & UPPER_ns::property_objec
         {Full, 16}, {Mixed, 1}, {Empty, 47}, {Full, 154}, {Mixed, 1},
         {Full, 130}, {Mixed, 1}, {Empty, 22250}, {Full, 7}, {Mixed, 1},
         {Empty, 6128}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __XIDC_set_quads[] = {
         0x03ff0000, 0x87fffffe, 0x07fffffe, 0x04a00400, 0xff7fffff,
         0xff7fffff, 0x0003ffc3, 0x0000501f, 0xb8dfffff, 0xffffd7c0,
         0xfffffffb, 0xffbfffff, 0xfffffcfb, 0xfffeffff, 0x027fffff,
@@ -4258,15 +4156,12 @@ PropertyObject * get_UPPER_PropertyObject() {  return & UPPER_ns::property_objec
         0x5ef7f796, 0x0ffffbff, 0x0ffffbee, 0x03ff0000, 0x03ffffff,
         0x3fffffff, 0xffff0003, 0xffff0001, 0x3fffffff, 0x3fffffff,
         0xffff07ff, 0x0000ffff, 0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 404, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 448, 0};
-
-        static BinaryPropertyObject property_object{XIDC, std::move(codepoint_set)};
+        const static UnicodeSet XIDC_set{__XIDC_set_runs, 404, __XIDC_set_quads, 448};
+        static BinaryPropertyObject property_object{XIDC, std::move(XIDC_set)};
     }
 PropertyObject * get_XIDC_PropertyObject() {  return & XIDC_ns::property_object; }
     namespace XIDS_ns {
-        /** Code Point Ranges for XIDS
+        /* Code Point Ranges for XIDS
         [0041, 005a], [0061, 007a], [00aa, 00aa], [00b5, 00b5],
         [00ba, 00ba], [00c0, 00d6], [00d8, 00f6], [00f8, 02c1],
         [02c6, 02d1], [02e0, 02e4], [02ec, 02ec], [02ee, 02ee],
@@ -4437,11 +4332,9 @@ PropertyObject * get_XIDC_PropertyObject() {  return & XIDC_ns::property_object;
         [1ee79, 1ee7c], [1ee7e, 1ee7e], [1ee80, 1ee89], [1ee8b, 1ee9b],
         [1eea1, 1eea3], [1eea5, 1eea9], [1eeab, 1eebb], [20000, 2a6df],
         [2a700, 2b739], [2b740, 2b81d], [2b820, 2cea1], [2ceb0, 2ebe0],
-        [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af]**/
+        [2ebf0, 2ee5d], [2f800, 2fa1d], [30000, 3134a], [31350, 323af] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __XIDS_set_runs[] = {
         {Empty, 2}, {Mixed, 2}, {Empty, 1}, {Mixed, 3}, {Full, 14},
         {Mixed, 2}, {Empty, 3}, {Mixed, 3}, {Full, 1}, {Mixed, 1},
         {Full, 4}, {Mixed, 1}, {Full, 4}, {Mixed, 2}, {Full, 1}, {Mixed, 1},
@@ -4517,7 +4410,7 @@ PropertyObject * get_XIDC_PropertyObject() {  return & XIDC_ns::property_object;
         {Full, 180}, {Mixed, 1}, {Full, 233}, {Mixed, 1}, {Full, 18},
         {Mixed, 1}, {Empty, 77}, {Full, 16}, {Mixed, 1}, {Empty, 47},
         {Full, 154}, {Mixed, 1}, {Full, 130}, {Mixed, 1}, {Empty, 28386}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __XIDS_set_quads[] = {
         0x07fffffe, 0x07fffffe, 0x04200400, 0xff7fffff, 0xff7fffff,
         0x0003ffc3, 0x0000501f, 0xb8df0000, 0xffffd740, 0xfffffffb,
         0xffbfffff, 0xfffffc03, 0xfffeffff, 0x027fffff, 0x000001ff,
@@ -4605,11 +4498,8 @@ PropertyObject * get_XIDC_PropertyObject() {  return & XIDC_ns::property_object;
         0x5ef7f796, 0x0ffffbff, 0x0ffffbee, 0x03ffffff, 0x3fffffff,
         0xffff0003, 0xffff0001, 0x3fffffff, 0x3fffffff, 0xffff07ff,
         0x0000ffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 387, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 431, 0};
-
-        static BinaryPropertyObject property_object{XIDS, std::move(codepoint_set)};
+        const static UnicodeSet XIDS_set{__XIDS_set_runs, 387, __XIDS_set_quads, 431};
+        static BinaryPropertyObject property_object{XIDS, std::move(XIDS_set)};
     }
 PropertyObject * get_XIDS_PropertyObject() {  return & XIDS_ns::property_object; }
 }

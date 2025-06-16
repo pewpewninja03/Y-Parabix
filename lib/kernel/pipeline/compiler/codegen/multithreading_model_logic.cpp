@@ -1434,7 +1434,6 @@ std::vector<Value *> PipelineCompiler::storeDoSegmentState() const {
     return S;
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief restoreInternalState
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1506,6 +1505,7 @@ void PipelineCompiler::readDoSegmentState(KernelBuilder & b, StructType * const 
     assert (i == n);
 
 }
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief restoreInternalState

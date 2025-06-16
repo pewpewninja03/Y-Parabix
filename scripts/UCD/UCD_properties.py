@@ -73,13 +73,13 @@ BinaryProperty_template = r"""
 """
 
 StringProperty_template = r"""    namespace ${prop_enum_up}_ns {
-        /** Code Point Ranges for ${prop_enum} mapping to <none>
-        ${null_set_ranges}**/
+        /* Code Point Ranges for ${prop_enum} mapping to <none>
+        ${null_set_ranges}*/
 
         ${null_set_value}
 
-        /** Code Point Ranges for ${prop_enum} mapping to <codepoint>
-        ${reflexive_set_ranges}**/
+        /* Code Point Ranges for ${prop_enum} mapping to <codepoint>
+        ${reflexive_set_ranges}*/
 
         ${reflexive_set_value}
 
@@ -99,13 +99,13 @@ StringProperty_template = r"""    namespace ${prop_enum_up}_ns {
 """
 
 CodepointProperty_template = r"""    namespace ${prop_enum_up}_ns {
-        /** Code Point Ranges for ${prop_enum} mapping to <none>
-        ${null_set_ranges}**/
+        /* Code Point Ranges for ${prop_enum} mapping to <none>
+        ${null_set_ranges}*/
 
         ${null_set_value}
 
-        /** Code Point Ranges for ${prop_enum} mapping to <codepoint>
-        ${reflexive_set_ranges}**/
+        /* Code Point Ranges for ${prop_enum} mapping to <codepoint>
+        ${reflexive_set_ranges}*/
 
         ${reflexive_set_value}
 
@@ -160,8 +160,8 @@ def emit_codepoint_property(f, property_code, null_set, reflexive_set, cp_value_
 
 def emit_string_override_property(f, property_code, overridden_code, override_set, cp_value_map):
     s = string.Template(r"""    namespace ${prop_enum_up}_ns {
-        /** Code Point Ranges for ${prop_enum} (possibly overriding values from ${overridden})
-        ${overridden_set_ranges}**/
+        /* Code Point Ranges for ${prop_enum} (possibly overriding values from ${overridden})
+        ${overridden_set_ranges}*/
 
         ${overridden_set_value}
 
@@ -200,8 +200,8 @@ def emit_string_override_property(f, property_code, overridden_code, override_se
 
 def emit_numeric_property(f, property_code, NaN_set, cp_value_map):
     s = string.Template(r"""    namespace ${prop_enum_up}_ns {
-        /** Code Point Ranges for ${prop_enum} mapping to NaN
-        ${NaN_set_ranges}**/
+        /* Code Point Ranges for ${prop_enum} mapping to NaN
+        ${NaN_set_ranges}*/
 
         ${NaN_set_value}
 
@@ -237,19 +237,21 @@ def emit_numeric_property(f, property_code, NaN_set, cp_value_map):
 
 def emit_binary_property(f, property_code, property_set):
     f.write("    namespace %s_ns {\n" % property_code.upper())
-    f.write("        /** Code Point Ranges for %s\n        " % property_code)
+    f.write("        /* Code Point Ranges for %s\n        " % property_code)
     f.write(cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(property_set)], ',', 8))
-    f.write("**/\n\n")
-    f.write(property_set.generate("codepoint_set", 8))
-    f.write("        static BinaryPropertyObject property_object{%s, std::move(codepoint_set)};\n    }\n" % property_code)
+    f.write(" */\n\n        ")
+    f.write(property_set.generate("%s_set" % property_code, 8))
+    f.write("        static BinaryPropertyObject property_object{%s, std::move(%s_set)};\n    }\n" % (property_code, property_code))
 
 def emit_enumerated_property(f, property_code, independent_prop_values, prop_values, value_map):
     f.write("  namespace %s_ns {\n" % property_code.upper())
     f.write("    const unsigned independent_prop_values = %s;\n" % independent_prop_values)
     for v in prop_values:
-        f.write("    /** Code Point Ranges for %s\n    " % v)
-        f.write(cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(value_map[v])], ',', 4))
-        f.write("**/\n\n")
+        rgs = uset_to_range_list(value_map[v])
+        f.write("\n    /* Code Point Ranges for %s" % v)
+        if len(rgs) >= 4: f.write("\n")
+        f.write("    " + cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in rgs], ',', 4))
+        f.write(" */\n    ")
         f.write(value_map[v].generate(v.lower() + "_Set", 4))
     set_list = ['&%s_Set' % v.lower() for v in prop_values]
     f.write("    static EnumeratedPropertyObject property_object\n")
@@ -580,9 +582,9 @@ class UCD_generator():
         f.write("\nnamespace UCD {\n")
         f.write("    namespace SCX_ns {\n")
         for v in prop_list:
-            f.write("        /** Code Point Ranges for %s\n        " % v)
+            f.write("        /* Code Point Ranges for %s\n        " % v)
             f.write(cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(value_map[v])], ',', 8))
-            f.write("**/\n")
+            f.write("*/\n")
             f.write(value_map[v].generate(v.lower() + "_Ext", 8))
         set_list = ['&%s_Ext' % v.lower() for v in prop_list]
         f.write("        static ExtensionPropertyObject property_object\n")

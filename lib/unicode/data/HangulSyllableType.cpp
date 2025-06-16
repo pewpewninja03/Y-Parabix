@@ -16,63 +16,38 @@
 namespace UCD {
   namespace HST_ns {
     const unsigned independent_prop_values = 6;
-    /** Code Point Ranges for NA
+
+    /* Code Point Ranges for NA
     [0000, 10ff], [1200, a95f], [a97d, abff], [d7a4, d7af], [d7c7, d7ca],
-    [d7fc, 10ffff]**/
-
-
-    namespace {
+    [d7fc, 10ffff] */
     const static UnicodeSet::run_t __na_Set_runs[] = {
     {Full, 136}, {Empty, 8}, {Full, 1211}, {Mixed, 1}, {Full, 20},
     {Empty, 349}, {Mixed, 3}, {Full, 33088}};
-    const static UnicodeSet::bitquad_t  __na_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __na_Set_quads[] = {
     0xe0000000, 0x0000fff0, 0x00000780, 0xf0000000};
-    }
+    const static UnicodeSet na_Set{__na_Set_runs, 8, __na_Set_quads, 4};
 
-    const static UnicodeSet na_Set{const_cast<UnicodeSet::run_t *>(__na_Set_runs), 8, 0, const_cast<UnicodeSet::bitquad_t *>(__na_Set_quads), 4, 0};
-
-    /** Code Point Ranges for L
-    [1100, 115f], [a960, a97c]**/
-
-
-    namespace {
+    /* Code Point Ranges for L    [1100, 115f], [a960, a97c] */
     const static UnicodeSet::run_t __l_Set_runs[] = {
     {Empty, 136}, {Full, 3}, {Empty, 1216}, {Mixed, 1}, {Empty, 33460}};
-    const static UnicodeSet::bitquad_t  __l_Set_quads[] = {
-    0x1fffffff};
-    }
+    const static UnicodeSet::bitquad_t __l_Set_quads[] = {0x1fffffff};
+    const static UnicodeSet l_Set{__l_Set_runs, 5, __l_Set_quads, 1};
 
-    const static UnicodeSet l_Set{const_cast<UnicodeSet::run_t *>(__l_Set_runs), 5, 0, const_cast<UnicodeSet::bitquad_t *>(__l_Set_quads), 1, 0};
-
-    /** Code Point Ranges for V
-    [1160, 11a7], [d7b0, d7c6]**/
-
-
-    namespace {
+    /* Code Point Ranges for V    [1160, 11a7], [d7b0, d7c6] */
     const static UnicodeSet::run_t __v_Set_runs[] = {
     {Empty, 139}, {Full, 2}, {Mixed, 1}, {Empty, 1583}, {Mixed, 2},
     {Empty, 33089}};
-    const static UnicodeSet::bitquad_t  __v_Set_quads[] = {
-    0x000000ff, 0xffff0000, 0x0000007f};
-    }
+    const static UnicodeSet::bitquad_t __v_Set_quads[] = {0x000000ff, 0xffff0000, 0x0000007f};
+    const static UnicodeSet v_Set{__v_Set_runs, 6, __v_Set_quads, 3};
 
-    const static UnicodeSet v_Set{const_cast<UnicodeSet::run_t *>(__v_Set_runs), 6, 0, const_cast<UnicodeSet::bitquad_t *>(__v_Set_quads), 3, 0};
-
-    /** Code Point Ranges for T
-    [11a8, 11ff], [d7cb, d7fb]**/
-
-
-    namespace {
+    /* Code Point Ranges for T    [11a8, 11ff], [d7cb, d7fb] */
     const static UnicodeSet::run_t __t_Set_runs[] = {
     {Empty, 141}, {Mixed, 1}, {Full, 2}, {Empty, 1582}, {Mixed, 2},
     {Empty, 33088}};
-    const static UnicodeSet::bitquad_t  __t_Set_quads[] = {
-    0xffffff00, 0xfffff800, 0x0fffffff};
-    }
+    const static UnicodeSet::bitquad_t __t_Set_quads[] = {0xffffff00, 0xfffff800, 0x0fffffff};
+    const static UnicodeSet t_Set{__t_Set_runs, 6, __t_Set_quads, 3};
 
-    const static UnicodeSet t_Set{const_cast<UnicodeSet::run_t *>(__t_Set_runs), 6, 0, const_cast<UnicodeSet::bitquad_t *>(__t_Set_quads), 3, 0};
-
-    /** Code Point Ranges for LV
+    /* Code Point Ranges for LV
     [ac00, ac00], [ac1c, ac1c], [ac38, ac38], [ac54, ac54], [ac70, ac70],
     [ac8c, ac8c], [aca8, aca8], [acc4, acc4], [ace0, ace0], [acfc, acfc],
     [ad18, ad18], [ad34, ad34], [ad50, ad50], [ad6c, ad6c], [ad88, ad88],
@@ -152,13 +127,9 @@ namespace UCD {
     [d590, d590], [d5ac, d5ac], [d5c8, d5c8], [d5e4, d5e4], [d600, d600],
     [d61c, d61c], [d638, d638], [d654, d654], [d670, d670], [d68c, d68c],
     [d6a8, d6a8], [d6c4, d6c4], [d6e0, d6e0], [d6fc, d6fc], [d718, d718],
-    [d734, d734], [d750, d750], [d76c, d76c], [d788, d788]**/
-
-
-    namespace {
-    const static UnicodeSet::run_t __lv_Set_runs[] = {
-    {Empty, 1376}, {Mixed, 349}, {Empty, 33091}};
-    const static UnicodeSet::bitquad_t  __lv_Set_quads[] = {
+    [d734, d734], [d750, d750], [d76c, d76c], [d788, d788] */
+    const static UnicodeSet::run_t __lv_Set_runs[] = {{Empty, 1376}, {Mixed, 349}, {Empty, 33091}};
+    const static UnicodeSet::bitquad_t __lv_Set_quads[] = {
     0x10000001, 0x01000000, 0x00100000, 0x00010000, 0x00001000, 0x00000100,
     0x00000010, 0x10000001, 0x01000000, 0x00100000, 0x00010000, 0x00001000,
     0x00000100, 0x00000010, 0x10000001, 0x01000000, 0x00100000, 0x00010000,
@@ -218,11 +189,9 @@ namespace UCD {
     0x10000001, 0x01000000, 0x00100000, 0x00010000, 0x00001000, 0x00000100,
     0x00000010, 0x10000001, 0x01000000, 0x00100000, 0x00010000, 0x00001000,
     0x00000100};
-    }
+    const static UnicodeSet lv_Set{__lv_Set_runs, 3, __lv_Set_quads, 349};
 
-    const static UnicodeSet lv_Set{const_cast<UnicodeSet::run_t *>(__lv_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__lv_Set_quads), 349, 0};
-
-    /** Code Point Ranges for LVT
+    /* Code Point Ranges for LVT
     [ac01, ac1b], [ac1d, ac37], [ac39, ac53], [ac55, ac6f], [ac71, ac8b],
     [ac8d, aca7], [aca9, acc3], [acc5, acdf], [ace1, acfb], [acfd, ad17],
     [ad19, ad33], [ad35, ad4f], [ad51, ad6b], [ad6d, ad87], [ad89, ada3],
@@ -302,13 +271,9 @@ namespace UCD {
     [d591, d5ab], [d5ad, d5c7], [d5c9, d5e3], [d5e5, d5ff], [d601, d61b],
     [d61d, d637], [d639, d653], [d655, d66f], [d671, d68b], [d68d, d6a7],
     [d6a9, d6c3], [d6c5, d6df], [d6e1, d6fb], [d6fd, d717], [d719, d733],
-    [d735, d74f], [d751, d76b], [d76d, d787], [d789, d7a3]**/
-
-
-    namespace {
-    const static UnicodeSet::run_t __lvt_Set_runs[] = {
-    {Empty, 1376}, {Mixed, 350}, {Empty, 33090}};
-    const static UnicodeSet::bitquad_t  __lvt_Set_quads[] = {
+    [d735, d74f], [d751, d76b], [d76d, d787], [d789, d7a3] */
+    const static UnicodeSet::run_t __lvt_Set_runs[] = {{Empty, 1376}, {Mixed, 350}, {Empty, 33090}};
+    const static UnicodeSet::bitquad_t __lvt_Set_quads[] = {
     0xeffffffe, 0xfeffffff, 0xffefffff, 0xfffeffff, 0xffffefff, 0xfffffeff,
     0xffffffef, 0xeffffffe, 0xfeffffff, 0xffefffff, 0xfffeffff, 0xffffefff,
     0xfffffeff, 0xffffffef, 0xeffffffe, 0xfeffffff, 0xffefffff, 0xfffeffff,
@@ -368,10 +333,7 @@ namespace UCD {
     0xeffffffe, 0xfeffffff, 0xffefffff, 0xfffeffff, 0xffffefff, 0xfffffeff,
     0xffffffef, 0xeffffffe, 0xfeffffff, 0xffefffff, 0xfffeffff, 0xffffefff,
     0xfffffeff, 0x0000000f};
-    }
-
-    const static UnicodeSet lvt_Set{const_cast<UnicodeSet::run_t *>(__lvt_Set_runs), 3, 0, const_cast<UnicodeSet::bitquad_t *>(__lvt_Set_quads), 350, 0};
-
+    const static UnicodeSet lvt_Set{__lvt_Set_runs, 3, __lvt_Set_quads, 350};
     static EnumeratedPropertyObject property_object
         {hst,
         HST_ns::independent_prop_values,

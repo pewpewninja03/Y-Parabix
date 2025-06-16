@@ -26,6 +26,7 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
+#include <kernel/unicode/normalization.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <toolchain/toolchain.h>
@@ -33,6 +34,7 @@
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <unicode/core/unicode_set.h>
 #include <unicode/algo/normalization.h>
+#include <unicode/utf/utf_compiler.h>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -43,96 +45,87 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decomposition Options", "Decomposition Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
+static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
-std::vector<re::CC *> Hangul_Decomposed_CCs() {
-    UCD::UnicodeSet Hangul_L(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
-    UCD::UnicodeSet Hangul_V(Hangul::LBase, Hangul::VBase + Hangul::VCount - 1);
-    UCD::UnicodeSet Hangul_T(Hangul::LBase, Hangul::TBase + Hangul::TCount - 1);
-    return {re::makeCC(Hangul_L, &cc::Unicode),
-            re::makeCC(Hangul_V, &cc::Unicode),
-            re::makeCC(Hangul_T, &cc::Unicode)};
-}
 
-class Hangul_Precomposition : public pablo::PabloKernel {
+class ApplyTransform : public pablo::PabloKernel {
 public:
-    Hangul_Precomposition(LLVMTypeSystemInterface & ts,
-                          StreamSet * Basis, StreamSet * L_V_T_Decomposed, 
-                          StreamSet * Output_Basis, StreamSet * SelectionMask);
+    ApplyTransform(LLVMTypeSystemInterface & ts,
+                   StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_Precomposition::Hangul_Precomposition (LLVMTypeSystemInterface & ts,
-                                              StreamSet * Basis, StreamSet * L_V_T_Decomposed,
-                                              StreamSet * Output_Basis, StreamSet * SelectionMask)
-: PabloKernel(ts, "Hangul_Precomposition" + Basis->shapeString(),
+ApplyTransform::ApplyTransform (LLVMTypeSystemInterface & ts,
+                                StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
+: PabloKernel(ts, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
 // inputs
-    {Binding{"Basis", Basis, FixedRate(1), LookAhead(8)}, Binding{"L_V_T_Decomposed", L_V_T_Decomposed, FixedRate(1), LookAhead(8)}},
+{Binding{"basis", Basis},
+ Binding{"xfrms", Xfrms}
+},
 // output
-    {Binding{"Output_Basis", Output_Basis}, Binding{"SelectionMask", SelectionMask}}) {
+{Binding{"output_basis", Output}}) {
 }
 
-void Hangul_Precomposition::generatePabloMethod() {
+void ApplyTransform::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // For UTF-8 each L, V, T are 3 code units in length.
-    // For Unicode or UTF-16, only a single code unit is needed.
-    unsigned codeUnitsPerChar = Basis.size() > 8 ? 1 : 3;
-    std::vector<PabloAST *> L_V_T_Decomposed = getInputStreamSet("L_V_T_Decomposed");
-    PabloAST * Hangul_L = L_V_T_Decomposed[0];
-    PabloAST * Hangul_V = L_V_T_Decomposed[1];
-    PabloAST * Hangul_T = L_V_T_Decomposed[2];
-    //
-    //  Set up variables to receive the output basis bit streams.
-    std::vector<Var *> outputVar(Basis.size());
-    for (unsigned i = 0; i < Basis.size(); i++) {
-        outputVar[i] = pb.createVar("outputVar" + std::to_string(i), Basis[i]);
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    std::vector<PabloAST *> xfrms = getInputStreamSet("xfrms");
+    std::vector<PabloAST *> transformed(basis.size());
+    for (unsigned i = 0; i < basis.size(); i++) {
+        if (i < xfrms.size()) {
+            transformed[i] = pb.createXor(xfrms[i], basis[i]);
+        } else {
+            transformed[i] = basis[i];
+        }
     }
-    Var * maskVar = pb.createVar("maskVar", pb.createOnes());
-    //
-    // All calculations depend on having an initial L, if there are none,
-    // we can skip.
-    auto nested = pb.createScope();
-    
-    pb.createIf(Hangul_L, nested);
-    BixNumCompiler bnc(nested);
-    //
-    // Only the 5 low bits of the basis are needed for index calculations.
-    const unsigned index_bits = 5;
-    BixNum IndexBasis = bnc.Truncate(Basis, index_bits);
-    // All index calculations will be performed at the first character position
-    BixNum IndexAhead1(index_bits);
-    BixNum IndexAhead2(index_bits);
-    for (unsigned i = 0; i < index_bits; i++) {
-        IndexAhead1[i] = nested.createLookahead(IndexBasis[i], codeUnitsPerChar * 1);
-        IndexAhead2[i] = nested.createLookahead(IndexBasis[i], codeUnitsPerChar * 2);
-    }
-    PabloAST * V_ahead = nested.createLookahead(Hangul_V, codeUnitsPerChar * 1);
-    PabloAST * T_ahead2 = nested.createLookahead(Hangul_T, codeUnitsPerChar * 2);
-    PabloAST * LV_combo = nested.createAnd(Hangul_L, V_ahead);
-    PabloAST * LVT_sequence = nested.createAnd(LV_combo, T_ahead2);
-    PabloAST * V_suffix = nested.createAdvance(LV_combo, codeUnitsPerChar * 1);
-    PabloAST * T_suffix = nested.createAdvance(LVT_sequence, codeUnitsPerChar * 2);
-    PabloAST * VT_suffixes = nested.createOr(V_suffix, T_suffix);
-    nested.createAssign(maskVar, nested.createInFile(nested.createNot(VT_suffixes)));
-    BixNum ZeroIndex(index_bits, nested.createZeroes());
-    BixNum L_index = bnc.Select(LV_combo, IndexBasis, ZeroIndex);
-    unsigned indexMask = (1 << index_bits) - 1;  // mask to select low bits of index only
-    BixNum V_index = bnc.Select(LV_combo, bnc.SubModular(IndexAhead1, Hangul::VBase & indexMask), ZeroIndex);
-    BixNum T_index = bnc.Select(LVT_sequence, bnc.SubModular(IndexAhead2, Hangul::TBase & indexMask), ZeroIndex);
-    BixNum LV_index = bnc.AddFull(bnc.MulFull(L_index, Hangul::VCount), V_index);
-    BixNum S_Index = bnc.AddFull(bnc.MulFull(LV_index, Hangul::TCount), T_index);
-    BixNum Precomposed = bnc.Select(LV_combo, bnc.ZeroExtend(bnc.AddFull(S_Index, Hangul::SBase), 21), Basis);
-    for (unsigned i = 0; i < Basis.size(); i++) {
-        nested.createAssign(outputVar[i], Precomposed[i]);
-    }
-    writeOutputStreamSet("Output_Basis", outputVar);
-    writeOutputStreamSet("SelectionMask", std::vector<Var *>{maskVar});
+    writeOutputStreamSet("output_basis", transformed);
 }
+
+
+class DelPriorToSelectMask : public PabloKernel {
+public:
+    DelPriorToSelectMask
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
+                                       StreamSet * SelectMask);
+protected:
+    void generatePabloMethod() override;
+};
+
+DelPriorToSelectMask::DelPriorToSelectMask
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
+                                   StreamSet * SelectMask)
+: PabloKernel(ts, "DelPriorToSelectMask",
+{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
+{Binding{"SelectMask", SelectMask}}) {}
+
+void DelPriorToSelectMask::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * InputMask = getInputStreamSet("InputMask")[0];
+    PabloAST * DelPrior = getInputStreamSet("DeletePrior")[0];
+    BixNumCompiler bnc(pb);
+    PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
+    PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
+    PabloAST * pfx = bnc.UGE(Basis, 0xC2);
+    PabloAST * pfx3 = pb.createXor(pfx3or4, pfx4);
+    PabloAST * pfx2 = pb.createXor(pfx, pfx3or4);
+    PabloAST * delpfx4 = pb.createAnd(pfx4, pb.createLookahead(DelPrior, 4));
+    PabloAST * thirdlast = pb.createOr(pfx3, pb.createAdvance(pfx4, 1));
+    PabloAST * del3 = pb.createAnd(thirdlast, pb.createLookahead(DelPrior, 3));
+    PabloAST * secondlast = pb.createOr(pfx2, pb.createAdvance(thirdlast, 1));
+    PabloAST * del2 = pb.createAnd(secondlast, pb.createLookahead(DelPrior, 2));
+    PabloAST * del1 = pb.createLookahead(DelPrior, 1);
+    PabloAST * del = pb.createOr(pb.createOr(delpfx4, del3), pb.createOr(del2, del1));
+    std::vector<PabloAST *> select_streamset = {pb.createAnd(InputMask, pb.createInFile(pb.createNot(del)))};
+    writeOutputStreamSet("SelectMask", select_streamset);
+}
+using namespace UCD;
+
 
 typedef void (*XfrmFunctionType)(uint32_t fd);
 
@@ -156,45 +149,104 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    //  The u8index stream marks the final byte of each UTF-8 character sequence.
-    StreamSet * u8index = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
-    SHOW_STREAM(u8index);
+    StreamSet * InsertionBixNum = P.CreateStreamSet(2, 1);
+    P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
+    SHOW_BIXNUM(InsertionBixNum);
 
-    //  To make Unicode calculations simpler, we will construct a stream set of
-    //  all 21 Unicode bits.   As a first step we calculate these bits at
-    //  the u8index positions.
-    StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+    StreamSet * SpreadMask = InsertionSpreadMask(P, InsertionBixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(SpreadMask);
 
-    //  Now we construct a compressed stream set which is one-to-one with
-    //  Unicode characters, by filtering out non u8index positions.
-    StreamSet * U21 = P.CreateStreamSet(21, 1);
-    FilterByMask(P, u8index, U21_u8indexed, U21);
-    SHOW_BIXNUM(U21);
+    StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
+    SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
+    SHOW_BIXNUM(ExpandedBasis);
 
-    //  Hangul decomposed characters are of three types, L, V and T.
-    //  Compute a set of 3 parallel bit streams, one for each character class.
-    auto L_V_T_ccs = Hangul_Decomposed_CCs();
-    StreamSet * L_V_T =  P.CreateStreamSet(L_V_T_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(L_V_T_ccs, U21, L_V_T);
-    SHOW_BIXNUM(L_V_T);
-    
-    StreamSet * TranslatedBasis = P.CreateStreamSet(21, 1);
-    StreamSet * SelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Hangul_Precomposition>(U21, L_V_T, TranslatedBasis, SelectionMask);
-    SHOW_BIXNUM(TranslatedBasis);
-    SHOW_STREAM(SelectionMask);
+    StreamSet * NSD_Basis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<NonStarterDecomposition>(ExpandedBasis, NSD_Basis);
+    SHOW_BIXNUM(NSD_Basis);
 
-    StreamSet * NFC_Basis = P.CreateStreamSet(21, 1);
-    FilterByMask(P, SelectionMask, TranslatedBasis, NFC_Basis);
-    SHOW_BIXNUM(NFC_Basis);
+    StreamSet * Canon_Basis = P.CreateStreamSet(8, 1);
+    StreamSet * CanonSelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<SingletonCanonicalization>(NSD_Basis, CanonSelectionMask, Canon_Basis);
+    SHOW_BIXNUM(Canon_Basis);
+    SHOW_STREAM(CanonSelectionMask);
 
-    // Given the 21-bit basis representation, we can now transform back
-    // to a UTF-8 representation.
+    StreamSet * XfrmBasis = P.CreateStreamSet(8, 1);
+    StreamSet * DelPrior = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<ShortComposableTranslation>(Canon_Basis, DelPrior, XfrmBasis);
+    SHOW_BIXNUM(XfrmBasis);
+    SHOW_STREAM(DelPrior);
+
+    StreamSet * XfrmedBasis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<ApplyTransform>(Canon_Basis, XfrmBasis, XfrmedBasis);
+    SHOW_BIXNUM(XfrmedBasis);
+
+    StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, CanonSelectionMask, DelPrior, SelectionMask0);
+    SHOW_STREAM(SelectionMask0);
+
+    StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
+    FilterByMask(P, SelectionMask0, XfrmedBasis, FilteredBasis);
+    SHOW_BIXNUM(FilteredBasis);
+
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
-    U21_to_UTF8(P, NFC_Basis, OutputBasis);
 
+    if (U21) {
+        //  The u8index stream marks the final byte of each UTF-8 character sequence.
+        StreamSet * u8index = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<UTF8_index>(FilteredBasis, u8index);
+        SHOW_STREAM(u8index);
+
+        //  To make Unicode calculations simpler, we will construct a stream set of
+        //  all 21 Unicode bits.   As a first step we calculate these bits at
+        //  the u8index positions.
+        StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
+        P.CreateKernelCall<UTF8_Decoder>(FilteredBasis, U21_u8indexed);
+
+        //  Now we construct a compressed stream set which is one-to-one with
+        //  Unicode characters, by filtering out non u8index positions.
+        StreamSet * U21 = P.CreateStreamSet(21, 1);
+        FilterByMask(P, u8index, U21_u8indexed, U21);
+        SHOW_BIXNUM(U21);
+
+        //  Hangul composable characters are of three types, L, V, LV and T.
+        //  Compute a set of 4 parallel bit streams, one for each character class.
+        //auto L_V_T_sets = Hangul_Composables();
+        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
+        P.CreateKernelCall<Hangul_Composables>(U21, L_V_T);
+        //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, U21, L_V_T);
+        SHOW_BIXNUM(L_V_T);
+
+        StreamSet * TranslatedBasis = P.CreateStreamSet(21, 1);
+        StreamSet * SelectionMask = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<Hangul_Composition>(U21, L_V_T, TranslatedBasis, SelectionMask);
+        SHOW_BIXNUM(TranslatedBasis);
+        SHOW_STREAM(SelectionMask);
+
+        StreamSet * NFC_Basis = P.CreateStreamSet(21, 1);
+        FilterByMask(P, SelectionMask, TranslatedBasis, NFC_Basis);
+        SHOW_BIXNUM(NFC_Basis);
+
+        // Given the 21-bit basis representation, we can now transform back
+        // to a UTF-8 representation.
+        U21_to_UTF8(P, NFC_Basis, OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
+    } else {
+        
+        //auto L_V_T_sets = Hangul_Composables();
+        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
+        P.CreateKernelCall<Hangul_Composables>(FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
+        //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
+        SHOW_BIXNUM(L_V_T);
+
+        StreamSet * TranslatedBasis = P.CreateStreamSet(8, 1);
+        StreamSet * SelectionMask = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<Hangul_Composition>(FilteredBasis, L_V_T, TranslatedBasis, SelectionMask);
+        SHOW_BIXNUM(TranslatedBasis);
+        SHOW_STREAM(SelectionMask);
+
+        FilterByMask(P, SelectionMask, TranslatedBasis, OutputBasis);
+        SHOW_BIXNUM(OutputBasis);
+    }
     //  The P2SKernel transforms the basis bit streams into the corresponding
     //  byte stream, inverting the S2P process.
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
@@ -205,6 +257,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
     return P.compile();
 }
+
 
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add

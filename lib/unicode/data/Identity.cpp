@@ -15,32 +15,20 @@
 
 namespace UCD {
     namespace IDENTITY_ns {
-        /** Code Point Ranges for identity mapping to <none>
-        **/
+        /* Code Point Ranges for identity mapping to <none>
+        */
 
-        
-        namespace {
-        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
-        {Empty, 34816}};
+        const static UnicodeSet::run_t __null_codepoint_set_runs[] = {{Empty, 34816}};
         const static UnicodeSet::bitquad_t * const __null_codepoint_set_quads = nullptr;
-        }
-
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 0, 0};
+        const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 1, __null_codepoint_set_quads, 0};
 
 
+        /* Code Point Ranges for identity mapping to <codepoint>
+        [0000, 10ffff]*/
 
-        /** Code Point Ranges for identity mapping to <codepoint>
-        [0000, 10ffff]**/
-
-        
-        namespace {
-        const static UnicodeSet::run_t __reflexive_set_runs[] = {
-        {Full, 34816}};
+        const static UnicodeSet::run_t __reflexive_set_runs[] = {{Full, 34816}};
         const static UnicodeSet::bitquad_t * const __reflexive_set_quads = nullptr;
-        }
-
-        const static UnicodeSet reflexive_set{const_cast<UnicodeSet::run_t *>(__reflexive_set_runs), 1, 0, const_cast<UnicodeSet::bitquad_t *>(__reflexive_set_quads), 0, 0};
-
+        const static UnicodeSet reflexive_set{__reflexive_set_runs, 1, __reflexive_set_quads, 0};
 
 
         const static std::unordered_map<codepoint_t, codepoint_t> explicit_cp_data = {

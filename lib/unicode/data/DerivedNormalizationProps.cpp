@@ -15,7 +15,7 @@
 
 namespace UCD {
     namespace CWKCF_ns {
-        /** Code Point Ranges for CWKCF
+        /* Code Point Ranges for CWKCF
         [0041, 005a], [00a0, 00a0], [00a8, 00a8], [00aa, 00aa],
         [00ad, 00ad], [00af, 00af], [00b2, 00b5], [00b8, 00ba],
         [00bc, 00be], [00c0, 00d6], [00d8, 00df], [0100, 0100],
@@ -226,11 +226,9 @@ namespace UCD {
         [1ee8b, 1ee9b], [1eea1, 1eea3], [1eea5, 1eea9], [1eeab, 1eebb],
         [1f100, 1f10a], [1f110, 1f12e], [1f130, 1f14f], [1f16a, 1f16c],
         [1f190, 1f190], [1f200, 1f202], [1f210, 1f23b], [1f240, 1f248],
-        [1f250, 1f251], [1fbf0, 1fbf9], [2f800, 2fa1d], [e0000, e0fff]**/
+        [1f250, 1f251], [1fbf0, 1fbf9], [2f800, 2fa1d], [e0000, e0fff] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __CWKCF_set_runs[] = {
         {Empty, 2}, {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 1},
         {Mixed, 11}, {Empty, 2}, {Mixed, 3}, {Empty, 2}, {Mixed, 6},
         {Full, 1}, {Mixed, 1}, {Empty, 1}, {Mixed, 8}, {Empty, 1},
@@ -269,7 +267,7 @@ namespace UCD {
         {Mixed, 5}, {Empty, 3}, {Mixed, 3}, {Empty, 76}, {Mixed, 1},
         {Empty, 2016}, {Full, 16}, {Mixed, 1}, {Empty, 22575}, {Full, 128},
         {Empty, 6016}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __CWKCF_set_quads[] = {
         0x07fffffe, 0x773ca501, 0xff7fffff, 0x55555555, 0xaa5d5555,
         0x555556ab, 0xab555555, 0xb1dbced6, 0x11aed2d5, 0x4aaabff0,
         0x55de5555, 0x55555555, 0x6c055555, 0x0000557a, 0x01ff0000,
@@ -309,15 +307,12 @@ namespace UCD {
         0x0ffffbee, 0xffff07ff, 0xffff7fff, 0x0000ffff, 0x00001c00,
         0x00010000, 0xffff0007, 0x0fffffff, 0x000301ff, 0x03ff0000,
         0x3fffffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 188, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 191, 0};
-
-        static BinaryPropertyObject property_object{CWKCF, std::move(codepoint_set)};
+        const static UnicodeSet CWKCF_set{__CWKCF_set_runs, 188, __CWKCF_set_quads, 191};
+        static BinaryPropertyObject property_object{CWKCF, std::move(CWKCF_set)};
     }
 PropertyObject * get_CWKCF_PropertyObject() {  return & CWKCF_ns::property_object; }
     namespace COMP_EX_ns {
-        /** Code Point Ranges for Comp_Ex
+        /* Code Point Ranges for Comp_Ex
         [0340, 0341], [0343, 0344], [0374, 0374], [037e, 037e],
         [0387, 0387], [0958, 095f], [09dc, 09dd], [09df, 09df],
         [0a33, 0a33], [0a36, 0a36], [0a59, 0a5b], [0a5e, 0a5e],
@@ -336,11 +331,9 @@ PropertyObject * get_CWKCF_PropertyObject() {  return & CWKCF_ns::property_objec
         [fa2a, fa6d], [fa70, fad9], [fb1d, fb1d], [fb1f, fb1f],
         [fb2a, fb36], [fb38, fb3c], [fb3e, fb3e], [fb40, fb41],
         [fb43, fb44], [fb46, fb4e], [1d15e, 1d164], [1d1bb, 1d1c0],
-        [2f800, 2fa1d]**/
+        [2f800, 2fa1d] */
 
-
-        namespace {
-        const static UnicodeSet::run_t __codepoint_set_runs[] = {
+        const static UnicodeSet::run_t __Comp_Ex_set_runs[] = {
         {Empty, 26}, {Mixed, 3}, {Empty, 45}, {Mixed, 1}, {Empty, 3},
         {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 7}, {Mixed, 1},
         {Empty, 31}, {Mixed, 4}, {Empty, 125}, {Mixed, 1}, {Empty, 1},
@@ -349,7 +342,7 @@ PropertyObject * get_CWKCF_PropertyObject() {  return & CWKCF_ns::property_objec
         {Full, 1}, {Mixed, 1}, {Full, 2}, {Mixed, 1}, {Empty, 1},
         {Mixed, 3}, {Empty, 1711}, {Mixed, 2}, {Empty, 1}, {Mixed, 2},
         {Empty, 2353}, {Full, 16}, {Mixed, 1}, {Empty, 28719}};
-        const static UnicodeSet::bitquad_t  __codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __Comp_Ex_set_quads[] = {
         0x0000001b, 0x40100000, 0x00000080, 0xff000000, 0xb0000000,
         0x00480000, 0x4e000000, 0x30000000, 0x10842008, 0x01680200,
         0x20080002, 0x02001084, 0x2aaa0000, 0x48000000, 0x08080a00,
@@ -357,11 +350,8 @@ PropertyObject * get_CWKCF_PropertyObject() {  return & CWKCF_ns::property_objec
         0x7fe53fff, 0xfffffc65, 0xffff3fff, 0x03ffffff, 0xa0000000,
         0x5f7ffc00, 0x00007fdb, 0xc0000000, 0x0000001f, 0xf8000000,
         0x00000001, 0x3fffffff};
-        }
-
-        const static UnicodeSet codepoint_set{const_cast<UnicodeSet::run_t *>(__codepoint_set_runs), 39, 0, const_cast<UnicodeSet::bitquad_t *>(__codepoint_set_quads), 32, 0};
-
-        static BinaryPropertyObject property_object{Comp_Ex, std::move(codepoint_set)};
+        const static UnicodeSet Comp_Ex_set{__Comp_Ex_set_runs, 39, __Comp_Ex_set_quads, 32};
+        static BinaryPropertyObject property_object{Comp_Ex, std::move(Comp_Ex_set)};
     }
 PropertyObject * get_COMP_EX_PropertyObject() {  return & COMP_EX_ns::property_object; }
     namespace FC_NFKC_ns {
@@ -370,7 +360,8 @@ PropertyObject * get_COMP_EX_PropertyObject() {  return & COMP_EX_ns::property_o
 PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_object; }
   namespace NFC_QC_ns {
     const unsigned independent_prop_values = 3;
-    /** Code Point Ranges for Y
+
+    /* Code Point Ranges for Y
     [0000, 02ff], [0305, 0305], [030d, 030e], [0310, 0310], [0312, 0312],
     [0315, 031a], [031c, 0322], [0329, 032c], [032f, 032f], [0332, 0337],
     [0339, 033f], [0346, 0373], [0375, 037d], [037f, 0386], [0388, 0652],
@@ -395,10 +386,7 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     [11358, 113b7], [113b9, 113ba], [113bc, 113c1], [113c3, 113c4],
     [113c6, 113c6], [113ca, 114af], [114b1, 114b9], [114bb, 114bc],
     [114be, 115ae], [115b0, 1192f], [11931, 1611d], [1612a, 16d66],
-    [16d69, 1d15d], [1d165, 1d1ba], [1d1c1, 2f7ff], [2fa1e, 10ffff]**/
-
-
-    namespace {
+    [16d69, 1d15d], [1d165, 1d1ba], [1d1c1, 2f7ff], [2fa1e, 10ffff] */
     const static UnicodeSet::run_t __y_Set_runs[] = {
     {Full, 24}, {Mixed, 5}, {Full, 21}, {Mixed, 1}, {Full, 22}, {Mixed, 2},
     {Full, 2}, {Mixed, 2}, {Full, 2}, {Mixed, 2}, {Full, 6}, {Mixed, 2},
@@ -414,7 +402,7 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     {Full, 27}, {Mixed, 1}, {Full, 574}, {Mixed, 2}, {Full, 97}, {Mixed, 1},
     {Full, 798}, {Mixed, 2}, {Full, 1}, {Mixed, 2}, {Full, 2353},
     {Empty, 16}, {Mixed, 1}, {Full, 28719}};
-    const static UnicodeSet::bitquad_t  __y_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __y_Set_quads[] = {
     0xf7e56020, 0xfefc9e07, 0xffffffc0, 0xbfefffff, 0xffffff7f, 0xffc7ffff,
     0xefffffff, 0x00ffffff, 0xbfffffff, 0x4f7fffff, 0xffb7ffff, 0xb1ffffff,
     0xbfffffff, 0xcf3fffff, 0xbfffffff, 0xff7fffff, 0xffbfffff, 0xff9ffffb,
@@ -426,11 +414,9 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     0xbfffffff, 0xff7fffff, 0xf6ffffff, 0xfffffc5b, 0xdbfeffff, 0xffff7fff,
     0xfffeffff, 0x3fffffff, 0xfffffc00, 0xfffffe7f, 0x3fffffff, 0xffffffe0,
     0x07ffffff, 0xfffffffe, 0xc0000000};
-    }
+    const static UnicodeSet y_Set{__y_Set_runs, 79, __y_Set_quads, 63};
 
-    const static UnicodeSet y_Set{const_cast<UnicodeSet::run_t *>(__y_Set_runs), 79, 0, const_cast<UnicodeSet::bitquad_t *>(__y_Set_quads), 63, 0};
-
-    /** Code Point Ranges for N
+    /* Code Point Ranges for N
     [0340, 0341], [0343, 0344], [0374, 0374], [037e, 037e], [0387, 0387],
     [0958, 095f], [09dc, 09dd], [09df, 09df], [0a33, 0a33], [0a36, 0a36],
     [0a59, 0a5b], [0a5e, 0a5e], [0b5c, 0b5d], [0f43, 0f43], [0f4d, 0f4d],
@@ -445,10 +431,7 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     [fa12, fa12], [fa15, fa1e], [fa20, fa20], [fa22, fa22], [fa25, fa26],
     [fa2a, fa6d], [fa70, fad9], [fb1d, fb1d], [fb1f, fb1f], [fb2a, fb36],
     [fb38, fb3c], [fb3e, fb3e], [fb40, fb41], [fb43, fb44], [fb46, fb4e],
-    [1d15e, 1d164], [1d1bb, 1d1c0], [2f800, 2fa1d]**/
-
-
-    namespace {
+    [1d15e, 1d164], [1d1bb, 1d1c0], [2f800, 2fa1d] */
     const static UnicodeSet::run_t __n_Set_runs[] = {
     {Empty, 26}, {Mixed, 3}, {Empty, 45}, {Mixed, 1}, {Empty, 3},
     {Mixed, 1}, {Empty, 2}, {Mixed, 2}, {Empty, 7}, {Mixed, 1}, {Empty, 31},
@@ -458,18 +441,16 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     {Full, 2}, {Mixed, 1}, {Empty, 1}, {Mixed, 3}, {Empty, 1711},
     {Mixed, 2}, {Empty, 1}, {Mixed, 2}, {Empty, 2353}, {Full, 16},
     {Mixed, 1}, {Empty, 28719}};
-    const static UnicodeSet::bitquad_t  __n_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __n_Set_quads[] = {
     0x0000001b, 0x40100000, 0x00000080, 0xff000000, 0xb0000000, 0x00480000,
     0x4e000000, 0x30000000, 0x10842008, 0x01680200, 0x20080002, 0x02001084,
     0x2aaa0000, 0x48000000, 0x08080a00, 0x2a00c808, 0x00000003, 0x00000c40,
     0x00000600, 0x10000000, 0x7fe53fff, 0xfffffc65, 0xffff3fff, 0x03ffffff,
     0xa0000000, 0x5f7ffc00, 0x00007fdb, 0xc0000000, 0x0000001f, 0xf8000000,
     0x00000001, 0x3fffffff};
-    }
+    const static UnicodeSet n_Set{__n_Set_runs, 39, __n_Set_quads, 32};
 
-    const static UnicodeSet n_Set{const_cast<UnicodeSet::run_t *>(__n_Set_runs), 39, 0, const_cast<UnicodeSet::bitquad_t *>(__n_Set_quads), 32, 0};
-
-    /** Code Point Ranges for M
+    /* Code Point Ranges for M
     [0300, 0304], [0306, 030c], [030f, 030f], [0311, 0311], [0313, 0314],
     [031b, 031b], [0323, 0328], [032d, 032e], [0330, 0331], [0338, 0338],
     [0342, 0342], [0345, 0345], [0653, 0655], [093c, 093c], [09be, 09be],
@@ -480,10 +461,7 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     [11127, 11127], [1133e, 1133e], [11357, 11357], [113b8, 113b8],
     [113bb, 113bb], [113c2, 113c2], [113c5, 113c5], [113c7, 113c9],
     [114b0, 114b0], [114ba, 114ba], [114bd, 114bd], [115af, 115af],
-    [11930, 11930], [1611e, 16129], [16d67, 16d68]**/
-
-
-    namespace {
+    [11930, 11930], [1611e, 16129], [16d67, 16d68] */
     const static UnicodeSet::run_t __m_Set_runs[] = {
     {Empty, 24}, {Mixed, 3}, {Empty, 23}, {Mixed, 1}, {Empty, 22},
     {Mixed, 1}, {Empty, 3}, {Mixed, 2}, {Empty, 10}, {Mixed, 2}, {Empty, 2},
@@ -494,17 +472,14 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
     {Mixed, 1}, {Empty, 15}, {Mixed, 2}, {Empty, 2}, {Mixed, 2}, {Empty, 6},
     {Mixed, 1}, {Empty, 7}, {Mixed, 1}, {Empty, 27}, {Mixed, 1},
     {Empty, 574}, {Mixed, 2}, {Empty, 97}, {Mixed, 1}, {Empty, 31892}};
-    const static UnicodeSet::bitquad_t  __m_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __m_Set_quads[] = {
     0x081a9fdf, 0x010361f8, 0x00000024, 0x00380000, 0x10000000, 0x40000000,
     0x00800000, 0x40000000, 0x00c00000, 0x40000000, 0x00800000, 0x00400000,
     0x00600004, 0x40000000, 0x00800000, 0x80008400, 0x00004000, 0x003ffffe,
     0xffffff00, 0x00000007, 0x00200000, 0x06000000, 0x04000000, 0x00000080,
     0x40000000, 0x00800000, 0x09000000, 0x000003a4, 0x24010000, 0x00008000,
     0x00010000, 0xc0000000, 0x000003ff, 0x00000180};
-    }
-
-    const static UnicodeSet m_Set{const_cast<UnicodeSet::run_t *>(__m_Set_runs), 49, 0, const_cast<UnicodeSet::bitquad_t *>(__m_Set_quads), 34, 0};
-
+    const static UnicodeSet m_Set{__m_Set_runs, 49, __m_Set_quads, 34};
     static EnumeratedPropertyObject property_object
         {NFC_QC,
         NFC_QC_ns::independent_prop_values,
@@ -517,7 +492,8 @@ PropertyObject * get_FC_NFKC_PropertyObject() {  return & FC_NFKC_ns::property_o
 PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_object; }
   namespace NFD_QC_ns {
     const unsigned independent_prop_values = 2;
-    /** Code Point Ranges for Y
+
+    /* Code Point Ranges for Y
     [0000, 00bf], [00c6, 00c6], [00d0, 00d0], [00d7, 00d8], [00de, 00df],
     [00e6, 00e6], [00f0, 00f0], [00f7, 00f8], [00fe, 00fe], [0110, 0111],
     [0126, 0127], [0131, 0133], [0138, 0138], [013f, 0142], [0149, 014b],
@@ -567,10 +543,7 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     [11384, 11384], [11386, 1138d], [1138f, 11390], [11392, 113c4],
     [113c6, 113c6], [113c9, 114ba], [114bd, 114bd], [114bf, 115b9],
     [115bc, 11937], [11939, 16120], [16129, 16d67], [16d6b, 1d15d],
-    [1d165, 1d1ba], [1d1c1, 2f7ff], [2fa1e, 10ffff]**/
-
-
-    namespace {
+    [1d165, 1d1ba], [1d1c1, 2f7ff], [2fa1e, 10ffff] */
     const static UnicodeSet::run_t __y_Set_runs[] = {
     {Full, 6}, {Mixed, 6}, {Full, 1}, {Mixed, 5}, {Full, 8}, {Mixed, 5},
     {Full, 1}, {Mixed, 4}, {Full, 2}, {Mixed, 2}, {Full, 9}, {Mixed, 1},
@@ -590,7 +563,7 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     {Full, 7}, {Mixed, 1}, {Full, 27}, {Mixed, 1}, {Full, 575}, {Mixed, 1},
     {Full, 97}, {Mixed, 1}, {Full, 798}, {Mixed, 2}, {Full, 1}, {Mixed, 2},
     {Full, 2353}, {Empty, 16}, {Mixed, 1}, {Full, 28719}};
-    const static UnicodeSet::bitquad_t  __y_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __y_Set_quads[] = {
     0xc1810040, 0x41810040, 0x00030000, 0x810e00c0, 0x000c0e07, 0x800000c0,
     0xfffe7ffc, 0x20001fff, 0x00ce0030, 0x30000000, 0xfff0003f, 0xffffffe4,
     0xbfefffff, 0xfffe281f, 0xfffe03ff, 0xffe783ff, 0xfdff8f74, 0xfdffffff,
@@ -608,11 +581,9 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     0xffff3fff, 0xffffe7ff, 0xfffdbfd7, 0xfffffe5f, 0xa7ffffff, 0xf3ffffff,
     0xfeffffff, 0xfffffe01, 0xfffff8ff, 0x3fffffff, 0xffffffe0, 0x07ffffff,
     0xfffffffe, 0xc0000000};
-    }
+    const static UnicodeSet y_Set{__y_Set_runs, 105, __y_Set_quads, 98};
 
-    const static UnicodeSet y_Set{const_cast<UnicodeSet::run_t *>(__y_Set_runs), 105, 0, const_cast<UnicodeSet::bitquad_t *>(__y_Set_quads), 98, 0};
-
-    /** Code Point Ranges for N
+    /* Code Point Ranges for N
     [00c0, 00c5], [00c7, 00cf], [00d1, 00d6], [00d9, 00dd], [00e0, 00e5],
     [00e7, 00ef], [00f1, 00f6], [00f9, 00fd], [00ff, 010f], [0112, 0125],
     [0128, 0130], [0134, 0137], [0139, 013e], [0143, 0148], [014c, 0151],
@@ -662,10 +633,7 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     [11385, 11385], [1138e, 1138e], [11391, 11391], [113c5, 113c5],
     [113c7, 113c8], [114bb, 114bc], [114be, 114be], [115ba, 115bb],
     [11938, 11938], [16121, 16128], [16d68, 16d6a], [1d15e, 1d164],
-    [1d1bb, 1d1c0], [2f800, 2fa1d]**/
-
-
-    namespace {
+    [1d1bb, 1d1c0], [2f800, 2fa1d] */
     const static UnicodeSet::run_t __n_Set_runs[] = {
     {Empty, 6}, {Mixed, 6}, {Empty, 1}, {Mixed, 5}, {Empty, 8}, {Mixed, 5},
     {Empty, 1}, {Mixed, 4}, {Empty, 2}, {Mixed, 2}, {Empty, 9}, {Mixed, 1},
@@ -686,7 +654,7 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     {Empty, 575}, {Mixed, 1}, {Empty, 97}, {Mixed, 1}, {Empty, 798},
     {Mixed, 2}, {Empty, 1}, {Mixed, 2}, {Empty, 2353}, {Full, 16},
     {Mixed, 1}, {Empty, 28719}};
-    const static UnicodeSet::bitquad_t  __n_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __n_Set_quads[] = {
     0x3e7effbf, 0xbe7effbf, 0xfffcffff, 0x7ef1ff3f, 0xfff3f1f8, 0x7fffff3f,
     0x00018003, 0xdfffe000, 0xff31ffcf, 0xcfffffff, 0x000fffc0, 0x0000001b,
     0x40100000, 0x0001d7e0, 0x0001fc00, 0x00187c00, 0x0200708b, 0x02000000,
@@ -704,10 +672,7 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     0x0000c000, 0x00001800, 0x00024028, 0x000001a0, 0x58000000, 0x0c000000,
     0x01000000, 0x000001fe, 0x00000700, 0xc0000000, 0x0000001f, 0xf8000000,
     0x00000001, 0x3fffffff};
-    }
-
-    const static UnicodeSet n_Set{const_cast<UnicodeSet::run_t *>(__n_Set_runs), 105, 0, const_cast<UnicodeSet::bitquad_t *>(__n_Set_quads), 98, 0};
-
+    const static UnicodeSet n_Set{__n_Set_runs, 105, __n_Set_quads, 98};
     static EnumeratedPropertyObject property_object
         {NFD_QC,
         NFD_QC_ns::independent_prop_values,
@@ -719,15 +684,13 @@ PropertyObject * get_NFC_QC_PropertyObject() {  return & NFC_QC_ns::property_obj
     }
 PropertyObject * get_NFD_QC_PropertyObject() {  return & NFD_QC_ns::property_object; }
     namespace NFKC_CF_ns {
-        /** Code Point Ranges for NFKC_CF mapping to <none>
+        /* Code Point Ranges for NFKC_CF mapping to <none>
         [00ad, 00ad], [034f, 034f], [061c, 061c], [115f, 1160],
         [17b4, 17b5], [180b, 180f], [200b, 200f], [202a, 202e],
         [2060, 206f], [3164, 3164], [fe00, fe0f], [feff, feff],
         [ffa0, ffa0], [fff0, fff8], [1bca0, 1bca3], [1d173, 1d17a],
-        [e0000, e0fff]**/
+        [e0000, e0fff]*/
 
-        
-        namespace {
         const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
         {Empty, 5}, {Mixed, 1}, {Empty, 20}, {Mixed, 1}, {Empty, 21},
         {Mixed, 1}, {Empty, 89}, {Mixed, 2}, {Empty, 49}, {Mixed, 1},
@@ -736,18 +699,15 @@ PropertyObject * get_NFD_QC_PropertyObject() {  return & NFD_QC_ns::property_obj
         {Empty, 6}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Mixed, 1}, {Empty, 1509}, {Mixed, 1}, {Empty, 165}, {Mixed, 1},
         {Empty, 24948}, {Full, 128}, {Empty, 6016}};
-        const static UnicodeSet::bitquad_t  __null_codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __null_codepoint_set_quads[] = {
         0x00002000, 0x00008000, 0x10000000, 0x80000000, 0x00000001,
         0x00300000, 0x0000f800, 0x0000f800, 0x00007c00, 0x0000ffff,
         0x00000010, 0x0000ffff, 0x80000000, 0x00000001, 0x01ff0000,
         0x0000000f, 0x07f80000};
-        }
-
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 33, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 17, 0};
+        const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 33, __null_codepoint_set_quads, 17};
 
 
-
-        /** Code Point Ranges for NFKC_CF mapping to <codepoint>
+        /* Code Point Ranges for NFKC_CF mapping to <codepoint>
         [0000, 0040], [005b, 009f], [00a1, 00a7], [00a9, 00a9],
         [00ab, 00ac], [00ae, 00ae], [00b0, 00b1], [00b6, 00b7],
         [00bb, 00bb], [00bf, 00bf], [00d7, 00d7], [00e0, 00ff],
@@ -959,10 +919,8 @@ PropertyObject * get_NFD_QC_PropertyObject() {  return & NFD_QC_ns::property_obj
         [1eebc, 1f0ff], [1f10b, 1f10f], [1f12f, 1f12f], [1f150, 1f169],
         [1f16d, 1f18f], [1f191, 1f1ff], [1f203, 1f20f], [1f23c, 1f23f],
         [1f249, 1f24f], [1f252, 1fbef], [1fbfa, 2f7ff], [2fa1e, dffff],
-        [e1000, 10ffff]**/
+        [e1000, 10ffff]*/
 
-        
-        namespace {
         const static UnicodeSet::run_t __reflexive_set_runs[] = {
         {Full, 2}, {Mixed, 1}, {Full, 2}, {Mixed, 2}, {Full, 1},
         {Mixed, 11}, {Full, 2}, {Mixed, 3}, {Full, 2}, {Mixed, 6},
@@ -1001,7 +959,7 @@ PropertyObject * get_NFD_QC_PropertyObject() {  return & NFD_QC_ns::property_obj
         {Full, 38}, {Mixed, 6}, {Full, 18}, {Mixed, 5}, {Full, 3},
         {Mixed, 3}, {Full, 76}, {Mixed, 1}, {Full, 2016}, {Empty, 16},
         {Mixed, 1}, {Full, 22575}, {Empty, 128}, {Full, 6016}};
-        const static UnicodeSet::bitquad_t  __reflexive_set_quads[] = {
+        const static UnicodeSet::bitquad_t __reflexive_set_quads[] = {
         0xf8000001, 0x88c35afe, 0x00800000, 0xaaaaaaaa, 0x55a2aaaa,
         0xaaaaa954, 0x54aaaaaa, 0x4e243129, 0xee512d2a, 0xb555400f,
         0xaa21aaaa, 0xaaaaaaaa, 0x93faaaaa, 0xffffaa85, 0xfe00ffff,
@@ -1041,10 +999,7 @@ PropertyObject * get_NFD_QC_PropertyObject() {  return & NFD_QC_ns::property_obj
         0xf0000411, 0x0000f800, 0x00008000, 0xffff0000, 0xffffe3ff,
         0xfffeffff, 0x0000fff8, 0xf0000000, 0xfffcfe00, 0xfc00ffff,
         0xc0000000};
-        }
-
-        const static UnicodeSet reflexive_set{const_cast<UnicodeSet::run_t *>(__reflexive_set_runs), 188, 0, const_cast<UnicodeSet::bitquad_t *>(__reflexive_set_quads), 191, 0};
-
+        const static UnicodeSet reflexive_set{__reflexive_set_runs, 188, __reflexive_set_quads, 191};
 
 
         const static std::vector<unsigned> buffer_offsets = {
@@ -8934,7 +8889,8 @@ dj
 PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_object; }
   namespace NFKC_QC_ns {
     const unsigned independent_prop_values = 3;
-    /** Code Point Ranges for Y
+
+    /* Code Point Ranges for Y
     [0000, 009f], [00a1, 00a7], [00a9, 00a9], [00ab, 00ae], [00b0, 00b1],
     [00b6, 00b7], [00bb, 00bb], [00bf, 0131], [0134, 013e], [0141, 0148],
     [014a, 017e], [0180, 01c3], [01cd, 01f0], [01f4, 02af], [02b9, 02d7],
@@ -8999,10 +8955,7 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     [1ee9c, 1eea0], [1eea4, 1eea4], [1eeaa, 1eeaa], [1eebc, 1f0ff],
     [1f10b, 1f10f], [1f12f, 1f12f], [1f150, 1f169], [1f16d, 1f18f],
     [1f191, 1f1ff], [1f203, 1f20f], [1f23c, 1f23f], [1f249, 1f24f],
-    [1f252, 1fbef], [1fbfa, 2f7ff], [2fa1e, 10ffff]**/
-
-
-    namespace {
+    [1f252, 1fbef], [1fbfa, 2f7ff], [2fa1e, 10ffff] */
     const static UnicodeSet::run_t __y_Set_runs[] = {
     {Full, 5}, {Mixed, 1}, {Full, 3}, {Mixed, 3}, {Full, 2}, {Mixed, 2},
     {Full, 5}, {Mixed, 8}, {Full, 1}, {Mixed, 2}, {Full, 12}, {Mixed, 1},
@@ -9035,7 +8988,7 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     {Full, 65}, {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Full, 108}, {Mixed, 6},
     {Full, 18}, {Mixed, 5}, {Full, 3}, {Mixed, 3}, {Full, 76}, {Mixed, 1},
     {Full, 2016}, {Empty, 16}, {Mixed, 1}, {Full, 28719}};
-    const static UnicodeSet::bitquad_t  __y_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __y_Set_quads[] = {
     0x88c37afe, 0x7ff3ffff, 0xfffffdfe, 0x7fffffff, 0xffffe00f, 0xfff1ffff,
     0xfe00ffff, 0xc0ffffff, 0xffffffe0, 0xf7e56020, 0xfefc9e07, 0xffffffc0,
     0xbbefffff, 0xffffff4f, 0xff80ffff, 0xfdc8ffff, 0xffffff7f, 0xffc7ffff,
@@ -9063,11 +9016,9 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     0x0000ffff, 0xffffc000, 0x00000010, 0xf5080169, 0x5569157b, 0xa1080869,
     0xf0000400, 0xf0000411, 0x0000f800, 0x00008000, 0xffff0000, 0xffffe3ff,
     0xfffeffff, 0x0000fff8, 0xf0000000, 0xfffcfe00, 0xfc00ffff, 0xc0000000};
-    }
+    const static UnicodeSet y_Set{__y_Set_runs, 184, __y_Set_quads, 162};
 
-    const static UnicodeSet y_Set{const_cast<UnicodeSet::run_t *>(__y_Set_runs), 184, 0, const_cast<UnicodeSet::bitquad_t *>(__y_Set_quads), 162, 0};
-
-    /** Code Point Ranges for N
+    /* Code Point Ranges for N
     [00a0, 00a0], [00a8, 00a8], [00aa, 00aa], [00af, 00af], [00b2, 00b5],
     [00b8, 00ba], [00bc, 00be], [0132, 0133], [013f, 0140], [0149, 0149],
     [017f, 017f], [01c4, 01cc], [01f1, 01f3], [02b0, 02b8], [02d8, 02dd],
@@ -9122,10 +9073,7 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     [1ee8b, 1ee9b], [1eea1, 1eea3], [1eea5, 1eea9], [1eeab, 1eebb],
     [1f100, 1f10a], [1f110, 1f12e], [1f130, 1f14f], [1f16a, 1f16c],
     [1f190, 1f190], [1f200, 1f202], [1f210, 1f23b], [1f240, 1f248],
-    [1f250, 1f251], [1fbf0, 1fbf9], [2f800, 2fa1d]**/
-
-
-    namespace {
+    [1f250, 1f251], [1fbf0, 1fbf9], [2f800, 2fa1d] */
     const static UnicodeSet::run_t __n_Set_runs[] = {
     {Empty, 5}, {Mixed, 1}, {Empty, 3}, {Mixed, 3}, {Empty, 2}, {Mixed, 2},
     {Empty, 5}, {Mixed, 3}, {Empty, 2}, {Mixed, 3}, {Empty, 1}, {Mixed, 2},
@@ -9154,7 +9102,7 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     {Mixed, 6}, {Empty, 18}, {Mixed, 5}, {Empty, 3}, {Mixed, 3},
     {Empty, 76}, {Mixed, 1}, {Empty, 2016}, {Full, 16}, {Mixed, 1},
     {Empty, 28719}};
-    const static UnicodeSet::bitquad_t  __n_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __n_Set_quads[] = {
     0x773c8501, 0x800c0000, 0x00000201, 0x80000000, 0x00001ff0, 0x000e0000,
     0x01ff0000, 0x3f000000, 0x0000001f, 0x0000001b, 0x44100000, 0x000000b0,
     0x007f0000, 0x02370000, 0x00000080, 0x01e00000, 0xff000000, 0xb0000000,
@@ -9177,11 +9125,9 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     0xffff0000, 0x00003fff, 0xffffffef, 0x0af7fe96, 0xaa96ea84, 0x5ef7f796,
     0x0ffffbff, 0x0ffffbee, 0xffff07ff, 0xffff7fff, 0x0000ffff, 0x00001c00,
     0x00010000, 0xffff0007, 0x0fffffff, 0x000301ff, 0x03ff0000, 0x3fffffff};
-    }
+    const static UnicodeSet n_Set{__n_Set_runs, 150, __n_Set_quads, 132};
 
-    const static UnicodeSet n_Set{const_cast<UnicodeSet::run_t *>(__n_Set_runs), 150, 0, const_cast<UnicodeSet::bitquad_t *>(__n_Set_quads), 132, 0};
-
-    /** Code Point Ranges for M
+    /* Code Point Ranges for M
     [0300, 0304], [0306, 030c], [030f, 030f], [0311, 0311], [0313, 0314],
     [031b, 031b], [0323, 0328], [032d, 032e], [0330, 0331], [0338, 0338],
     [0342, 0342], [0345, 0345], [0653, 0655], [093c, 093c], [09be, 09be],
@@ -9192,10 +9138,7 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     [11127, 11127], [1133e, 1133e], [11357, 11357], [113b8, 113b8],
     [113bb, 113bb], [113c2, 113c2], [113c5, 113c5], [113c7, 113c9],
     [114b0, 114b0], [114ba, 114ba], [114bd, 114bd], [115af, 115af],
-    [11930, 11930], [1611e, 16129], [16d67, 16d68]**/
-
-
-    namespace {
+    [11930, 11930], [1611e, 16129], [16d67, 16d68] */
     const static UnicodeSet::run_t __m_Set_runs[] = {
     {Empty, 24}, {Mixed, 3}, {Empty, 23}, {Mixed, 1}, {Empty, 22},
     {Mixed, 1}, {Empty, 3}, {Mixed, 2}, {Empty, 10}, {Mixed, 2}, {Empty, 2},
@@ -9206,17 +9149,14 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     {Mixed, 1}, {Empty, 15}, {Mixed, 2}, {Empty, 2}, {Mixed, 2}, {Empty, 6},
     {Mixed, 1}, {Empty, 7}, {Mixed, 1}, {Empty, 27}, {Mixed, 1},
     {Empty, 574}, {Mixed, 2}, {Empty, 97}, {Mixed, 1}, {Empty, 31892}};
-    const static UnicodeSet::bitquad_t  __m_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __m_Set_quads[] = {
     0x081a9fdf, 0x010361f8, 0x00000024, 0x00380000, 0x10000000, 0x40000000,
     0x00800000, 0x40000000, 0x00c00000, 0x40000000, 0x00800000, 0x00400000,
     0x00600004, 0x40000000, 0x00800000, 0x80008400, 0x00004000, 0x003ffffe,
     0xffffff00, 0x00000007, 0x00200000, 0x06000000, 0x04000000, 0x00000080,
     0x40000000, 0x00800000, 0x09000000, 0x000003a4, 0x24010000, 0x00008000,
     0x00010000, 0xc0000000, 0x000003ff, 0x00000180};
-    }
-
-    const static UnicodeSet m_Set{const_cast<UnicodeSet::run_t *>(__m_Set_runs), 49, 0, const_cast<UnicodeSet::bitquad_t *>(__m_Set_quads), 34, 0};
-
+    const static UnicodeSet m_Set{__m_Set_runs, 49, __m_Set_quads, 34};
     static EnumeratedPropertyObject property_object
         {NFKC_QC,
         NFKC_QC_ns::independent_prop_values,
@@ -9228,15 +9168,13 @@ PropertyObject * get_NFKC_CF_PropertyObject() {  return & NFKC_CF_ns::property_o
     }
 PropertyObject * get_NFKC_QC_PropertyObject() {  return & NFKC_QC_ns::property_object; }
     namespace NFKC_SCF_ns {
-        /** Code Point Ranges for NFKC_SCF mapping to <none>
+        /* Code Point Ranges for NFKC_SCF mapping to <none>
         [00ad, 00ad], [034f, 034f], [061c, 061c], [115f, 1160],
         [17b4, 17b5], [180b, 180f], [200b, 200f], [202a, 202e],
         [2060, 206f], [3164, 3164], [fe00, fe0f], [feff, feff],
         [ffa0, ffa0], [fff0, fff8], [1bca0, 1bca3], [1d173, 1d17a],
-        [e0000, e0fff]**/
+        [e0000, e0fff]*/
 
-        
-        namespace {
         const static UnicodeSet::run_t __null_codepoint_set_runs[] = {
         {Empty, 5}, {Mixed, 1}, {Empty, 20}, {Mixed, 1}, {Empty, 21},
         {Mixed, 1}, {Empty, 89}, {Mixed, 2}, {Empty, 49}, {Mixed, 1},
@@ -9245,18 +9183,15 @@ PropertyObject * get_NFKC_QC_PropertyObject() {  return & NFKC_QC_ns::property_o
         {Empty, 6}, {Mixed, 1}, {Empty, 5}, {Mixed, 1}, {Empty, 1},
         {Mixed, 1}, {Empty, 1509}, {Mixed, 1}, {Empty, 165}, {Mixed, 1},
         {Empty, 24948}, {Full, 128}, {Empty, 6016}};
-        const static UnicodeSet::bitquad_t  __null_codepoint_set_quads[] = {
+        const static UnicodeSet::bitquad_t __null_codepoint_set_quads[] = {
         0x00002000, 0x00008000, 0x10000000, 0x80000000, 0x00000001,
         0x00300000, 0x0000f800, 0x0000f800, 0x00007c00, 0x0000ffff,
         0x00000010, 0x0000ffff, 0x80000000, 0x00000001, 0x01ff0000,
         0x0000000f, 0x07f80000};
-        }
-
-        const static UnicodeSet null_codepoint_set{const_cast<UnicodeSet::run_t *>(__null_codepoint_set_runs), 33, 0, const_cast<UnicodeSet::bitquad_t *>(__null_codepoint_set_quads), 17, 0};
+        const static UnicodeSet null_codepoint_set{__null_codepoint_set_runs, 33, __null_codepoint_set_quads, 17};
 
 
-
-        /** Code Point Ranges for NFKC_SCF mapping to <codepoint>
+        /* Code Point Ranges for NFKC_SCF mapping to <codepoint>
         [0000, 0040], [005b, 009f], [00a1, 00a7], [00a9, 00a9],
         [00ab, 00ac], [00ae, 00ae], [00b0, 00b1], [00b6, 00b7],
         [00bb, 00bb], [00bf, 00bf], [00d7, 00d7], [00df, 00ff],
@@ -9467,10 +9402,8 @@ PropertyObject * get_NFKC_QC_PropertyObject() {  return & NFKC_QC_ns::property_o
         [1ee9c, 1eea0], [1eea4, 1eea4], [1eeaa, 1eeaa], [1eebc, 1f0ff],
         [1f10b, 1f10f], [1f12f, 1f12f], [1f150, 1f169], [1f16d, 1f18f],
         [1f191, 1f1ff], [1f203, 1f20f], [1f23c, 1f23f], [1f249, 1f24f],
-        [1f252, 1fbef], [1fbfa, 2f7ff], [2fa1e, dffff], [e1000, 10ffff]**/
+        [1f252, 1fbef], [1fbfa, 2f7ff], [2fa1e, dffff], [e1000, 10ffff]*/
 
-        
-        namespace {
         const static UnicodeSet::run_t __reflexive_set_runs[] = {
         {Full, 2}, {Mixed, 1}, {Full, 2}, {Mixed, 2}, {Full, 1},
         {Mixed, 11}, {Full, 2}, {Mixed, 3}, {Full, 2}, {Mixed, 6},
@@ -9509,7 +9442,7 @@ PropertyObject * get_NFKC_QC_PropertyObject() {  return & NFKC_QC_ns::property_o
         {Full, 38}, {Mixed, 6}, {Full, 18}, {Mixed, 5}, {Full, 3},
         {Mixed, 3}, {Full, 76}, {Mixed, 1}, {Full, 2016}, {Empty, 16},
         {Mixed, 1}, {Full, 22575}, {Empty, 128}, {Full, 6016}};
-        const static UnicodeSet::bitquad_t  __reflexive_set_quads[] = {
+        const static UnicodeSet::bitquad_t __reflexive_set_quads[] = {
         0xf8000001, 0x88c35afe, 0x80800000, 0xaaaaaaaa, 0x55a3aaaa,
         0xaaaaa954, 0x54aaaaaa, 0x4e243129, 0xee512d2a, 0xb555400f,
         0xaa21aaaa, 0xaaaaaaaa, 0x93faaaaa, 0xffffaa85, 0xfe00ffff,
@@ -9549,10 +9482,7 @@ PropertyObject * get_NFKC_QC_PropertyObject() {  return & NFKC_QC_ns::property_o
         0xf0000400, 0xf0000411, 0x0000f800, 0x00008000, 0xffff0000,
         0xffffe3ff, 0xfffeffff, 0x0000fff8, 0xf0000000, 0xfffcfe00,
         0xfc00ffff, 0xc0000000};
-        }
-
-        const static UnicodeSet reflexive_set{const_cast<UnicodeSet::run_t *>(__reflexive_set_runs), 186, 0, const_cast<UnicodeSet::bitquad_t *>(__reflexive_set_quads), 192, 0};
-
+        const static UnicodeSet reflexive_set{__reflexive_set_runs, 186, __reflexive_set_quads, 192};
 
 
         const static std::vector<unsigned> buffer_offsets = {
@@ -17394,7 +17324,8 @@ dj
 PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property_object; }
   namespace NFKD_QC_ns {
     const unsigned independent_prop_values = 2;
-    /** Code Point Ranges for Y
+
+    /* Code Point Ranges for Y
     [0000, 009f], [00a1, 00a7], [00a9, 00a9], [00ab, 00ae], [00b0, 00b1],
     [00b6, 00b7], [00bb, 00bb], [00bf, 00bf], [00c6, 00c6], [00d0, 00d0],
     [00d7, 00d8], [00de, 00df], [00e6, 00e6], [00f0, 00f0], [00f7, 00f8],
@@ -17481,10 +17412,7 @@ PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property
     [1eea4, 1eea4], [1eeaa, 1eeaa], [1eebc, 1f0ff], [1f10b, 1f10f],
     [1f12f, 1f12f], [1f150, 1f169], [1f16d, 1f18f], [1f191, 1f1ff],
     [1f203, 1f20f], [1f23c, 1f23f], [1f249, 1f24f], [1f252, 1fbef],
-    [1fbfa, 2f7ff], [2fa1e, 10ffff]**/
-
-
-    namespace {
+    [1fbfa, 2f7ff], [2fa1e, 10ffff] */
     const static UnicodeSet::run_t __y_Set_runs[] = {
     {Full, 5}, {Mixed, 7}, {Full, 1}, {Mixed, 5}, {Full, 3}, {Mixed, 3},
     {Full, 2}, {Mixed, 10}, {Full, 2}, {Mixed, 2}, {Full, 4}, {Mixed, 1},
@@ -17519,7 +17447,7 @@ PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property
     {Mixed, 1}, {Empty, 1}, {Mixed, 1}, {Full, 108}, {Mixed, 6}, {Full, 18},
     {Mixed, 5}, {Full, 3}, {Mixed, 3}, {Full, 76}, {Mixed, 1}, {Full, 2016},
     {Empty, 16}, {Mixed, 1}, {Full, 28719}};
-    const static UnicodeSet::bitquad_t  __y_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __y_Set_quads[] = {
     0x88c37afe, 0xc1810040, 0x41810040, 0x00030000, 0x010200c0, 0x000c0c06,
     0x000000c0, 0xfffe7ffc, 0x2000000f, 0x00c00030, 0x30000000, 0xfff0003f,
     0xfe00ffff, 0xc0ffffff, 0xffffffe0, 0xffffffe4, 0xbbefffff, 0xfffe280f,
@@ -17552,11 +17480,9 @@ PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property
     0xa1080869, 0xf0000400, 0xf0000411, 0x0000f800, 0x00008000, 0xffff0000,
     0xffffe3ff, 0xfffeffff, 0x0000fff8, 0xf0000000, 0xfffcfe00, 0xfc00ffff,
     0xc0000000};
-    }
+    const static UnicodeSet y_Set{__y_Set_runs, 194, __y_Set_quads, 187};
 
-    const static UnicodeSet y_Set{const_cast<UnicodeSet::run_t *>(__y_Set_runs), 194, 0, const_cast<UnicodeSet::bitquad_t *>(__y_Set_quads), 187, 0};
-
-    /** Code Point Ranges for N
+    /* Code Point Ranges for N
     [00a0, 00a0], [00a8, 00a8], [00aa, 00aa], [00af, 00af], [00b2, 00b5],
     [00b8, 00ba], [00bc, 00be], [00c0, 00c5], [00c7, 00cf], [00d1, 00d6],
     [00d9, 00dd], [00e0, 00e5], [00e7, 00ef], [00f1, 00f6], [00f9, 00fd],
@@ -17643,10 +17569,7 @@ PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property
     [1eea5, 1eea9], [1eeab, 1eebb], [1f100, 1f10a], [1f110, 1f12e],
     [1f130, 1f14f], [1f16a, 1f16c], [1f190, 1f190], [1f200, 1f202],
     [1f210, 1f23b], [1f240, 1f248], [1f250, 1f251], [1fbf0, 1fbf9],
-    [2f800, 2fa1d]**/
-
-
-    namespace {
+    [2f800, 2fa1d] */
     const static UnicodeSet::run_t __n_Set_runs[] = {
     {Empty, 5}, {Mixed, 7}, {Empty, 1}, {Mixed, 5}, {Empty, 3}, {Mixed, 3},
     {Empty, 2}, {Mixed, 10}, {Empty, 2}, {Mixed, 2}, {Empty, 4}, {Mixed, 1},
@@ -17682,7 +17605,7 @@ PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property
     {Empty, 108}, {Mixed, 6}, {Empty, 18}, {Mixed, 5}, {Empty, 3},
     {Mixed, 3}, {Empty, 76}, {Mixed, 1}, {Empty, 2016}, {Full, 16},
     {Mixed, 1}, {Empty, 28719}};
-    const static UnicodeSet::bitquad_t  __n_Set_quads[] = {
+    const static UnicodeSet::bitquad_t __n_Set_quads[] = {
     0x773c8501, 0x3e7effbf, 0xbe7effbf, 0xfffcffff, 0xfefdff3f, 0xfff3f3f9,
     0xffffff3f, 0x00018003, 0xdffffff0, 0xff3fffcf, 0xcfffffff, 0x000fffc0,
     0x01ff0000, 0x3f000000, 0x0000001f, 0x0000001b, 0x44100000, 0x0001d7f0,
@@ -17715,10 +17638,7 @@ PropertyObject * get_NFKC_SCF_PropertyObject() {  return & NFKC_SCF_ns::property
     0x5ef7f796, 0x0ffffbff, 0x0ffffbee, 0xffff07ff, 0xffff7fff, 0x0000ffff,
     0x00001c00, 0x00010000, 0xffff0007, 0x0fffffff, 0x000301ff, 0x03ff0000,
     0x3fffffff};
-    }
-
-    const static UnicodeSet n_Set{const_cast<UnicodeSet::run_t *>(__n_Set_runs), 194, 0, const_cast<UnicodeSet::bitquad_t *>(__n_Set_quads), 187, 0};
-
+    const static UnicodeSet n_Set{__n_Set_runs, 194, __n_Set_quads, 187};
     static EnumeratedPropertyObject property_object
         {NFKD_QC,
         NFKD_QC_ns::independent_prop_values,
