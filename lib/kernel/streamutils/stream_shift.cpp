@@ -131,6 +131,7 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     Value * const initialInputBlock = b.CreateUDiv(initialInputPos, sz_BLOCKWIDTH);
     Value * const initialOutputBlock = b.CreateUDiv(initialOutputPos, sz_BLOCKWIDTH);
     Value * const producedBlockOffset = b.CreateSub(initialInputBlock, initialOutputBlock);
+    Value * const avail = b.getAvailableItemCount("markerStream");
     b.CreateBr(stridePrologue);
 
     b.SetInsertPoint(stridePrologue);
@@ -304,8 +305,12 @@ void IndexedShiftBack::generateMultiBlockLogic(KernelBuilder & b, Value * const 
     PHINode * const producedItemPosition = b.CreatePHI(sizeTy, 2);
     producedItemPosition->addIncoming(finalIndexPosition, strideFinalize);
     producedItemPosition->addIncoming(confirmedOutputPosition, emptyStride);
-    ////b.CallPrintInt("ISB produced items", producedItemPosition);
-    b.setProducedItemCount("shiftResults", producedItemPosition);
+    // The produced item position must be the location of the final index
+    // or the previously confirmed output position until processing the final
+    // stride.
+    Value * finalProduced = b.CreateSelect(b.isFinal(), avail, producedItemPosition);
+    //b.CallPrintInt("ISB produced items", finalProduced);
+    b.setProducedItemCount("shiftResults", finalProduced);
 }
 
 }
