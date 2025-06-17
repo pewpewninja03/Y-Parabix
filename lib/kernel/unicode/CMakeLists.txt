@@ -14,6 +14,7 @@ SRC
     UCD_property_kernel.cpp
     utf8gen.cpp
     utf8_decoder.cpp
+    utf8_support.cpp
     utf16gen.cpp
 DEPS
     kernel.pipeline

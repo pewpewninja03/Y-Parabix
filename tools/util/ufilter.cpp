@@ -20,6 +20,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamset.h>
 #include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/utf8_support.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/streamutils/deletion.h>
 #include <llvm/IR/Function.h>
@@ -31,7 +32,6 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <grep/grep_kernel.h>
 #include <toolchain/toolchain.h>
 #include <fileselect/file_select.h>
 #include <fcntl.h>
