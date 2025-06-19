@@ -2,10 +2,9 @@
 #include "evolutionary_algorithm.hpp"
 #include "lexographic_ordering.hpp"
 #include <boost/icl/interval_set.hpp>
-//#include <boost/graph/breadth_first_search.hpp>
 #include <toolchain/toolchain.h>
 #include <z3.h>
-#include <stack>
+#include <queue>
 
 #if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
     typedef int64_t Z3_int64;
@@ -327,7 +326,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     }
 
-    ThreadLocalPlacementGraph T(PartitionCount + n);
+    ThreadLocalPlacementGraph T(PartitionCount + n + 1);
 
     if (numOfThreadLocalStreamSets) {
 
@@ -399,6 +398,15 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             }
         }
 
+        ThreadLocalConflictGraph = ThreadLocalConflictGraphType(LastStreamSet - FirstStreamSet + 1);
+
+        for (auto e : make_iterator_range(edges(I))) {
+            auto sid = [&](const unsigned i) {
+                return reverse_mapping[i] - PartitionCount;
+            };
+            add_edge(sid(source(e, I)), sid(target(e, I)), ThreadLocalConflictGraph);
+        }
+
         #ifndef NDEBUG
         for (size_t i = 0; i < numOfThreadLocalStreamSets; ++i) {
             assert (remaining[i] == 0);
@@ -421,9 +429,12 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         const auto pageSize = getPageSize();
 
+        size_t lcmOfDenom = 1;
+
         auto add_edge_to_T = [&](const size_t u, const size_t v, const unsigned num, const unsigned denom) {
             assert (!edge(u, v, T).second);
             Rational percentOfPagePerStride{num, denom * pageSize};
+            lcmOfDenom = boost::lcm(lcmOfDenom, percentOfPagePerStride.denominator());
             add_edge(u, v, percentOfPagePerStride, T);
             #ifndef NDEBUG
             for (auto e : make_iterator_range(in_edges(v, T))) {
@@ -448,6 +459,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 const auto firstKernel = FirstKernelInPartition[partId];
                 add_edge_to_T(partId, u, C.upper(), StrideRepetitionVector[firstKernel]);
             }
+            const auto & S = StreamSetIORate[u - PartitionCount];
+            lcmOfDenom = boost::lcm(lcmOfDenom, S.denominator());
         }
 
         for (auto e : make_iterator_range(edges(I))) {
@@ -484,153 +497,352 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         transitive_reduction_dag(T);
 
-#if 0
+        const ThreadLocalPlacementGraph T0(T);
+
+        // TODO: this is probably too complex a solution. is it not equivalent to simply check the path lengths
+        // and conclude if one is longer, then with a small segment length, it'd be preferred over the other in
+        // that case? Similarly, if we take two paths and sort their weights, we could say one is bigger than
+        // with a large segment size whenever any i-th edge weight is larger in one than the other.
+
+        // TODO: just have them loop back to the partition root to indicate final cost?
+
+        std::vector<unsigned> sinks;
+
+        for (unsigned i = 0; i < PartitionCount; ++i) {
+            T[i] = false;
+        }
+        for (unsigned i = 0; i < n; ++i) {
+            const auto u = PartitionCount + i;
+            const bool isSink = (out_degree(u, T) == 0 && in_degree(u, T) != 0);
+            T[u] = isSink;
+            if (isSink) {
+                sinks.push_back(u);
+            }
+        }
 
         const auto cfg = Z3_mk_config();
-        Z3_set_param_value(cfg, "model", "true");
+        Z3_set_param_value(cfg, "model", "false");
         Z3_set_param_value(cfg, "proof", "false");
         Z3_set_param_value(cfg, "timeout", "2000");
         const auto ctx = Z3_mk_context(cfg);
         Z3_del_config(cfg);
-        const auto solver = Z3_mk_optimize(ctx);
-        Z3_optimize_inc_ref(ctx, solver);
+        const auto solver = Z3_mk_solver(ctx);
+        Z3_solver_inc_ref(ctx, solver);
+
 
         const auto varType = Z3_mk_int_sort(ctx);
 
-        auto constant = [&](const Z3_int64 value) {
-            return Z3_mk_int(ctx, value, varType);
-        };
-
         auto hard_assert = [&](Z3_ast c) {
-            Z3_optimize_assert(ctx, solver, c);
-        };
-
-        auto add =[&](Z3_ast X, Z3_ast Y) {
-            assert (X && Y);
-            std::array<Z3_ast, 2> args{ X, Y };
-            return Z3_mk_add(ctx, 2, args.data());
-        };
-
-        auto sub =[&](Z3_ast X, Z3_ast Y) {
-            assert (X && Y);
-            std::array<Z3_ast, 2> args{ X, Y };
-            return Z3_mk_sub(ctx, 2, args.data());
-        };
-
-        auto multiply =[&](Z3_ast X, Z3_ast Y) {
-            assert (X && Y);
-            std::array<Z3_ast, 2> args{ X, Y };
-            return Z3_mk_mul(ctx, 2, args.data());
+            Z3_solver_assert(ctx, solver, c);
         };
 
         auto check = [&]() -> Z3_lbool {
-            #if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 5, 0)
-            return Z3_optimize_check(ctx, solver, 0, nullptr);
-            #else
-            return Z3_optimize_check(ctx, solver);
-            #endif
+            return Z3_solver_check(ctx, solver);
+        };
+
+        auto constant = [&](const size_t value) {
+            return Z3_mk_int(ctx, value, varType);
         };
 
         const Z3_ast z3_ZERO = constant(0);
 
-//        std::vector<Z3_ast> partitionScalingVars(packedPartitionCount, nullptr);
-//        for (unsigned i = 0; i < packedPartitionCount; ++i) {
-//            Z3_ast var = Z3_mk_fresh_const(ctx, nullptr, varType);
-//            hard_assert(Z3_mk_gt(ctx, var, z3_ZERO));
-//            partitionScalingVars[i] = var;
+        const Z3_ast z3_LCM_OF_DENOM = constant(lcmOfDenom);
 
+        std::queue<unsigned> Q;
 
+        std::vector<unsigned> pending(n);
 
-
-//        }
-
-        std::vector<Z3_ast> partitionScalingVars(packedPartitionCount, nullptr);
-        for (unsigned i = 0; i < packedPartitionCount; ++i) {
-            const auto d = maxMemory / maxPartitionMemory[i];
-            assert (d > 0);
-            maxPartitionMemory[i] = d;
-            partitionScalingVars[i] = constant(d);
+        for (unsigned i = 0; i < n; ++i) {
+            pending[i] = in_degree(PartitionCount + i, T);
         }
 
-        std::vector<Z3_ast> streamSetStartOffset(numOfThreadLocalStreamSets + 1, nullptr);
-        std::vector<Z3_ast> streamSetEndOffset(numOfThreadLocalStreamSets, nullptr);
+        std::vector<Z3_ast> val(PartitionCount + n);
 
+        std::vector<Rational> totalPathSum(n);
+        std::vector<unsigned> totalPathLength(n);
 
-        for (unsigned i = 0; i < numOfThreadLocalStreamSets; ++i) {
-            const auto p = streamSetPartitionId[i];
-            assert (p < packedPartitionCount);
-            auto sv = partitionScalingVars[p];
-            const auto & a = intervals[i];
-            Z3_ast start = z3_ZERO;
-            assert (a.upper() > a.lower());
-            assert (a.upper() <= maxMemory);
-            Z3_ast end = constant(maxPartitionMemory[p] * (a.upper() - a.lower()));
-            if (in_degree(i, B) > 0) {
-                Z3_ast off = Z3_mk_fresh_const(ctx, nullptr, varType);
-                hard_assert(Z3_mk_gt(ctx, off, z3_ZERO));
-                start = multiply(partitionScalingVars[p], off);
-                end = add(start, end);
+        flat_map<unsigned, Z3_ast> M;
+
+        auto to_int = [&](const Rational & R) -> unsigned {
+            const auto V = R * lcmOfDenom;
+            assert (V.denominator() == 1);
+            return V.numerator();
+        };
+
+        // TODO: preprocess the io scaling vars to determine if two partition vars are equivalent?
+
+        for (unsigned i = 0; i < PartitionCount; ++i) {
+            if (out_degree(i, T) > 0) {
+
+                const Z3_ast var = Z3_mk_fresh_const(ctx, nullptr, varType);
+                hard_assert(Z3_mk_gt(ctx, var, z3_ZERO));
+                val[i] = var;
+
+                assert (M.empty());
+
+                auto mk_ceil_var_mul = [&](const unsigned V) {
+                    auto f = M.find(V);
+                    if (f != M.end()) {
+                        return f->second;
+                    }
+                    Z3_ast v = nullptr;
+                    FixedArray<Z3_ast, 2> args;
+                    args[0] = var;
+                    args[1] = constant(V);
+                    v = Z3_mk_mul(ctx, 2, args.data());
+                    if (LLVM_LIKELY(V != lcmOfDenom)) {
+                        const Z3_ast r = Z3_mk_mod(ctx, v, z3_LCM_OF_DENOM);
+                        args[0] = v;
+                        args[1] = r;
+                        const Z3_ast a = Z3_mk_sub(ctx, 2, args.data());
+                        args[0] = a;
+                        args[1] = z3_LCM_OF_DENOM;
+                        const Z3_ast b = Z3_mk_add(ctx, 2, args.data());
+                        v = Z3_mk_ite(ctx, Z3_mk_eq(ctx, r, z3_ZERO), a, b);
+                    }
+                    M.emplace(V, v);
+                    return v;
+                };
+
+                assert (Q.empty());
+                for (auto e : make_iterator_range(out_edges(i, T))) {
+                    const auto v = target(e, T);
+                    assert (v >= PartitionCount);
+                    const auto k = v - PartitionCount;
+                    assert (pending[k] == 1);
+                    pending[k] = 0;
+                    const Rational & R = T[e];
+                    totalPathSum[k] = R;
+                    totalPathLength[k] = 1;
+                    val[v] = mk_ceil_var_mul(to_int(R));
+                    Q.push(v);
+                }
+
+                for (;;) {
+                    assert (!Q.empty());
+                    const auto u = Q.front(); Q.pop();
+                    for (auto e : make_iterator_range(out_edges(u, T))) {
+                        const auto v = target(e, T);
+                        assert (v >= PartitionCount);
+                        const auto k = v - PartitionCount;
+                        assert (pending[k] > 0);
+                        if (--pending[k] == 0) {
+                            const auto d = in_degree(v, T);
+                            assert (d > 0);
+                            Z3_ast incomingOffsetVal = nullptr;
+                            if (LLVM_LIKELY(d == 1)) {
+                                incomingOffsetVal = val[u];
+                            } else {
+                                ThreadLocalPlacementGraph::in_edge_iterator begin, end;
+                                std::tie(begin, end) = in_edges(v, T);
+                                SmallVector<Z3_ast, 4> prior(d);
+                                auto ei = begin;
+
+                                // TODO: sort these by total path cost up to the "source"
+
+                                for (unsigned i = 0; i != d; ++i, ++ei) {
+                                    prior[i] = val[source(*ei, T)];
+                                }
+                                assert (ei == end);
+
+                                for (unsigned i = 1; i != d; ++i) {
+                                    for (unsigned j = 0; j != i; ++j) {
+
+                                        if (prior[j] == nullptr) {
+                                            continue; // path_j was already pruned as being strictly less than some other path
+                                        }
+
+                                        Z3_solver_push(ctx, solver);
+                                        hard_assert(Z3_mk_lt(ctx, prior[j], prior[i]));
+                                        const Z3_lbool JltI = check();
+                                        Z3_solver_pop(ctx, solver, 1);
+
+                                        Z3_solver_push(ctx, solver);
+                                        hard_assert(Z3_mk_lt(ctx, prior[i], prior[j]));
+                                        const Z3_lbool IltJ = check();
+                                        Z3_solver_pop(ctx, solver, 1);
+
+                                        // If there exists an assignment of var s.t. path_j >= path_i and
+                                        // some different assignment of var s.t. path_i >= path_j, we must
+                                        // test both paths at runtime to determine the capacity required.
+
+                                        if (JltI == Z3_L_FALSE && IltJ != Z3_L_UNDEF) {
+                                            // for all assignments of var, path_j >= path_i
+                                            prior[i] = nullptr;
+                                            break;
+                                        } else if (IltJ == Z3_L_FALSE && JltI == Z3_L_TRUE) {
+                                            // for all assignments of var, path_i > path_j
+                                            prior[j] = nullptr;
+                                        }
+                                    }
+                                }
+
+                                auto ej = begin;
+                                unsigned m = 0;
+                                for (unsigned i = 0; i != d; ++i) {
+                                    auto ek = ej++;
+                                    if (prior[i]) {
+                                        prior[m++] = prior[i];
+                                    } else {
+                                        // prune the edge from the graph since we do not need to consider
+                                        // this path when determining the memory placement of this buffer
+                                        remove_edge(*ek, T);
+                                    }
+                                }
+                                assert (m > 0);
+                                Z3_ast c = prior[0];
+                                for (unsigned i = 1; i < m; ++i) {
+                                    c = Z3_mk_ite(ctx, Z3_mk_gt(ctx, prior[i], c), prior[i], c);
+                                }
+                                incomingOffsetVal = c;
+                            }
+
+                            FixedArray<Z3_ast, 2> args;
+                            args[0] = incomingOffsetVal;
+                            args[1] = mk_ceil_var_mul(to_int(T[e]));
+                            val[v] = Z3_mk_add(ctx, 2, args.data());
+
+                            Q.push(v);
+                        }
+                    }
+                    if (Q.empty()) {
+                        break;
+                    }
+                }
+
+                M.clear();
             }
-            streamSetStartOffset[i] = start;
-            streamSetEndOffset[i] = end;
         }
 
-        streamSetStartOffset[numOfThreadLocalStreamSets] = constant(maxMemory);
+        const auto l = sinks.size();
+        if (LLVM_UNLIKELY(l == 1)) {
 
-        std::vector<std::vector<Z3_ast>> spacers(packedPartitionCount);
+            add_edge(sinks[0], PartitionCount + n, Rational{0}, T);
 
-        for (auto e : make_iterator_range(edges(B))) {
-            auto i = source(e, B);
-            assert (i < numOfThreadLocalStreamSets);
-            auto j = target(e, B);
-            assert (j == numOfThreadLocalStreamSets || streamSetPartitionId[i] == streamSetPartitionId[j]);
-            assert (streamSetEndOffset[i]);
-            assert (streamSetStartOffset[j]);
-            hard_assert(Z3_mk_le(ctx, streamSetEndOffset[i], streamSetStartOffset[j]));
-            Z3_ast dist = sub(streamSetStartOffset[j], streamSetEndOffset[i]);
-            const auto p = streamSetPartitionId[i];
-            assert (p < packedPartitionCount);
-            spacers[p].push_back(multiply(dist, dist));
-        }
+        } else { assert (l > 0);
 
-        for (unsigned i = 0; i < packedPartitionCount; ++i) {
-            const auto & S = spacers[i];
-            if (LLVM_LIKELY(S.size() > 1)) {
-                Z3_ast sumOfSpacers = Z3_mk_add(ctx, S.size(), S.data());
-                Z3_optimize_minimize(ctx, solver, sumOfSpacers);
-            }
-        }
+            const Z3_ast ioScalingVar = Z3_mk_fresh_const(ctx, nullptr, varType);
 
-
-
-        if (LLVM_UNLIKELY(check() == Z3_L_FALSE)) {
-            report_fatal_error("Z3 failed to find a solution to the thread local layout problem");
-        }
-
-        const auto model = Z3_optimize_get_model(ctx, solver);
-        Z3_model_inc_ref(ctx, model);
-
-        for (unsigned i = 0; i < numOfThreadLocalStreamSets; ++i) {
-
-            Z3_ast const startOffset = streamSetStartOffset[i];
-            Z3_ast value;
-            if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, startOffset, Z3_L_TRUE, &value) != Z3_L_TRUE)) {
-                report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
+            for (unsigned i = 0; i < PartitionCount; ++i) {
+                if (out_degree(i, T) > 0) {
+                    const auto firstKernel = FirstKernelInPartition[i];
+                    Z3_ast scalingVar = ioScalingVar;
+                    if (in_degree(firstKernel, mBufferGraph) > 0) {
+                        Rational maxInputScale{0};
+                        for (auto input : make_iterator_range(in_edges(firstKernel, mBufferGraph))) {
+                            const auto streamSet = source(input, mBufferGraph);
+                            maxInputScale = std::max(maxInputScale, StreamSetIORate[streamSet - FirstStreamSet]);
+                        }
+                        if (maxInputScale.numerator() != 1 || maxInputScale.denominator() != 1) {
+                            FixedArray<Z3_ast, 2> args;
+                            args[0] = ioScalingVar;
+                            args[1] = constant(to_int(maxInputScale));
+                            scalingVar = Z3_mk_mul(ctx, 2, args.data());
+                        }
+                    }
+                    hard_assert(Z3_mk_ge(ctx, scalingVar, constant(MaximumNumOfStrides[firstKernel] * lcmOfDenom)));
+                    hard_assert(Z3_mk_eq(ctx, scalingVar, val[i]));
+                }
             }
 
-            Z3_int64 num;
-            if (LLVM_UNLIKELY(Z3_get_numeral_int64(ctx, value, &num) != Z3_L_TRUE)) {
-                report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
+            std::vector<Z3_ast> sinkval(l);
+            for (unsigned i = 0; i != l; ++i) {
+                sinkval[i] = val[sinks[i]]; assert (sinkval[i]);
             }
+
+            for (unsigned i = 1; i != l; ++i) {
+                for (unsigned j = 0; j != i; ++j) {
+
+                    if (sinkval[j] == nullptr) {
+                        continue;
+                    }
+
+                    Z3_solver_push(ctx, solver);
+                    hard_assert(Z3_mk_lt(ctx, sinkval[j], sinkval[i]));
+                    const Z3_lbool JltI = check();
+                    Z3_solver_pop(ctx, solver, 1);
+
+                    Z3_solver_push(ctx, solver);
+                    hard_assert(Z3_mk_lt(ctx, sinkval[i], sinkval[j]));
+                    const Z3_lbool IltJ = check();
+                    Z3_solver_pop(ctx, solver, 1);
+
+                    // If there exists an assignment of var s.t. path_j >= path_i and
+                    // some different assignment of var s.t. path_i >= path_j, we must
+                    // test both paths at runtime to determine the capacity required.
+
+                    if (JltI == Z3_L_FALSE && IltJ != Z3_L_UNDEF) {
+                        // for all assignments of var, path_j >= path_i
+                        sinkval[i] = nullptr;
+                        break;
+                    } else if (IltJ == Z3_L_FALSE && JltI == Z3_L_TRUE) {
+                        // for all assignments of var, path_i >= path_j
+                        sinkval[j] = nullptr;
+                    }
+
+                }
+            }
+
+            for (unsigned i = 0; i != l; ++i) {
+                if (sinkval[i]) {
+                    add_edge(sinks[i], PartitionCount + n, Rational{0}, T);
+                }
+            }
+
+            assert (in_degree(PartitionCount + n, T) > 0);
         }
 
-        Z3_model_dec_ref(ctx, model);
-        Z3_optimize_dec_ref(ctx, solver);
+        Z3_solver_dec_ref(ctx, solver);
         Z3_del_context(ctx);
         Z3_reset_memory();
-#endif
+
+        auto print_T = [&](StringRef name) {
+            auto & out = errs();
+
+            out << "digraph \"" << name << "\" {\n";
+            for (unsigned i = 0; i < PartitionCount + n; ++i) {
+                if (degree(i, T) > 0) {
+                    out << "v" << i << " [label=\"";
+                    if (i < PartitionCount) {
+                        out << "P_" << i;
+                    } else {
+                        out << "S_" << (FirstStreamSet + i - PartitionCount);
+                    }
+                    out << "\"];\n";
+                }
+            }
+
+            for (const auto e : make_iterator_range(edges(T0))) {
+                const auto s = source(e, T);
+                const auto t = target(e, T);
+                const auto & V = T0[e];
+                out << "v" << s << " -> v" << t <<
+                       " [label=\"" << V.numerator() << "/" << V.denominator() << "\"";
+                if (!edge(s, t, T).second) {
+                    out << ", color=\"red\"";
+                }
+                out << "];\n";
+            }
+
+            for (const auto e : make_iterator_range(edges(T))) {
+                const auto s = source(e, T);
+                const auto t = target(e, T);
+                if (!edge(s, t, T0).second) {
+                    const auto & V = T[e];
+                    out << "v" << s << " -> v" << t <<
+                           " [label=\"" << V.numerator() << "/" << V.denominator() << "\"";
+                    out << ", color=\"green\"";
+                    out << "];\n";
+
+                }
+            }
+
+            out << "}\n\n";
+        };
 
 
+
+        // print_T("T");
     }
 
     ThreadLocalPlacement = T;

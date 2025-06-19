@@ -330,6 +330,8 @@ public:
     InOutGraph                      InOutStreamSetReplacement;
     ThreadLocalPlacementGraph       ThreadLocalPlacement;
 
+    ThreadLocalConflictGraphType    ThreadLocalConflictGraph;
+
     std::vector<unsigned>           PartitionJumpTargetId;
     RedundantStreamSetMap           RedundantStreamSets;
 

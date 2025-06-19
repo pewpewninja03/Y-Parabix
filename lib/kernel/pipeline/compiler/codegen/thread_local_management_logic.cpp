@@ -12,85 +12,61 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         return;
     }
 
-    const auto m = PartitionCount + (LastStreamSet - FirstStreamSet) + 1;
-
-    assert (num_vertices(ThreadLocalPlacement) == m);
-
-    std::vector<unsigned> toVisit(m);
-    for (unsigned i = PartitionCount; i < m; ++i) {
-        toVisit[i] = in_degree(i, ThreadLocalPlacement);
-    }
-
     const auto pageSize = getPageSize();
     assert (is_pow2(pageSize));
     ConstantInt * const LOG_2_PAGE_SIZE = b.getSize(floor_log2(pageSize));
     ConstantInt * const sz_ZERO = b.getSize(0);
 
-    std::queue<unsigned> Q;
+    using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
 
-    Value * memorySize = nullptr;
+    std::function<Value *(Vertex)> calculatePlacement = [&](const Vertex v) -> Value * {
+        assert (in_degree(v, ThreadLocalPlacement) > 0);
+        ThreadLocalPlacementGraph::in_edge_iterator begin, end;
+        std::tie(begin, end) = in_edges(v, ThreadLocalPlacement);
 
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-
-        for (auto u = i;;) {
-            for (auto e : make_iterator_range(out_edges(u, ThreadLocalPlacement))) {
-                const auto v = target(e, ThreadLocalPlacement);
-                assert (toVisit[v] > 0);
-                if (--toVisit[v] == 0) {
-                    const auto streamSet = FirstStreamSet + v - PartitionCount;
-                    assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
-                    const auto producer = parent(streamSet, mBufferGraph);
-                    assert (KernelPartitionId[producer] == i);
-
-                    const auto & ioRatio = StreamSetIORate[streamSet - FirstStreamSet];
-                    Value * expectedSegSize = b.CreateMulRational(segmentSize, ioRatio);
-                    expectedSegSize = b.CreateUMax(expectedSegSize, b.getSize(MaximumNumOfStrides[producer]));
-                    Value * off = b.CreateShl(b.CreateCeilUMulRational(expectedSegSize, ThreadLocalPlacement[e]), LOG_2_PAGE_SIZE);
-                    Value * start = nullptr;
-                    Value * end = nullptr;
-                    if (u < PartitionCount) {
-                        start = sz_ZERO;
-                        end = off;
-                    } else {
-                        for (auto in : make_iterator_range(in_edges(v, ThreadLocalPlacement))) {
-                            const auto src = source(in, ThreadLocalPlacement) + FirstStreamSet - PartitionCount;
-                            start = b.CreateUMax(start, mThreadLocalEndOffset[src]);
-                        }
-                        end = b.CreateAdd(start, off);
-                    }
-                    mThreadLocalStartOffset[streamSet] = start;
-                    mThreadLocalEndOffset[streamSet] = end;
-                    if (out_degree(v, ThreadLocalPlacement) == 0) {
-                        memorySize = b.CreateUMax(memorySize, end);
-                    } else {
-                        Q.push(v);
-                    }
-                }
+        const auto first = source(*begin, ThreadLocalPlacement);
+        Value * max = nullptr;
+        if (first < PartitionCount) {
+            assert (in_degree(v, ThreadLocalPlacement) == 1);
+        } else {
+            max = calculatePlacement(first);
+            for (auto ei = begin; ++ei != end; ) {
+                max = b.CreateUMax(max, calculatePlacement(source(*ei, ThreadLocalPlacement)));
             }
-            if (Q.empty()) {
-                break;
-            }
-            u = Q.front();
-            Q.pop();
+            assert (max);
         }
-    }
-    assert ((memorySize != nullptr) ^ (num_edges(ThreadLocalPlacement) == 0));
-    #ifndef NDEBUG
-    for (unsigned i = PartitionCount; i < m; ++i) {
-        assert (toVisit[i] == 0);
-    }
-    #endif
-    assert (mTarget->hasThreadLocal());
-    if (memorySize) {
-        #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-        memorySize = b.CreateMul(memorySize, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
-        #endif
-        Value * const base = b.CreatePageAlignedMalloc(memorySize);
-        PointerType * const int8PtrTy = b.getInt8PtrTy();
-        b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b.CreatePointerCast(base, int8PtrTy));
-        b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
-    }
+        const auto streamSet = FirstStreamSet + v - PartitionCount;
+        assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+        const auto producer = parent(streamSet, mBufferGraph);
+        const auto & ioRatio = StreamSetIORate[v - PartitionCount];
+        Value * ex = b.CreateMulRational(segmentSize, ioRatio);
+        ex = b.CreateUMax(ex, b.getSize(MaximumNumOfStrides[producer]));
+        Value * off = b.CreateShl(b.CreateCeilUMulRational(ex, ThreadLocalPlacement[*begin]), LOG_2_PAGE_SIZE);
+        if (max) {
+            off = b.CreateAdd(off, max);
+        }
+        return off;
+    };
 
+    const auto m = PartitionCount + (LastStreamSet - FirstStreamSet) + 1;
+    assert (num_vertices(ThreadLocalPlacement) == m + 1);
+    assert (in_degree(m, ThreadLocalPlacement) > 0);
+    ThreadLocalPlacementGraph::in_edge_iterator ei, end;
+    std::tie(ei, end) = in_edges(m, ThreadLocalPlacement);
+    Value * memorySize = calculatePlacement(source(*ei, ThreadLocalPlacement));
+    while (++ei != end) {
+        memorySize = b.CreateUMax(memorySize, calculatePlacement(source(*ei, ThreadLocalPlacement)));
+    }
+    assert (memorySize);
+
+    assert (mTarget->hasThreadLocal());
+    #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
+    memorySize = b.CreateMul(memorySize, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
+    #endif
+    Value * const base = b.CreatePageAlignedMalloc(memorySize);
+    PointerType * const int8PtrTy = b.getInt8PtrTy();
+    b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY, b.CreatePointerCast(base, int8PtrTy));
+    b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
 
 }
 
@@ -120,13 +96,8 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     std::tie(threadLocalPtr, threadLocalTy) = b.getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
 
     const auto m = PartitionCount + LastStreamSet - FirstStreamSet + 1;
-    assert (num_vertices(ThreadLocalPlacement) == m);
+    assert (num_vertices(ThreadLocalPlacement) == m + 1);
     std::vector<unsigned> toVisit(m, 0);
-    #ifndef NDEBUG
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        assert(in_degree(i, ThreadLocalPlacement) == 0);
-    }
-    #endif
     for (unsigned i = PartitionCount; i < m; ++i) {
         toVisit[i] = in_degree(i, ThreadLocalPlacement);
     }
@@ -156,7 +127,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     for (auto u = mCurrentPartitionId;;) {
         for (auto e : make_iterator_range(out_edges(u, ThreadLocalPlacement))) {
             const auto v = target(e, ThreadLocalPlacement);
-            assert (PartitionCount <= v && v < m);
+            assert (PartitionCount <= v && v <= m);
             assert (v != u);
             auto & T = toVisit[v];
             assert (T > 0);
@@ -192,7 +163,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 debugPrint(b, "mappedAddrRange" + std::to_string(streamSet) + " = [%" PRIx64 ", %" PRIx64 ")", start, end);
                 #endif
 
-                if (out_degree(v, ThreadLocalPlacement) == 0) {
+                if (ThreadLocalPlacement[v]) {
                     memoryForSegment = b.CreateUMax(memoryForSegment, end);
                 } else {
                     #ifndef NDEBUG
@@ -242,6 +213,23 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
         Value * const noExpansion = b.CreateICmpULE(memoryForSegment, currentMem);
         b.CreateAssert(noExpansion, "%s requires more thread-local memory (%" PRIu64 ") than maximum (%" PRIu64 ")?",
                        mCurrentKernelName, memoryForSegment, currentMem);
+    }
+
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+        for (auto e : make_iterator_range(edges(ThreadLocalConflictGraph))) {
+            const size_t x = source(e, ThreadLocalConflictGraph) + FirstStreamSet;
+            const auto producer = parent(x, mBufferGraph);
+            if (KernelPartitionId[producer] == mCurrentPartitionId) {
+                const size_t y = target(e, ThreadLocalConflictGraph) + FirstStreamSet;
+                Value * const before = b.CreateICmpULE(mThreadLocalEndOffset[x], mThreadLocalStartOffset[y]);
+                Value * const after = b.CreateICmpULE(mThreadLocalEndOffset[y], mThreadLocalStartOffset[x]);
+                b.CreateAssert(b.CreateOr(before, after),
+                        "streamset %" PRIu64 " [%" PRIx64 ",%" PRIx64 ") overlaps "
+                        "streamset %" PRIu64 " [%" PRIx64 ",%" PRIx64 ")",
+                        b.getSize(x), mThreadLocalStartOffset[x], mThreadLocalEndOffset[x],
+                        b.getSize(y), mThreadLocalStartOffset[y], mThreadLocalEndOffset[y]);
+            }
+        }
     }
 
     mThreadLocalStreamSetBaseAddress = b.CreateAlignedLoad(threadLocalTy, threadLocalPtr, PtrTyABIAlignment);

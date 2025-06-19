@@ -37,8 +37,6 @@ using boost::container::flat_map;
 
 namespace kernel {
 
-using IntervalGraph = adjacency_list<hash_setS, vecS, undirectedS>;
-
 #include <util/enum_flags.hpp>
 
 using BindingRef = RefWrapper<Binding>;
@@ -674,7 +672,9 @@ using ZeroInputGraph = adjacency_list<vecS, vecS, directedS, no_property, unsign
 
 using InOutGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 
-using ThreadLocalPlacementGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, Rational>;
+using ThreadLocalPlacementGraph = adjacency_list<vecS, vecS, bidirectionalS, bool, Rational>;
+
+using ThreadLocalConflictGraphType = adjacency_list<vecS, vecS, undirectedS>;
 
 }
 

@@ -678,6 +678,7 @@ protected:
     const InOutGraph                            InOutStreamSetReplacement;
     const std::vector<Rational>                 StreamSetIORate;
     const ThreadLocalPlacementGraph             ThreadLocalPlacement;
+    const ThreadLocalConflictGraphType          ThreadLocalConflictGraph;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -994,6 +995,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , InOutStreamSetReplacement(std::move(P.InOutStreamSetReplacement))
 , StreamSetIORate(std::move(P.StreamSetIORate))
 , ThreadLocalPlacement(std::move(P.ThreadLocalPlacement))
+
+, ThreadLocalConflictGraph(std::move(P.ThreadLocalConflictGraph))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)
