@@ -12,6 +12,8 @@
     typedef long long int        Z3_int64;
 #endif
 
+// #define PRINT_Z3_OPTIMIZATION
+
 using boost::icl::interval_set;
 
 namespace kernel {
@@ -429,7 +431,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         const auto pageSize = getPageSize();
 
-        size_t lcmOfDenom = 1;
+        unsigned lcmOfDenom = 1U;
 
         auto add_edge_to_T = [&](const size_t u, const size_t v, const unsigned num, const unsigned denom) {
             assert (!edge(u, v, T).second);
@@ -497,7 +499,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         transitive_reduction_dag(T);
 
+        #ifdef PRINT_Z3_OPTIMIZATION
         const ThreadLocalPlacementGraph T0(T);
+        #endif
 
         // TODO: this is probably too complex a solution. is it not equivalent to simply check the path lengths
         // and conclude if one is longer, then with a small segment length, it'd be preferred over the other in
@@ -571,6 +575,66 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         // TODO: preprocess the io scaling vars to determine if two partition vars are equivalent?
 
+        using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
+
+        auto identifyLowerValueAncestors = [&](auto & ancestors, auto & result) {
+            // sort ancestors in decending sum/length cost
+            std::sort(ancestors.begin(), ancestors.end(), [&](const Vertex a, const Vertex b) {
+                assert (a >= PartitionCount);
+                const auto & A = totalPathSum[a - PartitionCount];
+                assert (b >= PartitionCount);
+                const auto & B = totalPathSum[b - PartitionCount];
+                if (A > B) {
+                    return true;
+                } else if (A == B) {
+                    return totalPathLength[a - PartitionCount] > totalPathLength[b - PartitionCount];
+                } else {
+                    return false;
+                }
+            });
+
+            const auto m = ancestors.size();
+
+            assert (result.size() == m);
+
+            for (unsigned i = 0; i != m; ++i) {
+                result[i] = val[ancestors[i]]; assert (result[i]);
+            }
+
+            for (unsigned i = 1; i != m; ++i) {
+                for (unsigned j = 0; j != i; ++j) {
+
+                    if (result[j] == nullptr) {
+                        continue; // path_j was already pruned as being strictly less than some other path
+                    }
+
+                    Z3_solver_push(ctx, solver);
+                    hard_assert(Z3_mk_lt(ctx, result[j], result[i]));
+                    const Z3_lbool JltI = check();
+                    Z3_solver_pop(ctx, solver, 1);
+
+                    Z3_solver_push(ctx, solver);
+                    hard_assert(Z3_mk_lt(ctx, result[i], result[j]));
+                    const Z3_lbool IltJ = check();
+                    Z3_solver_pop(ctx, solver, 1);
+
+                    // If there exists an assignment of var s.t. path_j >= path_i and
+                    // some different assignment of var s.t. path_i >= path_j, we must
+                    // test both paths at runtime to determine the capacity required.
+
+                    if (JltI == Z3_L_FALSE && IltJ != Z3_L_UNDEF) {
+                        // for all assignments of var, path_j >= path_i
+                        result[i] = nullptr;
+                        break;
+                    } else if (IltJ == Z3_L_FALSE && JltI == Z3_L_TRUE) {
+                        // for all assignments of var, path_i > path_j
+                        result[j] = nullptr;
+                    }
+                }
+            }
+
+        };
+
         for (unsigned i = 0; i < PartitionCount; ++i) {
             if (out_degree(i, T) > 0) {
 
@@ -613,7 +677,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     pending[k] = 0;
                     const Rational & R = T[e];
                     totalPathSum[k] = R;
-                    totalPathLength[k] = 1;
+                    totalPathLength[k] = 0;
                     val[v] = mk_ceil_var_mul(to_int(R));
                     Q.push(v);
                 }
@@ -629,79 +693,55 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         if (--pending[k] == 0) {
                             const auto d = in_degree(v, T);
                             assert (d > 0);
-                            Z3_ast incomingOffsetVal = nullptr;
+                            Z3_ast priorOffset = nullptr;
+
+                            Rational priorPathSum{0};
+                            unsigned priorPathLength{0};
+
                             if (LLVM_LIKELY(d == 1)) {
-                                incomingOffsetVal = val[u];
+                                priorPathSum = totalPathSum[u - PartitionCount];
+                                priorPathLength = totalPathLength[u - PartitionCount];
+                                priorOffset = val[u];
                             } else {
                                 ThreadLocalPlacementGraph::in_edge_iterator begin, end;
                                 std::tie(begin, end) = in_edges(v, T);
-                                SmallVector<Z3_ast, 4> prior(d);
+                                SmallVector<Vertex, 4> ancestor(d);
                                 auto ei = begin;
-
-                                // TODO: sort these by total path cost up to the "source"
-
                                 for (unsigned i = 0; i != d; ++i, ++ei) {
-                                    prior[i] = val[source(*ei, T)];
+                                    ancestor[i] = source(*ei, T);
+                                    assert (ancestor[i] >= PartitionCount);
                                 }
-                                assert (ei == end);
 
-                                for (unsigned i = 1; i != d; ++i) {
-                                    for (unsigned j = 0; j != i; ++j) {
+                                SmallVector<Z3_ast, 4> prior(d);
 
-                                        if (prior[j] == nullptr) {
-                                            continue; // path_j was already pruned as being strictly less than some other path
-                                        }
-
-                                        Z3_solver_push(ctx, solver);
-                                        hard_assert(Z3_mk_lt(ctx, prior[j], prior[i]));
-                                        const Z3_lbool JltI = check();
-                                        Z3_solver_pop(ctx, solver, 1);
-
-                                        Z3_solver_push(ctx, solver);
-                                        hard_assert(Z3_mk_lt(ctx, prior[i], prior[j]));
-                                        const Z3_lbool IltJ = check();
-                                        Z3_solver_pop(ctx, solver, 1);
-
-                                        // If there exists an assignment of var s.t. path_j >= path_i and
-                                        // some different assignment of var s.t. path_i >= path_j, we must
-                                        // test both paths at runtime to determine the capacity required.
-
-                                        if (JltI == Z3_L_FALSE && IltJ != Z3_L_UNDEF) {
-                                            // for all assignments of var, path_j >= path_i
-                                            prior[i] = nullptr;
-                                            break;
-                                        } else if (IltJ == Z3_L_FALSE && JltI == Z3_L_TRUE) {
-                                            // for all assignments of var, path_i > path_j
-                                            prior[j] = nullptr;
-                                        }
-                                    }
-                                }
+                                identifyLowerValueAncestors(ancestor, prior);
 
                                 auto ej = begin;
-                                unsigned m = 0;
                                 for (unsigned i = 0; i != d; ++i) {
                                     auto ek = ej++;
                                     if (prior[i]) {
-                                        prior[m++] = prior[i];
+                                        if (priorOffset) {
+                                            priorOffset = Z3_mk_ite(ctx, Z3_mk_gt(ctx, prior[i], priorOffset), prior[i], priorOffset);
+                                        } else {
+                                            priorOffset = prior[i];
+                                        }
+                                        const auto w = ancestor[i] - PartitionCount;
+                                        priorPathSum = std::max(priorPathSum, totalPathSum[w]);
+                                        priorPathLength = std::max(priorPathLength, totalPathLength[w]);
                                     } else {
                                         // prune the edge from the graph since we do not need to consider
                                         // this path when determining the memory placement of this buffer
-                                        remove_edge(*ek, T);
+                                        remove_edge(ancestor[i], v, T);
                                     }
                                 }
-                                assert (m > 0);
-                                Z3_ast c = prior[0];
-                                for (unsigned i = 1; i < m; ++i) {
-                                    c = Z3_mk_ite(ctx, Z3_mk_gt(ctx, prior[i], c), prior[i], c);
-                                }
-                                incomingOffsetVal = c;
                             }
 
                             FixedArray<Z3_ast, 2> args;
-                            args[0] = incomingOffsetVal;
+                            args[0] = priorOffset;
                             args[1] = mk_ceil_var_mul(to_int(T[e]));
                             val[v] = Z3_mk_add(ctx, 2, args.data());
-
+                            totalPathSum[k] = priorPathSum + T[e];
+                            totalPathLength[k] = priorPathLength + 1U;
                             Q.push(v);
                         }
                     }
@@ -746,42 +786,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             }
 
             std::vector<Z3_ast> sinkval(l);
-            for (unsigned i = 0; i != l; ++i) {
-                sinkval[i] = val[sinks[i]]; assert (sinkval[i]);
-            }
 
-            for (unsigned i = 1; i != l; ++i) {
-                for (unsigned j = 0; j != i; ++j) {
-
-                    if (sinkval[j] == nullptr) {
-                        continue;
-                    }
-
-                    Z3_solver_push(ctx, solver);
-                    hard_assert(Z3_mk_lt(ctx, sinkval[j], sinkval[i]));
-                    const Z3_lbool JltI = check();
-                    Z3_solver_pop(ctx, solver, 1);
-
-                    Z3_solver_push(ctx, solver);
-                    hard_assert(Z3_mk_lt(ctx, sinkval[i], sinkval[j]));
-                    const Z3_lbool IltJ = check();
-                    Z3_solver_pop(ctx, solver, 1);
-
-                    // If there exists an assignment of var s.t. path_j >= path_i and
-                    // some different assignment of var s.t. path_i >= path_j, we must
-                    // test both paths at runtime to determine the capacity required.
-
-                    if (JltI == Z3_L_FALSE && IltJ != Z3_L_UNDEF) {
-                        // for all assignments of var, path_j >= path_i
-                        sinkval[i] = nullptr;
-                        break;
-                    } else if (IltJ == Z3_L_FALSE && JltI == Z3_L_TRUE) {
-                        // for all assignments of var, path_i >= path_j
-                        sinkval[j] = nullptr;
-                    }
-
-                }
-            }
+            identifyLowerValueAncestors(sinks, sinkval);
 
             for (unsigned i = 0; i != l; ++i) {
                 if (sinkval[i]) {
@@ -796,6 +802,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         Z3_del_context(ctx);
         Z3_reset_memory();
 
+        #ifdef PRINT_Z3_OPTIMIZATION
         auto print_T = [&](StringRef name) {
             auto & out = errs();
 
@@ -839,10 +846,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
             out << "}\n\n";
         };
-
-
-
-        // print_T("T");
+        print_T("T");
+        #endif
     }
 
     ThreadLocalPlacement = T;
