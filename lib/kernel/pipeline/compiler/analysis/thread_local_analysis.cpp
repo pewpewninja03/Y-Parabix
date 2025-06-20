@@ -2,6 +2,7 @@
 #include "evolutionary_algorithm.hpp"
 #include "lexographic_ordering.hpp"
 #include <boost/icl/interval_set.hpp>
+#include <boost/integer/common_factor.hpp>
 #include <toolchain/toolchain.h>
 #include <z3.h>
 #include <queue>
@@ -39,7 +40,7 @@ using Interval = IntervalSet::interval_type;
 
 using Vertex = unsigned;
 
-struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker<double> {
+struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
 
 
     struct PartitionData {
@@ -59,7 +60,7 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief fitness
      ** ------------------------------------------------------------------------------------------------------------- */
-    double fitness(const Candidate & candidate, pipeline_random_engine & /* rng */) final {
+    size_t fitness(const Candidate & candidate, pipeline_random_engine & /* rng */) final {
 
         const auto partitionCount = MaxMemorySize.size();
 
@@ -136,17 +137,14 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
             M = std::max(M, end);
         }
 
-        double cost = 0;
-        size_t max = 0;
-        for (unsigned i = 0; i < partitionCount; ++i) {
-            const size_t M = MaxMemorySize[i];
-            cost += std::log(M * M);
-            if (max < M) {
-                max = M;
-            }
+        std::sort(MaxMemorySize.begin(), MaxMemorySize.end());
+
+        auto median = MaxMemorySize[partitionCount / 2];
+        if ((partitionCount & 2) == 0) {
+            median = (median + MaxMemorySize[(partitionCount / 2) + 1] + 1) / 2;
         }
-        cost = std::exp(cost / ((double)partitionCount)) * (max * max);
-        return cost;
+        const auto max = MaxMemorySize[partitionCount - 1];
+        return median + (max * max);
     }
 
     /** ------------------------------------------------------------------------------------------------------------- *
@@ -195,7 +193,7 @@ private:
 
 };
 
-struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm<double> {
+struct BufferLayoutOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief getIntervals
@@ -420,7 +418,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                                  I, unitWeight, streamSetPartitionId,
                                  rng);
 
-        BA.runGA<false>();
+        BA.runGA();
 
         auto O = BA.getResult();
 
@@ -431,12 +429,12 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         const auto pageSize = getPageSize();
 
-        unsigned lcmOfDenom = 1U;
+        size_t lcmOfDenom = 1U;
 
         auto add_edge_to_T = [&](const size_t u, const size_t v, const unsigned num, const unsigned denom) {
             assert (!edge(u, v, T).second);
             Rational percentOfPagePerStride{num, denom * pageSize};
-            lcmOfDenom = boost::lcm(lcmOfDenom, percentOfPagePerStride.denominator());
+            lcmOfDenom = boost::integer::lcm(lcmOfDenom, percentOfPagePerStride.denominator());
             add_edge(u, v, percentOfPagePerStride, T);
             #ifndef NDEBUG
             for (auto e : make_iterator_range(in_edges(v, T))) {
@@ -462,7 +460,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 add_edge_to_T(partId, u, C.upper(), StrideRepetitionVector[firstKernel]);
             }
             const auto & S = StreamSetIORate[u - PartitionCount];
-            lcmOfDenom = boost::lcm(lcmOfDenom, S.denominator());
+            lcmOfDenom = boost::integer::lcm(lcmOfDenom, S.denominator());
         }
 
         for (auto e : make_iterator_range(edges(I))) {
@@ -948,8 +946,6 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
     for (;;) {
 
         for (const auto streamSet : mNonThreadLocalStreamSets) {
-
-
 
             BufferNode & bn = mBufferGraph[streamSet];
             if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
