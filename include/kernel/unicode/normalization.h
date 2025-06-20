@@ -6,8 +6,10 @@
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <pablo/pablo_toolchain.h>
+#include <kernel/pipeline/pipeline_builder.h>
 
 using StreamSet = kernel::StreamSet;
+using PipelineBuilder = kernel::PipelineBuilder;
 
 // Hangul Composition Kernels for NFC (See Unicode section 3.12).
 //
@@ -106,6 +108,19 @@ protected:
 };
 
 //
+//  Excluded composites are those that are always normalized to
+//  decomposed form with both NFD and NFC.
+//
+class ExcludedCompositeStage : public pablo::PabloKernel {
+public:
+    ExcludedCompositeStage
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+         StreamSet * SelectMask, StreamSet * EC_Basis);
+protected:
+    void generatePabloMethod() override;
+};
+
+//
 //  Short composable sequences are those involving non reorderable
 //  characters.   In this case, precomposition is only applied when
 //  the characters are adjacent.   This kernel replaces the
@@ -138,3 +153,6 @@ protected:
     void generatePabloMethod() override;
 };
 
+void LongComposablePipeline(PipelineBuilder & P,
+                            StreamSet * Basis, StreamSet * ccc_NR,
+                            StreamSet * FinalBasis, StreamSet * DeletionMask);

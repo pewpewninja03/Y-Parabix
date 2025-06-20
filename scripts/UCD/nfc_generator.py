@@ -460,7 +460,7 @@ def gen_pass_pfx_code(pfx_code):
 
 mark_case_template = r"""
 //  Case for mark ${mark}
-    PabloAST * ${builder}_possible_${mark}_pos = ${builder}.createScanTo(${mark_starters}, ${ccc_v}_or_NR);
+    PabloAST * ${builder}_possible_${mark}_pos = ${builder}.createAdvanceThenScanTo(${mark_starters}, ${ccc_v}_or_NR);
     PabloAST * ${builder}_found_${mark} = ${builder}.createAnd(${builder}_possible_${mark}_pos, ${mark_var});
 """
 
@@ -489,7 +489,7 @@ finalize_nfc_template = r"""// Generate combined outputs for pass ${pass_no}.
         pb.createAssign(pb.createExtract(markOutputVar, pb.getInteger(i)), markCode[i]);
     }
     PabloAST * updatedIndexStrm = pb.createOr(ccc_NR, composable2nd);
-    Var * indexVar = getOutputStreamVar("Index_ccc_NR_or_MarkFound");
+    Var * indexVar = getOutputStreamVar("Index_ccc_NR_or_MarksFound");
     pb.createAssign(pb.createExtract(indexVar, pb.getInteger(0)), updatedIndexStrm);
 }
 """
@@ -542,6 +542,7 @@ long_composition_pfx_template = r"""
     PabloAST * ${pfx_test_var} = ${logic};
     pb.createIf(pb.createAnd(${pfx_test_var}, markFound), ${builder});
     std::vector<PabloAST *> xfrm_${code_str}(8, All0);
+    BixNumCompiler ${builder}_bnc(${builder});
 """
 
 def gen_long_composition_pfx_code(pfx_code):
@@ -569,7 +570,7 @@ def finalize_long_composable_pfx_code(pfx_code):
                         code_str = code_str)
 
 long_composable_final_code = r"""
-    Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
@@ -578,7 +579,7 @@ long_composable_final_code = r"""
 }
 """
 
-any_mark_template = r"""    std::vector<PabloAST *> MarkCodes${pass_no} = getInputStreamSet("MarkCode${pass_no}");
+any_mark_template = r"""    std::vector<PabloAST *> MarkCodes${pass_no} = getInputStreamSet("MarkCodes${pass_no}");
     for (unsigned i = 0; i < MarkCodes${pass_no}.size(); i++) {
         anyMark = pb.createOr(anyMark, MarkCodes${pass_no}[i]);
     }
@@ -628,7 +629,7 @@ ${mark_accumulation}
 long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify long composable sequences and transform to precomposed characters.
     StreamSet * MarkCode${pass_no} = P.CreateStreamSet(${mark_code_bits});
     StreamSet * Index_ccc_NR_or_MarksFound${pass_no} = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<FindComposables${pass_no}>(${basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
+    P.CreateKernelCall<FindComposables${pass_no}>(${input_basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
     SHOW_BIXNUM(MarkCode${pass_no});
     SHOW_STREAM(Index_ccc_NR_or_MarksFound${pass_no});
 
@@ -636,17 +637,14 @@ long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify lon
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${pass_no}, MarkCode${pass_no}, MarkCodeAtStarter${pass_no});
     SHOW_BIXNUM(MarkCodeAtStarter${pass_no});
 
-    StreamSet * XfrmedBasis${pass_no} = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${basis}, MarkCodeAtStarter${pass_no}, XfrmedBasis${pass_no});
-    SHOW_BIXNUM(XfrmedBasis${pass_no});
+    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${input_basis}, MarkCodeAtStarter${pass_no}, ${output_basis});
+    SHOW_BIXNUM(${output_basis});
 """
 
 long_composable_pipeline_template = r"""void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis, StreamSet * DeletionMask) {
 ${pipeline_logic}
-    FinalBasis = XfrmedBasis${final_pass_no};
-    DeletionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<MarkDeletion>(Basis, ${mark_code_parms}, DeletionMask);
+    P.CreateKernelCall<MarkDeletion>(FinalBasis, ${mark_code_parms}, DeletionMask);
 }
 """
 
@@ -1389,7 +1387,7 @@ class NFC_generator:
                 if pass_no in self.conditional_mark_codes.keys():
                     if pfx_code in self.conditional_mark_codes[pass_no].keys():
                         mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
-                s += "    PabloAST * foundMark_%x = bnc.EQ(markCode, %i);\n" % (mark, mark_code)
+                s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCode, %i);\n" % (mark, scope, mark_code)
                 for pos in sorted(by_pos[pfx_code][mark].keys()):
                     for bit in sorted(by_pos[pfx_code][mark][pos].keys()):
                         bit_xfrm = by_pos[pfx_code][mark][pos][bit]
@@ -1423,10 +1421,19 @@ class NFC_generator:
         logic = ""
         input_basis = "Basis"
         for pass_no in range(self.pass_count):
+
+            if pass_no == self.pass_count - 1:
+                output_basis = "FinalBasis"
+            else:
+                output_basis = "XfrmedBasis%i" % pass_no
+                logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
             mark_code_bits = self.max_conditional_code_bits[pass_no]
-            logic += t.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits, basis = input_basis)
-            input_basis = "XfrmedBasis%i" % pass_no
-        mark_streamsets = ", " .join(["XfrmedBasis%i" % i for i in range(self.pass_count)])
+            logic += t.substitute(pass_no = pass_no, 
+                                  mark_code_bits = mark_code_bits, 
+                                  input_basis = input_basis,
+                                  output_basis = output_basis)
+            input_basis = output_basis # for next pass
+        mark_streamsets = ", " .join(["MarkCode%i" % i for i in range(self.pass_count)])
         return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
 
     def generate_short_composable_stage(self):

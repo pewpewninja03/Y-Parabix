@@ -30,6 +30,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/unicode/boundary_kernels.h>
+#include <kernel/unicode/utf8_support.h>
 #include <re/unicode/resolve_properties.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/util/linebreak_kernel.h>

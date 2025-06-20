@@ -55,11 +55,11 @@ NAME
 SRC
     ufilter.cpp
 DEPS
-    grep
     kernel.basis
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     kernel.util
     toolchain
     re.cc

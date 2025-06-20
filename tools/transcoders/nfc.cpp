@@ -29,6 +29,7 @@
 #include <kernel/unicode/normalization.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/utf8_support.h>
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
@@ -36,6 +37,8 @@
 #include <unicode/algo/normalization.h>
 #include <unicode/utf/utf_compiler.h>
 #include <re/toolchain/toolchain.h>
+#include <re/unicode/resolve_properties.h>
+#include <kernel/unicode/UCD_property_kernel.h>
 
 using namespace kernel;
 using namespace llvm;
@@ -90,25 +93,30 @@ void ApplyTransform::generatePabloMethod() {
 class DelPriorToSelectMask : public PabloKernel {
 public:
     DelPriorToSelectMask
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
-                                       StreamSet * SelectMask);
+        (LLVMTypeSystemInterface & ts,
+         StreamSet * Basis, StreamSet * InputMask, StreamSet * MarkDeletion, StreamSet * DeletePrior,
+         StreamSet * SelectMask);
 protected:
     void generatePabloMethod() override;
 };
 
 DelPriorToSelectMask::DelPriorToSelectMask
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * InputMask, StreamSet * DeletePrior,
-                                   StreamSet * SelectMask)
+    (LLVMTypeSystemInterface & ts,
+     StreamSet * Basis, StreamSet * InputMask, StreamSet * MarkDeletion, StreamSet * DeletePrior,
+     StreamSet * SelectMask)
 : PabloKernel(ts, "DelPriorToSelectMask",
-{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"MarkDeletion", MarkDeletion}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
 {Binding{"SelectMask", SelectMask}}) {}
 
 void DelPriorToSelectMask::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     PabloAST * InputMask = getInputStreamSet("InputMask")[0];
+    PabloAST * MarkDeletion = getInputStreamSet("MarkDeletion")[0];
     PabloAST * DelPrior = getInputStreamSet("DeletePrior")[0];
     BixNumCompiler bnc(pb);
+    PabloAST * nullDeletion = bnc.EQ(Basis, 0);
+    // TODO: keep Nulls in original basis
     PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
     PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
     PabloAST * pfx = bnc.UGE(Basis, 0xC2);
@@ -121,6 +129,7 @@ void DelPriorToSelectMask::generatePabloMethod() {
     PabloAST * del2 = pb.createAnd(secondlast, pb.createLookahead(DelPrior, 2));
     PabloAST * del1 = pb.createLookahead(DelPrior, 1);
     PabloAST * del = pb.createOr(pb.createOr(delpfx4, del3), pb.createOr(del2, del1));
+    del = pb.createOr3(nullDeletion, MarkDeletion, del);
     std::vector<PabloAST *> select_streamset = {pb.createAnd(InputMask, pb.createInFile(pb.createNot(del)))};
     writeOutputStreamSet("SelectMask", select_streamset);
 }
@@ -149,7 +158,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    StreamSet * InsertionBixNum = P.CreateStreamSet(2, 1);
+    StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
     SHOW_BIXNUM(InsertionBixNum);
 
@@ -160,13 +169,26 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
-    StreamSet * NSD_Basis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<NonStarterDecomposition>(ExpandedBasis, NSD_Basis);
-    SHOW_BIXNUM(NSD_Basis);
+    StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
+    StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<ExcludedCompositeStage>(ExpandedBasis, EC_SelectionMask, EC_Basis);
+    SHOW_BIXNUM(EC_Basis);
+
+    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+    re::Name * CCC0_Name = re::makeName("CCC", "NR");
+    CCC0_Name->setDefinition(CCC0_Prop);
+    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, ccc_NR0, BitMovementMode::LookAhead);
+    SHOW_STREAM(ccc_NR0);
+
+    StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, SpreadMask, ccc_NR0, ccc_NR);
+    SHOW_STREAM(ccc_NR);
 
     StreamSet * Canon_Basis = P.CreateStreamSet(8, 1);
     StreamSet * CanonSelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<SingletonCanonicalization>(NSD_Basis, CanonSelectionMask, Canon_Basis);
+    P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonSelectionMask, Canon_Basis);
     SHOW_BIXNUM(Canon_Basis);
     SHOW_STREAM(CanonSelectionMask);
 
@@ -180,12 +202,17 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<ApplyTransform>(Canon_Basis, XfrmBasis, XfrmedBasis);
     SHOW_BIXNUM(XfrmedBasis);
 
+    StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
+    StreamSet * MarkDeletion = P.CreateStreamSet(1, 1);
+    LongComposablePipeline(P, XfrmedBasis, ccc_NR, FinalBasis, MarkDeletion);
+    SHOW_STREAM(MarkDeletion);
+
     StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<DelPriorToSelectMask>(ExpandedBasis, CanonSelectionMask, DelPrior, SelectionMask0);
+    P.CreateKernelCall<DelPriorToSelectMask>(FinalBasis, CanonSelectionMask, MarkDeletion, DelPrior, SelectionMask0);
     SHOW_STREAM(SelectionMask0);
 
     StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
-    FilterByMask(P, SelectionMask0, XfrmedBasis, FilteredBasis);
+    FilterByMask(P, SelectionMask0, FinalBasis, FilteredBasis);
     SHOW_BIXNUM(FilteredBasis);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);

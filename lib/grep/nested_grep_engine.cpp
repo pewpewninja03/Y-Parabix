@@ -12,6 +12,7 @@
 #include <kernel/core/kernel_builder.h>
 #include <llvm/Support/raw_ostream.h>
 #include <grep/grep_toolchain.h>
+#include <kernel/unicode/utf8_support.h>
 
 #include <re/printer/re_printer.h>
 

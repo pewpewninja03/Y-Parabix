@@ -14,7 +14,6 @@
 #include <re/adt/re_re.h>
 #include <pablo/codegenstate.h>
 #include <pablo/pe_zeroes.h>        // for Zeroes
-#include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
@@ -29,6 +28,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/utf8_support.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>

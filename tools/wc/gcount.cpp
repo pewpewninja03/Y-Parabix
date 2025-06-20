@@ -16,6 +16,7 @@
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
+#include <kernel/unicode/utf8_support.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
