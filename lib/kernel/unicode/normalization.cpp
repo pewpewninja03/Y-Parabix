@@ -35,17 +35,17 @@ Hangul_Composables::Hangul_Composables (LLVMTypeSystemInterface & ts,
 void Hangul_Composables::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     UTF::UTF_Compiler unicodeCompiler(getInput(0), pb, mBitMovement);
-    std::vector<Var *> Hangul_var(Kind::Count);
-    for (unsigned i = 0; i < Kind::Count; i++) {
+    std::vector<Var *> Hangul_var(HC_Kind::Count);
+    for (unsigned i = 0; i < HC_Kind::Count; i++) {
         Hangul_var[i] = pb.createVar("Composable_" + std::to_string(i), pb.createZeroes());
     }
-    std::vector<UCD::UnicodeSet> Hangul_uset (Kind::Count);
-    Hangul_uset[Kind::L] = UCD::UnicodeSet(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
-    Hangul_uset[Kind::V] = UCD::UnicodeSet(Hangul::VBase, Hangul::VBase + Hangul::VCount - 1);
+    std::vector<UCD::UnicodeSet> Hangul_uset (HC_Kind::Count);
+    Hangul_uset[HC_Kind::L] = UCD::UnicodeSet(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
+    Hangul_uset[HC_Kind::V] = UCD::UnicodeSet(Hangul::VBase, Hangul::VBase + Hangul::VCount - 1);
     for (unsigned i = 0; i < Hangul::LCount * Hangul::VCount; i++) {
-        Hangul_uset[Kind::LV].insert(Hangul::SBase + i * Hangul::TCount);
+        Hangul_uset[HC_Kind::LV].insert(Hangul::SBase + i * Hangul::TCount);
     }
-    Hangul_uset[Kind::T] = UCD::UnicodeSet(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
+    Hangul_uset[HC_Kind::T] = UCD::UnicodeSet(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
     unicodeCompiler.compile(Hangul_var, Hangul_uset);
     writeOutputStreamSet("L_V_T_Composables", Hangul_var);
 }
@@ -64,10 +64,10 @@ void Hangul_Composition::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     std::vector<PabloAST *> L_V_T_Composables = getInputStreamSet("L_V_T_Composables");
-    PabloAST * Hangul_L = L_V_T_Composables[0];
-    PabloAST * Hangul_V = L_V_T_Composables[1];
-    PabloAST * Hangul_LV = L_V_T_Composables[2];
-    PabloAST * Hangul_T = L_V_T_Composables[3];
+    PabloAST * Hangul_L = L_V_T_Composables[Hangul_Composables::HC_Kind::L];
+    PabloAST * Hangul_V = L_V_T_Composables[Hangul_Composables::HC_Kind::V];
+    PabloAST * Hangul_LV = L_V_T_Composables[Hangul_Composables::HC_Kind::LV];
+    PabloAST * Hangul_T = L_V_T_Composables[Hangul_Composables::HC_Kind::T];
     //
     //  Set up variables to receive the output basis bit streams.
     std::vector<Var *> outputVar(Basis.size());

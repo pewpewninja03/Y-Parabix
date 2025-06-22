@@ -903,6 +903,37 @@ def insert_map_to_bixnum_usets(ins_map):
             bit = 1 << i
     return bixnum_usets
 
+candidate_class_template = r"""//  The NFC_CandidateClass kernel produces the class of characters 
+//  that are relevant to NFC processing by virtue of being reorderable marks or
+//  non-reorderable characters that can occur as the second character of a
+//  composable sequence.
+//
+class NFC_CandidateClass : public pablo::PabloKernel {
+public:
+NFC_CandidateClass
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * NFC_CandidateClass);
+protected:
+    void generatePabloMethod() override;
+};
+
+NFC_CandidateClass::NFC_CandidateClass
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * candidates)
+: PabloKernel(ts, "NFC_CandidateClass" + Basis->shapeString(),
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"candidates", candidates}}) {}
+
+void NFC_CandidateClass::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    Var * Basis = getInputStreamVar("Basis");
+    UTF::UTF_Compiler utf_compiler(Basis, pb, pablo::BitMovementMode::LookAhead);
+    std::vector<Var *> targets = {pb.createVar("candidates", pb.createZeroes()), 
+                                  pb.createVar("expandfirst", pb.createZeroes())};
+    utf_compiler.compile(targets, {${candidate_uset}_uset, ${expansion_required_uset}_uset});
+    writeOutputStreamSet("candidates", targets);
+}
+"""
 
 nfc_generated_cpp_template = r"""#include <kernel/unicode/normalization.h>
 #include <unicode/core/unicode_set.h>
@@ -1103,6 +1134,58 @@ class NFC_generator:
     def display_max_insert_map(self):
         for cp in sorted(self.max_insert_map.keys()):
             print("%04x - insert %i" % (cp, self.max_insert_map[cp]))
+
+    # Overridable composites are primary composites p with
+    # decomposition into starter s and mark m such that there
+    # is a composite p' = <s, m'> where CCC(m) > CCC(m')
+    # In this case the sequence <p ... m'> may be replaced by <p' m ...>
+    #
+    # A special case is when a second composite p'' = <p' m> exists,
+    # in which case, the sequence <p ... m'> can directly be replaced
+    # by <p'' ...>.
+    #
+    def determine_expansion_required_primaries(self):
+        by_starter_and_ccc = {}
+        for cp2 in self.long_composable_map.keys():
+            ccc = self.ccc_val_map[cp2]
+            ccc_code = self.ccc_enum_map[ccc]
+            for cp1 in self.long_composable_map[cp2].keys():
+                if not cp1 in by_starter_and_ccc.keys():
+                    by_starter_and_ccc[cp1] = {}
+                if not ccc_code in by_starter_and_ccc[cp1].keys():
+                    by_starter_and_ccc[cp1][ccc_code] = {}
+                by_starter_and_ccc[cp1][ccc_code][cp2] = self.long_composable_map[cp2][cp1]
+        self.expansion_required_primaries = empty_uset()
+        self.overridable_composites = {}
+        for starter in by_starter_and_ccc.keys():
+            ccc_list = sorted(by_starter_and_ccc[starter].keys())
+            if len(ccc_list) > 1:
+                for i in range(len(ccc_list)):
+                    for j in range(i+1, len(ccc_list)):
+                        lo_ccc = ccc_list[i]
+                        hi_ccc = ccc_list[j]
+                        for m1 in by_starter_and_ccc[starter][hi_ccc].keys():
+                            overridable = by_starter_and_ccc[starter][hi_ccc][m1]
+                            uset = singleton_uset(overridable)
+                            self.expansion_required_primaries = uset_union(self.expansion_required_primaries, uset)
+                            overrider_marks = by_starter_and_ccc[starter][lo_ccc].keys()
+                            for m2 in overrider_marks:
+                                overrider_precomp = by_starter_and_ccc[starter][lo_ccc][m2]
+                                if overrider_precomp in self.long_composable_map[m1].keys():
+                                    # found a override replacement p''
+                                    replacement = self.long_composable_map[m1][overrider_precomp]
+                                    #print("%x + %x => %x" %(overridable, m1, replacement ))
+                                    #self.long_composable_map[m2][replacement] = overridable
+                            self.overridable_composites[overridable] = overrider_marks
+
+    def show_expansion_required_primaries(self):
+        cps = uset_to_member_list(self.expansion_required_primaries)
+        for cp in cps:
+            print("%x ==> %s" % (cp, ", ".join(["%x" % ov for ov in self.overridable_composites[cp]])))
+
+    def show_overridable_composites(self):
+        for cp in sorted(self.overridable_composites.keys()):
+            print("%x ==> %s" % (cp, ", ".join(["%x" % ov for ov in self.overridable_composites[cp]])))
 
     #
     # If a given starter has precompositions with marks of
@@ -1503,6 +1586,31 @@ class NFC_generator:
         s += u8_insertion_final_code
         return s
 
+    def generate_candidate_class(self):
+        t = string.Template(candidate_class_template)
+        candidate_class = empty_uset()
+        for ccc_enum in self.ucd.ccc_map.keys():
+            if ccc_enum != 'NR':  # 
+                candidate_class = uset_union(candidate_class, self.ucd.ccc_map[ccc_enum])
+        for cp1 in self.short_composable_map.keys():
+            for cp2 in self.short_composable_map[cp1].keys():
+                candidate_class = uset_union(candidate_class, singleton_uset(cp2))
+        # Include the Hangul V and T composables
+        VBase = 0x1161
+        VCount = 21
+        TBase = 0x11A7
+        TCount = 28
+        candidate_class = uset_union(candidate_class, range_uset(VBase, VBase + VCount - 1))
+        candidate_class = uset_union(candidate_class, range_uset(TBase, TBase + TCount - 1))
+        candidate_uset = self.builder.install_uset(candidate_class)
+        expansion_required_class = self.expansion_required_primaries
+        for cp in self.singleton_map.keys():
+            expansion_required_class = uset_union(expansion_required_class, singleton_uset(cp))
+        for cp in self.excluded_composite_map.keys():
+            expansion_required_class = uset_union(expansion_required_class, singleton_uset(cp))
+        expansion_required_uset = self.builder.install_uset(expansion_required_class)
+        return t.substitute(candidate_uset = candidate_uset, expansion_required_uset = expansion_required_uset)
+
     def emit_normalization_cpp(self):
         basename = 'normalization-generated'
         f = cformat.open_cpp_file_for_write(basename)
@@ -1516,6 +1624,7 @@ class NFC_generator:
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
         kernels += self.long_composable_mark_deletion()
         kernels += self.generate_long_composable_pipeline()
+        kernels += self.generate_candidate_class()
         uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
@@ -1529,8 +1638,10 @@ if __name__ == "__main__":
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
     generator.create_conditional_mark_codes()
+    generator.determine_expansion_required_primaries()
+    generator.show_expansion_required_primaries()
     #generator.show_ccc_pass_allocation()
-    generator.show_conditional_codes()
+    #generator.show_conditional_codes()
     #generator.display_singletons()
     #generator.display_non_starter_decomps()
     #generator.display_short_composables()

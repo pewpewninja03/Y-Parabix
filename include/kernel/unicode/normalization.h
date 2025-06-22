@@ -29,7 +29,7 @@ using PipelineBuilder = kernel::PipelineBuilder;
 
 class Hangul_Composables : public pablo::PabloKernel {
 public:
-    enum Kind : unsigned {L, V, LV, T, Count};
+    enum HC_Kind : unsigned {L, V, LV, T, Count};
 
     Hangul_Composables(LLVMTypeSystemInterface & ts,
                        StreamSet * Basis, StreamSet * L_V_T_Composables,

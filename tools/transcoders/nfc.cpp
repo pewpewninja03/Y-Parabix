@@ -54,6 +54,47 @@ static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-b
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
+class NFC_Focus : public pablo::PabloKernel {
+public:
+    NFC_Focus(LLVMTypeSystemInterface & ts,
+              StreamSet * Basis, StreamSet * ccc_NR, StreamSet * Composable2nds, StreamSet * Focus);
+protected:
+    void generatePabloMethod() override;
+};
+
+NFC_Focus::NFC_Focus(LLVMTypeSystemInterface & ts, 
+                     StreamSet * Basis, StreamSet * ccc_NR, StreamSet * NFC_candidates,
+                     StreamSet * Focus)
+: PabloKernel(ts, "NFC_Focus",
+// inputs
+{Binding{"Basis", Basis},
+ Binding{"ccc_NR", ccc_NR},
+ Binding{"NFC_candidates", NFC_candidates, FixedRate(), LookAhead(4)}},
+// output
+{Binding{"Focus", Focus}}) {
+}
+
+void NFC_Focus::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
+    PabloAST * NFC_candidates = getInputStreamSet("NFC_candidates")[0];
+    BixNumCompiler bnc(pb);
+    PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
+    PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
+    PabloAST * pfx = bnc.UGE(Basis, 0xC2);
+    PabloAST * pfx3 = pb.createXor(pfx3or4, pfx4);
+    PabloAST * pfx2 = pb.createXor(pfx, pfx3or4);
+    PabloAST * thirdlast = pb.createOr(pfx3, pb.createAdvance(pfx4, 1));
+    PabloAST * secondlast = pb.createOr(pfx2, pb.createAdvance(thirdlast, 1));
+    PabloAST * focus = pb.createLookahead(NFC_candidates, 1);
+    focus = pb.createOr(focus, pb.createAnd(secondlast, pb.createLookahead(NFC_candidates, 2)));
+    focus = pb.createOr(focus, pb.createAnd(thirdlast, pb.createLookahead(NFC_candidates, 3)));
+    focus = pb.createOr(focus, pb.createAnd(pfx4, pb.createLookahead(NFC_candidates, 4)));
+    // Now find the next starter from each candidate run.
+    focus = pb.createMatchStar(focus, pb.createNot(ccc_NR));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("Focus"), pb.getInteger(0)), focus);
+}
 
 class ApplyTransform : public pablo::PabloKernel {
 public:
@@ -238,7 +279,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         //  Hangul composable characters are of three types, L, V, LV and T.
         //  Compute a set of 4 parallel bit streams, one for each character class.
         //auto L_V_T_sets = Hangul_Composables();
-        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
+        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::HC_Kind::Count);
         P.CreateKernelCall<Hangul_Composables>(U21, L_V_T);
         //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, U21, L_V_T);
         SHOW_BIXNUM(L_V_T);
@@ -260,7 +301,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     } else {
         
         //auto L_V_T_sets = Hangul_Composables();
-        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
+        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::HC_Kind::Count);
         P.CreateKernelCall<Hangul_Composables>(FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
         //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
         SHOW_BIXNUM(L_V_T);
