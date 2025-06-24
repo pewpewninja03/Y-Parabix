@@ -63,6 +63,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
+static cl::opt<bool> NoFilter("NoFilter", cl::desc("Process the entire file without filtering to narrow the focus of work"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
@@ -998,6 +999,12 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 }
 
+void SimpleOutputStage(PipelineBuilder & P, StreamSet * TransformedBasis) {
+    StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(TransformedBasis, OutputBytes);
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
+}
+
 typedef void (*CombinedWorkFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, uint32_t fd);
 
 CombinedWorkFunctionType generate_combined_work_pipeline(CPUDriver & driver, NFD_BixData & NFD_Data) {
@@ -1056,15 +1063,22 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
     StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
     source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
 
-    StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
-    StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
-    StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
-    NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+    if (NoFilter) {
+        StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+        NFD_Transform_Stage(P, NFD_Data, BasisBits, TransformedBasis);
 
-    StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
-    NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
-
-    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+        SimpleOutputStage(P, TransformedBasis);
+    } else {
+        StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+        StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+        StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
+        NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+        
+        StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+        NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
+        
+        OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+    }
     return P.compile();
 }
 
