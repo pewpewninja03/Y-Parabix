@@ -72,6 +72,20 @@ protected:
     void generatePabloMethod() override;
 };
 
+//  The NFC_CandidateClass kernel produces the class of characters
+//  that are relevant to NFC processing by virtue of being reorderable marks or
+//  non-reorderable characters that can occur as the second character of a
+//  composable sequence.
+//
+class NFC_CandidateClass : public pablo::PabloKernel {
+public:
+NFC_CandidateClass
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * NFC_CandidateClass);
+protected:
+    void generatePabloMethod() override;
+};
+
 //
 //  Although NFC generally compresses text by replacing decomposed
 //  character sequences by their precomposed equivalents, there are

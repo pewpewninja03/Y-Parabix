@@ -908,14 +908,14 @@ candidate_class_template = r"""//  The NFC_CandidateClass kernel produces the cl
 //  non-reorderable characters that can occur as the second character of a
 //  composable sequence.
 //
-class NFC_CandidateClass : public pablo::PabloKernel {
-public:
-NFC_CandidateClass
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * NFC_CandidateClass);
-protected:
-    void generatePabloMethod() override;
-};
+//class NFC_CandidateClass : public pablo::PabloKernel {
+//public:
+//NFC_CandidateClass
+//    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+//                                   StreamSet * NFC_CandidateClass);
+//protected:
+//    void generatePabloMethod() override;
+//};
 
 NFC_CandidateClass::NFC_CandidateClass
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
@@ -1018,21 +1018,36 @@ class NFC_generator:
         if not uset_member(ucd.ccc_map['NR'], cp): return True
         return not uset_member(ucd.ccc_map['NR'], ord(decomp[0]))
 
+    def full_decomp(self, cp):
+        if not uset_member(ucd.dt_map['Can'], cp): return chr(cp)
+        decomp = ucd.decomp_map[cp]
+        cp1 = ord(decomp[0])
+        while cp1 in ucd.decomp_map.keys() and uset_member(ucd.dt_map['Can'], cp1):
+            decomp = ucd.decomp_map[cp1] + decomp[1:]
+            cp1 = ord(decomp[0])
+        return decomp
+
     def create_mappings(self):
+        self.full_decomp_map = {}
         self.singleton_map = {}
         self.short_composable_map = {}
         self.long_composable_map = {}
         self.excluded_composite_map = {}
+        self.non_starter_uset = empty_uset()
         for precomposed in ucd.decomp_map.keys():
             if uset_member(ucd.dt_map['Can'], precomposed):
                 decomp = ucd.decomp_map[precomposed]
+                cp1 = ord(decomp[0])
+                self.full_decomp_map[precomposed] = self.full_decomp(precomposed)
                 if len(decomp) == 1:
-                    self.singleton_map[precomposed] = ord(decomp[0])
+                    self.singleton_map[precomposed] = cp1
                 elif len(decomp) == 2:
-                    cp1 = ord(decomp[0])
+                    if not uset_member(ucd.ccc_map['NR'], precomposed) or not uset_member(ucd.ccc_map['NR'], cp1):
+                        self.non_starter_uset = uset_union(self.non_starter_uset, singleton_uset(precomposed))
                     cp2 = ord(decomp[1])
                     if self.excluded_composite(precomposed):
                         while self.excluded_composite(cp1):
+                            #print("Recursive excluded composite: %x => %x %x => %x %x %x" %(precomposed, cp1, cp2, ord(ucd.decomp_map[cp1][0]), ord(ucd.decomp_map[cp1][1]), cp2))
                             decomp = ucd.decomp_map[cp1] + decomp[1:]
                             cp1 = ord(decomp[0])
                         self.excluded_composite_map[precomposed] = decomp
@@ -1130,6 +1145,15 @@ class NFC_generator:
             ldiff = decomp_len - u8_encoded_length(cp)
             if ldiff > 0:
                 self.update_max_insert_map(cp, ldiff)
+        expansion_required = uset_to_member_list(self.expansion_required_primaries)
+        for precomposed in expansion_required:
+            decomp = self.full_decomp(precomposed)
+            decomp_len = 0
+            for c in decomp:
+                decomp_len += u8_encoded_length(ord(c))
+            ldiff = decomp_len - u8_encoded_length(precomposed)
+            if ldiff > 0:
+                self.update_max_insert_map(precomposed, ldiff)
 
     def display_max_insert_map(self):
         for cp in sorted(self.max_insert_map.keys()):
@@ -1586,9 +1610,16 @@ class NFC_generator:
         s += u8_insertion_final_code
         return s
 
-    def generate_candidate_class(self):
+    #  Generate the two character classes which identify characters
+    #  that may be involved in NFC conversion.
+    #  (1)  candidates which are marks, generate marks (nonstarter decomposition),
+    #       or otherwise potentially composable with a prior character
+    #       (Hangul V and T type characters, second characters of short composables)
+    #  (2)  characters with required expansions (singletons, excluded composites)
+    def generate_candidate_classes(self):
         t = string.Template(candidate_class_template)
-        candidate_class = empty_uset()
+        # non-starter decompositions are either marks or generate marks
+        candidate_class = self.non_starter_uset
         for ccc_enum in self.ucd.ccc_map.keys():
             if ccc_enum != 'NR':  # 
                 candidate_class = uset_union(candidate_class, self.ucd.ccc_map[ccc_enum])
@@ -1624,7 +1655,7 @@ class NFC_generator:
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
         kernels += self.long_composable_mark_deletion()
         kernels += self.generate_long_composable_pipeline()
-        kernels += self.generate_candidate_class()
+        kernels += self.generate_candidate_classes()
         uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
@@ -1635,15 +1666,14 @@ if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
     generator.create_mappings()
+    generator.determine_expansion_required_primaries()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
     generator.create_conditional_mark_codes()
-    generator.determine_expansion_required_primaries()
-    generator.show_expansion_required_primaries()
+    #generator.show_expansion_required_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
-    #generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()

@@ -78,7 +78,9 @@ void NFC_Focus::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
-    PabloAST * NFC_candidates = getInputStreamSet("NFC_candidates")[0];
+    std::vector<PabloAST *> NFC_candidates = getInputStreamSet("NFC_candidates");
+    PabloAST * composable_seconds = NFC_candidates[0];
+    PabloAST * excluded_composites = NFC_candidates[1];
     BixNumCompiler bnc(pb);
     PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
     PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
@@ -87,12 +89,16 @@ void NFC_Focus::generatePabloMethod() {
     PabloAST * pfx2 = pb.createXor(pfx, pfx3or4);
     PabloAST * thirdlast = pb.createOr(pfx3, pb.createAdvance(pfx4, 1));
     PabloAST * secondlast = pb.createOr(pfx2, pb.createAdvance(thirdlast, 1));
-    PabloAST * focus = pb.createLookahead(NFC_candidates, 1);
-    focus = pb.createOr(focus, pb.createAnd(secondlast, pb.createLookahead(NFC_candidates, 2)));
-    focus = pb.createOr(focus, pb.createAnd(thirdlast, pb.createLookahead(NFC_candidates, 3)));
-    focus = pb.createOr(focus, pb.createAnd(pfx4, pb.createLookahead(NFC_candidates, 4)));
+    PabloAST * focus = pb.createLookahead(composable_seconds, 1);
+    focus = pb.createOr(focus, pb.createAnd(secondlast, pb.createLookahead(composable_seconds, 2)));
+    focus = pb.createOr(focus, pb.createAnd(thirdlast, pb.createLookahead(composable_seconds, 3)));
+    focus = pb.createOr(focus, pb.createAnd(pfx4, pb.createLookahead(composable_seconds, 4)));
     // Now find the next starter from each candidate run.
     focus = pb.createMatchStar(focus, pb.createNot(ccc_NR));
+    focus = pb.createOr(focus, excluded_composites);
+    focus = pb.createOr(focus, pb.createAdvance(pb.createAnd(pfx, excluded_composites), 1));
+    focus = pb.createOr(focus, pb.createAdvance(pb.createAnd(pfx3or4, excluded_composites), 2));
+    focus = pb.createOr(focus, pb.createAdvance(pb.createAnd(pfx4, excluded_composites), 3));
     pb.createAssign(pb.createExtract(getOutputStreamVar("Focus"), pb.getInteger(0)), focus);
 }
 
@@ -199,6 +205,22 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
+    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+    re::Name * CCC0_Name = re::makeName("CCC", "NR");
+    CCC0_Name->setDefinition(CCC0_Prop);
+    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, ccc_NR0, BitMovementMode::LookAhead);
+    SHOW_STREAM(ccc_NR0);
+
+    StreamSet * NFC_Candidates = P.CreateStreamSet(2, 1);
+    P.CreateKernelCall<NFC_CandidateClass>(BasisBits, NFC_Candidates);
+    SHOW_BIXNUM(NFC_Candidates);
+
+    StreamSet * NFC_WorkItems = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<NFC_Focus>(BasisBits, ccc_NR0, NFC_Candidates, NFC_WorkItems);
+    SHOW_STREAM(NFC_WorkItems);
+
     StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
     SHOW_BIXNUM(InsertionBixNum);
@@ -214,14 +236,6 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<ExcludedCompositeStage>(ExpandedBasis, EC_SelectionMask, EC_Basis);
     SHOW_BIXNUM(EC_Basis);
-
-    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
-    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
-    re::Name * CCC0_Name = re::makeName("CCC", "NR");
-    CCC0_Name->setDefinition(CCC0_Prop);
-    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, ccc_NR0, BitMovementMode::LookAhead);
-    SHOW_STREAM(ccc_NR0);
 
     StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
     SpreadByMask(P, SpreadMask, ccc_NR0, ccc_NR);
