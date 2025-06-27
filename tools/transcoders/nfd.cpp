@@ -29,6 +29,7 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
+#include <kernel/unicode/normalization.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/utf8_support.h>
@@ -612,43 +613,6 @@ FinalSelection::FinalSelection(LLVMTypeSystemInterface & ts, StreamSet * SelectM
 {Binding{"Output", Output}}) {
 }
 
-class Invert : public PabloKernel {
-public:
-    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(ts, "Invert",
-                      {Binding{"mask", mask}},
-                      {Binding{"inverted", inverted}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void Invert::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * mask = getInputStreamSet("mask")[0];
-    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
-    Var * outVar = getOutputStreamVar("inverted");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
-}
-
-class OrCombine : public PabloKernel {
-public:
-    OrCombine(LLVMTypeSystemInterface & ts, StreamSet * s1, StreamSet * s2, StreamSet * combined)
-        : PabloKernel(ts, "OrCombine",
-                      {Binding{"s1", s1}, Binding{"s2", s2}},
-                      {Binding{"combined", combined}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void OrCombine::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * s1 = getInputStreamSet("s1")[0];
-    PabloAST * s2 = getInputStreamSet("s2")[0];
-    PabloAST * combined = pb.createOr(s1, s2);
-    Var * outVar = getOutputStreamVar("combined");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), combined);
-}
-
 void FinalSelection::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * SelectMask = getInputStreamSet("SelectMask")[0];
@@ -660,47 +624,6 @@ void FinalSelection::generatePabloMethod() {
     }
     writeOutputStreamSet("Output", Output);
 }
-
-class CreateU8_FilterMask : public pablo::PabloKernel {
-public:
-    CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);
-protected:
-    void generatePabloMethod() override;
-private:
-    unsigned mBixBits;
-};
-
-CreateU8_FilterMask::CreateU8_FilterMask (LLVMTypeSystemInterface & ts,
-                                StreamSet * DeletionBixNum,
-                                StreamSet * DelMask)
-: PabloKernel(ts, "u8_delmask@-1_" + DeletionBixNum->shapeString(),
-// inputs
-{Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
-// output
-{Binding{"selection_mask", DelMask}}),
-    mBixBits(DeletionBixNum->getNumElements()) {
-}
-
-void CreateU8_FilterMask::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    Var * deletion_bixnum = getInputStreamVar("deletion_bixnum");
-    Var * del_bixnum0 = pb.createExtract(deletion_bixnum, pb.getInteger(0));
-    // Deletion and insertion bixnums are calculated at the final position of
-    // a UTF-8 sequence.   Deletion masks will preserve this position.
-    //
-    PabloAST * del_mask = pb.createLookahead(del_bixnum0, 1);
-    if (mBixBits == 2) {
-        Var * del_bixnum1 = pb.createExtract(deletion_bixnum, pb.getInteger(1));
-        // Mark two positions for deletion.
-        del_mask = pb.createOr3(del_mask, pb.createLookahead(del_bixnum1, 1), pb.createLookahead(del_bixnum1, 2));
-        // If both del_bixnum0 and del_bixnum1 are 1, then 3 positions must be deleted.
-        del_mask = pb.createOr(del_mask, pb.createAnd(pb.createLookahead(del_bixnum0, 3), pb.createLookahead(del_bixnum1, 3)));
-    }
-    PabloAST * selected = pb.createInFile(pb.createNot(del_mask));
-    Var * const selection_mask = getOutputStreamVar("selection_mask");
-    pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
-}
-
 
 StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U21_Basis) {
     // Now we have a Unicode-indexed representation of all significant
@@ -819,48 +742,6 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
     return NFD_WorkItems;
 }
 
-void ComputeWorkPlacement(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * SelectionMask,
-                          StreamSet * WorkPlacementMask) {
-    auto u8_insert_ccs = NFD_Data.UTF8_Insertion_BixNumCCs();
-    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(u8_insert_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(u8_insert_ccs, U8_Basis, U8_Insertion_BixNum);
-    SHOW_BIXNUM(U8_Insertion_BixNum);
-
-    auto u8_deletion_ccs = NFD_Data.UTF8_Deletion_BixNumCCs();
-    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(u8_deletion_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(u8_deletion_ccs, U8_Basis, U8_Deletion_BixNum);
-    SHOW_BIXNUM(U8_Deletion_BixNum);
-
-    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
-    SHOW_STREAM(U8_FilterMask);
-
-    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(U8_SpreadMask);
-
-    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
-
-    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
-    SHOW_STREAM(ExpandedFilterMask);
-
-    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
-    SHOW_STREAM(U8_PostSpreadFilterMask);
-
-    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, SelectionMask, WorkSpreadMask);
-    SHOW_STREAM(WorkSpreadMask);
-
-    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
-    SHOW_STREAM(WorkExpansionMask);
-
-    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
-    SHOW_STREAM(WorkPlacementMask);
-}
-
 void source_input_stage(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * BasisBits) {
 
     P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
@@ -896,7 +777,7 @@ void NFD_FilterStage(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * Ba
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
 
-    ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
+    ComputeWorkPlacement(P, NFD_Data.UTF8_Insertion_BixNumCCs(), NFD_Data.UTF8_Deletion_BixNumCCs(), BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
     SHOW_STREAM(FinalWorkPlacementMask);
 
     FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);

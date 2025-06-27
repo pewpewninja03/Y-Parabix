@@ -10,6 +10,7 @@
 
 using StreamSet = kernel::StreamSet;
 using PipelineBuilder = kernel::PipelineBuilder;
+namespace re {class CC;}
 
 // Hangul Composition Kernels for NFC (See Unicode section 3.12).
 //
@@ -170,3 +171,28 @@ protected:
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,
                             StreamSet * FinalBasis, StreamSet * DeletionMask);
+
+class Invert : public pablo::PabloKernel {
+public:
+    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted);
+protected:
+    void generatePabloMethod() override;
+};
+
+//
+//  Compute a mask for final work placement, given
+//  (a) a set of ccs that define the insertion amounts (as a BixNum)
+//      required for the work to be carried out,
+//  (b) a set of ccs that define the deletion amounts (as a BixNum)
+//      required to remove unneeeded positiona after work has been
+//      performed,
+//  (c) a source UTF-8 basis bits stream,
+//  (d) a mask to select only those portions of the basis that are
+//      relevant to the work to be performed.
+
+void ComputeWorkPlacement(PipelineBuilder & P,
+                          std::vector<re::CC *> insertionBixNumCCs,
+                          std::vector<re::CC *> deletionBixNumCCs,
+                          StreamSet * U8_Basis, StreamSet * WorkSelectionMask,
+                          StreamSet * WorkPlacementMask);
+

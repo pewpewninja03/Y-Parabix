@@ -11,6 +11,11 @@
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>
 #include <pablo/bixnum/bixnum.h>
+#include <kernel/unicode/charclasses.h>
+#include <toolchain/toolchain.h>
+#include <kernel/streamutils/deletion.h>
+#include <kernel/streamutils/pdep_kernel.h>
+#include <pablo/pablo_kernel.h>
 
 using namespace pablo;
 using namespace kernel;
@@ -204,3 +209,123 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("Output_Basis", outputVar);
     writeOutputStreamSet("SelectionMask", std::vector<Var *>{maskVar});
 }
+
+Invert::Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(ts, "Invert",
+                      {Binding{"mask", mask}},
+                      {Binding{"inverted", inverted}}) {}
+
+void Invert::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * mask = getInputStreamSet("mask")[0];
+    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
+    Var * outVar = getOutputStreamVar("inverted");
+    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
+}
+
+class CreateU8_FilterMask : public pablo::PabloKernel {
+public:
+    CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mBixBits;
+};
+
+CreateU8_FilterMask::CreateU8_FilterMask (LLVMTypeSystemInterface & ts,
+                                StreamSet * DeletionBixNum,
+                                StreamSet * DelMask)
+: PabloKernel(ts, "u8_delmask@-1_" + DeletionBixNum->shapeString(),
+// inputs
+{Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
+// output
+{Binding{"selection_mask", DelMask}}),
+    mBixBits(DeletionBixNum->getNumElements()) {
+}
+
+void CreateU8_FilterMask::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    Var * deletion_bixnum = getInputStreamVar("deletion_bixnum");
+    Var * del_bixnum0 = pb.createExtract(deletion_bixnum, pb.getInteger(0));
+    // Deletion and insertion bixnums are calculated at the final position of
+    // a UTF-8 sequence.   Deletion masks will preserve this position.
+    //
+    PabloAST * del_mask = pb.createLookahead(del_bixnum0, 1);
+    if (mBixBits == 2) {
+        Var * del_bixnum1 = pb.createExtract(deletion_bixnum, pb.getInteger(1));
+        // Mark two positions for deletion.
+        del_mask = pb.createOr3(del_mask, pb.createLookahead(del_bixnum1, 1), pb.createLookahead(del_bixnum1, 2));
+        // If both del_bixnum0 and del_bixnum1 are 1, then 3 positions must be deleted.
+        del_mask = pb.createOr(del_mask, pb.createAnd(pb.createLookahead(del_bixnum0, 3), pb.createLookahead(del_bixnum1, 3)));
+    }
+    PabloAST * selected = pb.createInFile(pb.createNot(del_mask));
+    Var * const selection_mask = getOutputStreamVar("selection_mask");
+    pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
+}
+
+class OrCombine : public PabloKernel {
+public:
+    OrCombine(LLVMTypeSystemInterface & ts, StreamSet * s1, StreamSet * s2, StreamSet * combined)
+        : PabloKernel(ts, "OrCombine",
+                      {Binding{"s1", s1}, Binding{"s2", s2}},
+                      {Binding{"combined", combined}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void OrCombine::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * s1 = getInputStreamSet("s1")[0];
+    PabloAST * s2 = getInputStreamSet("s2")[0];
+    PabloAST * combined = pb.createOr(s1, s2);
+    Var * outVar = getOutputStreamVar("combined");
+    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), combined);
+}
+
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
+
+void ComputeWorkPlacement(PipelineBuilder & P,
+                          std::vector<re::CC *> insertionBixNumCCs,
+                          std::vector<re::CC *> deletionBixNumCCs,
+                          StreamSet * U8_Basis, StreamSet * WorkSelectionMask,
+                          StreamSet * WorkPlacementMask) {
+    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(insertionBixNumCCs.size());
+    P.CreateKernelCall<CharClassesKernel>(insertionBixNumCCs, U8_Basis, U8_Insertion_BixNum);
+    SHOW_BIXNUM(U8_Insertion_BixNum);
+
+    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(deletionBixNumCCs.size());
+    P.CreateKernelCall<CharClassesKernel>(deletionBixNumCCs, U8_Basis, U8_Deletion_BixNum);
+    SHOW_BIXNUM(U8_Deletion_BixNum);
+
+    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
+    SHOW_STREAM(U8_FilterMask);
+
+    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(U8_SpreadMask);
+
+    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
+
+    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
+    SHOW_STREAM(ExpandedFilterMask);
+
+    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
+    SHOW_STREAM(U8_PostSpreadFilterMask);
+
+    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, U8_SpreadMask, WorkSelectionMask, WorkSpreadMask);
+    SHOW_STREAM(WorkSpreadMask);
+
+    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
+    SHOW_STREAM(WorkExpansionMask);
+
+    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
+    SHOW_STREAM(WorkPlacementMask);
+}
+
