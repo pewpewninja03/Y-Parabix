@@ -171,14 +171,6 @@ protected:
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,
                             StreamSet * FinalBasis, StreamSet * DeletionMask);
-
-class Invert : public pablo::PabloKernel {
-public:
-    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted);
-protected:
-    void generatePabloMethod() override;
-};
-
 //
 //  Compute a mask for final work placement, given
 //  (a) a set of ccs that define the insertion amounts (as a BixNum)

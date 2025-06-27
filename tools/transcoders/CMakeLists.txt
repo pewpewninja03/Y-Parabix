@@ -125,6 +125,7 @@ DEPS
     pablo
     pablo.bixnum
     kernel.basis
+    kernel.bitwise
     kernel.io
     kernel.pipeline
     kernel.streamutils

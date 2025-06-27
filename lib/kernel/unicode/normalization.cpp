@@ -13,6 +13,7 @@
 #include <pablo/bixnum/bixnum.h>
 #include <kernel/unicode/charclasses.h>
 #include <toolchain/toolchain.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <pablo/pablo_kernel.h>
@@ -210,19 +211,6 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("SelectionMask", std::vector<Var *>{maskVar});
 }
 
-Invert::Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(ts, "Invert",
-                      {Binding{"mask", mask}},
-                      {Binding{"inverted", inverted}}) {}
-
-void Invert::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * mask = getInputStreamSet("mask")[0];
-    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
-    Var * outVar = getOutputStreamVar("inverted");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
-}
-
 class CreateU8_FilterMask : public pablo::PabloKernel {
 public:
     CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);
@@ -263,25 +251,6 @@ void CreateU8_FilterMask::generatePabloMethod() {
     pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
 }
 
-class OrCombine : public PabloKernel {
-public:
-    OrCombine(LLVMTypeSystemInterface & ts, StreamSet * s1, StreamSet * s2, StreamSet * combined)
-        : PabloKernel(ts, "OrCombine",
-                      {Binding{"s1", s1}, Binding{"s2", s2}},
-                      {Binding{"combined", combined}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void OrCombine::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * s1 = getInputStreamSet("s1")[0];
-    PabloAST * s2 = getInputStreamSet("s2")[0];
-    PabloAST * combined = pb.createOr(s1, s2);
-    Var * outVar = getOutputStreamVar("combined");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), combined);
-}
-
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
@@ -307,14 +276,14 @@ void ComputeWorkPlacement(PipelineBuilder & P,
     SHOW_STREAM(U8_SpreadMask);
 
     StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
+    Invert(P, U8_SpreadMask, ExpandedSpaceMask);
 
     StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
     SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
     SHOW_STREAM(ExpandedFilterMask);
 
     StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
+    OrCombine(P, ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
     SHOW_STREAM(U8_PostSpreadFilterMask);
 
     StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
@@ -322,7 +291,7 @@ void ComputeWorkPlacement(PipelineBuilder & P,
     SHOW_STREAM(WorkSpreadMask);
 
     StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
+    OrCombine(P, WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
     SHOW_STREAM(WorkExpansionMask);
 
     FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);

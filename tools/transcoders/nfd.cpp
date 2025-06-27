@@ -25,6 +25,7 @@
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
@@ -839,7 +840,7 @@ NFD_TransformFunctionType NFD_transform_pipeline(CPUDriver & driver, NFD_BixData
 void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * ByteStream, StreamSet * TransformedBasis) {
 
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
+    Invert(P, WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
 
     StreamSet * const NonModified = P.CreateStreamSet(1, 8);
@@ -847,7 +848,7 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
     SHOW_BYTES(NonModified);
 
     StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(FinalWorkPlacementMask, NonModifiedPlacementMask);
+    Invert(P, FinalWorkPlacementMask, NonModifiedPlacementMask);
     SHOW_STREAM(NonModifiedPlacementMask);
 
     StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
