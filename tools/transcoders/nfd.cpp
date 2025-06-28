@@ -837,25 +837,25 @@ NFD_TransformFunctionType NFD_transform_pipeline(CPUDriver & driver, NFD_BixData
     return P.compile();
 }
 
-void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * ByteStream, StreamSet * TransformedBasis) {
+void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * Source, StreamSet * TransformedBasis) {
 
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
     Invert(P, WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
 
-    StreamSet * const NonModified = P.CreateStreamSet(1, 8);
-    FilterByMask(P, NonModifiedMask, ByteStream, NonModified);
-    SHOW_BYTES(NonModified);
-
-    StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
-    Invert(P, FinalWorkPlacementMask, NonModifiedPlacementMask);
-    SHOW_STREAM(NonModifiedPlacementMask);
-
-    StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
-    SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
-
     StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
     if (ByteMerging) {
+        StreamSet * const NonModified = P.CreateStreamSet(1, 8);
+        FilterByMask(P, NonModifiedMask, Source, NonModified);
+        SHOW_BYTES(NonModified);
+        
+        StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
+        Invert(P, FinalWorkPlacementMask, NonModifiedPlacementMask);
+        SHOW_STREAM(NonModifiedPlacementMask);
+        
+        StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
+        SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
+        
         StreamSet * const TransformedBytes = P.CreateStreamSet(1, 8);
         P.CreateKernelCall<P2SKernel>(TransformedBasis, TransformedBytes);
 
@@ -869,7 +869,7 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
         }
     } else {
         StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
-        P.CreateKernelCall<S2PKernel>(NonModified, NonModifiedBasis);
+        FilterByMask(P, NonModifiedMask, Source, NonModifiedBasis);
         SHOW_BIXNUM(NonModifiedBasis);
 
         StreamSet * const OutputBasis = P.CreateStreamSet(8);
@@ -915,23 +915,21 @@ CombinedWorkFunctionType generate_combined_work_pipeline(CPUDriver & driver, NFD
     return P.compile();
 }
 
-
-
 typedef void (*OutputAssemblyFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
 
 OutputAssemblyFunctionType generate_output_pipeline(CPUDriver & driver) {
     auto P = CreatePipeline(driver,
                             Input<streamset_t>("WorkSelectionMask", 1, 1),
                             Input<streamset_t>("FinalWorkPlacementMask", 1, 1),
-                            Input<streamset_t>("ByteStream", 1, 8),
+                            Input<streamset_t>("Source", ByteMerging ? 1 : 8, ByteMerging ? 8 : 1),
                             Input<streamset_t>("TransformedBasis", 8, 1)
                             );
     StreamSet * const WorkSelectionMask = P.getInputStreamSet("WorkSelectionMask");
     StreamSet * const FinalWorkPlacementMask = P.getInputStreamSet("FinalWorkPlacementMask");
-    StreamSet * const ByteStream = P.getInputStreamSet("ByteStream");
+    StreamSet * const Source = P.getInputStreamSet("Source");
     StreamSet * const TransformedBasis = P.getInputStreamSet("TransformedBasis");
 
-    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, Source, TransformedBasis);
     return P.compile();
 }
 
@@ -959,7 +957,7 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
         
-        OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+        OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteMerging ? ByteStream : BasisBits, TransformedBasis);
     }
     return P.compile();
 }
@@ -1006,7 +1004,7 @@ int main(int argc, char *argv[]) {
         stage2(WorkingBasis, TransformedBasis);
 
         OutputAssemblyFunctionType stage3 = generate_output_pipeline(driver);
-        stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+        stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteMerging ? ByteStream : BasisBits, TransformedBasis);
     } else {
         XfrmFunctionType fn = generate_unitary_pipeline(driver, NFD_Data);
         fn(fd);
