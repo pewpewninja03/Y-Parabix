@@ -278,21 +278,13 @@ void ComputeWorkPlacement(PipelineBuilder & P,
     StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
     Invert(P, U8_SpreadMask, ExpandedSpaceMask);
 
-    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
-    SHOW_STREAM(ExpandedFilterMask);
-
     StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
-    OrCombine(P, ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
+    ExpandFilter(P, U8_SpreadMask, U8_FilterMask, U8_PostSpreadFilterMask);
     SHOW_STREAM(U8_PostSpreadFilterMask);
 
-    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, WorkSelectionMask, WorkSpreadMask);
-    SHOW_STREAM(WorkSpreadMask);
-
     StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
-    OrCombine(P, WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
-    SHOW_STREAM(WorkExpansionMask);
+
+    ExpandFilter(P, U8_SpreadMask, WorkSelectionMask, WorkExpansionMask);
 
     FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
     SHOW_STREAM(WorkPlacementMask);
