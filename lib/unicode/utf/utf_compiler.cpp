@@ -1084,6 +1084,15 @@ void UTF_Compiler::compile(Target_List targets, std::vector<re::CC *> ccs) {
     compile(targets, usets);
 }
 
+void UTF_Compiler::compile(std::string targetPfx, CC_List ccs) {
+    std::vector<Var *> targets(ccs.size());
+    auto All0 = mPB.createZeroes();
+    for (unsigned i = 0; i < ccs.size(); i++) {
+        targets[i] = mPB.createVar(targetPfx + std::to_string(i), All0);
+    }
+    compile(targets, ccs);
+}
+
 void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
     llvm::ArrayType * ty = cast<ArrayType>(mVar->getType());
     unsigned streamCount = ty->getArrayNumElements();

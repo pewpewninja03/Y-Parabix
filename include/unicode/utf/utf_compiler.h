@@ -34,6 +34,7 @@ public:
                  pablo::BitMovementMode m);
     void compile(Target_List targets, CC_List ccs);
     void compile(Target_List targets, std::vector<re::CC *> ccs);
+    void compile(std::string varPrefix, CC_List ccs);
 protected:
     pablo::Var *            mVar;
     pablo::PabloBuilder &   mPB;
