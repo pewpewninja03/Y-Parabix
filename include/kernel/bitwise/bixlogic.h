@@ -42,4 +42,13 @@ void XorCombine(PipelineBuilder & P,
 void AndCombine(PipelineBuilder & P,
                 StreamSet * source, StreamSet * toCombine,
                 StreamSet * combined, CombiningKind k = CombiningKind::Functional);
+
+//
+//  ZeroByMask applies a mask stream to each stream in a source stream set,
+//  zeroing out positions in each source stream at positions marked by zeroes
+//  in the mask.
+//
+void ZeroByMask(PipelineBuilder & P,
+                StreamSet * mask, StreamSet * source,
+                StreamSet * masked, CombiningKind k = CombiningKind::Functional);
 }

@@ -113,4 +113,52 @@ void AndCombine(PipelineBuilder & P,
     P.CreateKernelCall<BitwiseCombine>(BitwiseOp::And, source, toCombine, combined, k);
 }
 
+std::string ZBM_unique_name(CombiningKind k, StreamSet * source) {
+    std::string tmp;
+    llvm::raw_string_ostream out(tmp);
+    out << "ZeroByMask_";
+    out << source->shapeString();
+    if (k == CombiningKind::InOut) {
+        out << "+InOut";
+    }
+    return out.str();
+}
+
+
+class ZeroByMaskKernel : public PabloKernel {
+public:
+    ZeroByMaskKernel(LLVMTypeSystemInterface & ts,
+                     StreamSet * mask, StreamSet * source,
+                     StreamSet * masked, CombiningKind k)
+    : PabloKernel(ts, ZBM_unique_name(k, source),
+                  {Binding{"mask", mask}, Binding{"source", source}},
+                  {})
+    {
+        if (k == CombiningKind::InOut) {
+            mOutputStreamSets.push_back(Binding{"masked", masked, FixedRate(), InOut("source")});
+        } else {
+            mOutputStreamSets.push_back(Binding{"masked", masked});
+        }
+    }
+protected:
+    void generatePabloMethod() override;
+};
+
+void ZeroByMaskKernel::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * mask = getInputStreamSet("mask")[0];
+    std::vector<PabloAST *> source = getInputStreamSet("source");
+    std::vector<PabloAST *> masked(source.size());
+    for (unsigned i = 0; i < source.size(); i++) {
+        masked[i] = pb.createAnd(mask, source[i]);
+    }
+    writeOutputStreamSet("masked", masked);
+}
+
+void ZeroByMask(PipelineBuilder & P,
+                StreamSet * mask, StreamSet * source,
+                StreamSet * masked, CombiningKind k) {
+    P.CreateKernelCall<ZeroByMaskKernel>(mask, source, masked, k);
+}
+
 }
