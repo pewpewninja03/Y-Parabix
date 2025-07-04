@@ -275,15 +275,11 @@ void ComputeWorkPlacement(PipelineBuilder & P,
     StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
     SHOW_STREAM(U8_SpreadMask);
 
-    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
-    Invert(P, U8_SpreadMask, ExpandedSpaceMask);
-
     StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
     ExpandFilter(P, U8_SpreadMask, U8_FilterMask, U8_PostSpreadFilterMask);
     SHOW_STREAM(U8_PostSpreadFilterMask);
 
     StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
-
     ExpandFilter(P, U8_SpreadMask, WorkSelectionMask, WorkExpansionMask);
 
     FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
