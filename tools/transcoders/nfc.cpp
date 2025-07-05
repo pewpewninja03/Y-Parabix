@@ -49,7 +49,8 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFC_Options("Decomposition Options", "Decomposition Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFC_Options));
-static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFC_Options));
+static cl::opt<bool> NoFocus("NoFocus", cl::desc("Process the entire file without filtering to narrow the focus of work"), cl::init(false), cl::cat(NFC_Options));
+//static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFC_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -58,18 +59,17 @@ static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-b
 class NFC_Focus : public pablo::PabloKernel {
 public:
     NFC_Focus(LLVMTypeSystemInterface & ts,
-              StreamSet * Basis, StreamSet * ccc_NR, StreamSet * Composable2nds, StreamSet * Focus);
+              StreamSet * Basis, StreamSet * Composable2nds, StreamSet * Focus);
 protected:
     void generatePabloMethod() override;
 };
 
 NFC_Focus::NFC_Focus(LLVMTypeSystemInterface & ts, 
-                     StreamSet * Basis, StreamSet * ccc_NR, StreamSet * NFC_candidates,
+                     StreamSet * Basis, StreamSet * NFC_candidates,
                      StreamSet * Focus)
 : PabloKernel(ts, "NFC_Focus",
 // inputs
 {Binding{"Basis", Basis},
- Binding{"ccc_NR", ccc_NR},
  Binding{"NFC_candidates", NFC_candidates, FixedRate(), LookAhead(4)}},
 // output
 {Binding{"Focus", Focus}}) {
@@ -78,7 +78,6 @@ NFC_Focus::NFC_Focus(LLVMTypeSystemInterface & ts,
 void NFC_Focus::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    PabloAST * ccc_NR = getInputStreamSet("ccc_NR")[0];
     std::vector<PabloAST *> NFC_candidates = getInputStreamSet("NFC_candidates");
     PabloAST * composable_seconds = NFC_candidates[0];
     PabloAST * excluded_composites = NFC_candidates[1];
@@ -88,18 +87,12 @@ void NFC_Focus::generatePabloMethod() {
     PabloAST * pfx = bnc.UGE(Basis, 0xC2);
     PabloAST * pfx3 = pb.createXor(pfx3or4, pfx4);
     PabloAST * pfx2 = pb.createXor(pfx, pfx3or4);
-    PabloAST * thirdlast = pb.createOr(pfx3, pb.createAdvance(pfx4, 1));
-    PabloAST * secondlast = pb.createOr(pfx2, pb.createAdvance(thirdlast, 1));
-    PabloAST * focus = pb.createLookahead(composable_seconds, 1);
-    focus = pb.createOr(focus, pb.createAnd(secondlast, pb.createLookahead(composable_seconds, 2)));
-    focus = pb.createOr(focus, pb.createAnd(thirdlast, pb.createLookahead(composable_seconds, 3)));
+    PabloAST * ASCII = bnc.ULE(Basis, 0x7F);
+    PabloAST * focus = pb.createOr(composable_seconds, pb.createAnd(ASCII, pb.createLookahead(composable_seconds, 1)));
+    focus = pb.createOr(focus, pb.createAnd(pfx2, pb.createLookahead(composable_seconds, 2)));
+    focus = pb.createOr(focus, pb.createAnd(pfx3, pb.createLookahead(composable_seconds, 3)));
     focus = pb.createOr(focus, pb.createAnd(pfx4, pb.createLookahead(composable_seconds, 4)));
-    // Now find the next starter from each candidate run.
-    focus = pb.createMatchStar(focus, pb.createNot(ccc_NR));
     focus = pb.createOr(focus, excluded_composites);
-    focus = pb.createOr(focus, pb.createAdvance(pb.createAnd(pfx, excluded_composites), 1));
-    focus = pb.createOr(focus, pb.createAdvance(pb.createAnd(pfx3or4, excluded_composites), 2));
-    focus = pb.createOr(focus, pb.createAdvance(pb.createAnd(pfx4, excluded_composites), 3));
     pb.createAssign(pb.createExtract(getOutputStreamVar("Focus"), pb.getInteger(0)), focus);
 }
 
@@ -148,21 +141,26 @@ void DelPriorToSelectMask::generatePabloMethod() {
 }
 using namespace UCD;
 
+StreamSet * DetermineNFC_WorkSpans(PipelineBuilder & P, StreamSet * U8_Basis, StreamSet * u8index) {
+    StreamSet * NFC_Candidates = P.CreateStreamSet(2, 1);
+    P.CreateKernelCall<NFC_CandidateClass>(U8_Basis, NFC_Candidates);
+    SHOW_BIXNUM(NFC_Candidates);
+
+    StreamSet * NFC_WorkItems = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<NFC_Focus>(U8_Basis, NFC_Candidates, NFC_WorkItems);
+    SHOW_STREAM(NFC_WorkItems);
+
+    StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(NFC_WorkItems, u8index, WorkSelectionMask, BitMovementMode::Advance);
+    SHOW_STREAM(WorkSelectionMask);
+
+    return WorkSelectionMask;
+}
+
 void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * U8_Basis, StreamSet * OutputBasis, StreamSet * FinalSelectionMask) {
-    StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
-    P.CreateKernelCall<NFC_Initial_Insertion>(U8_Basis, InsertionBixNum);
-    SHOW_BIXNUM(InsertionBixNum);
-
-    StreamSet * SpreadMask = InsertionSpreadMask(P, InsertionBixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(SpreadMask);
-
-    StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
-    SpreadByMask(P, SpreadMask, U8_Basis, ExpandedBasis);
-    SHOW_BIXNUM(ExpandedBasis);
-
     StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
     StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ExcludedCompositeStage>(ExpandedBasis, EC_SelectionMask, EC_Basis);
+    P.CreateKernelCall<ExcludedCompositeStage>(U8_Basis, EC_SelectionMask, EC_Basis);
     SHOW_BIXNUM(EC_Basis);
 
     StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
@@ -239,22 +237,70 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, ccc_NR0, BitMovementMode::LookAhead);
-    SHOW_STREAM(ccc_NR0);
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_BIXNUM(u8index);
 
-    StreamSet * NFC_Candidates = P.CreateStreamSet(2, 1);
-    P.CreateKernelCall<NFC_CandidateClass>(BasisBits, NFC_Candidates);
-    SHOW_BIXNUM(NFC_Candidates);
+    StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
+    P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
+    SHOW_BIXNUM(InsertionBixNum);
 
-    StreamSet * NFC_WorkItems = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<NFC_Focus>(BasisBits, ccc_NR0, NFC_Candidates, NFC_WorkItems);
-    SHOW_STREAM(NFC_WorkItems);
+    StreamSet * SourceExpansionMask = InsertionSpreadMask(P, InsertionBixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(SourceExpansionMask);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
-    StreamSet * FinalSelectionMask = P.CreateStreamSet(1, 1);
-    NFC_U8_Pipeline(P, CCC0_Name, BasisBits, OutputBasis, FinalSelectionMask);
 
+    if (NoFocus) {
+        StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
+        SpreadByMask(P, SourceExpansionMask, BasisBits, ExpandedBasis);
+
+        StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+        StreamSet * FinalSelectionMask = P.CreateStreamSet(1, 1);
+        NFC_U8_Pipeline(P, CCC0_Name, ExpandedBasis, TransformedBasis, FinalSelectionMask);
+        FilterByMask(P, FinalSelectionMask, TransformedBasis, OutputBasis);
+    } else {
+        StreamSet * WorkSelectionMask = DetermineNFC_WorkSpans(P, BasisBits, u8index);
+        StreamSet * SelectedWorkBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, WorkSelectionMask, BasisBits, SelectedWorkBasis);
+
+        StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
+        P.CreateKernelCall<NFC_Initial_Insertion>(SelectedWorkBasis, WorkingInsertionBixNum);
+        SHOW_BIXNUM(WorkingInsertionBixNum);
+
+        StreamSet * WorkingExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+        SHOW_STREAM(WorkingExpansionMask);
+
+        StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
+        SpreadByMask(P, WorkingExpansionMask, SelectedWorkBasis, WorkingBasis);
+
+        StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+        StreamSet * ValidWorkMask = P.CreateStreamSet(1, 1);
+        NFC_U8_Pipeline(P, CCC0_Name, WorkingBasis, TransformedBasis, ValidWorkMask);
+        SHOW_STREAM(ValidWorkMask);
+
+        StreamSet * CompressedWorkBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, ValidWorkMask, TransformedBasis, CompressedWorkBasis);
+        SHOW_BIXNUM(CompressedWorkBasis);
+
+        StreamSet * const ValidSourceMask = P.CreateStreamSet(1, 1);
+        ExpandFilter(P, WorkSelectionMask, ValidWorkMask, ValidSourceMask);
+        SHOW_STREAM(ValidSourceMask);
+
+        StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+        ExpandFilter(P, SourceExpansionMask, ValidSourceMask, FinalWorkPlacementMask);
+        SHOW_STREAM(FinalWorkPlacementMask);
+
+        StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
+        Invert(P, WorkSelectionMask, NonModifiedMask);
+        SHOW_STREAM(NonModifiedMask);
+
+        StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
+        FilterByMask(P, NonModifiedMask, BasisBits, NonModifiedBasis);
+        SHOW_BIXNUM(NonModifiedBasis);
+
+        MergeByMask(P, FinalWorkPlacementMask, CompressedWorkBasis, NonModifiedBasis, OutputBasis);
+    }
+    
     //  The P2SKernel transforms the basis bit streams into the corresponding
     //  byte stream, inverting the S2P process.
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
