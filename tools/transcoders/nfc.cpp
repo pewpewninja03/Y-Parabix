@@ -157,7 +157,7 @@ StreamSet * DetermineNFC_WorkSpans(PipelineBuilder & P, StreamSet * U8_Basis, St
     return WorkSelectionMask;
 }
 
-void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * U8_Basis, StreamSet * OutputBasis, StreamSet * FinalSelectionMask) {
+void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * U8_Basis, StreamSet * TranslatedBasis, StreamSet * FinalSelectionMask) {
     StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
     StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<ExcludedCompositeStage>(U8_Basis, EC_SelectionMask, EC_Basis);
@@ -197,7 +197,6 @@ void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * U8_B
     //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
     SHOW_BIXNUM(L_V_T);
 
-    StreamSet * TranslatedBasis = P.CreateStreamSet(8, 1);
     StreamSet * SelectionMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<Hangul_Composition>(FinalBasis, L_V_T, TranslatedBasis, SelectionMask);
     SHOW_BIXNUM(TranslatedBasis);
@@ -205,9 +204,6 @@ void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * U8_B
 
     AndCombine(P, SelectionMask0, SelectionMask, FinalSelectionMask);
     SHOW_STREAM(FinalSelectionMask);
-
-    FilterByMask(P, FinalSelectionMask, TranslatedBasis, OutputBasis);
-    SHOW_BIXNUM(OutputBasis);
 }
 
 typedef void (*XfrmFunctionType)(uint32_t fd);
@@ -241,11 +237,17 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_BIXNUM(u8index);
 
+    StreamSet * WorkSelectionMask = DetermineNFC_WorkSpans(P, BasisBits, u8index);
+
     StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
     SHOW_BIXNUM(InsertionBixNum);
 
-    StreamSet * SourceExpansionMask = InsertionSpreadMask(P, InsertionBixNum, kernel::InsertPosition::After);
+    StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
+    ZeroByMask(P, WorkSelectionMask, InsertionBixNum, WorkingInsertionBixNum);
+    SHOW_BIXNUM(WorkingInsertionBixNum);
+
+    StreamSet * SourceExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
     SHOW_STREAM(SourceExpansionMask);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
@@ -259,7 +261,6 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         NFC_U8_Pipeline(P, CCC0_Name, ExpandedBasis, TransformedBasis, FinalSelectionMask);
         FilterByMask(P, FinalSelectionMask, TransformedBasis, OutputBasis);
     } else {
-        StreamSet * WorkSelectionMask = DetermineNFC_WorkSpans(P, BasisBits, u8index);
         StreamSet * SelectedWorkBasis = P.CreateStreamSet(8, 1);
         FilterByMask(P, WorkSelectionMask, BasisBits, SelectedWorkBasis);
 
@@ -282,13 +283,16 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         FilterByMask(P, ValidWorkMask, TransformedBasis, CompressedWorkBasis);
         SHOW_BIXNUM(CompressedWorkBasis);
 
-        StreamSet * const ValidSourceMask = P.CreateStreamSet(1, 1);
-        ExpandFilter(P, WorkSelectionMask, ValidWorkMask, ValidSourceMask);
-        SHOW_STREAM(ValidSourceMask);
+        StreamSet * const ExpandedWorkMask = P.CreateStreamSet(1, 1);
+        ExpandFilter(P, SourceExpansionMask, WorkSelectionMask, ExpandedWorkMask);
+        SHOW_STREAM(ExpandedWorkMask);
 
+        StreamSet * const FinalWorkSelectionMask = P.CreateStreamSet(1, 1);
+        ExpandFilter(P, ExpandedWorkMask, ValidWorkMask, FinalWorkSelectionMask);
+        SHOW_STREAM(FinalWorkSelectionMask);
+        
         StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
-        ExpandFilter(P, SourceExpansionMask, ValidSourceMask, FinalWorkPlacementMask);
-        SHOW_STREAM(FinalWorkPlacementMask);
+        FilterByMask(P, FinalWorkSelectionMask, ExpandedWorkMask, FinalWorkPlacementMask);
 
         StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
         Invert(P, WorkSelectionMask, NonModifiedMask);
@@ -300,7 +304,8 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
         MergeByMask(P, FinalWorkPlacementMask, CompressedWorkBasis, NonModifiedBasis, OutputBasis);
     }
-    
+    SHOW_BIXNUM(OutputBasis);
+
     //  The P2SKernel transforms the basis bit streams into the corresponding
     //  byte stream, inverting the S2P process.
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
