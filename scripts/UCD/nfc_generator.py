@@ -1065,6 +1065,16 @@ class NFC_generator:
                             self.long_composable_map[cp2][cp1] = precomposed
                 else:
                     raise Exception("Unexpected: decomposition length(%x) = %i" % (precomposed, len(decomp)))
+        for cp in self.singleton_map.keys():
+            canon_cp = self.singleton_map[cp]
+            if self.excluded_composite(canon_cp):
+                decomp = self.excluded_composite_map[canon_cp]
+                self.excluded_composite_map[cp] = decomp
+                print("singleton %x maps to excluded_composite %x => %s" % (cp, canon_cp, " ".join(["%x" % ord(c) for c in decomp])))
+            if uset_member(ucd.dt_map['Can'], canon_cp):
+                decomp = ucd.decomp_map[canon_cp]
+                print("singleton %x maps to %x => %s" % (cp, canon_cp, " ".join(["%x" % ord(c) for c in decomp])))
+
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1159,7 +1169,7 @@ class NFC_generator:
         for cp in sorted(self.max_insert_map.keys()):
             print("%04x - insert %i" % (cp, self.max_insert_map[cp]))
 
-    # Overridable composites are primary composites p with
+    # Overridable primaries are primary composites p with
     # decomposition into starter s and mark m such that there
     # is a composite p' = <s, m'> where CCC(m) > CCC(m')
     # In this case the sequence <p ... m'> may be replaced by <p' m ...>
@@ -1170,17 +1180,17 @@ class NFC_generator:
     #
     def determine_expansion_required_primaries(self):
         by_starter_and_ccc = {}
-        for cp2 in self.long_composable_map.keys():
-            ccc = self.ccc_val_map[cp2]
+        for mark in self.long_composable_map.keys():
+            ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
-            for cp1 in self.long_composable_map[cp2].keys():
-                if not cp1 in by_starter_and_ccc.keys():
-                    by_starter_and_ccc[cp1] = {}
-                if not ccc_code in by_starter_and_ccc[cp1].keys():
-                    by_starter_and_ccc[cp1][ccc_code] = {}
-                by_starter_and_ccc[cp1][ccc_code][cp2] = self.long_composable_map[cp2][cp1]
+            for starter in self.long_composable_map[mark].keys():
+                if not starter in by_starter_and_ccc.keys():
+                    by_starter_and_ccc[starter] = {}
+                if not ccc_code in by_starter_and_ccc[starter].keys():
+                    by_starter_and_ccc[starter][ccc_code] = {}
+                by_starter_and_ccc[starter][ccc_code][mark] = self.long_composable_map[mark][starter]
         self.expansion_required_primaries = empty_uset()
-        self.overridable_composites = {}
+        self.overridable_primaries = {}
         for starter in by_starter_and_ccc.keys():
             ccc_list = sorted(by_starter_and_ccc[starter].keys())
             if len(ccc_list) > 1:
@@ -1190,26 +1200,39 @@ class NFC_generator:
                         hi_ccc = ccc_list[j]
                         for m1 in by_starter_and_ccc[starter][hi_ccc].keys():
                             overridable = by_starter_and_ccc[starter][hi_ccc][m1]
+                            if not overridable in self.overridable_primaries.keys():
+                                self.overridable_primaries[overridable] = {}
                             uset = singleton_uset(overridable)
                             self.expansion_required_primaries = uset_union(self.expansion_required_primaries, uset)
                             overrider_marks = by_starter_and_ccc[starter][lo_ccc].keys()
                             for m2 in overrider_marks:
                                 overrider_precomp = by_starter_and_ccc[starter][lo_ccc][m2]
+                                self.overridable_primaries[overridable][m2] = overrider_precomp
                                 if overrider_precomp in self.long_composable_map[m1].keys():
                                     # found a override replacement p''
                                     replacement = self.long_composable_map[m1][overrider_precomp]
                                     #print("%x + %x => %x" %(overridable, m1, replacement ))
                                     #self.long_composable_map[m2][replacement] = overridable
-                            self.overridable_composites[overridable] = overrider_marks
 
     def show_expansion_required_primaries(self):
         cps = uset_to_member_list(self.expansion_required_primaries)
         for cp in cps:
-            print("%x ==> %s" % (cp, ", ".join(["%x" % ov for ov in self.overridable_composites[cp]])))
+            print("%x ==> %s" % (cp, ", ".join(["%x" % ov for ov in self.overridable_primaries[cp]])))
 
-    def show_overridable_composites(self):
-        for cp in sorted(self.overridable_composites.keys()):
-            print("%x ==> %s" % (cp, ", ".join(["%x" % ov for ov in self.overridable_composites[cp]])))
+    def show_overridable_primaries(self):
+        for cp in sorted(self.overridable_primaries.keys()):
+            decomp = ucd.decomp_map[cp]
+            starter = ord(decomp[0])
+            overridden_mark = ord(decomp[1])
+            print("%x == %x %s" % (cp, starter, self.cp_with_ccc(overridden_mark)))
+            for mark in self.overridable_primaries[cp].keys():
+                overrider = self.overridable_primaries[cp][mark]
+                if overrider in self.long_composable_map[overridden_mark].keys():
+                    print("  %x %s ==> %x %x ==> %x" % (cp, self.cp_with_ccc(mark), overrider, overridden_mark, self.long_composable_map[overridden_mark][overrider]))
+                else: 
+                    print("  %x %s ==> %x %x" % (cp, self.cp_with_ccc(mark), overrider, overridden_mark))
+                if overrider in self.overridable_primaries.keys():
+                    print(  "%x is recursively overridable" % overrider)
 
     #
     # If a given starter has precompositions with marks of
@@ -1671,6 +1694,7 @@ if __name__ == "__main__":
     generator.allocate_ccc_passes()
     generator.create_conditional_mark_codes()
     #generator.show_expansion_required_primaries()
+    generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
@@ -1679,4 +1703,4 @@ if __name__ == "__main__":
     #generator.display_excluded_composites()
     #generator.display_recursive_decomposables()
     #generator.display_max_insert_map()
-    generator.emit_normalization_cpp()
+    #generator.emit_normalization_cpp()
