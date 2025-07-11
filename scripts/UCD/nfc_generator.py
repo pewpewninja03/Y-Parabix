@@ -1155,14 +1155,15 @@ class NFC_generator:
             ldiff = decomp_len - u8_encoded_length(cp)
             if ldiff > 0:
                 self.update_max_insert_map(cp, ldiff)
-        for precomposed in self.overridable_primaries.keys():
-            decomp = self.full_decomp(precomposed)
-            decomp_len = 0
-            for c in decomp:
-                decomp_len += u8_encoded_length(ord(c))
-            ldiff = decomp_len - u8_encoded_length(precomposed)
-            if ldiff > 0:
-                self.update_max_insert_map(precomposed, ldiff)
+        for overridden in sorted(self.overridable_primaries.keys()):
+            for mark in self.overridable_primaries[overridden].keys():
+                decomp = self.overridable_primaries[overridden][mark]
+                decomp_len = 0
+                for c in decomp:
+                    decomp_len += u8_encoded_length(ord(c))
+                ldiff = decomp_len - u8_encoded_length(overridden)
+                if ldiff > 0:
+                    self.update_max_insert_map(precomposed, ldiff)
 
     def display_max_insert_map(self):
         for cp in sorted(self.max_insert_map.keys()):
@@ -1191,25 +1192,39 @@ class NFC_generator:
         self.overridable_primaries = {}
         for starter in by_starter_and_ccc.keys():
             ccc_list = sorted(by_starter_and_ccc[starter].keys())
-            if len(ccc_list) > 1:
-                for i in range(len(ccc_list)):
-                    for j in range(i+1, len(ccc_list)):
-                        lo_ccc = ccc_list[i]
-                        hi_ccc = ccc_list[j]
-                        for m1 in by_starter_and_ccc[starter][hi_ccc].keys():
-                            overridable = by_starter_and_ccc[starter][hi_ccc][m1]
-                            if not overridable in self.overridable_primaries.keys():
-                                self.overridable_primaries[overridable] = {}
-                            uset = singleton_uset(overridable)
-                            overrider_marks = by_starter_and_ccc[starter][lo_ccc].keys()
-                            for m2 in overrider_marks:
-                                overrider_precomp = by_starter_and_ccc[starter][lo_ccc][m2]
-                                self.overridable_primaries[overridable][m2] = overrider_precomp
-                                if overrider_precomp in self.long_composable_map[m1].keys():
-                                    # found a override replacement p''
-                                    replacement = self.long_composable_map[m1][overrider_precomp]
-                                    #print("%x + %x => %x" %(overridable, m1, replacement ))
-                                    #self.long_composable_map[m2][replacement] = overridable
+            for i in range(len(ccc_list) - 1):
+                for j in range(i+1, len(ccc_list)):
+                    lo_ccc = ccc_list[i]
+                    hi_ccc = ccc_list[j]
+                    for m1 in by_starter_and_ccc[starter][hi_ccc].keys():
+                        overridable = by_starter_and_ccc[starter][hi_ccc][m1]
+                        if not overridable in self.overridable_primaries.keys():
+                            self.overridable_primaries[overridable] = {}
+                        overrider_marks = by_starter_and_ccc[starter][lo_ccc].keys()
+                        for m2 in overrider_marks:
+                            overrider_precomp = by_starter_and_ccc[starter][lo_ccc][m2]
+                            if overrider_precomp in self.long_composable_map[m1].keys():
+                                # found a override replacement p''
+                                replacement = self.long_composable_map[m1][overrider_precomp]
+                                self.overridable_primaries[overridable][m2] = chr(replacement)
+                            else:
+                                s = chr(overrider_precomp) + chr(m1)
+                                self.overridable_primaries[overridable][m2] = s
+        for overidden in self.overridable_primaries.keys():
+            for mark in self.overridable_primaries[overidden].keys():
+                ccc = self.ccc_val_map[mark]
+                ccc_code = self.ccc_enum_map[ccc]
+                overrider = self.overridable_primaries[overidden][mark]
+                override_primary = ord(overrider[0])
+                if overrider in self.overridable_primaries.keys():
+                    # The overrider is recursively overridable.   Make sure there
+                    # is no mark in its override set that would not have already been 
+                    # considered in the processing of the overridden primary itself.
+                    for mark2 in self.overridable_primaries[overrider].keys():
+                        ccc2 = self.ccc_val_map[mark2]
+                        ccc_code2 = self.ccc_enum_map[ccc2]
+                        if ccc_code2 < ccc_code and not mark2 in self.overridable_primaries[overidden].keys():
+                            print("unexpected recursive override %x %x => %x %x" % (overridden, mark, overrider, mark2))
 
     def show_overridable_primaries(self):
         for cp in sorted(self.overridable_primaries.keys()):
@@ -1219,14 +1234,8 @@ class NFC_generator:
             print("%x == %x %s" % (cp, starter, self.cp_with_ccc(overridden_mark)))
             for mark in self.overridable_primaries[cp].keys():
                 overrider = self.overridable_primaries[cp][mark]
-                if overrider in self.long_composable_map[overridden_mark].keys():
-                    print("  %x %s ==> %x %x ==> %x" % (cp, self.cp_with_ccc(mark), overrider, overridden_mark, self.long_composable_map[overridden_mark][overrider]))
-                else: 
-                    print("  %x %s ==> %x %x" % (cp, self.cp_with_ccc(mark), overrider, overridden_mark))
-                if overrider in self.overridable_primaries.keys():
-                    expansion = " ".join(["%x" % ord(c) for c in self.full_decomp(overrider)])
-                    print("    %x %s ==> %s %x" % (cp, self.cp_with_ccc(mark), expansion, overridden_mark))
-                    print("    %x is recursively overridable" % overrider)
+                seq = " ".join(["%x" % ord(c) for c in overrider])
+                print("  %x %s ==> %s" % (cp, self.cp_with_ccc(mark), seq))
 
     #
     # If a given starter has precompositions with marks of
@@ -1687,7 +1696,7 @@ if __name__ == "__main__":
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
     generator.create_conditional_mark_codes()
-    generator.show_overridable_primaries()
+    #generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
