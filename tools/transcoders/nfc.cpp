@@ -157,14 +157,18 @@ StreamSet * DetermineNFC_WorkSpans(PipelineBuilder & P, StreamSet * U8_Basis, St
     return WorkSelectionMask;
 }
 
-void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * U8_Basis, StreamSet * TranslatedBasis, StreamSet * FinalSelectionMask) {
+void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * ExpansionMask, StreamSet * U8_Basis, StreamSet * TranslatedBasis, StreamSet * FinalSelectionMask) {
     StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
     StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<ExcludedCompositeStage>(U8_Basis, EC_SelectionMask, EC_Basis);
     SHOW_BIXNUM(EC_Basis);
 
+    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, EC_Basis, ccc_NR0, BitMovementMode::LookAhead);
+    SHOW_STREAM(ccc_NR0);
+
     StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, EC_Basis, ccc_NR, BitMovementMode::LookAhead);
+    AndCombine(P, ccc_NR0, ExpansionMask, ccc_NR);
     SHOW_STREAM(ccc_NR);
 
     StreamSet * CanonBasis = P.CreateStreamSet(8, 1);
@@ -258,7 +262,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         StreamSet * FinalSelectionMask = P.CreateStreamSet(1, 1);
-        NFC_U8_Pipeline(P, CCC0_Name, ExpandedBasis, TransformedBasis, FinalSelectionMask);
+        NFC_U8_Pipeline(P, CCC0_Name, SourceExpansionMask, ExpandedBasis, TransformedBasis, FinalSelectionMask);
         FilterByMask(P, FinalSelectionMask, TransformedBasis, OutputBasis);
     } else {
         StreamSet * SelectedWorkBasis = P.CreateStreamSet(8, 1);
@@ -276,7 +280,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         StreamSet * ValidWorkMask = P.CreateStreamSet(1, 1);
-        NFC_U8_Pipeline(P, CCC0_Name, WorkingBasis, TransformedBasis, ValidWorkMask);
+        NFC_U8_Pipeline(P, CCC0_Name, WorkingExpansionMask, WorkingBasis, TransformedBasis, ValidWorkMask);
         SHOW_STREAM(ValidWorkMask);
 
         StreamSet * CompressedWorkBasis = P.CreateStreamSet(8, 1);
