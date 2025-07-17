@@ -53,10 +53,7 @@ private:
 //
 //  As a result of this transformation, leading L and trailing T
 //  characters become redundant.   This is reflected by zeroing out
-//  such positions in the produced SelectionMask bit stream.
-//  The produced Output Basis will still contain the leading L and
-//  trailing T characters, but they may be subsequently removed using
-//  a FilterByMask operation with the SelectionMask.
+//  such positions in the produced output basis bit streams.
 //
 //  This kernel may be used with basis stream sets having 21 streams
 //  (Unicode indexing), 16 streams (UTF-16 indexing) or 8 streams
@@ -68,7 +65,7 @@ class Hangul_Composition : public pablo::PabloKernel {
 public:
     Hangul_Composition(LLVMTypeSystemInterface & ts,
                        StreamSet * Basis, StreamSet * Hangul_Composables,
-                       StreamSet * Output_Basis, StreamSet * SelectionMask);
+                       StreamSet * Output_Basis);
 protected:
     void generatePabloMethod() override;
 };
@@ -129,8 +126,7 @@ protected:
 class ExcludedCompositeStage : public pablo::PabloKernel {
 public:
     ExcludedCompositeStage
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-         StreamSet * SelectMask, StreamSet * EC_Basis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * EC_Basis);
 protected:
     void generatePabloMethod() override;
 };
@@ -162,15 +158,14 @@ protected:
 class SingletonCanonicalization : public pablo::PabloKernel {
 public:
     SingletonCanonicalization
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * SelectMask, StreamSet * XfrmBasis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,
-                            StreamSet * FinalBasis, StreamSet * DeletionMask);
+                            StreamSet * FinalBasis);
 //
 //  Compute a mask for final work placement, given
 //  (a) a set of ccs that define the insertion amounts (as a BixNum)

@@ -5718,18 +5718,16 @@ void NFC_Initial_Insertion::generatePabloMethod() {
 }
 //
 SingletonCanonicalization::SingletonCanonicalization
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis)
 : PabloKernel(ts, "SingletonCanonicalization" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+{Binding{"XfrmBasis", XfrmBasis}}) {}
 
 void SingletonCanonicalization::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // DeleteVar will be inverted to produce SelectMask
     Var * DeleteVar = pb.createVar("DeleteVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -6179,28 +6177,25 @@ void SingletonCanonicalization::generatePabloMethod() {
     }
 
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    PabloAST * select = pb.createNot(DeleteVar);
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(Basis[i], XfrmVar[i])));
     }
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 //
 ExcludedCompositeStage::ExcludedCompositeStage
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis)
 : PabloKernel(ts, "ExcludedCompositeStage" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+{Binding{"XfrmBasis", XfrmBasis}}) {}
 
 void ExcludedCompositeStage::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // DeleteVar will be inverted to produce SelectMask
     Var * DeleteVar = pb.createVar("DeleteVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -6640,13 +6635,12 @@ void ExcludedCompositeStage::generatePabloMethod() {
     }
 
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    PabloAST * select = pb.createNot(DeleteVar);
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(Basis[i], XfrmVar[i])));
     }
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 //
 ShortComposableTranslation::ShortComposableTranslation
@@ -15283,90 +15277,8 @@ void ApplyLongComposition4::generatePabloMethod() {
         pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
-//
-class MarkDeletion : public pablo::PabloKernel {
-public:
-MarkDeletion
-    (LLVMTypeSystemInterface & ts, 
-     StreamSet * Basis,
-     StreamSet * MarkCodes0,
-     StreamSet * MarkCodes1,
-     StreamSet * MarkCodes2,
-     StreamSet * MarkCodes3,
-     StreamSet * MarkCodes4,
-     StreamSet * MarkCodes3A,
-    StreamSet * DeletionMask);
-protected:
-    void generatePabloMethod() override;
-};
-
-MarkDeletion::MarkDeletion
-    (LLVMTypeSystemInterface & ts,
-     StreamSet * Basis,
-     StreamSet * MarkCodes0,
-     StreamSet * MarkCodes1,
-     StreamSet * MarkCodes2,
-     StreamSet * MarkCodes3,
-     StreamSet * MarkCodes4,
-     StreamSet * MarkCodes3A,
-    StreamSet * DeletionMask)
-: PabloKernel(ts, "MarkDeletion",
-{Binding{"Basis", Basis},
- Binding{"MarkCodes0", MarkCodes0},
- Binding{"MarkCodes1", MarkCodes1},
- Binding{"MarkCodes2", MarkCodes2},
- Binding{"MarkCodes3", MarkCodes3},
- Binding{"MarkCodes4", MarkCodes4},
- Binding{"MarkCodes3A", MarkCodes3A}},
-{Binding{"DeletionMask", DeletionMask}}) {}
-
-void MarkDeletion::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    BixNumCompiler bnc(pb);
-    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    PabloAST * anyMark = pb.createZeroes();
-    std::vector<PabloAST *> MarkCodes0 = getInputStreamSet("MarkCodes0");
-    for (unsigned i = 0; i < MarkCodes0.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes0[i]);
-    }
-    std::vector<PabloAST *> MarkCodes1 = getInputStreamSet("MarkCodes1");
-    for (unsigned i = 0; i < MarkCodes1.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes1[i]);
-    }
-    std::vector<PabloAST *> MarkCodes2 = getInputStreamSet("MarkCodes2");
-    for (unsigned i = 0; i < MarkCodes2.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes2[i]);
-    }
-    std::vector<PabloAST *> MarkCodes3 = getInputStreamSet("MarkCodes3");
-    for (unsigned i = 0; i < MarkCodes3.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes3[i]);
-    }
-    std::vector<PabloAST *> MarkCodes4 = getInputStreamSet("MarkCodes4");
-    for (unsigned i = 0; i < MarkCodes4.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes4[i]);
-    }
-    std::vector<PabloAST *> MarkCodes3A = getInputStreamSet("MarkCodes3A");
-    for (unsigned i = 0; i < MarkCodes3A.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes3A[i]);
-    }
-
-    PabloAST * pfxmark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xC2));
-    PabloAST * pfx3or4mark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xE0));
-    Var * markVar = pb.createVar("MarkVar", pb.createZeroes());
-    pb.createAssign(markVar, pb.createOr(anyMark, pb.createAdvance(pfxmark, 1)));
-    auto nested = pb.createScope();
-    pb.createIf(pfx3or4mark, nested);
-    BixNumCompiler bnc2(nested);
-    nested.createAssign(markVar, nested.createOr(markVar, nested.createAdvance(pfx3or4mark, 2)));
-    PabloAST * pfx4mark = nested.createAnd(anyMark, bnc2.UGE(Basis, 0xF0));
-    auto nested2 = nested.createScope();
-    nested.createIf(pfx4mark, nested2);
-    nested2.createAssign(markVar, nested2.createOr(markVar, nested2.createAdvance(pfx4mark, 3)));
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("DeletionMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, markVar);
-}
 void LongComposablePipeline(PipelineBuilder & P,
-                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis, StreamSet * DeletionMask) {
+                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis) {
     StreamSet * XfrmedBasis0 = P.CreateStreamSet(8, 1);
 //  Pass 0 to identify long composable sequences and transform to precomposed characters.
     StreamSet * MarkCode0 = P.CreateStreamSet(2);
@@ -15451,7 +15363,6 @@ void LongComposablePipeline(PipelineBuilder & P,
     P.CreateKernelCall<ApplyLongComposition4>(XfrmedBasis3A, MarkCodeAtStarter4,  MarkCode4, FinalBasis);
     SHOW_BIXNUM(FinalBasis);
 
-    P.CreateKernelCall<MarkDeletion>(FinalBasis, MarkCode0, MarkCode1, MarkCode2, MarkCode3, MarkCode4, MarkCode3A, DeletionMask);
 }
 //  The NFC_CandidateClass kernel produces the class of characters 
 //  that are relevant to NFC processing by virtue of being reorderable marks or

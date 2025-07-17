@@ -58,12 +58,12 @@ void Hangul_Composables::generatePabloMethod() {
 
 Hangul_Composition::Hangul_Composition (LLVMTypeSystemInterface & ts,
                                               StreamSet * Basis, StreamSet * L_V_T_Composables,
-                                              StreamSet * Output_Basis, StreamSet * SelectionMask)
+                                              StreamSet * Output_Basis)
 : PabloKernel(ts, "Hangul_Composition" + Basis->shapeString(),
 // inputs
     {Binding{"Basis", Basis, FixedRate(1), LookAhead(5)}, Binding{"L_V_T_Composables", L_V_T_Composables, FixedRate(1), LookAhead(5)}},
 // output
-    {Binding{"Output_Basis", Output_Basis}, Binding{"SelectionMask", SelectionMask}}) {
+    {Binding{"Output_Basis", Output_Basis}}) {
 }
 
 void Hangul_Composition::generatePabloMethod() {
@@ -190,25 +190,27 @@ void Hangul_Composition::generatePabloMethod() {
         //
         //  Since V, LV and LVT characters all have the same 3-byte UTF-8
         //  structure, only the low 6 bits of each UTF-8 byte change.
-        for (unsigned i = 0; i < 6; i++) {
-            PabloAST * updated = Basis[i];
+        for (unsigned i = 0; i < 8; i++) {
+            PabloAST * updated = nested.createAnd(Basis[i], maskVar);
             if (i < 4) {
                 // At prefix (LV_sequence) positions, set 4 data bits, keep high 4 bits unchanged.
                 updated = nested.createSel(LV_sequence, Composed[i+12], updated);
             }
-            // Suffix bytes - set 6 data bits for each, keep top two bits unchanged.
-            updated = nested.createSel(LV_suffix1, nested.createAdvance(Composed[i+6], 1), updated);
-            updated = nested.createSel(LV_suffix2, nested.createAdvance(Composed[i], 2), updated);
+            if (i < 6) {
+                // Suffix bytes - set 6 data bits for each, keep top two bits unchanged.
+                updated = nested.createSel(LV_suffix1, nested.createAdvance(Composed[i+6], 1), updated);
+                updated = nested.createSel(LV_suffix2, nested.createAdvance(Composed[i], 2), updated);
+            }
             nested.createAssign(outputVar[i], updated);
         }
     } else {
         Composed = bnc.ZeroExtend(Composed, Basis.size());
         for (unsigned i = 0; i < Basis.size(); i++) {
-            nested.createAssign(outputVar[i], nested.createSel(LV_sequence, Composed[i], Basis[i]));
+            PabloAST * selected = nested.createAnd(Basis[i], maskVar);
+            nested.createAssign(outputVar[i], nested.createSel(LV_sequence, Composed[i], selected));
         }
     }
     writeOutputStreamSet("Output_Basis", outputVar);
-    writeOutputStreamSet("SelectionMask", std::vector<Var *>{maskVar});
 }
 
 class CreateU8_FilterMask : public pablo::PabloKernel {

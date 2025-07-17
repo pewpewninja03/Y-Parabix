@@ -275,18 +275,16 @@ def range_usets_from_cps(cp_list):
 
 singleton_header = r"""//
 SingletonCanonicalization::SingletonCanonicalization
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis)
 : PabloKernel(ts, "SingletonCanonicalization" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+{Binding{"XfrmBasis", XfrmBasis}}) {}
 
 void SingletonCanonicalization::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // DeleteVar will be inverted to produce SelectMask
     Var * DeleteVar = pb.createVar("DeleteVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -359,30 +357,27 @@ def finalize_nested_pfx_code(pfx_code, has_del):
 
 singleton_final_code = r"""
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    PabloAST * select = pb.createNot(DeleteVar);
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(Basis[i], XfrmVar[i])));
     }
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 """
 
 excluded_composite_header = r"""//
 ExcludedCompositeStage::ExcludedCompositeStage
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis)
 : PabloKernel(ts, "ExcludedCompositeStage" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+{Binding{"XfrmBasis", XfrmBasis}}) {}
 
 void ExcludedCompositeStage::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // DeleteVar will be inverted to produce SelectMask
     Var * DeleteVar = pb.createVar("DeleteVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -392,13 +387,12 @@ void ExcludedCompositeStage::generatePabloMethod() {
 
 excluded_composite_final_code = r"""
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    PabloAST * select = pb.createNot(DeleteVar);
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(Basis[i], XfrmVar[i])));
     }
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 """
 
@@ -650,9 +644,8 @@ long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify lon
 """
 
 long_composable_pipeline_template = r"""void LongComposablePipeline(PipelineBuilder & P,
-                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis, StreamSet * DeletionMask) {
+                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis) {
 ${pipeline_logic}
-    P.CreateKernelCall<MarkDeletion>(FinalBasis, ${mark_code_parms}, DeletionMask);
 }
 """
 
@@ -1586,9 +1579,7 @@ class NFC_generator:
                                       input_basis = input_basis,
                                       output_basis = output_basis)
             input_basis = output_basis # for next pass
-        mark_streamsets = ", " .join(["MarkCode%i" % i for i in range(self.pass_count)])
-        mark_streamsets += ", MarkCode3A"
-        return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
+        return t2.substitute(pipeline_logic = logic, final_pass_no = self.pass_count - 1)
 
     def generate_short_composable_stage(self):
         s = short_composable_header
@@ -1703,7 +1694,6 @@ class NFC_generator:
         for pass_no in range(5):
             kernels += self.generate_nfc_stage(pass_no)
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
-        kernels += self.long_composable_mark_deletion()
         kernels += self.generate_long_composable_pipeline()
         kernels += self.generate_candidate_classes()
         uset_definitions = self.builder.get_uset_definitions()
