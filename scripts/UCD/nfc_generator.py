@@ -417,7 +417,7 @@ FindComposables${pass_no}::FindComposables${pass_no}
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables${pass_no}_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables${pass_no}::generatePabloMethod() {
@@ -444,7 +444,7 @@ def gen_pass_header_code(pass_no, mark_code_bits):
 pass_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
-    pb.createIf(pb.createAnd(${pfx_test_var}, mark_ahead_${mark_lookahead}), ${builder});
+    pb.createIf(${pfx_test_var}, ${builder});
 """
 
 def gen_pass_pfx_code(pfx_code):
@@ -455,7 +455,6 @@ def gen_pass_pfx_code(pfx_code):
     t = string.Template(pass_pfx_template)
     return t.substitute(builder = scope,
                         pfx_test_var = pfx_test_var,
-                        mark_lookahead = pfx_code_lgth(pfx_code),
                         logic = test)
 
 mark_case_template = r"""
@@ -502,17 +501,17 @@ long_composable_application_template = r"""//
 class ApplyLongComposition${pass_no} : public PabloKernel {
 public:
     ApplyLongComposition${pass_no}
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition${pass_no}::ApplyLongComposition${pass_no}
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition${pass_no}_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition${pass_no}::generatePabloMethod() {
@@ -520,11 +519,16 @@ void ApplyLongComposition${pass_no}::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = ${markCodeBits};
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -540,7 +544,7 @@ def gen_long_composition_xfrm_header_code(pass_no, mark_code_bits):
 long_composition_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
-    pb.createIf(pb.createAnd(${pfx_test_var}, markFound), ${builder});
+    pb.createIf(pb.createAnd(${pfx_test_var}, markFoundForStarter), ${builder});
     std::vector<PabloAST *> xfrm_${code_str}(8, All0);
     BixNumCompiler ${builder}_bnc(${builder});
 """
@@ -570,11 +574,15 @@ def finalize_long_composable_pfx_code(pfx_code):
                         code_str = code_str)
 
 long_composable_final_code = r"""
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 """
@@ -627,17 +635,17 @@ ${mark_accumulation}
 """
 
 long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify long composable sequences and transform to precomposed characters.
-    StreamSet * MarkCode${pass_no} = P.CreateStreamSet(${mark_code_bits});
-    StreamSet * Index_ccc_NR_or_MarksFound${pass_no} = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<FindComposables${pass_no}>(${input_basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
-    SHOW_BIXNUM(MarkCode${pass_no});
-    SHOW_STREAM(Index_ccc_NR_or_MarksFound${pass_no});
+    StreamSet * MarkCode${step} = P.CreateStreamSet(${mark_code_bits});
+    StreamSet * Index_ccc_NR_or_MarksFound${step} = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<FindComposables${pass_no}>(${input_basis}, ccc_NR, MarkCode${step}, Index_ccc_NR_or_MarksFound${step});
+    SHOW_BIXNUM(MarkCode${step});
+    SHOW_STREAM(Index_ccc_NR_or_MarksFound${step});
 
-    StreamSet * MarkCodeAtStarter${pass_no} = P.CreateStreamSet(${mark_code_bits}, 1);
-    P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${pass_no}, MarkCode${pass_no}, MarkCodeAtStarter${pass_no});
-    SHOW_BIXNUM(MarkCodeAtStarter${pass_no});
+    StreamSet * MarkCodeAtStarter${step} = P.CreateStreamSet(${mark_code_bits}, 1);
+    P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${step}, MarkCode${step}, MarkCodeAtStarter${step});
+    SHOW_BIXNUM(MarkCodeAtStarter${step});
 
-    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${input_basis}, MarkCodeAtStarter${pass_no}, ${output_basis});
+    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${input_basis}, MarkCodeAtStarter${step},  MarkCode${step}, ${output_basis});
     SHOW_BIXNUM(${output_basis});
 """
 
@@ -1438,7 +1446,6 @@ class NFC_generator:
         mark_code_bits = self.max_conditional_code_bits[pass_no]
         s = gen_pass_header_code(pass_no, mark_code_bits)
         pass_data = {}
-        pfx_lgths = []
         for mark in self.long_composable_map.keys():
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
@@ -1447,12 +1454,7 @@ class NFC_generator:
                 for pfx_code in rg_set_map.keys():
                     if not pfx_code in pass_data.keys():
                         pass_data[pfx_code] = {}
-                        pfx_lgth = pfx_code_lgth(pfx_code)
-                        if not pfx_lgth in pfx_lgths:
-                            pfx_lgths.append(pfx_lgth)
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
-        for pfx_lgth in sorted(pfx_lgths):
-            s += "    PabloAST * mark_ahead_%i = pb.createNot(pb.createLookahead(ccc_NR, %i));\n" % (pfx_lgth, pfx_lgth)
         for pfx_code in pass_data.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
@@ -1492,7 +1494,6 @@ class NFC_generator:
         mark_code_bits = self.max_conditional_code_bits[pass_no]
         s = gen_long_composition_xfrm_header_code(pass_no, mark_code_bits)
         pass_data = {}
-        pfx_lgths = []
         for mark in self.long_composable_map.keys():
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
@@ -1501,9 +1502,6 @@ class NFC_generator:
                 for pfx_code in rg_set_map.keys():
                     if not pfx_code in pass_data.keys():
                         pass_data[pfx_code] = {}
-                        pfx_lgth = pfx_code_lgth(pfx_code)
-                        if not pfx_lgth in pfx_lgths:
-                            pfx_lgths.append(pfx_lgth)
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
         by_pos = {}
         for pfx_code in pass_data.keys():
@@ -1529,7 +1527,7 @@ class NFC_generator:
                 if pass_no in self.conditional_mark_codes.keys():
                     if pfx_code in self.conditional_mark_codes[pass_no].keys():
                         mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
-                s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCode, %i);\n" % (mark, scope, mark_code)
+                s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCodeAtStarter, %i);\n" % (mark, scope, mark_code)
                 for pos in sorted(by_pos[pfx_code][mark].keys()):
                     for bit in sorted(by_pos[pfx_code][mark][pos].keys()):
                         bit_xfrm = by_pos[pfx_code][mark][pos][bit]
@@ -1553,6 +1551,9 @@ class NFC_generator:
             bindings += r"""%s Binding{"MarkCodes%i", MarkCodes%i}""" % (",\n", pass_no, pass_no)
             mark_code_bits = self.max_conditional_code_bits[pass_no]
             mark_stmts += t2.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits)
+        stream_sets += "     StreamSet * MarkCodes3A,\n"
+        bindings += r"""%s Binding{"MarkCodes3A", MarkCodes3A}""" % (",\n")
+        mark_stmts += t2.substitute(pass_no = "3A", mark_code_bits = mark_code_bits)
         return t.substitute(mark_code_streamsets = stream_sets,
                             mark_code_bindings = bindings,
                             mark_accumulation = mark_stmts)
@@ -1571,11 +1572,22 @@ class NFC_generator:
                 logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
             mark_code_bits = self.max_conditional_code_bits[pass_no]
             logic += t.substitute(pass_no = pass_no, 
+                                  step = pass_no,
                                   mark_code_bits = mark_code_bits, 
                                   input_basis = input_basis,
                                   output_basis = output_basis)
             input_basis = output_basis # for next pass
+            if pass_no == 3:
+                output_basis = "XfrmedBasis%iA" % pass_no
+                logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
+                logic += t.substitute(pass_no = pass_no,
+                                      step = "%iA" % pass_no,
+                                      mark_code_bits = mark_code_bits,
+                                      input_basis = input_basis,
+                                      output_basis = output_basis)
+            input_basis = output_basis # for next pass
         mark_streamsets = ", " .join(["MarkCode%i" % i for i in range(self.pass_count)])
+        mark_streamsets += ", MarkCode3A"
         return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
 
     def generate_short_composable_stage(self):

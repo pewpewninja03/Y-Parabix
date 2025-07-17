@@ -7493,7 +7493,7 @@ FindComposables0::FindComposables0
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables0_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables0::generatePabloMethod() {
@@ -7508,14 +7508,10 @@ void FindComposables0::generatePabloMethod() {
     for (unsigned i = 0; i < markCodeBits; i++) {
         markCode[i] = pb.createVar("markCode" + std::to_string(i), All0);
     }
-    PabloAST * mark_ahead_1 = pb.createNot(pb.createLookahead(ccc_NR, 1));
-    PabloAST * mark_ahead_2 = pb.createNot(pb.createLookahead(ccc_NR, 2));
-    PabloAST * mark_ahead_3 = pb.createNot(pb.createLookahead(ccc_NR, 3));
-    PabloAST * mark_ahead_4 = pb.createNot(pb.createLookahead(ccc_NR, 4));
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, mark_ahead_1), b_0_7F);
+    pb.createIf(pfx_0_7F_test, b_0_7F);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_0_7F, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(8);
@@ -7568,7 +7564,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, mark_ahead_3), b_e1);
+    pb.createIf(pfx_e1_test, b_e1);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e1, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(5);
@@ -7606,7 +7602,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, mark_ahead_2), b_c2_c3);
+    pb.createIf(pfx_c2_c3_test, b_c2_c3);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c2_c3, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(5);
@@ -7644,7 +7640,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, mark_ahead_2), b_c4_c7);
+    pb.createIf(pfx_c4_c7_test, b_c4_c7);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c4_c7, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(5);
@@ -7682,7 +7678,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, mark_ahead_2), b_c8_cb);
+    pb.createIf(pfx_c8_cb_test, b_c8_cb);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c8_cb, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(5);
@@ -7720,7 +7716,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_e0 = pb.createScope();
     PabloAST * pfx_e0_test = bnc.EQ(Basis, 0xe0);
-    pb.createIf(pb.createAnd(pfx_e0_test, mark_ahead_3), b_e0);
+    pb.createIf(pfx_e0_test, b_e0);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e0, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(9);
@@ -7777,7 +7773,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_e2 = pb.createScope();
     PabloAST * pfx_e2_test = bnc.EQ(Basis, 0xe2);
-    pb.createIf(pb.createAnd(pfx_e2_test, mark_ahead_3), b_e2);
+    pb.createIf(pfx_e2_test, b_e2);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e2, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -7803,7 +7799,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_e3 = pb.createScope();
     PabloAST * pfx_e3_test = bnc.EQ(Basis, 0xe3);
-    pb.createIf(pb.createAnd(pfx_e3_test, mark_ahead_3), b_e3);
+    pb.createIf(pfx_e3_test, b_e3);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e3, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(5);
@@ -7840,7 +7836,7 @@ void FindComposables0::generatePabloMethod() {
 
     auto b_f0 = pb.createScope();
     PabloAST * pfx_f0_test = bnc.EQ(Basis, 0xf0);
-    pb.createIf(pb.createAnd(pfx_f0_test, mark_ahead_4), b_f0);
+    pb.createIf(pfx_f0_test, b_f0);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_f0, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -7878,17 +7874,17 @@ void FindComposables0::generatePabloMethod() {
 class ApplyLongComposition0 : public PabloKernel {
 public:
     ApplyLongComposition0
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition0::ApplyLongComposition0
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition0_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition0::generatePabloMethod() {
@@ -7896,11 +7892,16 @@ void ApplyLongComposition0::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = 2;
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -7909,7 +7910,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, markFound), b_0_7F);
+    pb.createIf(pb.createAnd(pfx_0_7F_test, markFoundForStarter), b_0_7F);
     std::vector<PabloAST *> xfrm_0_7F(8, All0);
     BixNumCompiler b_0_7F_bnc(b_0_7F);
     {
@@ -8011,7 +8012,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[30] = ASC_3e_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_327 = b_0_7F_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_327 = b_0_7F_bnc.EQ(markCodeAtStarter, 3);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_44_5_7_8_b_e_52_4_64_5_7_8_b_e_72_4, foundMark_327));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_47_b_e_52_3_67_b_e_72_3, foundMark_327));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_44_5_b_52_3_64_5_b_72_3, foundMark_327));
@@ -8031,7 +8032,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_44_64, foundMark_327), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_68, foundMark_327), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_44_8_64_8, foundMark_327), 2));
-    PabloAST * foundMark_328 = b_0_7F_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_328 = b_0_7F_bnc.EQ(markCodeAtStarter, 1);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_41_5_9_61_5_9, foundMark_328));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_41_9_61_9, foundMark_328));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_49_f_69_f, foundMark_328));
@@ -8045,7 +8046,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_55_65_75, foundMark_328), 1));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_49_f_55_69_f_75, foundMark_328), 1));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_5_9_f_55_61_5_9_f_75, foundMark_328), 1));
-    PabloAST * foundMark_338 = b_0_7F_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_338 = b_0_7F_bnc.EQ(markCodeAtStarter, 2);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_3d, foundMark_338));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_3c_d, foundMark_338));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_3c___e, foundMark_338));
@@ -8070,7 +8071,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, markFound), b_e1);
+    pb.createIf(pb.createAnd(pfx_e1_test, markFoundForStarter), b_e1);
     std::vector<PabloAST *> xfrm_e1(8, All0);
     BixNumCompiler b_e1_bnc(b_e1);
     {
@@ -8229,7 +8230,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[49] = E1_1ea0_1_b8_9_c_d_ca___d_e4_5_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_327 = b_e1_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_327 = b_e1_bnc.EQ(markCodeAtStarter, 3);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAnd(E1_1e18___b_20_1_30___7_a___d_b8___d, foundMark_327));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAnd(E1_1e20_1_30___7_a___d_44___b_58___b_e___63_a___71_97, foundMark_327));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAnd(E1_1e18___b_b8___d, foundMark_327));
@@ -8262,7 +8263,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_e1[4] = b_e1.createOr(xfrm_e1[4], b_e1.createAdvance(b_e1.createAnd(E1_1e0e_f_96, foundMark_327), 4));
     xfrm_e1[5] = b_e1.createOr(xfrm_e1[5], b_e1.createAdvance(b_e1.createAnd(E1_1e0c___f_12_3_24_5_a_b_96, foundMark_327), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1e0a___f_12_3_22___7_a_b_96, foundMark_327), 4));
-    PabloAST * foundMark_328 = b_e1_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_328 = b_e1_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAnd(E1_1e00_1_18___b_2c_d_a0___3_b8___d_c8___b, foundMark_328));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAnd(E1_1ecc___f, foundMark_328));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAnd(E1_1e00_1_18___b_2c_d_72___7_a0___3_b8___d_c8___f_e4___7, foundMark_328));
@@ -8295,7 +8296,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFound), b_c2_c3);
+    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFoundForStarter), b_c2_c3);
     std::vector<PabloAST *> xfrm_c2_c3(8, All0);
     BixNumCompiler b_c2_c3_bnc(b_c2_c3);
     {
@@ -8367,7 +8368,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[20] = C3_c4_5_b_f_d6_c_e4_5_b_f_f6_c_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_327 = b_c2_c3_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_327 = b_c2_c3_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAnd(C3_c8___b_e8___b, foundMark_327));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c8___b_d1_e8___b_f1, foundMark_327));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C3_d1_f1, foundMark_327));
@@ -8385,7 +8386,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_ca_d1_ea_f1, foundMark_327), 3));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_cb_eb, foundMark_327), 3));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c8___b_d1_e8___b_f1, foundMark_327), 3));
-    PabloAST * foundMark_328 = b_c2_c3_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_328 = b_c2_c3_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAnd(C3_c0___5_8___f_e0___5_8___f, foundMark_328));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c0___5_8___f_d9___c_e0___5_8___f_f9___c, foundMark_328));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C3_c0___5_8___f_d2___6_9___c_e0___5_8___f_f2___6_9___c, foundMark_328));
@@ -8411,7 +8412,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFound), b_c4_c7);
+    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFoundForStarter), b_c4_c7);
     std::vector<PabloAST *> xfrm_c4_c7(8, All0);
     BixNumCompiler b_c4_c7_bnc(b_c4_c7);
     {
@@ -8537,7 +8538,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[38] = C6_1a0_1_f_b0_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_327 = b_c4_c7_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_327 = b_c4_c7_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_106___f_14_5_24_5_e6___9_f4_5, foundMark_327));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C4_108___d_e6___9_f4_5_8_9, foundMark_327));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_106___f_12___7_a_b_24_5, foundMark_327));
@@ -8566,7 +8567,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f, foundMark_327), 4));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f, foundMark_327), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f_24_5, foundMark_327), 4));
-    PabloAST * foundMark_328 = b_c4_c7_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_328 = b_c4_c7_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C6_1a0_1_f_b0_cd___d0, foundMark_328));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C5_14c___51_af_b0_cd___d0_3_4, foundMark_328));
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAdvance(b_c4_c7.createAnd(C6_1af_b0_cd___d4, foundMark_328), 1));
@@ -8593,7 +8594,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFound), b_c8_cb);
+    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFoundForStarter), b_c8_cb);
     std::vector<PabloAST *> xfrm_c8_cb(8, All0);
     BixNumCompiler b_c8_cb_bnc(b_c8_cb);
     {
@@ -8683,7 +8684,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[26] = C8_202_3_6_7_a_b_e_f_16_7_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_327 = b_c8_cb_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_327 = b_c8_cb_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_210___3_8___b_e_f, foundMark_327));
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAnd(C8_210___3_8___b, foundMark_327));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_210___3_8___b_e_f, foundMark_327));
@@ -8711,7 +8712,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_21e_f, foundMark_327), 4));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_21e_f, foundMark_327), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_21e_f, foundMark_327), 4));
-    PabloAST * foundMark_328 = b_c8_cb_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_328 = b_c8_cb_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_20c___f_14___7_2e_f, foundMark_328));
     xfrm_c8_cb[1] = b_c8_cb.createOr(xfrm_c8_cb[1], b_c8_cb.createAnd(C8_20c___f_2e_f, foundMark_328));
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAnd(C8_200___f_14___7_26_7_e_f, foundMark_328));
@@ -8739,7 +8740,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_e0 = pb.createScope();
     PabloAST * pfx_e0_test = bnc.EQ(Basis, 0xe0);
-    pb.createIf(pb.createAnd(pfx_e0_test, markFound), b_e0);
+    pb.createIf(pb.createAnd(pfx_e0_test, markFoundForStarter), b_e0);
     std::vector<PabloAST *> xfrm_e0(8, All0);
     BixNumCompiler b_e0_bnc(b_e0);
     {
@@ -8763,15 +8764,15 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[4] = E0_dd9_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_93c = b_e0_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_93c = b_e0_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e0[0] = b_e0.createOr(xfrm_e0[0], b_e0.createAdvance(b_e0.createAnd(E0_928_30_3, foundMark_93c), 2));
     xfrm_e0[1] = b_e0.createOr(xfrm_e0[1], b_e0.createAdvance(b_e0.createAnd(E0_933, foundMark_93c), 2));
     xfrm_e0[2] = b_e0.createOr(xfrm_e0[2], b_e0.createAdvance(b_e0.createAnd(E0_933, foundMark_93c), 2));
-    PabloAST * foundMark_c56 = b_e0_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_c56 = b_e0_bnc.EQ(markCodeAtStarter, 2);
     xfrm_e0[1] = b_e0.createOr(xfrm_e0[1], b_e0.createAdvance(b_e0.createAnd(E0_c46, foundMark_c56), 2));
     xfrm_e0[2] = b_e0.createOr(xfrm_e0[2], b_e0.createAdvance(b_e0.createAnd(E0_c46, foundMark_c56), 2));
     xfrm_e0[3] = b_e0.createOr(xfrm_e0[3], b_e0.createAdvance(b_e0.createAnd(E0_c46, foundMark_c56), 2));
-    PabloAST * foundMark_dca = b_e0_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_dca = b_e0_bnc.EQ(markCodeAtStarter, 3);
     xfrm_e0[0] = b_e0.createOr(xfrm_e0[0], b_e0.createAdvance(b_e0.createAnd(E0_dd9_c, foundMark_dca), 2));
     xfrm_e0[1] = b_e0.createOr(xfrm_e0[1], b_e0.createAdvance(b_e0.createAnd(E0_dd9, foundMark_dca), 2));
 
@@ -8782,7 +8783,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_e2 = pb.createScope();
     PabloAST * pfx_e2_test = bnc.EQ(Basis, 0xe2);
-    pb.createIf(pb.createAnd(pfx_e2_test, markFound), b_e2);
+    pb.createIf(pb.createAnd(pfx_e2_test, markFoundForStarter), b_e2);
     std::vector<PabloAST *> xfrm_e2(8, All0);
     BixNumCompiler b_e2_bnc(b_e2);
     {
@@ -8815,7 +8816,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[7] = E2_21d0_2_2203_b_23_3c_43_64_5_72_3_6_7_c_d_82_3_6_7_a2_8_9_b_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_338 = b_e2_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_338 = b_e2_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e2[0] = b_e2.createOr(xfrm_e2[0], b_e2.createAdvance(b_e2.createAnd(E2_223c_7a_b_91_2_b2___5, foundMark_338), 1));
     xfrm_e2[1] = b_e2.createOr(xfrm_e2[1], b_e2.createAdvance(b_e2.createAnd(E2_227a___d, foundMark_338), 1));
     xfrm_e2[0] = b_e2.createOr(xfrm_e2[0], b_e2.createAdvance(b_e2.createAnd(E2_2192_d0_2_2203_8_b_23_5_3c_43_8_61_91_2_a8_9, foundMark_338), 2));
@@ -8832,7 +8833,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_e3 = pb.createScope();
     PabloAST * pfx_e3_test = bnc.EQ(Basis, 0xe3);
-    pb.createIf(pb.createAnd(pfx_e3_test, markFound), b_e3);
+    pb.createIf(pb.createAnd(pfx_e3_test, markFoundForStarter), b_e3);
     std::vector<PabloAST *> xfrm_e3(8, All0);
     BixNumCompiler b_e3_bnc(b_e3);
     {
@@ -8874,7 +8875,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[10] = E3_306f_cf_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_3099 = b_e3_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_3099 = b_e3_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e3[0] = b_e3.createOr(xfrm_e3[0], b_e3.createAdvance(b_e3.createAnd(E3_3046_a6_bf, foundMark_3099), 1));
     xfrm_e3[1] = b_e3.createOr(xfrm_e3[1], b_e3.createAdvance(b_e3.createAnd(E3_3046, foundMark_3099), 1));
     xfrm_e3[0] = b_e3.createOr(xfrm_e3[0], b_e3.createAdvance(b_e3.createAnd(E3_304b_d_f_51_3_5_7_9_b_d_f_61_4_6_8_f_72_5_8_b_9d_ab_d_f_b1_3_5_7_9_b_d_f_c1_4_6_8_f_d2_5_8_b_fd, foundMark_3099), 2));
@@ -8883,7 +8884,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     xfrm_e3[3] = b_e3.createOr(xfrm_e3[3], b_e3.createAdvance(b_e3.createAnd(E3_304f_57_f_6f_af_b7_f_cf_ef___f2, foundMark_3099), 2));
     xfrm_e3[4] = b_e3.createOr(xfrm_e3[4], b_e3.createAdvance(b_e3.createAnd(E3_3046_f_5f_6f_a6_f_bf_cf_ef, foundMark_3099), 2));
     xfrm_e3[5] = b_e3.createOr(xfrm_e3[5], b_e3.createAdvance(b_e3.createAnd(E3_305f_bf, foundMark_3099), 2));
-    PabloAST * foundMark_309a = b_e3_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_309a = b_e3_bnc.EQ(markCodeAtStarter, 2);
     xfrm_e3[1] = b_e3.createOr(xfrm_e3[1], b_e3.createAdvance(b_e3.createAnd(E3_306f_72_5_8_b_cf_d2_5_8_b, foundMark_309a), 2));
     xfrm_e3[2] = b_e3.createOr(xfrm_e3[2], b_e3.createAdvance(b_e3.createAnd(E3_306f_72_b_cf_d2_b, foundMark_309a), 2));
     xfrm_e3[3] = b_e3.createOr(xfrm_e3[3], b_e3.createAdvance(b_e3.createAnd(E3_306f_cf, foundMark_309a), 2));
@@ -8896,7 +8897,7 @@ void ApplyLongComposition0::generatePabloMethod() {
 
     auto b_f0 = pb.createScope();
     PabloAST * pfx_f0_test = bnc.EQ(Basis, 0xf0);
-    pb.createIf(pb.createAnd(pfx_f0_test, markFound), b_f0);
+    pb.createIf(pb.createAnd(pfx_f0_test, markFoundForStarter), b_f0);
     std::vector<PabloAST *> xfrm_f0(8, All0);
     BixNumCompiler b_f0_bnc(b_f0);
     {
@@ -8917,7 +8918,7 @@ void ApplyLongComposition0::generatePabloMethod() {
     _usets[3] = F0_110a5_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_110ba = b_f0_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_110ba = b_f0_bnc.EQ(markCodeAtStarter, 1);
     xfrm_f0[0] = b_f0.createOr(xfrm_f0[0], b_f0.createAdvance(b_f0.createAnd(F0_11099_b, foundMark_110ba), 3));
     xfrm_f0[1] = b_f0.createOr(xfrm_f0[1], b_f0.createAdvance(b_f0.createAnd(F0_11099_b_a5, foundMark_110ba), 3));
     xfrm_f0[2] = b_f0.createOr(xfrm_f0[2], b_f0.createAdvance(b_f0.createAnd(F0_1109b_a5, foundMark_110ba), 3));
@@ -8928,11 +8929,15 @@ void ApplyLongComposition0::generatePabloMethod() {
     }
     }
 
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 //
@@ -8949,7 +8954,7 @@ FindComposables1::FindComposables1
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables1_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables1::generatePabloMethod() {
@@ -8964,13 +8969,10 @@ void FindComposables1::generatePabloMethod() {
     for (unsigned i = 0; i < markCodeBits; i++) {
         markCode[i] = pb.createVar("markCode" + std::to_string(i), All0);
     }
-    PabloAST * mark_ahead_1 = pb.createNot(pb.createLookahead(ccc_NR, 1));
-    PabloAST * mark_ahead_2 = pb.createNot(pb.createLookahead(ccc_NR, 2));
-    PabloAST * mark_ahead_3 = pb.createNot(pb.createLookahead(ccc_NR, 3));
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, mark_ahead_1), b_0_7F);
+    pb.createIf(pfx_0_7F_test, b_0_7F);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_0_7F, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -8996,7 +8998,7 @@ void FindComposables1::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, mark_ahead_3), b_e1);
+    pb.createIf(pfx_e1_test, b_e1);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e1, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -9022,7 +9024,7 @@ void FindComposables1::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, mark_ahead_2), b_c2_c3);
+    pb.createIf(pfx_c2_c3_test, b_c2_c3);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c2_c3, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -9048,7 +9050,7 @@ void FindComposables1::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, mark_ahead_2), b_c4_c7);
+    pb.createIf(pfx_c4_c7_test, b_c4_c7);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c4_c7, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -9074,7 +9076,7 @@ void FindComposables1::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, mark_ahead_2), b_c8_cb);
+    pb.createIf(pfx_c8_cb_test, b_c8_cb);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c8_cb, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -9111,17 +9113,17 @@ void FindComposables1::generatePabloMethod() {
 class ApplyLongComposition1 : public PabloKernel {
 public:
     ApplyLongComposition1
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition1::ApplyLongComposition1
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition1_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition1::generatePabloMethod() {
@@ -9129,11 +9131,16 @@ void ApplyLongComposition1::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = 1;
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -9142,7 +9149,7 @@ void ApplyLongComposition1::generatePabloMethod() {
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, markFound), b_0_7F);
+    pb.createIf(pb.createAnd(pfx_0_7F_test, markFoundForStarter), b_0_7F);
     std::vector<PabloAST *> xfrm_0_7F(8, All0);
     BixNumCompiler b_0_7F_bnc(b_0_7F);
     {
@@ -9172,7 +9179,7 @@ void ApplyLongComposition1::generatePabloMethod() {
     _usets[6] = ASC_75_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_31b = b_0_7F_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_31b = b_0_7F_bnc.EQ(markCodeAtStarter, 1);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_4f_55_6f_75, foundMark_31b));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_55_75, foundMark_31b));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_4f_6f, foundMark_31b));
@@ -9194,7 +9201,7 @@ void ApplyLongComposition1::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, markFound), b_e1);
+    pb.createIf(pb.createAnd(pfx_e1_test, markFoundForStarter), b_e1);
     std::vector<PabloAST *> xfrm_e1(8, All0);
     BixNumCompiler b_e1_bnc(b_e1);
     {
@@ -9236,7 +9243,7 @@ void ApplyLongComposition1::generatePabloMethod() {
     _usets[10] = E1_1e76_7_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_31b = b_e1_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_31b = b_e1_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAnd(E1_1e72___7, foundMark_31b));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAnd(E1_1e72___7, foundMark_31b));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAnd(E1_1e72___7, foundMark_31b));
@@ -9267,7 +9274,7 @@ void ApplyLongComposition1::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFound), b_c2_c3);
+    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFoundForStarter), b_c2_c3);
     std::vector<PabloAST *> xfrm_c2_c3(8, All0);
     BixNumCompiler b_c2_c3_bnc(b_c2_c3);
     {
@@ -9327,7 +9334,7 @@ void ApplyLongComposition1::generatePabloMethod() {
     _usets[16] = C3_d6_c_f6_c_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_31b = b_c2_c3_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_31b = b_c2_c3_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAnd(C3_d4_6_b_c_f4_6_b_c, foundMark_31b));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_d2_3_5_9_a_f2_3_5_9_a, foundMark_31b));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C3_d4_6_b_c_f4_6_b_c, foundMark_31b));
@@ -9357,7 +9364,7 @@ void ApplyLongComposition1::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFound), b_c4_c7);
+    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFoundForStarter), b_c4_c7);
     std::vector<PabloAST *> xfrm_c4_c7(8, All0);
     BixNumCompiler b_c4_c7_bnc(b_c4_c7);
     {
@@ -9411,7 +9418,7 @@ void ApplyLongComposition1::generatePabloMethod() {
     _usets[14] = C5_150_1_6e___71_d1___4_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_31b = b_c4_c7_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_31b = b_c4_c7_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C5_14c___51_6a___71_d1___4, foundMark_31b));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C5_14c___51_6a___71, foundMark_31b));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C5_168_9, foundMark_31b));
@@ -9442,7 +9449,7 @@ void ApplyLongComposition1::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFound), b_c8_cb);
+    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFoundForStarter), b_c8_cb);
     std::vector<PabloAST *> xfrm_c8_cb(8, All0);
     BixNumCompiler b_c8_cb_bnc(b_c8_cb);
     {
@@ -9481,7 +9488,7 @@ void ApplyLongComposition1::generatePabloMethod() {
     _usets[9] = C8_20e_f_16_7_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_31b = b_c8_cb_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_31b = b_c8_cb_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c8_cb[1] = b_c8_cb.createOr(xfrm_c8_cb[1], b_c8_cb.createAnd(C8_20c___f_14___7_2e_f, foundMark_31b));
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAnd(C8_20c___f_14___7_2e_f, foundMark_31b));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_20c___f_14___7_2e_f, foundMark_31b));
@@ -9507,11 +9514,15 @@ void ApplyLongComposition1::generatePabloMethod() {
     }
     }
 
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 //
@@ -9528,7 +9539,7 @@ FindComposables2::FindComposables2
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables2_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables2::generatePabloMethod() {
@@ -9543,13 +9554,10 @@ void FindComposables2::generatePabloMethod() {
     for (unsigned i = 0; i < markCodeBits; i++) {
         markCode[i] = pb.createVar("markCode" + std::to_string(i), All0);
     }
-    PabloAST * mark_ahead_1 = pb.createNot(pb.createLookahead(ccc_NR, 1));
-    PabloAST * mark_ahead_2 = pb.createNot(pb.createLookahead(ccc_NR, 2));
-    PabloAST * mark_ahead_3 = pb.createNot(pb.createLookahead(ccc_NR, 3));
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, mark_ahead_1), b_0_7F);
+    pb.createIf(pfx_0_7F_test, b_0_7F);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_0_7F, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(17);
@@ -9659,7 +9667,7 @@ void FindComposables2::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, mark_ahead_2), b_c4_c7);
+    pb.createIf(pfx_c4_c7_test, b_c4_c7);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c4_c7, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(17);
@@ -9769,7 +9777,7 @@ void FindComposables2::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, mark_ahead_3), b_e1);
+    pb.createIf(pfx_e1_test, b_e1);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e1, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(17);
@@ -9879,7 +9887,7 @@ void FindComposables2::generatePabloMethod() {
 
     auto b_d8_db = pb.createScope();
     PabloAST * pfx_d8_db_test = pb.createAnd(bnc.UGE(Basis, 0xd8), bnc.ULE(Basis, 0xdb));
-    pb.createIf(pb.createAnd(pfx_d8_db_test, mark_ahead_2), b_d8_db);
+    pb.createIf(pfx_d8_db_test, b_d8_db);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_d8_db, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -9905,7 +9913,7 @@ void FindComposables2::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, mark_ahead_2), b_c2_c3);
+    pb.createIf(pfx_c2_c3_test, b_c2_c3);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c2_c3, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(13);
@@ -9989,7 +9997,7 @@ void FindComposables2::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, mark_ahead_2), b_c8_cb);
+    pb.createIf(pfx_c8_cb_test, b_c8_cb);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c8_cb, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(15);
@@ -10100,17 +10108,17 @@ void FindComposables2::generatePabloMethod() {
 class ApplyLongComposition2 : public PabloKernel {
 public:
     ApplyLongComposition2
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition2::ApplyLongComposition2
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition2_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition2::generatePabloMethod() {
@@ -10118,11 +10126,16 @@ void ApplyLongComposition2::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = 4;
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -10131,7 +10144,7 @@ void ApplyLongComposition2::generatePabloMethod() {
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, markFound), b_0_7F);
+    pb.createIf(pb.createAnd(pfx_0_7F_test, markFoundForStarter), b_0_7F);
     std::vector<PabloAST *> xfrm_0_7F(8, All0);
     BixNumCompiler b_0_7F_bnc(b_0_7F);
     {
@@ -10329,7 +10342,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     _usets[62] = ASC_75_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_323 = b_0_7F_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_323 = b_0_7F_bnc.EQ(markCodeAtStarter, 3);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_42_4_8_c_e_52_4_6_a_62_4_8_c_e_72_4_6_a, foundMark_323));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_42_b_e_f_52_3_6_7_a_62_b_e_f_72_3_6_7_a, foundMark_323));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_44_5_c___f_54___7_64_5_c___f_74___7, foundMark_323));
@@ -10350,7 +10363,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_b_c_52_6_9_a_65_b_c_72_6_9_a, foundMark_323), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_5_8_b_c_53___6_9_61_5_8_b_c_73___6_9, foundMark_323), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_2_4_5_8_9_b___f_52___7_9_a_61_2_4_5_8_9_b___f_72___7_9_a, foundMark_323), 2));
-    PabloAST * foundMark_324 = b_0_7F_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_324 = b_0_7F_bnc.EQ(markCodeAtStarter, 4);
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_55_75, foundMark_324));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAnd(ASC_55_75, foundMark_324));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAnd(ASC_55, foundMark_324));
@@ -10365,7 +10378,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_55_75, foundMark_324), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_55_75, foundMark_324), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_55_75, foundMark_324), 2));
-    PabloAST * foundMark_325 = b_0_7F_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_325 = b_0_7F_bnc.EQ(markCodeAtStarter, 5);
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAnd(ASC_41, foundMark_325));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAnd(ASC_41_61, foundMark_325));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_61, foundMark_325), 1));
@@ -10374,7 +10387,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_61, foundMark_325), 1));
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_61, foundMark_325), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_61, foundMark_325), 2));
-    PabloAST * foundMark_326 = b_0_7F_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_326 = b_0_7F_bnc.EQ(markCodeAtStarter, 6);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_53_73, foundMark_326));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_53_73, foundMark_326));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_54_74, foundMark_326));
@@ -10387,7 +10400,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_53_4_73_4, foundMark_326), 1));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_53_4_73_4, foundMark_326), 1));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_53_4_73_4, foundMark_326), 1));
-    PabloAST * foundMark_32d = b_0_7F_bnc.EQ(markCode, 13);
+    PabloAST * foundMark_32d = b_0_7F_bnc.EQ(markCodeAtStarter, 13);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_44_c_e_54_64_c_e_74, foundMark_32d));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_4e_6e, foundMark_32d));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_44_5_c_e_54_5_64_5_c_e_74_5, foundMark_32d));
@@ -10407,7 +10420,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_44_5_c_54_5_64_5_c_74_5, foundMark_32d), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_4c_54_5_6c_74_5, foundMark_32d), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_44_5_c_e_54_5_64_5_c_e_74_5, foundMark_32d), 2));
-    PabloAST * foundMark_32e = b_0_7F_bnc.EQ(markCode, 14);
+    PabloAST * foundMark_32e = b_0_7F_bnc.EQ(markCodeAtStarter, 14);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_48_68, foundMark_32e));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_48_68, foundMark_32e));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAnd(ASC_48, foundMark_32e));
@@ -10421,7 +10434,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_68, foundMark_32e), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_68, foundMark_32e), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_68, foundMark_32e), 2));
-    PabloAST * foundMark_330 = b_0_7F_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_330 = b_0_7F_bnc.EQ(markCodeAtStarter, 2);
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_55_65_75, foundMark_330));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_49_69, foundMark_330));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAnd(ASC_55_75, foundMark_330));
@@ -10439,7 +10452,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_55_65_75, foundMark_330), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_49_55_69_75, foundMark_330), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_9_55_65_9_75, foundMark_330), 2));
-    PabloAST * foundMark_331 = b_0_7F_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_331 = b_0_7F_bnc.EQ(markCodeAtStarter, 1);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_42_4_c_e_52_4_a_62_4_8_c_e_72_4_a, foundMark_331));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_42_b_e_52_a_62_b_e_72_a, foundMark_331));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_44_c_e_54_64_c_e_74, foundMark_331));
@@ -10468,7 +10481,7 @@ void ApplyLongComposition2::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFound), b_c4_c7);
+    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFoundForStarter), b_c4_c7);
     std::vector<PabloAST *> xfrm_c4_c7(8, All0);
     BixNumCompiler b_c4_c7_bnc(b_c4_c7);
     {
@@ -10786,7 +10799,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     _usets[102] = C5_16e___71_d3_4_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_323 = b_c4_c7_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_323 = b_c4_c7_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_100___3_e_f_12___7_a_b_24_5_8___d_30_9_a_d_e_a0_1_f_b0, foundMark_323));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C6_1a0_1_f_b0_cd___d4_e8_9_f8_9, foundMark_323));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_100___3_e_f_12___7_a_b_24_5_8___d_30_9_a_d_e_43_4_7_8_c___51_4_5_8___d_60_1_4_5_8___71_4___e_a0_1_f_b0_cd___d4_e8_9_f8_9, foundMark_323));
@@ -10813,7 +10826,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_100_1_e_f_12___7_a_b_2a___d_30_d_e_47_8_c___f_58_9_60_1_4_5_a___d_7b___e_cd___d4_e8_9, foundMark_323), 4));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f_1a_b_3d_e_47_8_50_1_8_9_60_1_4_5_e___71_8_d_e_cd___d4_e8_9, foundMark_323), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_100_1_e_f_12___7_a_b_24_5_8___d_30_9_a_d_e_43_4_7_8_c___51_4_5_8___d_60_1_4_5_8___71_4___e_cd___d4_e8_9_f8_9, foundMark_323), 4));
-    PabloAST * foundMark_324 = b_c4_c7_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_324 = b_c4_c7_bnc.EQ(markCodeAtStarter, 4);
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C7_1d3_4, foundMark_324));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C5_168___71_d3_4, foundMark_324));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAnd(C5_168___71_d3_4, foundMark_324));
@@ -10837,7 +10850,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_16a___d_d3_4, foundMark_324), 4));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_16e___71_d3_4, foundMark_324), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_168___71_d3_4, foundMark_324), 4));
-    PabloAST * foundMark_325 = b_c4_c7_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_325 = b_c4_c7_bnc.EQ(markCodeAtStarter, 5);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_100___3, foundMark_325));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C7_1cd_e, foundMark_325));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_100___3_cd_e, foundMark_325));
@@ -10858,7 +10871,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_100___3_cd_e, foundMark_325), 4));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C7_1cd_e, foundMark_325), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_100___3_cd_e, foundMark_325), 4));
-    PabloAST * foundMark_326 = b_c4_c7_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_326 = b_c4_c7_bnc.EQ(markCodeAtStarter, 6);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C5_15a___d_60_1_4_5, foundMark_326));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C5_15a___d_60_1_4_5, foundMark_326));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAnd(C5_15a___d_60_1_4_5, foundMark_326));
@@ -10876,7 +10889,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_160_1_4_5, foundMark_326), 3));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_160_1_4_5, foundMark_326), 3));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_15a___d_60_1_4_5, foundMark_326), 3));
-    PabloAST * foundMark_32d = b_c4_c7_bnc.EQ(markCode, 13);
+    PabloAST * foundMark_32d = b_c4_c7_bnc.EQ(markCodeAtStarter, 13);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_10e_f_12___7_a_b_39_a_d_e, foundMark_32d));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C7_1d3_4_f8_9, foundMark_32d));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_10e_f_12___7_a_b_39_a_d_e_43_4_7_8_64_5_8___71_d3_4_f8_9, foundMark_32d));
@@ -10903,7 +10916,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f_12___7_a_b_3d_e_47_8_64_5_a___d_d3_4, foundMark_32d), 4));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f_1a_b_3d_e_47_8_64_5_e___71_d3_4, foundMark_32d), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_10e_f_12___7_a_b_39_a_d_e_43_4_7_8_64_5_8___71_d3_4_f8_9, foundMark_32d), 4));
-    PabloAST * foundMark_32e = b_c4_c7_bnc.EQ(markCode, 14);
+    PabloAST * foundMark_32e = b_c4_c7_bnc.EQ(markCodeAtStarter, 14);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_124_5, foundMark_32e));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_124_5, foundMark_32e));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAnd(C4_124_5, foundMark_32e));
@@ -10922,7 +10935,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_124_5, foundMark_32e), 3));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_124_5, foundMark_32e), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_124_5, foundMark_32e), 4));
-    PabloAST * foundMark_330 = b_c4_c7_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_330 = b_c4_c7_bnc.EQ(markCodeAtStarter, 2);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_112___7_a_b_28___d_30, foundMark_330));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C7_1cf_d0_3_4, foundMark_330));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_112___7_a_b_28___d_30_68___71_cf_d0_3_4, foundMark_330));
@@ -10949,7 +10962,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_112___7_a_b_2a___d_30_6a___d_cf_d0_3_4, foundMark_330), 4));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_11a_b_6e___71_cf_d0_3_4, foundMark_330), 4));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_112___7_a_b_28___d_30_68___71_cf_d0_3_4, foundMark_330), 4));
-    PabloAST * foundMark_331 = b_c4_c7_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_331 = b_c4_c7_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_10e_f_25_39_a_d_e, foundMark_331));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C7_1e8_9_f8_9, foundMark_331));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_10e_f_25_39_a_d_e_43_4_7_8_54_5_8_9_64_5_79___e_e8_9_f8_9, foundMark_331));
@@ -10984,7 +10997,7 @@ void ApplyLongComposition2::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, markFound), b_e1);
+    pb.createIf(pb.createAnd(pfx_e1_test, markFoundForStarter), b_e1);
     std::vector<PabloAST *> xfrm_e1(8, All0);
     BixNumCompiler b_e1_bnc(b_e1);
     {
@@ -11149,7 +11162,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     _usets[51] = E1_1e22_3_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_323 = b_e1_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_323 = b_e1_bnc.EQ(markCodeAtStarter, 3);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1e3e_f_8e_f_97_9, foundMark_323), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1e97, foundMark_323), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1e98, foundMark_323), 2));
@@ -11167,7 +11180,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e02_3_a_b_22_3_40_1_4_5_58_9_6a_b_86_7_e_f, foundMark_323), 4));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1e26_7_84_5_97___9_a2_3_ba_b_c8_9_e_f_de_f_e6_7_c_d_f6_7, foundMark_323), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1e02_3_a_b_22_3_6_7_30_1_e___41_4_5_58_9_6a_b_7c_d_80___7_e___91_7___9_a2_3_ba___d_c8_9_e_f_da___e1_6___f_f2_3_6___9, foundMark_323), 4));
-    PabloAST * foundMark_324 = b_e1_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_324 = b_e1_bnc.EQ(markCodeAtStarter, 4);
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1ee6_7, foundMark_324), 1));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1ee6_7, foundMark_324), 2));
     xfrm_e1[4] = b_e1.createOr(xfrm_e1[4], b_e1.createAdvance(b_e1.createAnd(E1_1ee6_7, foundMark_324), 2));
@@ -11178,7 +11191,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1ee6_7, foundMark_324), 4));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1ee6_7, foundMark_324), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1ee6_7, foundMark_324), 4));
-    PabloAST * foundMark_325 = b_e1_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_325 = b_e1_bnc.EQ(markCodeAtStarter, 5);
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1ea2_3, foundMark_325), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1ea2_3, foundMark_325), 2));
     xfrm_e1[5] = b_e1.createOr(xfrm_e1[5], b_e1.createAdvance(b_e1.createAnd(E1_1ea2_3, foundMark_325), 2));
@@ -11189,7 +11202,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1ea2_3, foundMark_325), 4));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1ea2_3, foundMark_325), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1ea2_3, foundMark_325), 4));
-    PabloAST * foundMark_326 = b_e1_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_326 = b_e1_bnc.EQ(markCodeAtStarter, 6);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAnd(E1_1e60_1_a_b_97, foundMark_326));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAnd(E1_1e60_1_a_b_97, foundMark_326));
     xfrm_e1[5] = b_e1.createOr(xfrm_e1[5], b_e1.createAnd(E1_1e60_1_a_b_97, foundMark_326));
@@ -11208,7 +11221,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e60_1_a_b, foundMark_326), 3));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1e97, foundMark_326), 3));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1e60_1_a_b_97, foundMark_326), 3));
-    PabloAST * foundMark_32d = b_e1_bnc.EQ(markCode, 13);
+    PabloAST * foundMark_32d = b_e1_bnc.EQ(markCodeAtStarter, 13);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1e97, foundMark_32d), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1e97_ba___d_e6_7, foundMark_32d), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1e44_5_6a_b_97_ba_b, foundMark_32d), 2));
@@ -11225,7 +11238,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e0a_b_44_5_6a_b, foundMark_32d), 4));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1e97_ba_b_e6_7, foundMark_32d), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1e0a_b_44_5_6a_b_97_ba___d_e6_7, foundMark_32d), 4));
-    PabloAST * foundMark_32e = b_e1_bnc.EQ(markCode, 14);
+    PabloAST * foundMark_32e = b_e1_bnc.EQ(markCodeAtStarter, 14);
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e26_7, foundMark_32e), 2));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1e22_3_6_7, foundMark_32e), 2));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e22_3_6_7, foundMark_32e), 3));
@@ -11237,7 +11250,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e22_3, foundMark_32e), 4));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1e26_7, foundMark_32e), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1e22_3_6_7, foundMark_32e), 4));
-    PabloAST * foundMark_330 = b_e1_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_330 = b_e1_bnc.EQ(markCodeAtStarter, 2);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1ec8_9, foundMark_330), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1eba___d_c8_9_e6_7, foundMark_330), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1ebc_d_e6_7, foundMark_330), 2));
@@ -11252,7 +11265,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1ebc_d, foundMark_330), 4));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1eba_b_c8_9_e6_7, foundMark_330), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1eba___d_c8_9_e6_7, foundMark_330), 4));
-    PabloAST * foundMark_331 = b_e1_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_331 = b_e1_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1e97, foundMark_331), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1e23_7_97, foundMark_331), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1e23_7, foundMark_331), 2));
@@ -11278,7 +11291,7 @@ void ApplyLongComposition2::generatePabloMethod() {
 
     auto b_d8_db = pb.createScope();
     PabloAST * pfx_d8_db_test = pb.createAnd(bnc.UGE(Basis, 0xd8), bnc.ULE(Basis, 0xdb));
-    pb.createIf(pb.createAnd(pfx_d8_db_test, markFound), b_d8_db);
+    pb.createIf(pb.createAnd(pfx_d8_db_test, markFoundForStarter), b_d8_db);
     std::vector<PabloAST *> xfrm_d8_db(8, All0);
     BixNumCompiler b_d8_db_bnc(b_d8_db);
     {
@@ -11299,7 +11312,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     _usets[3] = D8_623_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_655 = b_d8_db_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_655 = b_d8_db_bnc.EQ(markCodeAtStarter, 1);
     xfrm_d8_db[0] = b_d8_db.createOr(xfrm_d8_db[0], b_d8_db.createAdvance(b_d8_db.createAnd(D8_622, foundMark_655), 1));
     xfrm_d8_db[1] = b_d8_db.createOr(xfrm_d8_db[1], b_d8_db.createAdvance(b_d8_db.createAnd(D8_622_3_7, foundMark_655), 1));
     xfrm_d8_db[2] = b_d8_db.createOr(xfrm_d8_db[2], b_d8_db.createAdvance(b_d8_db.createAnd(D8_622_3, foundMark_655), 1));
@@ -11321,7 +11334,7 @@ void ApplyLongComposition2::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFound), b_c2_c3);
+    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFoundForStarter), b_c2_c3);
     std::vector<PabloAST *> xfrm_c2_c3(8, All0);
     BixNumCompiler b_c2_c3_bnc(b_c2_c3);
     {
@@ -11507,7 +11520,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     _usets[58] = C3_db_fb_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_323 = b_c2_c3_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_323 = b_c2_c3_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c0___5_8___f_d1___6_9___d_e0___5_8___f_f1___6_9___d_f, foundMark_323));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_c0___5_8___f_d1___6_9___d_e0___5_8___f_f1___6_9___d_f, foundMark_323));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c1_3_5_9___c_e_d2_4_6_a_c_e1_3_5_9___c_e_f2_4_6_a_c, foundMark_323), 1));
@@ -11531,7 +11544,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c3_5_e_d1_5_b_e3_5_e_f1_5_b, foundMark_323), 4));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c4_5_b_f_d6_c_e4_5_b_f_f6_c_f, foundMark_323), 4));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c0_1_3___5_8_9_b___f_d1___3_5_6_9___d_e0_1_3___5_8_9_b___f_f1___3_5_6_9___d_f, foundMark_323), 4));
-    PabloAST * foundMark_324 = b_c2_c3_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_324 = b_c2_c3_bnc.EQ(markCodeAtStarter, 4);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_d9___c_f9___c, foundMark_324));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_d9___c_f9___c, foundMark_324));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_da_c_fa_c, foundMark_324), 1));
@@ -11551,7 +11564,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_db_fb, foundMark_324), 4));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_dc_fc, foundMark_324), 4));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d9___c_f9___c, foundMark_324), 4));
-    PabloAST * foundMark_325 = b_c2_c3_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_325 = b_c2_c3_bnc.EQ(markCodeAtStarter, 5);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c0___5_e0___5, foundMark_325));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_c0___5_e0___5, foundMark_325));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c1_3_5_e1_3_5, foundMark_325), 1));
@@ -11570,7 +11583,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_3_5_e2_3_5, foundMark_325), 4));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c4_5_e4_5, foundMark_325), 4));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c0___5_e0___5, foundMark_325), 4));
-    PabloAST * foundMark_32d = b_c2_c3_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_32d = b_c2_c3_bnc.EQ(markCodeAtStarter, 2);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c8___b_d1_9___c_e8___b_f1_9___c, foundMark_32d));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_c8___b_d1_9___c_e8___b_f1_9___c, foundMark_32d));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c9_b_da_c_e9_b_fa_c, foundMark_32d), 1));
@@ -11594,7 +11607,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_ca_d1_b_ea_f1_b, foundMark_32d), 4));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_cb_dc_eb_fc, foundMark_32d), 4));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c8___b_d1_9___c_e8___b_f1_9___c, foundMark_32d), 4));
-    PabloAST * foundMark_330 = b_c2_c3_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_330 = b_c2_c3_bnc.EQ(markCodeAtStarter, 6);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c8___f_d9___c_e8___f_f9___c, foundMark_330));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_c8___f_d9___c_e8___f_f9___c, foundMark_330));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c9_b_d_f_da_c_e9_b_d_f_fa_c, foundMark_330), 1));
@@ -11617,7 +11630,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_ca_e_db_ea_e_fb, foundMark_330), 4));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_cb_f_dc_eb_f_fc, foundMark_330), 4));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c8___f_d9___c_e8___f_f9___c, foundMark_330), 4));
-    PabloAST * foundMark_331 = b_c2_c3_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_331 = b_c2_c3_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_d1_f1, foundMark_331));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_d1_f1, foundMark_331));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d1_f1, foundMark_331), 1));
@@ -11640,7 +11653,7 @@ void ApplyLongComposition2::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFound), b_c8_cb);
+    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFoundForStarter), b_c8_cb);
     std::vector<PabloAST *> xfrm_c8_cb(8, All0);
     BixNumCompiler b_c8_cb_bnc(b_c8_cb);
     {
@@ -11808,7 +11821,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     _usets[52] = C8_214_5_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_323 = b_c8_cb_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_323 = b_c8_cb_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_200___17_e_f_26_7_e_f_32_3, foundMark_323));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_200___17_e_f_26_7_e_f_32_3, foundMark_323));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_200___17_e_f_26_7_e_f_32_3, foundMark_323));
@@ -11835,7 +11848,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_200_1_4_5_8_9_c_d_10_1_4_5_e_f, foundMark_323), 4));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_202_3_6_7_a_b_e_f_12_3_6_7, foundMark_323), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_200___17_e_f_26_7_e_f_32_3, foundMark_323), 4));
-    PabloAST * foundMark_324 = b_c8_cb_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_324 = b_c8_cb_bnc.EQ(markCodeAtStarter, 4);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_214___7, foundMark_324));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_214___7, foundMark_324));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_214___7, foundMark_324));
@@ -11859,7 +11872,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_214_5, foundMark_324), 4));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_216_7, foundMark_324), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_214___7, foundMark_324), 4));
-    PabloAST * foundMark_325 = b_c8_cb_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_325 = b_c8_cb_bnc.EQ(markCodeAtStarter, 5);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_200___3_26_7, foundMark_325));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_200___3_26_7, foundMark_325));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_200___3_26_7, foundMark_325));
@@ -11881,7 +11894,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_200_1, foundMark_325), 4));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_202_3, foundMark_325), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_200___3_26_7, foundMark_325), 4));
-    PabloAST * foundMark_32d = b_c8_cb_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_32d = b_c8_cb_bnc.EQ(markCodeAtStarter, 2);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_204___7_14___7, foundMark_32d));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_204___7_14___7, foundMark_32d));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_204___7_14___7, foundMark_32d));
@@ -11908,7 +11921,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_204_5_14_5, foundMark_32d), 4));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_206_7_16_7, foundMark_32d), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_204___7_14___7, foundMark_32d), 4));
-    PabloAST * foundMark_32e = b_c8_cb_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_32e = b_c8_cb_bnc.EQ(markCodeAtStarter, 6);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_21e_f, foundMark_32e));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_21e_f, foundMark_32e));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_21e_f, foundMark_32e));
@@ -11928,7 +11941,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_21e_f, foundMark_32e), 4));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_21e_f, foundMark_32e), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_21e_f, foundMark_32e), 4));
-    PabloAST * foundMark_330 = b_c8_cb_bnc.EQ(markCode, 7);
+    PabloAST * foundMark_330 = b_c8_cb_bnc.EQ(markCodeAtStarter, 7);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_204___b_14___7, foundMark_330));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_204___b_14___7, foundMark_330));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_204___b_14___7, foundMark_330));
@@ -11955,7 +11968,7 @@ void ApplyLongComposition2::generatePabloMethod() {
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_204_5_8_9_14_5, foundMark_330), 4));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_206_7_a_b_16_7, foundMark_330), 4));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_204___b_14___7, foundMark_330), 4));
-    PabloAST * foundMark_331 = b_c8_cb_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_331 = b_c8_cb_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_210___3_f, foundMark_331));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_210___3_f, foundMark_331));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_210___3_f, foundMark_331));
@@ -11986,11 +11999,15 @@ void ApplyLongComposition2::generatePabloMethod() {
     }
     }
 
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 //
@@ -12007,7 +12024,7 @@ FindComposables3::FindComposables3
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables3_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables3::generatePabloMethod() {
@@ -12022,14 +12039,10 @@ void FindComposables3::generatePabloMethod() {
     for (unsigned i = 0; i < markCodeBits; i++) {
         markCode[i] = pb.createVar("markCode" + std::to_string(i), All0);
     }
-    PabloAST * mark_ahead_1 = pb.createNot(pb.createLookahead(ccc_NR, 1));
-    PabloAST * mark_ahead_2 = pb.createNot(pb.createLookahead(ccc_NR, 2));
-    PabloAST * mark_ahead_3 = pb.createNot(pb.createLookahead(ccc_NR, 3));
-    PabloAST * mark_ahead_4 = pb.createNot(pb.createLookahead(ccc_NR, 4));
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, mark_ahead_1), b_0_7F);
+    pb.createIf(pfx_0_7F_test, b_0_7F);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_0_7F, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(28);
@@ -12210,7 +12223,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, mark_ahead_2), b_c2_c3);
+    pb.createIf(pfx_c2_c3_test, b_c2_c3);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c2_c3, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(16);
@@ -12314,7 +12327,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_d0_d3 = pb.createScope();
     PabloAST * pfx_d0_d3_test = pb.createAnd(bnc.UGE(Basis, 0xd0), bnc.ULE(Basis, 0xd3));
-    pb.createIf(pb.createAnd(pfx_d0_d3_test, mark_ahead_2), b_d0_d3);
+    pb.createIf(pfx_d0_d3_test, b_d0_d3);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_d0_d3, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(15);
@@ -12411,7 +12424,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, mark_ahead_2), b_c4_c7);
+    pb.createIf(pfx_c4_c7_test, b_c4_c7);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c4_c7, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(16);
@@ -12516,7 +12529,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, mark_ahead_3), b_e1);
+    pb.createIf(pfx_e1_test, b_e1);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e1, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(17);
@@ -12630,7 +12643,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_cc_cf = pb.createScope();
     PabloAST * pfx_cc_cf_test = pb.createAnd(bnc.UGE(Basis, 0xcc), bnc.ULE(Basis, 0xcf));
-    pb.createIf(pb.createAnd(pfx_cc_cf_test, mark_ahead_2), b_cc_cf);
+    pb.createIf(pfx_cc_cf_test, b_cc_cf);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_cc_cf, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(16);
@@ -12735,7 +12748,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, mark_ahead_2), b_c8_cb);
+    pb.createIf(pfx_c8_cb_test, b_c8_cb);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_c8_cb, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(7);
@@ -12784,7 +12797,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_f0 = pb.createScope();
     PabloAST * pfx_f0_test = bnc.EQ(Basis, 0xf0);
-    pb.createIf(pb.createAnd(pfx_f0_test, mark_ahead_4), b_f0);
+    pb.createIf(pfx_f0_test, b_f0);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_f0, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -12810,7 +12823,7 @@ void FindComposables3::generatePabloMethod() {
 
     auto b_d8_db = pb.createScope();
     PabloAST * pfx_d8_db_test = pb.createAnd(bnc.UGE(Basis, 0xd8), bnc.ULE(Basis, 0xdb));
-    pb.createIf(pb.createAnd(pfx_d8_db_test, mark_ahead_2), b_d8_db);
+    pb.createIf(pfx_d8_db_test, b_d8_db);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_d8_db, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(5);
@@ -12862,17 +12875,17 @@ void FindComposables3::generatePabloMethod() {
 class ApplyLongComposition3 : public PabloKernel {
 public:
     ApplyLongComposition3
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition3::ApplyLongComposition3
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition3_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition3::generatePabloMethod() {
@@ -12880,11 +12893,16 @@ void ApplyLongComposition3::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = 4;
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -12893,7 +12911,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_0_7F = pb.createScope();
     PabloAST * pfx_0_7F_test = pb.createNot(Basis[7]);
-    pb.createIf(pb.createAnd(pfx_0_7F_test, markFound), b_0_7F);
+    pb.createIf(pb.createAnd(pfx_0_7F_test, markFoundForStarter), b_0_7F);
     std::vector<PabloAST *> xfrm_0_7F(8, All0);
     BixNumCompiler b_0_7F_bnc(b_0_7F);
     {
@@ -13406,7 +13424,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[167] = ASC_4f_55_9_6f_75_9_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_300 = b_0_7F_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_300 = b_0_7F_bnc.EQ(markCodeAtStarter, 5);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_4e_6e, foundMark_300));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_5_9_55_7_61_5_9_75_7, foundMark_300));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_f_55_7_65_f_75_7, foundMark_300));
@@ -13426,7 +13444,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_59_79, foundMark_300), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_59_79, foundMark_300), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_57_9_77_9, foundMark_300), 2));
-    PabloAST * foundMark_301 = b_0_7F_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_301 = b_0_7F_bnc.EQ(markCodeAtStarter, 1);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_43_e_50_2_a_63_e_70_2_a, foundMark_301));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_3_5_9_b_e_52_3_5_7_9_a_61_3_5_9_b_e_72_3_5_7_9_a, foundMark_301));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_43_5_d_f_52_3_5_7_a_63_5_d_f_72_3_5_7_a, foundMark_301));
@@ -13448,7 +13466,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_4b_d_50_6b_d_70, foundMark_301), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_4b_d_6b_d, foundMark_301), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_4b_d_50_7_6b_d_70_7, foundMark_301), 2));
-    PabloAST * foundMark_302 = b_0_7F_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_302 = b_0_7F_bnc.EQ(markCodeAtStarter, 2);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_43_7_5a_63_7_7a, foundMark_302));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_3_5_7_9_a_53_5_7_a_61_3_5_7_9_a_73_5_7_a, foundMark_302));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_43_5_8_a_f_53_5_9_63_5_8_a_f_73_5_9, foundMark_302));
@@ -13466,7 +13484,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_7a, foundMark_302), 2));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_5a_7a, foundMark_302), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_5a_7a, foundMark_302), 2));
-    PabloAST * foundMark_303 = b_0_7F_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_303 = b_0_7F_bnc.EQ(markCodeAtStarter, 3);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_49_e_56_69_e_76, foundMark_303));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_56_61_76, foundMark_303));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_9_e_f_56_65_9_e_f_76, foundMark_303));
@@ -13487,7 +13505,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_56_9_65_76_9, foundMark_303), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_56_9_65_76_9, foundMark_303), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_56_9_65_76_9, foundMark_303), 2));
-    PabloAST * foundMark_304 = b_0_7F_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_304 = b_0_7F_bnc.EQ(markCodeAtStarter, 4);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_41_5_9_59_61_5_9_79, foundMark_304));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_47_f_67_f, foundMark_304));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_41_7_9_61_7_9, foundMark_304));
@@ -13505,7 +13523,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_67, foundMark_304), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_47_67, foundMark_304), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_47_67, foundMark_304), 2));
-    PabloAST * foundMark_306 = b_0_7F_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_306 = b_0_7F_bnc.EQ(markCodeAtStarter, 6);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_41_5_7_9_61_5_7_9, foundMark_306));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_47_f_67_f, foundMark_306));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_41_9_61_9, foundMark_306));
@@ -13520,7 +13538,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_7_65_7, foundMark_306), 1));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_49_55_69_75, foundMark_306), 1));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_5_7_9_f_55_61_5_7_9_f_75, foundMark_306), 1));
-    PabloAST * foundMark_307 = b_0_7F_bnc.EQ(markCode, 7);
+    PabloAST * foundMark_307 = b_0_7F_bnc.EQ(markCodeAtStarter, 7);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_41___9_e___50_2_4_8_a_61___8_e___70_2_4_8_a, foundMark_307));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_42_3_6_7_e_f_52_3_7_a_62_3_6_7_e_f_72_3_7_a, foundMark_307));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_43_4_6_9_d___f_54_7_a_63_4_6_d___f_74_7_a, foundMark_307));
@@ -13542,7 +13560,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_46_50_2_66_70_2, foundMark_307), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_53_4_68_73_4, foundMark_307), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_42_4_6_8_d_e_50_2___4_7___9_62_4_6_8_d_e_70_2___4_7___9, foundMark_307), 2));
-    PabloAST * foundMark_308 = b_0_7F_bnc.EQ(markCode, 8);
+    PabloAST * foundMark_308 = b_0_7F_bnc.EQ(markCodeAtStarter, 8);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_48_58_68_74_8, foundMark_308));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_5_9_55_7_61_5_9_75_7_9, foundMark_308));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_f_55_7_9_65_f_74_5_7, foundMark_308));
@@ -13564,7 +13582,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_74, foundMark_308), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_68, foundMark_308), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_48_57_8_68_74_7_8, foundMark_308), 2));
-    PabloAST * foundMark_309 = b_0_7F_bnc.EQ(markCode, 9);
+    PabloAST * foundMark_309 = b_0_7F_bnc.EQ(markCodeAtStarter, 9);
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_4f_6f, foundMark_309));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_f_55_65_f_75, foundMark_309));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_49_f_59_69_f_79, foundMark_309));
@@ -13584,7 +13602,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_59_65_79, foundMark_309), 2));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_5_55_9_61_5_75_9, foundMark_309), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_5_9_f_55_9_61_5_9_f_75_9, foundMark_309), 2));
-    PabloAST * foundMark_30a = b_0_7F_bnc.EQ(markCode, 10);
+    PabloAST * foundMark_30a = b_0_7F_bnc.EQ(markCodeAtStarter, 10);
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_61_77, foundMark_30a));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_77, foundMark_30a));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_79, foundMark_30a));
@@ -13602,7 +13620,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_77_9, foundMark_30a), 2));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_77_9, foundMark_30a), 2));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_77_9, foundMark_30a), 2));
-    PabloAST * foundMark_30b = b_0_7F_bnc.EQ(markCode, 11);
+    PabloAST * foundMark_30b = b_0_7F_bnc.EQ(markCodeAtStarter, 11);
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_4f_6f, foundMark_30b));
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAnd(ASC_4f_6f, foundMark_30b));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAnd(ASC_55_75, foundMark_30b));
@@ -13612,7 +13630,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_4f_55_6f_75, foundMark_30b), 1));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_55_75, foundMark_30b), 1));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_4f_55_6f_75, foundMark_30b), 1));
-    PabloAST * foundMark_30c = b_0_7F_bnc.EQ(markCode, 12);
+    PabloAST * foundMark_30c = b_0_7F_bnc.EQ(markCodeAtStarter, 12);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_43_5_e_52_4_a_63_5_a_e_72_4_a, foundMark_30c));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_41_3_9_e_52_3_5_a_61_3_9_e_72_3_5_a, foundMark_30c));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_41_3_9_b_52_3_a_61_3_9___b_72_3_a, foundMark_30c));
@@ -13627,7 +13645,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_45_8_c_f_52_5_a_65_8___a_c_f_72_5_a, foundMark_30c), 1));
     xfrm_0_7F[5] = b_0_7F.createOr(xfrm_0_7F[5], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_47_b_c_53_4_a_67_a___c_73_4_a, foundMark_30c), 1));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_3___5_7___9_b_c_e_f_52___5_a_61_3___5_7___c_e_f_72___5_a, foundMark_30c), 1));
-    PabloAST * foundMark_30f = b_0_7F_bnc.EQ(markCode, 15);
+    PabloAST * foundMark_30f = b_0_7F_bnc.EQ(markCodeAtStarter, 15);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_41_5_9_f_55_61_5_9_f_75, foundMark_30f));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_4f_52_6f_72, foundMark_30f));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_f_55_65_f_75, foundMark_30f));
@@ -13640,7 +13658,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_0_7F[3] = b_0_7F.createOr(xfrm_0_7F[3], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_49_f_69_f, foundMark_30f), 1));
     xfrm_0_7F[4] = b_0_7F.createOr(xfrm_0_7F[4], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_52_5_72_5, foundMark_30f), 1));
     xfrm_0_7F[7] = b_0_7F.createOr(xfrm_0_7F[7], b_0_7F.createAdvance(b_0_7F.createAnd(ASC_41_5_9_f_52_5_61_5_9_f_72_5, foundMark_30f), 1));
-    PabloAST * foundMark_311 = b_0_7F_bnc.EQ(markCode, 13);
+    PabloAST * foundMark_311 = b_0_7F_bnc.EQ(markCodeAtStarter, 13);
     xfrm_0_7F[0] = b_0_7F.createOr(xfrm_0_7F[0], b_0_7F.createAnd(ASC_41_5_9_f_55_61_5_9_f_75, foundMark_311));
     xfrm_0_7F[1] = b_0_7F.createOr(xfrm_0_7F[1], b_0_7F.createAnd(ASC_4f_52_6f_72, foundMark_311));
     xfrm_0_7F[2] = b_0_7F.createOr(xfrm_0_7F[2], b_0_7F.createAnd(ASC_45_f_55_65_f_75, foundMark_311));
@@ -13662,7 +13680,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_c2_c3 = pb.createScope();
     PabloAST * pfx_c2_c3_test = pb.createAnd(bnc.UGE(Basis, 0xc2), bnc.ULE(Basis, 0xc3));
-    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFound), b_c2_c3);
+    pb.createIf(pb.createAnd(pfx_c2_c3_test, markFoundForStarter), b_c2_c3);
     std::vector<PabloAST *> xfrm_c2_c3(8, All0);
     BixNumCompiler b_c2_c3_bnc(b_c2_c3);
     {
@@ -13803,7 +13821,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[43] = C3_ca_ea_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_300 = b_c2_c3_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_300 = b_c2_c3_bnc.EQ(markCodeAtStarter, 5);
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAnd(C2_a8, foundMark_300));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C2_a8_c2_a_d4_e2_a_f4, foundMark_300));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C3_dc_fc, foundMark_300));
@@ -13821,7 +13839,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c2_c3[4] = b_c2_c3.createOr(xfrm_c2_c3[4], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d4_f4, foundMark_300), 2));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAdvance(b_c2_c3.createAnd(C2_a8_c2_e2, foundMark_300), 2));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C2_a8_c2_a_d4_e2_a_f4, foundMark_300), 2));
-    PabloAST * foundMark_301 = b_c2_c3_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_301 = b_c2_c3_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c2_7_a_f_d4_5_e2_7_a_f_f4_5, foundMark_301));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C2_a8_c5_6_d8_c_e5_6_f8_c, foundMark_301));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAnd(C2_a8, foundMark_301));
@@ -13839,7 +13857,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c2_c3[4] = b_c2_c3.createOr(xfrm_c2_c3[4], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_ca_d4_ea_f4, foundMark_301), 2));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_a_f_e2_a_f, foundMark_301), 2));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_7_a_f_d4_5_e2_7_a_f_f4_5, foundMark_301), 2));
-    PabloAST * foundMark_303 = b_c2_c3_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_303 = b_c2_c3_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c2_a_d4_e2_a_f4, foundMark_303));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_c2_a_d4_e2_a_f4, foundMark_303));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_ca_d4_ea_f4, foundMark_303), 1));
@@ -13855,7 +13873,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c2_c3[4] = b_c2_c3.createOr(xfrm_c2_c3[4], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d4_f4, foundMark_303), 2));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_e2, foundMark_303), 2));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_a_d4_e2_a_f4, foundMark_303), 2));
-    PabloAST * foundMark_304 = b_c2_c3_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_304 = b_c2_c3_bnc.EQ(markCodeAtStarter, 4);
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAnd(C3_d5_6_f5_6, foundMark_304));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_d5_6_f5_6, foundMark_304));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C3_c4_6_dc_e4_6_fc, foundMark_304));
@@ -13866,7 +13884,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c4_d5_6_c_e4_f5_6_c, foundMark_304), 1));
     xfrm_c2_c3[4] = b_c2_c3.createOr(xfrm_c2_c3[4], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c4_d5_6_e4_f5_6, foundMark_304), 1));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c6_d5_6_e4_fc, foundMark_304), 1));
-    PabloAST * foundMark_308 = b_c2_c3_bnc.EQ(markCode, 8);
+    PabloAST * foundMark_308 = b_c2_c3_bnc.EQ(markCodeAtStarter, 8);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_d5_f5, foundMark_308));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_d5_f5, foundMark_308));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d5_f5, foundMark_308), 1));
@@ -13877,7 +13895,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d5_f5, foundMark_308), 2));
     xfrm_c2_c3[3] = b_c2_c3.createOr(xfrm_c2_c3[3], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d5_f5, foundMark_308), 2));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d5_f5, foundMark_308), 2));
-    PabloAST * foundMark_309 = b_c2_c3_bnc.EQ(markCode, 9);
+    PabloAST * foundMark_309 = b_c2_c3_bnc.EQ(markCodeAtStarter, 9);
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C3_c2_a_d4_e2_a_f4, foundMark_309));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C3_c2_a_d4_e2_a_f4, foundMark_309));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_ca_d4_ea_f4, foundMark_309), 1));
@@ -13893,13 +13911,13 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c2_c3[4] = b_c2_c3.createOr(xfrm_c2_c3[4], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_d4_f4, foundMark_309), 2));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_e2, foundMark_309), 2));
     xfrm_c2_c3[7] = b_c2_c3.createOr(xfrm_c2_c3[7], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_c2_a_d4_e2_a_f4, foundMark_309), 2));
-    PabloAST * foundMark_30c = b_c2_c3_bnc.EQ(markCode, 12);
+    PabloAST * foundMark_30c = b_c2_c3_bnc.EQ(markCodeAtStarter, 12);
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAnd(C3_dc_fc, foundMark_30c));
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_dc, foundMark_30c), 1));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_fc, foundMark_30c), 1));
     xfrm_c2_c3[2] = b_c2_c3.createOr(xfrm_c2_c3[2], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_dc_fc, foundMark_30c), 1));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAdvance(b_c2_c3.createAnd(C3_fc, foundMark_30c), 1));
-    PabloAST * foundMark_342 = b_c2_c3_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_342 = b_c2_c3_bnc.EQ(markCodeAtStarter, 2);
     xfrm_c2_c3[0] = b_c2_c3.createOr(xfrm_c2_c3[0], b_c2_c3.createAnd(C2_a8, foundMark_342));
     xfrm_c2_c3[1] = b_c2_c3.createOr(xfrm_c2_c3[1], b_c2_c3.createAnd(C2_a8, foundMark_342));
     xfrm_c2_c3[5] = b_c2_c3.createOr(xfrm_c2_c3[5], b_c2_c3.createAnd(C2_a8, foundMark_342));
@@ -13917,7 +13935,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_d0_d3 = pb.createScope();
     PabloAST * pfx_d0_d3_test = pb.createAnd(bnc.UGE(Basis, 0xd0), bnc.ULE(Basis, 0xd3));
-    pb.createIf(pb.createAnd(pfx_d0_d3_test, markFound), b_d0_d3);
+    pb.createIf(pb.createAnd(pfx_d0_d3_test, markFoundForStarter), b_d0_d3);
     std::vector<PabloAST *> xfrm_d0_d3(8, All0);
     BixNumCompiler b_d0_d3_bnc(b_d0_d3);
     {
@@ -14010,19 +14028,19 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[27] = D1_474_5_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_300 = b_d0_d3_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_300 = b_d0_d3_bnc.EQ(markCodeAtStarter, 2);
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAnd(D0_435_8, foundMark_300));
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_415_8_35_8, foundMark_300), 1));
     xfrm_d0_d3[2] = b_d0_d3.createOr(xfrm_d0_d3[2], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_415_8_35_8, foundMark_300), 1));
     xfrm_d0_d3[4] = b_d0_d3.createOr(xfrm_d0_d3[4], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_415_8, foundMark_300), 1));
     xfrm_d0_d3[5] = b_d0_d3.createOr(xfrm_d0_d3[5], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_435_8, foundMark_300), 1));
-    PabloAST * foundMark_301 = b_d0_d3_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_301 = b_d0_d3_bnc.EQ(markCodeAtStarter, 1);
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAnd(D0_433_a, foundMark_301));
     xfrm_d0_d3[1] = b_d0_d3.createOr(xfrm_d0_d3[1], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_41a_3a, foundMark_301), 1));
     xfrm_d0_d3[2] = b_d0_d3.createOr(xfrm_d0_d3[2], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_41a_3a, foundMark_301), 1));
     xfrm_d0_d3[4] = b_d0_d3.createOr(xfrm_d0_d3[4], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_413_a, foundMark_301), 1));
     xfrm_d0_d3[5] = b_d0_d3.createOr(xfrm_d0_d3[5], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_433_a, foundMark_301), 1));
-    PabloAST * foundMark_304 = b_d0_d3_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_304 = b_d0_d3_bnc.EQ(markCodeAtStarter, 4);
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAnd(D0_418_23_38, foundMark_304));
     xfrm_d0_d3[1] = b_d0_d3.createOr(xfrm_d0_d3[1], b_d0_d3.createAnd(D0_418_23_38_43, foundMark_304));
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_423_38, foundMark_304), 1));
@@ -14031,7 +14049,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_d0_d3[3] = b_d0_d3.createOr(xfrm_d0_d3[3], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_418_23_38_43, foundMark_304), 1));
     xfrm_d0_d3[4] = b_d0_d3.createOr(xfrm_d0_d3[4], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_418_38, foundMark_304), 1));
     xfrm_d0_d3[5] = b_d0_d3.createOr(xfrm_d0_d3[5], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_418_43, foundMark_304), 1));
-    PabloAST * foundMark_306 = b_d0_d3_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_306 = b_d0_d3_bnc.EQ(markCodeAtStarter, 6);
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAnd(D0_410_5_6_30_5_6, foundMark_306));
     xfrm_d0_d3[1] = b_d0_d3.createOr(xfrm_d0_d3[1], b_d0_d3.createAnd(D0_410_5_6_30_5_6, foundMark_306));
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_415_6_8_23_30_8_43, foundMark_306), 1));
@@ -14040,7 +14058,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_d0_d3[3] = b_d0_d3.createOr(xfrm_d0_d3[3], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_423_43, foundMark_306), 1));
     xfrm_d0_d3[4] = b_d0_d3.createOr(xfrm_d0_d3[4], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_416_36_43, foundMark_306), 1));
     xfrm_d0_d3[5] = b_d0_d3.createOr(xfrm_d0_d3[5], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_423_30_5_6, foundMark_306), 1));
-    PabloAST * foundMark_308 = b_d0_d3_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_308 = b_d0_d3_bnc.EQ(markCodeAtStarter, 5);
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAnd(D0_410_6___8_e_23_7_b_d_30_5___8_e, foundMark_308));
     xfrm_d0_d3[1] = b_d0_d3.createOr(xfrm_d0_d3[1], b_d0_d3.createAnd(D0_410_6___8_e_23_7_b_d_30_6___8_e_43_7_b_d, foundMark_308));
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_406_17_23_7_b_d_30_6_8_e_56, foundMark_308), 1));
@@ -14049,13 +14067,13 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_d0_d3[3] = b_d0_d3.createOr(xfrm_d0_d3[3], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_416___8_e_36___8_e, foundMark_308), 1));
     xfrm_d0_d3[4] = b_d0_d3.createOr(xfrm_d0_d3[4], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_415_8_e_23_7_b_38_e_43_7_b, foundMark_308), 1));
     xfrm_d0_d3[5] = b_d0_d3.createOr(xfrm_d0_d3[5], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_418_e_30_5___7_43_7_b_d, foundMark_308), 1));
-    PabloAST * foundMark_30b = b_d0_d3_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_30b = b_d0_d3_bnc.EQ(markCodeAtStarter, 3);
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAnd(D0_423, foundMark_30b));
     xfrm_d0_d3[1] = b_d0_d3.createOr(xfrm_d0_d3[1], b_d0_d3.createAnd(D0_423_43, foundMark_30b));
     xfrm_d0_d3[0] = b_d0_d3.createOr(xfrm_d0_d3[0], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_423, foundMark_30b), 1));
     xfrm_d0_d3[4] = b_d0_d3.createOr(xfrm_d0_d3[4], b_d0_d3.createAdvance(b_d0_d3.createAnd(D0_423_43, foundMark_30b), 1));
     xfrm_d0_d3[5] = b_d0_d3.createOr(xfrm_d0_d3[5], b_d0_d3.createAdvance(b_d0_d3.createAnd(D1_443, foundMark_30b), 1));
-    PabloAST * foundMark_30f = b_d0_d3_bnc.EQ(markCode, 7);
+    PabloAST * foundMark_30f = b_d0_d3_bnc.EQ(markCodeAtStarter, 7);
     xfrm_d0_d3[1] = b_d0_d3.createOr(xfrm_d0_d3[1], b_d0_d3.createAdvance(b_d0_d3.createAnd(D1_474_5, foundMark_30f), 1));
 
     for (unsigned i = 0; i < 8; i++) {
@@ -14065,7 +14083,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_c4_c7 = pb.createScope();
     PabloAST * pfx_c4_c7_test = pb.createAnd(bnc.UGE(Basis, 0xc4), bnc.ULE(Basis, 0xc7));
-    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFound), b_c4_c7);
+    pb.createIf(pb.createAnd(pfx_c4_c7_test, markFoundForStarter), b_c4_c7);
     std::vector<PabloAST *> xfrm_c4_c7(8, All0);
     BixNumCompiler b_c4_c7_bnc(b_c4_c7);
     {
@@ -14206,7 +14224,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[43] = C4_102_3_a0_1_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_300 = b_c4_c7_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_300 = b_c4_c7_bnc.EQ(markCodeAtStarter, 2);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_102_3_12_3_a0_1_f_b0, foundMark_300));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C6_1a0_1_f_b0, foundMark_300));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_102_3_12_3_4c_d_a0_1_f_b0, foundMark_300));
@@ -14224,7 +14242,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c4_c7[4] = b_c4_c7.createOr(xfrm_c4_c7[4], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_12_3_4c_d_a0_1, foundMark_300), 2));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_af_b0, foundMark_300), 2));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_12_3_4c_d_a0_1_f_b0, foundMark_300), 2));
-    PabloAST * foundMark_301 = b_c4_c7_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_301 = b_c4_c7_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_102_3_12_3_a0_1_f_b0, foundMark_301));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C6_1a0_1_f_b0, foundMark_301));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_102_3_12_3_4c_d_68_9_a0_1_f_b0, foundMark_301));
@@ -14242,7 +14260,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c4_c7[4] = b_c4_c7.createOr(xfrm_c4_c7[4], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_112_3_4c_d_68_9_a0_1, foundMark_301), 2));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_68_9_af_b0, foundMark_301), 2));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_12_3_4c_d_68_9_a0_1_f_b0, foundMark_301), 2));
-    PabloAST * foundMark_303 = b_c4_c7_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_303 = b_c4_c7_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_303));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C6_1a0_1_f_b0, foundMark_303));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_303));
@@ -14260,10 +14278,10 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c4_c7[4] = b_c4_c7.createOr(xfrm_c4_c7[4], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3, foundMark_303), 2));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_303), 2));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_303), 2));
-    PabloAST * foundMark_304 = b_c4_c7_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_304 = b_c4_c7_bnc.EQ(markCodeAtStarter, 4);
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAdvance(b_c4_c7.createAnd(C7_1ea_b, foundMark_304), 1));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAdvance(b_c4_c7.createAnd(C7_1ea_b, foundMark_304), 1));
-    PabloAST * foundMark_307 = b_c4_c7_bnc.EQ(markCode, 7);
+    PabloAST * foundMark_307 = b_c4_c7_bnc.EQ(markCodeAtStarter, 7);
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C5_15a_b_60_1_7f, foundMark_307));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAnd(C5_15a_b_60_1_7f, foundMark_307));
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_15a_60_7f, foundMark_307), 1));
@@ -14279,7 +14297,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c4_c7[4] = b_c4_c7.createOr(xfrm_c4_c7[4], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_17f, foundMark_307), 2));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_15a_b_60_1, foundMark_307), 2));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_15a_b_60_1_7f, foundMark_307), 2));
-    PabloAST * foundMark_308 = b_c4_c7_bnc.EQ(markCode, 8);
+    PabloAST * foundMark_308 = b_c4_c7_bnc.EQ(markCodeAtStarter, 8);
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C5_16a_b, foundMark_308));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAnd(C5_16a_b, foundMark_308));
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_16a, foundMark_308), 1));
@@ -14291,7 +14309,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c4_c7[4] = b_c4_c7.createOr(xfrm_c4_c7[4], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_16a_b, foundMark_308), 2));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_16a_b, foundMark_308), 2));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C5_16a_b, foundMark_308), 2));
-    PabloAST * foundMark_309 = b_c4_c7_bnc.EQ(markCode, 9);
+    PabloAST * foundMark_309 = b_c4_c7_bnc.EQ(markCodeAtStarter, 9);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_309));
     xfrm_c4_c7[1] = b_c4_c7.createOr(xfrm_c4_c7[1], b_c4_c7.createAnd(C6_1a0_1_f_b0, foundMark_309));
     xfrm_c4_c7[2] = b_c4_c7.createOr(xfrm_c4_c7[2], b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_309));
@@ -14309,7 +14327,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c4_c7[4] = b_c4_c7.createOr(xfrm_c4_c7[4], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_a0_1, foundMark_309), 2));
     xfrm_c4_c7[5] = b_c4_c7.createOr(xfrm_c4_c7[5], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_af_b0, foundMark_309), 2));
     xfrm_c4_c7[7] = b_c4_c7.createOr(xfrm_c4_c7[7], b_c4_c7.createAdvance(b_c4_c7.createAnd(C4_102_3_a0_1_f_b0, foundMark_309), 2));
-    PabloAST * foundMark_30c = b_c4_c7_bnc.EQ(markCode, 12);
+    PabloAST * foundMark_30c = b_c4_c7_bnc.EQ(markCodeAtStarter, 12);
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAnd(C6_1b7, foundMark_30c));
     xfrm_c4_c7[0] = b_c4_c7.createOr(xfrm_c4_c7[0], b_c4_c7.createAdvance(b_c4_c7.createAnd(C6_1b7, foundMark_30c), 1));
     xfrm_c4_c7[3] = b_c4_c7.createOr(xfrm_c4_c7[3], b_c4_c7.createAdvance(b_c4_c7.createAnd(C6_1b7, foundMark_30c), 1));
@@ -14322,7 +14340,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, markFound), b_e1);
+    pb.createIf(pb.createAnd(pfx_e1_test, markFoundForStarter), b_e1);
     std::vector<PabloAST *> xfrm_e1(8, All0);
     BixNumCompiler b_e1_bnc(b_e1);
     {
@@ -14421,7 +14439,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[29] = E1_1ffe_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_300 = b_e1_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_300 = b_e1_bnc.EQ(markCodeAtStarter, 5);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fbf, foundMark_300), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c3_f3_e, foundMark_300), 2));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1f00_1_8_9_10_1_8_9_20_1_8_9_30_1_8_9_40_1_8_9_50_1_9_60_1_8_9_80_1_8_9_90_1_8_9_a0_1_8_9_bc_f_cc_fc_e, foundMark_300), 2));
@@ -14436,7 +14454,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_300), 4));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_300), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_300), 4));
-    PabloAST * foundMark_301 = b_e1_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_301 = b_e1_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAnd(E1_1fbc_cc_fc, foundMark_301));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAnd(E1_1fbc_cc_fc, foundMark_301));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAnd(E1_1fbc_cc_fc, foundMark_301));
@@ -14457,14 +14475,14 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_301), 3));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_301), 3));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_301), 3));
-    PabloAST * foundMark_302 = b_e1_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_302 = b_e1_bnc.EQ(markCodeAtStarter, 2);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1eb8_9, foundMark_302), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1eb8_9, foundMark_302), 2));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1ea0_1_b8_9_cc_d, foundMark_302), 2));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1ea0_1_b8_9, foundMark_302), 2));
     xfrm_e1[4] = b_e1.createOr(xfrm_e1[4], b_e1.createAdvance(b_e1.createAnd(E1_1eb8_9_cc_d, foundMark_302), 2));
     xfrm_e1[5] = b_e1.createOr(xfrm_e1[5], b_e1.createAdvance(b_e1.createAnd(E1_1eb8_9, foundMark_302), 2));
-    PabloAST * foundMark_304 = b_e1_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_304 = b_e1_bnc.EQ(markCodeAtStarter, 4);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fbc, foundMark_304), 2));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1e36_7_5a_b_1fb3, foundMark_304), 2));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1e36_7_5a_b_1fbc, foundMark_304), 2));
@@ -14477,7 +14495,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_304), 4));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_304), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_304), 4));
-    PabloAST * foundMark_306 = b_e1_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_306 = b_e1_bnc.EQ(markCodeAtStarter, 6);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fb3, foundMark_306), 2));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1ea0_1_1fb3, foundMark_306), 2));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1ea0_1_1fbc, foundMark_306), 2));
@@ -14490,24 +14508,24 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_306), 4));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_306), 4));
     xfrm_e1[7] = b_e1.createOr(xfrm_e1[7], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_306), 4));
-    PabloAST * foundMark_307 = b_e1_bnc.EQ(markCode, 7);
+    PabloAST * foundMark_307 = b_e1_bnc.EQ(markCodeAtStarter, 7);
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1e62_3, foundMark_307), 2));
     xfrm_e1[3] = b_e1.createOr(xfrm_e1[3], b_e1.createAdvance(b_e1.createAnd(E1_1e62_3, foundMark_307), 2));
-    PabloAST * foundMark_313 = b_e1_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_313 = b_e1_bnc.EQ(markCodeAtStarter, 3);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fc3_c_f3_c, foundMark_313), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c3_f3, foundMark_313), 2));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c3_f3, foundMark_313), 2));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_313), 2));
     xfrm_e1[4] = b_e1.createOr(xfrm_e1[4], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c_c3_c_f3_c, foundMark_313), 2));
     xfrm_e1[5] = b_e1.createOr(xfrm_e1[5], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_313), 2));
-    PabloAST * foundMark_314 = b_e1_bnc.EQ(markCode, 8);
+    PabloAST * foundMark_314 = b_e1_bnc.EQ(markCodeAtStarter, 8);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fc3_c_f3_c, foundMark_314), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_314), 2));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c3_f3, foundMark_314), 2));
     xfrm_e1[2] = b_e1.createOr(xfrm_e1[2], b_e1.createAdvance(b_e1.createAnd(E1_1fbc_cc_fc, foundMark_314), 2));
     xfrm_e1[4] = b_e1.createOr(xfrm_e1[4], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c_c3_c_f3_c, foundMark_314), 2));
     xfrm_e1[5] = b_e1.createOr(xfrm_e1[5], b_e1.createAdvance(b_e1.createAnd(E1_1fb3_c, foundMark_314), 2));
-    PabloAST * foundMark_342 = b_e1_bnc.EQ(markCode, 9);
+    PabloAST * foundMark_342 = b_e1_bnc.EQ(markCodeAtStarter, 9);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fbf, foundMark_342), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1ffe, foundMark_342), 2));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1f00_1_8_9_20_1_8_9_30_1_8_9_50_1_9_60_1_8_9_80_1_8_9_90_1_8_9_a0_1_8_9, foundMark_342), 2));
@@ -14522,7 +14540,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_cc_cf = pb.createScope();
     PabloAST * pfx_cc_cf_test = pb.createAnd(bnc.UGE(Basis, 0xcc), bnc.ULE(Basis, 0xcf));
-    pb.createIf(pb.createAnd(pfx_cc_cf_test, markFound), b_cc_cf);
+    pb.createIf(pb.createAnd(pfx_cc_cf_test, markFoundForStarter), b_cc_cf);
     std::vector<PabloAST *> xfrm_cc_cf(8, All0);
     BixNumCompiler b_cc_cf_bnc(b_cc_cf);
     {
@@ -14726,7 +14744,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[64] = CF_3ca_b_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_300 = b_cc_cf_bnc.EQ(markCode, 5);
+    PabloAST * foundMark_300 = b_cc_cf_bnc.EQ(markCodeAtStarter, 5);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_391_5_7_9_f_a5_9_b1_5_7_9_f, foundMark_300));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b, foundMark_300));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b, foundMark_300));
@@ -14744,7 +14762,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_9_f_a9_b1_5_7_9_f_c5_9_a, foundMark_300), 2));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_f_a5_9_b1_5_7_9_f_c5_9_b, foundMark_300), 2));
     xfrm_cc_cf[7] = b_cc_cf.createOr(xfrm_cc_cf[7], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_5_7_9_f_a5_9_b1_5_7_9_f_c5_9___b, foundMark_300), 2));
-    PabloAST * foundMark_301 = b_cc_cf_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_301 = b_cc_cf_bnc.EQ(markCodeAtStarter, 1);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_3bf_ca_b, foundMark_301));
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_5_9_f_a5_b1_7_f_c9_b_d2, foundMark_301), 1));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_7_9_f_a5_9_b9_f_c9___b, foundMark_301), 1));
@@ -14752,7 +14770,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[3] = b_cc_cf.createOr(xfrm_cc_cf[3], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_395_7_a5_b1_5_7_c5_a_b, foundMark_301), 1));
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_5_7_9_f_b1_5_7_9_f_ca_b, foundMark_301), 1));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_3a5_9_bf_cb, foundMark_301), 1));
-    PabloAST * foundMark_304 = b_cc_cf_bnc.EQ(markCode, 4);
+    PabloAST * foundMark_304 = b_cc_cf_bnc.EQ(markCodeAtStarter, 4);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_391_9_a5_b1_9, foundMark_304));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_391_9_a5_b1_9_c5, foundMark_304));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_391_9_a5_b1_9_c5, foundMark_304));
@@ -14769,7 +14787,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_9_b1_9, foundMark_304), 2));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_a5_b1_c5, foundMark_304), 2));
     xfrm_cc_cf[7] = b_cc_cf.createOr(xfrm_cc_cf[7], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_9_a5_b1_9_c5, foundMark_304), 2));
-    PabloAST * foundMark_306 = b_cc_cf_bnc.EQ(markCode, 6);
+    PabloAST * foundMark_306 = b_cc_cf_bnc.EQ(markCodeAtStarter, 6);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_391_9_a5_b1_9, foundMark_306));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_391_9_a5_b1_9_c5, foundMark_306));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_391_9_a5_b1_9_c5, foundMark_306));
@@ -14785,7 +14803,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_9_b1_9, foundMark_306), 2));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_a5_b1_c5, foundMark_306), 2));
     xfrm_cc_cf[7] = b_cc_cf.createOr(xfrm_cc_cf[7], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_9_a5_b1_9_c5, foundMark_306), 2));
-    PabloAST * foundMark_308 = b_cc_cf_bnc.EQ(markCode, 8);
+    PabloAST * foundMark_308 = b_cc_cf_bnc.EQ(markCodeAtStarter, 8);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_3b9, foundMark_308));
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_399_b9, foundMark_308), 1));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_399_a5_b9_c5_d2, foundMark_308), 1));
@@ -14793,7 +14811,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[3] = b_cc_cf.createOr(xfrm_cc_cf[3], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_3a5_c5, foundMark_308), 1));
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_399_b9, foundMark_308), 1));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_399_b9, foundMark_308), 1));
-    PabloAST * foundMark_313 = b_cc_cf_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_313 = b_cc_cf_bnc.EQ(markCodeAtStarter, 3);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_391_5_7_9_f_a9_b1_5_7_9_f, foundMark_313));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_391_5_7_9_f_a9_b1_5_7_9_f_c1_5_9, foundMark_313));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_391_5_7_9_f_a9_b1_5_7_9_f_c1_5_9, foundMark_313));
@@ -14810,7 +14828,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_395_9_b5_9_c5, foundMark_313), 2));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_397_9_a9_b7_9_c1_9, foundMark_313), 2));
     xfrm_cc_cf[7] = b_cc_cf.createOr(xfrm_cc_cf[7], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_5_7_9_f_a9_b1_5_7_9_f_c1_5_9, foundMark_313), 2));
-    PabloAST * foundMark_314 = b_cc_cf_bnc.EQ(markCode, 7);
+    PabloAST * foundMark_314 = b_cc_cf_bnc.EQ(markCodeAtStarter, 7);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_391_5_7_9_f_a1_5_9_b1_5_7_9_f, foundMark_314));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_391_5_7_9_f_a1_5_9_b1_5_7_9_f_c1_5_9, foundMark_314));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_391_5_7_9_f_a1_5_9_b1_5_7_9_f_c1_5_9, foundMark_314));
@@ -14828,7 +14846,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_cc_cf[4] = b_cc_cf.createOr(xfrm_cc_cf[4], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_395_9_a5_b5_9_c5, foundMark_314), 2));
     xfrm_cc_cf[5] = b_cc_cf.createOr(xfrm_cc_cf[5], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_397_9_a1_9_b7_9_c1_9, foundMark_314), 2));
     xfrm_cc_cf[7] = b_cc_cf.createOr(xfrm_cc_cf[7], b_cc_cf.createAdvance(b_cc_cf.createAnd(CE_391_5_7_9_f_a1_5_9_b1_5_7_9_f_c1_5_9, foundMark_314), 2));
-    PabloAST * foundMark_342 = b_cc_cf_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_342 = b_cc_cf_bnc.EQ(markCodeAtStarter, 2);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_3b1_7_9, foundMark_342));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_3b1_7_9_c5_9___b, foundMark_342));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_3b1_7_9_c5_9___b, foundMark_342));
@@ -14854,7 +14872,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_c8_cb = pb.createScope();
     PabloAST * pfx_c8_cb_test = pb.createAnd(bnc.UGE(Basis, 0xc8), bnc.ULE(Basis, 0xcb));
-    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFound), b_c8_cb);
+    pb.createIf(pb.createAnd(pfx_c8_cb_test, markFoundForStarter), b_c8_cb);
     std::vector<PabloAST *> xfrm_c8_cb(8, All0);
     BixNumCompiler b_c8_cb_bnc(b_c8_cb);
     {
@@ -14881,7 +14899,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[5] = CA_292_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_304 = b_c8_cb_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_304 = b_c8_cb_bnc.EQ(markCodeAtStarter, 1);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_226_7, foundMark_304));
     xfrm_c8_cb[1] = b_c8_cb.createOr(xfrm_c8_cb[1], b_c8_cb.createAnd(C8_226_7, foundMark_304));
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAnd(C8_226_7, foundMark_304));
@@ -14890,7 +14908,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_226_7_e_f, foundMark_304), 1));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_22e_f, foundMark_304), 1));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_22e_f, foundMark_304), 1));
-    PabloAST * foundMark_306 = b_c8_cb_bnc.EQ(markCode, 2);
+    PabloAST * foundMark_306 = b_c8_cb_bnc.EQ(markCodeAtStarter, 2);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(C8_228_9, foundMark_306));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(C8_228_9, foundMark_306));
     xfrm_c8_cb[5] = b_c8_cb.createOr(xfrm_c8_cb[5], b_c8_cb.createAnd(C8_228_9, foundMark_306));
@@ -14901,7 +14919,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_228_9, foundMark_306), 2));
     xfrm_c8_cb[4] = b_c8_cb.createOr(xfrm_c8_cb[4], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_228_9, foundMark_306), 2));
     xfrm_c8_cb[7] = b_c8_cb.createOr(xfrm_c8_cb[7], b_c8_cb.createAdvance(b_c8_cb.createAnd(C8_228_9, foundMark_306), 2));
-    PabloAST * foundMark_30c = b_c8_cb_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_30c = b_c8_cb_bnc.EQ(markCodeAtStarter, 3);
     xfrm_c8_cb[0] = b_c8_cb.createOr(xfrm_c8_cb[0], b_c8_cb.createAnd(CA_292, foundMark_30c));
     xfrm_c8_cb[2] = b_c8_cb.createOr(xfrm_c8_cb[2], b_c8_cb.createAnd(CA_292, foundMark_30c));
     xfrm_c8_cb[3] = b_c8_cb.createOr(xfrm_c8_cb[3], b_c8_cb.createAnd(CA_292, foundMark_30c));
@@ -14918,7 +14936,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_f0 = pb.createScope();
     PabloAST * pfx_f0_test = bnc.EQ(Basis, 0xf0);
-    pb.createIf(pb.createAnd(pfx_f0_test, markFound), b_f0);
+    pb.createIf(pb.createAnd(pfx_f0_test, markFoundForStarter), b_f0);
     std::vector<PabloAST *> xfrm_f0(8, All0);
     BixNumCompiler b_f0_bnc(b_f0);
     {
@@ -14936,7 +14954,7 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[2] = F0_105da_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_307 = b_f0_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_307 = b_f0_bnc.EQ(markCodeAtStarter, 1);
     xfrm_f0[0] = b_f0.createOr(xfrm_f0[0], b_f0.createAdvance(b_f0.createAnd(F0_105d2, foundMark_307), 3));
     xfrm_f0[1] = b_f0.createOr(xfrm_f0[1], b_f0.createAdvance(b_f0.createAnd(F0_105d2_a, foundMark_307), 3));
     xfrm_f0[2] = b_f0.createOr(xfrm_f0[2], b_f0.createAdvance(b_f0.createAnd(F0_105da, foundMark_307), 3));
@@ -14951,7 +14969,7 @@ void ApplyLongComposition3::generatePabloMethod() {
 
     auto b_d8_db = pb.createScope();
     PabloAST * pfx_d8_db_test = pb.createAnd(bnc.UGE(Basis, 0xd8), bnc.ULE(Basis, 0xdb));
-    pb.createIf(pb.createAnd(pfx_d8_db_test, markFound), b_d8_db);
+    pb.createIf(pb.createAnd(pfx_d8_db_test, markFoundForStarter), b_d8_db);
     std::vector<PabloAST *> xfrm_d8_db(8, All0);
     BixNumCompiler b_d8_db_bnc(b_d8_db);
     {
@@ -14978,10 +14996,10 @@ void ApplyLongComposition3::generatePabloMethod() {
     _usets[5] = DB_6d5_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_653 = b_d8_db_bnc.EQ(markCode, 3);
+    PabloAST * foundMark_653 = b_d8_db_bnc.EQ(markCodeAtStarter, 3);
     xfrm_d8_db[0] = b_d8_db.createOr(xfrm_d8_db[0], b_d8_db.createAdvance(b_d8_db.createAnd(D8_627, foundMark_653), 1));
     xfrm_d8_db[2] = b_d8_db.createOr(xfrm_d8_db[2], b_d8_db.createAdvance(b_d8_db.createAnd(D8_627, foundMark_653), 1));
-    PabloAST * foundMark_654 = b_d8_db_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_654 = b_d8_db_bnc.EQ(markCodeAtStarter, 1);
     xfrm_d8_db[0] = b_d8_db.createOr(xfrm_d8_db[0], b_d8_db.createAnd(D9_648_a, foundMark_654));
     xfrm_d8_db[0] = b_d8_db.createOr(xfrm_d8_db[0], b_d8_db.createAdvance(b_d8_db.createAnd(DB_6c1_d2_5, foundMark_654), 1));
     xfrm_d8_db[1] = b_d8_db.createOr(xfrm_d8_db[1], b_d8_db.createAdvance(b_d8_db.createAnd(DB_6c1, foundMark_654), 1));
@@ -14995,11 +15013,15 @@ void ApplyLongComposition3::generatePabloMethod() {
     }
     }
 
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 //
@@ -15016,7 +15038,7 @@ FindComposables4::FindComposables4
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables4_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables4::generatePabloMethod() {
@@ -15031,12 +15053,10 @@ void FindComposables4::generatePabloMethod() {
     for (unsigned i = 0; i < markCodeBits; i++) {
         markCode[i] = pb.createVar("markCode" + std::to_string(i), All0);
     }
-    PabloAST * mark_ahead_2 = pb.createNot(pb.createLookahead(ccc_NR, 2));
-    PabloAST * mark_ahead_3 = pb.createNot(pb.createLookahead(ccc_NR, 3));
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, mark_ahead_3), b_e1);
+    pb.createIf(pfx_e1_test, b_e1);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_e1, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -15062,7 +15082,7 @@ void FindComposables4::generatePabloMethod() {
 
     auto b_cc_cf = pb.createScope();
     PabloAST * pfx_cc_cf_test = pb.createAnd(bnc.UGE(Basis, 0xcc), bnc.ULE(Basis, 0xcf));
-    pb.createIf(pb.createAnd(pfx_cc_cf_test, mark_ahead_2), b_cc_cf);
+    pb.createIf(pfx_cc_cf_test, b_cc_cf);
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_cc_cf, pablo::BitMovementMode::LookAhead);
     std::vector<Var *> _vars(3);
@@ -15099,17 +15119,17 @@ void FindComposables4::generatePabloMethod() {
 class ApplyLongComposition4 : public PabloKernel {
 public:
     ApplyLongComposition4
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition4::ApplyLongComposition4
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition4_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition4::generatePabloMethod() {
@@ -15117,11 +15137,16 @@ void ApplyLongComposition4::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = 1;
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -15130,7 +15155,7 @@ void ApplyLongComposition4::generatePabloMethod() {
 
     auto b_e1 = pb.createScope();
     PabloAST * pfx_e1_test = bnc.EQ(Basis, 0xe1);
-    pb.createIf(pb.createAnd(pfx_e1_test, markFound), b_e1);
+    pb.createIf(pb.createAnd(pfx_e1_test, markFoundForStarter), b_e1);
     std::vector<PabloAST *> xfrm_e1(8, All0);
     BixNumCompiler b_e1_bnc(b_e1);
     {
@@ -15160,7 +15185,7 @@ void ApplyLongComposition4::generatePabloMethod() {
     _usets[6] = E1_1fb6_c6_f6_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_345 = b_e1_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_345 = b_e1_bnc.EQ(markCodeAtStarter, 1);
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1f60___70, foundMark_345), 1));
     xfrm_e1[1] = b_e1.createOr(xfrm_e1[1], b_e1.createAdvance(b_e1.createAnd(E1_1f00___f_20___f_60___70_4_c, foundMark_345), 1));
     xfrm_e1[0] = b_e1.createOr(xfrm_e1[0], b_e1.createAdvance(b_e1.createAnd(E1_1fb6_c6_f6, foundMark_345), 2));
@@ -15177,7 +15202,7 @@ void ApplyLongComposition4::generatePabloMethod() {
 
     auto b_cc_cf = pb.createScope();
     PabloAST * pfx_cc_cf_test = pb.createAnd(bnc.UGE(Basis, 0xcc), bnc.ULE(Basis, 0xcf));
-    pb.createIf(pb.createAnd(pfx_cc_cf_test, markFound), b_cc_cf);
+    pb.createIf(pb.createAnd(pfx_cc_cf_test, markFoundForStarter), b_cc_cf);
     std::vector<PabloAST *> xfrm_cc_cf(8, All0);
     BixNumCompiler b_cc_cf_bnc(b_cc_cf);
     {
@@ -15222,7 +15247,7 @@ void ApplyLongComposition4::generatePabloMethod() {
     _usets[11] = CE_3b1_7_c9_uset;
 
     _compiler.compile(_vars, _usets);
-    PabloAST * foundMark_345 = b_cc_cf_bnc.EQ(markCode, 1);
+    PabloAST * foundMark_345 = b_cc_cf_bnc.EQ(markCodeAtStarter, 1);
     xfrm_cc_cf[0] = b_cc_cf.createOr(xfrm_cc_cf[0], b_cc_cf.createAnd(CE_391_7_a9_c_e_b1_7, foundMark_345));
     xfrm_cc_cf[1] = b_cc_cf.createOr(xfrm_cc_cf[1], b_cc_cf.createAnd(CE_391_7_a9_c_e_b1_7_c9_e, foundMark_345));
     xfrm_cc_cf[2] = b_cc_cf.createOr(xfrm_cc_cf[2], b_cc_cf.createAnd(CE_391_7_a9_c_e_b1_7_c9_e, foundMark_345));
@@ -15247,11 +15272,15 @@ void ApplyLongComposition4::generatePabloMethod() {
     }
     }
 
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 //
@@ -15265,6 +15294,7 @@ MarkDeletion
      StreamSet * MarkCodes2,
      StreamSet * MarkCodes3,
      StreamSet * MarkCodes4,
+     StreamSet * MarkCodes3A,
     StreamSet * DeletionMask);
 protected:
     void generatePabloMethod() override;
@@ -15278,6 +15308,7 @@ MarkDeletion::MarkDeletion
      StreamSet * MarkCodes2,
      StreamSet * MarkCodes3,
      StreamSet * MarkCodes4,
+     StreamSet * MarkCodes3A,
     StreamSet * DeletionMask)
 : PabloKernel(ts, "MarkDeletion",
 {Binding{"Basis", Basis},
@@ -15285,7 +15316,8 @@ MarkDeletion::MarkDeletion
  Binding{"MarkCodes1", MarkCodes1},
  Binding{"MarkCodes2", MarkCodes2},
  Binding{"MarkCodes3", MarkCodes3},
- Binding{"MarkCodes4", MarkCodes4}},
+ Binding{"MarkCodes4", MarkCodes4},
+ Binding{"MarkCodes3A", MarkCodes3A}},
 {Binding{"DeletionMask", DeletionMask}}) {}
 
 void MarkDeletion::generatePabloMethod() {
@@ -15312,6 +15344,10 @@ void MarkDeletion::generatePabloMethod() {
     std::vector<PabloAST *> MarkCodes4 = getInputStreamSet("MarkCodes4");
     for (unsigned i = 0; i < MarkCodes4.size(); i++) {
         anyMark = pb.createOr(anyMark, MarkCodes4[i]);
+    }
+    std::vector<PabloAST *> MarkCodes3A = getInputStreamSet("MarkCodes3A");
+    for (unsigned i = 0; i < MarkCodes3A.size(); i++) {
+        anyMark = pb.createOr(anyMark, MarkCodes3A[i]);
     }
 
     PabloAST * pfxmark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xC2));
@@ -15343,7 +15379,7 @@ void LongComposablePipeline(PipelineBuilder & P,
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound0, MarkCode0, MarkCodeAtStarter0);
     SHOW_BIXNUM(MarkCodeAtStarter0);
 
-    P.CreateKernelCall<ApplyLongComposition0>(Basis, MarkCodeAtStarter0, XfrmedBasis0);
+    P.CreateKernelCall<ApplyLongComposition0>(Basis, MarkCodeAtStarter0,  MarkCode0, XfrmedBasis0);
     SHOW_BIXNUM(XfrmedBasis0);
     StreamSet * XfrmedBasis1 = P.CreateStreamSet(8, 1);
 //  Pass 1 to identify long composable sequences and transform to precomposed characters.
@@ -15357,7 +15393,7 @@ void LongComposablePipeline(PipelineBuilder & P,
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound1, MarkCode1, MarkCodeAtStarter1);
     SHOW_BIXNUM(MarkCodeAtStarter1);
 
-    P.CreateKernelCall<ApplyLongComposition1>(XfrmedBasis0, MarkCodeAtStarter1, XfrmedBasis1);
+    P.CreateKernelCall<ApplyLongComposition1>(XfrmedBasis0, MarkCodeAtStarter1,  MarkCode1, XfrmedBasis1);
     SHOW_BIXNUM(XfrmedBasis1);
     StreamSet * XfrmedBasis2 = P.CreateStreamSet(8, 1);
 //  Pass 2 to identify long composable sequences and transform to precomposed characters.
@@ -15371,7 +15407,7 @@ void LongComposablePipeline(PipelineBuilder & P,
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound2, MarkCode2, MarkCodeAtStarter2);
     SHOW_BIXNUM(MarkCodeAtStarter2);
 
-    P.CreateKernelCall<ApplyLongComposition2>(XfrmedBasis1, MarkCodeAtStarter2, XfrmedBasis2);
+    P.CreateKernelCall<ApplyLongComposition2>(XfrmedBasis1, MarkCodeAtStarter2,  MarkCode2, XfrmedBasis2);
     SHOW_BIXNUM(XfrmedBasis2);
     StreamSet * XfrmedBasis3 = P.CreateStreamSet(8, 1);
 //  Pass 3 to identify long composable sequences and transform to precomposed characters.
@@ -15385,12 +15421,26 @@ void LongComposablePipeline(PipelineBuilder & P,
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound3, MarkCode3, MarkCodeAtStarter3);
     SHOW_BIXNUM(MarkCodeAtStarter3);
 
-    P.CreateKernelCall<ApplyLongComposition3>(XfrmedBasis2, MarkCodeAtStarter3, XfrmedBasis3);
+    P.CreateKernelCall<ApplyLongComposition3>(XfrmedBasis2, MarkCodeAtStarter3,  MarkCode3, XfrmedBasis3);
     SHOW_BIXNUM(XfrmedBasis3);
+    StreamSet * XfrmedBasis3A = P.CreateStreamSet(8, 1);
+//  Pass 3 to identify long composable sequences and transform to precomposed characters.
+    StreamSet * MarkCode3A = P.CreateStreamSet(4);
+    StreamSet * Index_ccc_NR_or_MarksFound3A = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<FindComposables3>(XfrmedBasis3, ccc_NR, MarkCode3A, Index_ccc_NR_or_MarksFound3A);
+    SHOW_BIXNUM(MarkCode3A);
+    SHOW_STREAM(Index_ccc_NR_or_MarksFound3A);
+
+    StreamSet * MarkCodeAtStarter3A = P.CreateStreamSet(4, 1);
+    P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound3A, MarkCode3A, MarkCodeAtStarter3A);
+    SHOW_BIXNUM(MarkCodeAtStarter3A);
+
+    P.CreateKernelCall<ApplyLongComposition3>(XfrmedBasis3, MarkCodeAtStarter3A,  MarkCode3A, XfrmedBasis3A);
+    SHOW_BIXNUM(XfrmedBasis3A);
 //  Pass 4 to identify long composable sequences and transform to precomposed characters.
     StreamSet * MarkCode4 = P.CreateStreamSet(1);
     StreamSet * Index_ccc_NR_or_MarksFound4 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<FindComposables4>(XfrmedBasis3, ccc_NR, MarkCode4, Index_ccc_NR_or_MarksFound4);
+    P.CreateKernelCall<FindComposables4>(XfrmedBasis3A, ccc_NR, MarkCode4, Index_ccc_NR_or_MarksFound4);
     SHOW_BIXNUM(MarkCode4);
     SHOW_STREAM(Index_ccc_NR_or_MarksFound4);
 
@@ -15398,10 +15448,10 @@ void LongComposablePipeline(PipelineBuilder & P,
     P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound4, MarkCode4, MarkCodeAtStarter4);
     SHOW_BIXNUM(MarkCodeAtStarter4);
 
-    P.CreateKernelCall<ApplyLongComposition4>(XfrmedBasis3, MarkCodeAtStarter4, FinalBasis);
+    P.CreateKernelCall<ApplyLongComposition4>(XfrmedBasis3A, MarkCodeAtStarter4,  MarkCode4, FinalBasis);
     SHOW_BIXNUM(FinalBasis);
 
-    P.CreateKernelCall<MarkDeletion>(FinalBasis, MarkCode0, MarkCode1, MarkCode2, MarkCode3, MarkCode4, DeletionMask);
+    P.CreateKernelCall<MarkDeletion>(FinalBasis, MarkCode0, MarkCode1, MarkCode2, MarkCode3, MarkCode4, MarkCode3A, DeletionMask);
 }
 //  The NFC_CandidateClass kernel produces the class of characters 
 //  that are relevant to NFC processing by virtue of being reorderable marks or
