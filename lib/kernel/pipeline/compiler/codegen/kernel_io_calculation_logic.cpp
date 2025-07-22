@@ -107,6 +107,8 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         const BufferPort & port = mBufferGraph[output];
         if (port.canModifySegmentLength()) {
             Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
+            if (strides)
+            b.CallPrintInt("strides" + std::to_string(target(output, mBufferGraph)), strides);
             numOfLinearStrides = b.CreateUMin(numOfLinearStrides, strides);
         }
     }
@@ -586,11 +588,10 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     continue;
                 }
                 const Binding & binding = port.Binding;
-                if (isCountable(binding)) {
-                    continue;
+                if (!isCountable(binding)) {
+                    anyNonCountable = true;
+                    break;
                 }
-                anyNonCountable = true;
-                break;
             }
         }
 
@@ -636,10 +637,9 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     isFirstCheck = false;
                 }
 
-                Value * const closed = isClosed(b, streamSet);
+                Value * closed = isClosed(b, streamSet);
                 Value * hasEnough = closed;
-
-                if (anyNonCountable || port.isCrossThreaded()) {
+                if (anyNonCountable || port.isCrossThreaded() || bn.isNonThreadLocal()) {
 
                     if (LLVM_UNLIKELY(port.isZeroExtended())) {
                         avail = b.CreateSelect(closed, MAX_INT, avail);
@@ -652,7 +652,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
                     if (LLVM_UNLIKELY(CheckAssertions)) {
                         const Binding & inputBinding = port.Binding;
-                        Value * valid = b.CreateICmpULE(processed, avail);
+                        Value * valid = b.CreateOr(b.CreateICmpULE(processed, avail), closed);
                         b.CreateAssert(valid,
                                         "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
                                         mCurrentKernelName,
@@ -664,8 +664,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     Value * const remaining = b.CreateSub(avail, processed, "remaining");
                     Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
                     Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
-
-                    hasEnough = b.CreateOr(closed, b.CreateICmpUGE(remaining, required));
+                    hasEnough = b.CreateOr(hasEnough, b.CreateICmpUGE(remaining, required));
                 }
 
                 if (enoughInput) {
@@ -763,7 +762,7 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
 
     if (LLVM_UNLIKELY(CheckAssertions)) {
         const Binding & inputBinding = port.Binding;
-        Value * valid = b.CreateICmpULE(processed, available);
+        Value * valid = b.CreateOr(b.CreateICmpULE(processed, available), isClosed(b, streamSet));
         Value * const zeroExtended = mIsInputZeroExtended[inputPort];
         if (zeroExtended) {
             valid = b.CreateOr(valid, zeroExtended);
@@ -1129,7 +1128,11 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             } else  {
                 selected = b.CreateSaturatingSub(accessible, b.getSize(k));
             }
-            accessible = b.CreateSelect(isClosed(b, port.Port, true), selected, accessible, "accessible");
+            Value * closed = mHasExhaustedClosedInput;
+            if (closed == nullptr) {
+                closed = isClosed(b, port.Port, true);
+            }
+            accessible = b.CreateSelect(closed, selected, accessible, "accessible");
         }
         if (LLVM_UNLIKELY(port.isPrincipal())) {
             const Binding & input = port.Binding;
@@ -1370,7 +1373,9 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     assert (ref.Type == PortType::Input);
     assert (previouslyTransferred);
 
-    const StreamSetBuffer * const buffer = getInputBuffer(mKernelId, ref);
+    const auto srcStreamSet = getInputBufferVertex(mKernelId, ref);
+    const auto & srcBufferNode = mBufferGraph[srcStreamSet];
+    const StreamSetBuffer * const buffer = srcBufferNode.Buffer;
 
     ConstantInt * const sz_ZERO = b.getSize(0);
     Value * position = mCurrentProcessedItemCountPhi[ref];
@@ -1433,6 +1438,10 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
     Value * current = b.CreateAlignedLoad(b.getSizeTy(), currentPtr, SizeTyABIAlignment);
+//    const auto producer = parent(srcStreamSet, mBufferGraph);
+//    if (LLVM_UNLIKELY(HasTerminationSignal.test(producer))) {
+//        current = b.CreateUMax(current, mLocallyAvailableItems[srcStreamSet]);
+//    }
 
     #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
     debugPrint(b, "%s.%s:  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",

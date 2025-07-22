@@ -239,6 +239,8 @@ PEXTFieldCompressKernel::PEXTFieldCompressKernel(LLVMTypeSystemInterface & ts, c
     if ((fieldWidth != 32) && (fieldWidth != 64)) llvm::report_fatal_error("Unsupported PEXT width for PEXTFieldCompressKernel");
 }
 
+constexpr unsigned StreamCompressStrideSize = 1;
+
 StreamCompressKernel::StreamCompressKernel(LLVMTypeSystemInterface & ts
                                            , StreamSet * extractionMask
                                            , StreamSet * source
@@ -254,7 +256,7 @@ StreamCompressKernel::StreamCompressKernel(LLVMTypeSystemInterface & ts
     for (unsigned i = 0; i < mStreamCount; i++) {
         addInternalScalar(ts.getBitBlockType(), "pendingOutputBlock_" + std::to_string(i));
     }
-    setStride(4 * ts.getBitBlockWidth());
+    setStride(StreamCompressStrideSize * ts.getBitBlockWidth());
 }
 
 void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {

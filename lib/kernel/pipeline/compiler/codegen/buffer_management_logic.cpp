@@ -220,19 +220,20 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                     if (LLVM_UNLIKELY(bn.Overflow)) {
                         maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
                     }
-                    const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
+                    const auto & R = bn.RelativeIORate;
                     assert (R.numerator() > 0);
                     Value * multiplier = b.CreateCeilUMulRational(maxStrides, R);
 
-                 //   b.CallPrintInt("xmultiplier" + std::to_string(streamSet) + ":" + std::to_string(R.numerator()) + "/" + std::to_string(R.denominator()), multiplier);
+
 
                     if (LLVM_UNLIKELY(bn.isReturned())) {
                         auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
-                        if (scaleFactor.numerator() > 0) {
-                            assert (expectedSourceOutputSize);
-                            Value * expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
-                            multiplier = b.CreateUMax(multiplier, expectedBufferSize);
+                        if (scaleFactor.numerator() == 0) {
+                            scaleFactor = R;
                         }
+                        assert (expectedSourceOutputSize);
+                        Value * expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
+                        multiplier = b.CreateUMax(multiplier, expectedBufferSize);
                     }
 
                     buffer->allocateBuffer(b, multiplier);

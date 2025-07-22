@@ -71,8 +71,6 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
     SmallVector<Z3_ast, 2> fakeIOVars;
 
-//    SmallVector<Z3_ast, 4> ioVars;
-
     const auto z3_ZERO = constant_real(0);
 
     const auto z3_ONE = constant_real(1);
@@ -150,9 +148,8 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
                     Z3_ast expOutRate = nullptr;
 
-                    if (LLVM_UNLIKELY(oRate.isGreedy() || oRate.isUnknown())) {
-                        assert (producer == PipelineInput || oRate.isUnknown());
-                        // we cannot predict how much data will be passed to this
+                    if (LLVM_UNLIKELY(producer == PipelineInput || oRate.isUnknown())) {
+                        // we cannot predict how much data will be passed to a pipeline
                         expOutRate = Z3_mk_fresh_const(ctx, nullptr, varType);
                     } else {
                         const auto s = producerNode.Kernel->getStride();
@@ -258,6 +255,9 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
     for (size_t partId = 0; partId < numOfPartitions; ++partId) {
         PartitionData & N = P[partId];
+
+#if 0
+
         Z3_ast const stridesPerSegmentVar = VarList[N.Kernels[0]];
         Z3_ast value;
         if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, stridesPerSegmentVar, Z3_L_TRUE, &value) != Z3_L_TRUE)) {
@@ -274,10 +274,13 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         assert (N.Repetitions[0] > 0);
 
         N.ExpectedStridesPerSegment = Rational{pipelineInputDenom * num, pipelineInputNum * denom} / N.Repetitions[0];
+
         const auto m = N.ExpectedStridesPerSegment.denominator();
         if (m > 1) {
             lcmOfDenom = boost::lcm(lcmOfDenom, m);
         }
+#endif
+        N.ExpectedStridesPerSegment = Rational{1};
 
         N.StridesPerSegmentCoV = Rational{T[partId] ? 1U : 0U, 3U};
         N.LinkedGroupId = partId;
@@ -317,7 +320,7 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
                     assert (denom > 0);
 
-                    StreamSetIORateMap.emplace(streamSet, Rational{pipelineInputDenom * num, pipelineInputNum * denom});
+                    // StreamSetIORateMap.emplace(streamSet, Rational{pipelineInputDenom * num, pipelineInputNum * denom});
                 }
             }
         }

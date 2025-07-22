@@ -88,12 +88,12 @@ void PipelineAnalysis::addFlowControlAnnotations() {
     FirstComputePartitionId = firstPartitionId;
     LastComputePartitionId = lastPartitionId;
 
-    for (size_t partitionId = firstPartitionId; partitionId <= lastPartitionId; ++partitionId) {
-        const auto kernelId = FirstKernelInPartition[partitionId];
-        if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId] || IsNestedPipeline) {
-            mBufferGraph[kernelId].Type |= PermitSegmentSizeSlidingWindowing;
-        }
-    }
+//    for (size_t partitionId = firstPartitionId; partitionId <= lastPartitionId; ++partitionId) {
+//        const auto kernelId = FirstKernelInPartition[partitionId];
+//        if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId] || IsNestedPipeline) {
+//            mBufferGraph[kernelId].Type |= PermitSegmentSizeSlidingWindowing;
+//        }
+//    }
 
 }
 

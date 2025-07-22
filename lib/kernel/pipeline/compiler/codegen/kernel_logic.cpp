@@ -65,7 +65,7 @@ void PipelineCompiler::computeFullyProcessedItemCounts(KernelBuilder & b, Value 
         if (LLVM_UNLIKELY(CheckAssertions)) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.Locality == BufferLocality::ThreadLocal) {
+            if (bn.isThreadLocal()) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
                 Value * const fullyConsumed = b.CreateICmpEQ(produced, processed);
                 Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);

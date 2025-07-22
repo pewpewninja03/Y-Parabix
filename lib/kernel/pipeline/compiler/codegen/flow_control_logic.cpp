@@ -17,7 +17,7 @@ namespace kernel {
 void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId) {
     assert (FirstKernel <= kernelId && kernelId <= LastKernel);
     assert ("not root?" && (FirstKernelInPartition[KernelPartitionId[kernelId]] == kernelId));
-    if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId] || mIsNestedPipeline) {
+    if (mBufferGraph[kernelId].controlsSlidingWindow()) {
         assert (FirstComputePartitionId <= KernelPartitionId[kernelId] && KernelPartitionId[kernelId] <= LastComputePartitionId);
         mTarget->addInternalScalar(b.getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
     }
@@ -28,23 +28,29 @@ void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuild
  ** ------------------------------------------------------------------------------------------------------------- */
 Rational PipelineCompiler::calculateBufferScalingFactor(const unsigned kernelId) const {
     assert (kernelId == FirstKernelInPartition[KernelPartitionId[kernelId]]);
+    Rational scale{0};
     if (in_degree(kernelId, mBufferGraph) == 0) {
-//        auto largestSourceKernel = MaximumNumOfStrides[PipelineInput];
-//        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-//            if (in_degree(kernel, mBufferGraph) == 0) {
-//                largestSourceKernel = std::max(largestSourceKernel, MaximumNumOfStrides[kernel]);
-//            }
-//        }
-//        return Rational{largestSourceKernel, MaximumNumOfStrides[mKernelId]};
-        return Rational{1};
+        assert (out_degree(kernelId, mBufferGraph) > 0);
+        for (auto input : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = target(input, mBufferGraph);
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const auto & bn = mBufferGraph[streamSet];
+            scale = std::max(scale, bn.RelativeIORate);
+        }
+        scale *= Rational{mTarget->getStride(), getKernel(kernelId)->getStride()};
+        assert (scale.numerator() > 0);
     } else {
-        Rational scale{0};
+        assert (in_degree(kernelId, mBufferGraph) > 0);
         for (auto input : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const auto streamSet = source(input, mBufferGraph);
-            scale = std::max(scale, StreamSetIORate[streamSet - FirstStreamSet]);
-        }
-        return scale;
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const auto & bn = mBufferGraph[streamSet];
+            scale = std::max(scale, bn.RelativeIORate);
+        } 
+        assert (scale.numerator() > 0);
     }
+
+    return scale;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -59,12 +65,10 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilde
 
     for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
         const auto f = FirstKernelInPartition[i];
-        if (MinimumNumOfStrides[f] != MaximumNumOfStrides[f] || mIsNestedPipeline) {
-
+        if (mBufferGraph[f].controlsSlidingWindow()) {
             const auto factor = calculateBufferScalingFactor(f);
             Value * init = b.CreateMulRational(segmentLengthScalingFactor, factor);
             init = b.CreateRoundUpRational(init, StrideStepLength[f]);
-
             b.setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
         } else {
             assert (!b.hasScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f)));
@@ -104,25 +108,18 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         // rate input into this partition. However if this a nested pipeline, we cannot assume
         // that the outer pipeline will feed data to this at a fixed rate.
 
-        const auto hasSlidingWindow = mBufferGraph[mKernelId].permitSlidingWindow();
-
-        if (hasSlidingWindow) {
+        const auto & bn = mBufferGraph[mKernelId];
+        if (bn.controlsSlidingWindow()) {
             assert (!mIsIOProcessThread);
             mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
+        } else if (bn.permitSlidingWindow()) {
+            mMaximumNumOfStrides = nullptr;
         } else {
-
             const auto factor = calculateBufferScalingFactor(mKernelId);
-
-//            Rational factor {mTarget->getStride() * MaximumNumOfStrides[mKernelId], mKernel->getStride() * largestSourceKernel};
-//#warning scale the initial multiplier by the max step size to eliminate the roundup?
-
             mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
             mMaximumNumOfStrides = b.CreateRoundUpRational(mMaximumNumOfStrides, StrideStepLength[mKernelId]);
         }
-
         allocateThreadLocalMemoryForMaximumNumOfStrides(b);
-
-
     } else {
         assert (!mIsIOProcessThread);
         const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
@@ -130,8 +127,6 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         assert (factor.numerator() > 0);
         mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
     }
-
-  //  b.CallPrintInt("mMaximumNumOfStrides" , mMaximumNumOfStrides);
 }
 
 
@@ -141,7 +136,8 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
 void PipelineCompiler::updateNextSlidingWindowSize(KernelBuilder & b, Value * const maxNumOfStrides, Value * const potentialNumOfStrides) {
     assert (!mIsIOProcessThread);
     assert (mIsPartitionRoot);
-    if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
+    const auto & bn = mBufferGraph[mKernelId];
+    if (bn.controlsSlidingWindow()) {
         ConstantInt * const TWO = b.getSize(2);
         Value * const A = b.CreateMul(maxNumOfStrides, TWO);
         Value * const B = b.CreateAdd(maxNumOfStrides, potentialNumOfStrides);

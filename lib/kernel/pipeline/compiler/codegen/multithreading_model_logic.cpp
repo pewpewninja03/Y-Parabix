@@ -976,11 +976,10 @@ void PipelineCompiler::start(KernelBuilder & b) {
     }
 
     assert (mExpectedNumOfStridesMultiplier == nullptr);
-    mExpectedNumOfStridesMultiplier = b.CreateUMax(getNumOfStrides(), b.getSize(1));
+    Value * const ns = b.CreateUMax(getNumOfStrides(), b.getSize(1));
 
-//    if (LLVM_UNLIKELY(CheckAssertions)) {
-//        b.CreateAssert(getNumOfStrides(), "pipeline num of strides cannot be 0");
-//    }
+    mExpectedNumOfStridesMultiplier = ns; // b.CreateCeilUMulRational(ns, mTarget->getStride());
+   // b.CallPrintInt("mExpectedNumOfStridesMultiplier", mExpectedNumOfStridesMultiplier);
 
     initializeFlowControl(b);
     readExternalConsumerItemCounts(b);

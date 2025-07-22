@@ -292,6 +292,7 @@ enum BufferLocality {
 
 enum KernelFlags {
     PermitSegmentSizeSlidingWindowing = 1
+    , ControlsSegmentSizeSlidingWindowing = 2
 };
 
 struct BufferNode {
@@ -306,23 +307,21 @@ struct BufferNode {
 
     unsigned Overflow = 0;
 
-//    unsigned BufferStart = 0;
-//    unsigned BufferEnd = 0;
-//    std::vector<size_t> PreceedingThreadLocalStrideSize;
-//    unsigned StrideSize = 0;
-
     bool RequiresUnderflow = false;
-
-    size_t MaxQuantityPerSegment = 0;
 
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
     unsigned LockId = 0;
 
+    Rational RelativeIORate{0};
 
     bool permitSlidingWindow() const {
         return (Type & KernelFlags::PermitSegmentSizeSlidingWindowing) != 0;
+    }
+
+    bool controlsSlidingWindow() const {
+        return (Type & KernelFlags::ControlsSegmentSizeSlidingWindowing) != 0;
     }
 
     bool isOwned() const {
@@ -498,11 +497,6 @@ struct BufferPort {
 
 using BufferGraph = adjacency_list<vecS, vecS, bidirectionalS, BufferNode, BufferPort>;
 
-struct ConsumerNode {
-//    mutable Value * Consumed = nullptr;
-//    mutable PHINode * PhiNode = nullptr;
-};
-
 struct ConsumerEdge {
 
     enum ConsumerTypeFlags : unsigned {
@@ -522,7 +516,7 @@ struct ConsumerEdge {
     : Port(port.Number), Index(index), Flags(flags) { }
 };
 
-using ConsumerGraph = adjacency_list<vecS, vecS, bidirectionalS, ConsumerNode, ConsumerEdge>;
+using ConsumerGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, ConsumerEdge>;
 
 using PartialSumStepFactorGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 

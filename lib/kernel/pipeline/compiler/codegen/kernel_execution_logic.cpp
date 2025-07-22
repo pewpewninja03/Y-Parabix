@@ -703,7 +703,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
                 mProducedDeferredItemCount[outputPort] = b.CreateAlignedLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort], SizeTyABIAlignment);
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, outputPort);
-                debugPrint(b, prefix + "_produced_deferred' = %" PRIu64, mProcessedDeferredItemCount[outputPort]);
+                debugPrint(b, prefix + "_produced_deferred' = %" PRIu64, mProducedDeferredItemCount[outputPort]);
                 #endif
                 if (LLVM_UNLIKELY(CheckAssertions)) {
                     Value * const deferred = mProducedDeferredItemCount[outputPort];

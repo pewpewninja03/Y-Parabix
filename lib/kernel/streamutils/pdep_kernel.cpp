@@ -63,7 +63,7 @@ void MergeByMask(PipelineBuilder & P,
 }
 
 
-const unsigned StreamExpandStrideSize = 4;
+constexpr unsigned StreamExpandStrideSize = 1;
 
 StreamExpandKernel::StreamExpandKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,

@@ -661,7 +661,6 @@ protected:
     const std::vector<unsigned>                 StrideStepLength;
     const std::vector<unsigned>                 MinimumNumOfStrides;
     const std::vector<unsigned>                 MaximumNumOfStrides;
-    const std::vector<Rational>                 ThreadLocalExpansionThresholdFactor;
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
@@ -676,7 +675,6 @@ protected:
     const IllustratedStreamSetMap               mIllustratedStreamSetBindings;
     const ZeroInputGraph                        mZeroInputGraph;
     const InOutGraph                            InOutStreamSetReplacement;
-    const std::vector<Rational>                 StreamSetIORate;
     const ThreadLocalPlacementGraph             ThreadLocalPlacement;
     const ThreadLocalConflictGraphType          ThreadLocalConflictGraph;
 
@@ -978,7 +976,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , StrideStepLength(std::move(P.StrideRepetitionVector))
 , MinimumNumOfStrides(std::move(P.MinimumNumOfStrides))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
-, ThreadLocalExpansionThresholdFactor(std::move(P.ThreadLocalExpansionThresholdFactor))
 , mStreamGraph(std::move(P.mStreamGraph))
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))
@@ -993,7 +990,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
 , mZeroInputGraph(std::move(P.mZeroInputGraph))
 , InOutStreamSetReplacement(std::move(P.InOutStreamSetReplacement))
-, StreamSetIORate(std::move(P.StreamSetIORate))
 , ThreadLocalPlacement(std::move(P.ThreadLocalPlacement))
 
 , ThreadLocalConflictGraph(std::move(P.ThreadLocalConflictGraph))

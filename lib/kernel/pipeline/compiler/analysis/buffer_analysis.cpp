@@ -42,7 +42,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
 
 
-    Rational lowestSourceStreamSetIORate{std::numeric_limits<unsigned>::max()};
+//    Rational lowestSourceStreamSetIORate{std::numeric_limits<unsigned>::max()};
 
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
@@ -450,10 +450,10 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                 const auto streamSet = target(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
-                if (numOfInputs == 0) {
-                    const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
-                    lowestSourceStreamSetIORate = std::min(lowestSourceStreamSetIORate, R);
-                }
+//                if (numOfInputs == 0) {
+//                    const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
+//                    lowestSourceStreamSetIORate = std::min(lowestSourceStreamSetIORate, R);
+//                }
             }
         }
 
@@ -469,11 +469,11 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
         }
     }
 
-    if (LLVM_LIKELY(FirstKernel != PipelineInput)) {
-        for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
-            StreamSetIORate[i - FirstStreamSet] /= lowestSourceStreamSetIORate;
-        }
-    }
+//    if (LLVM_LIKELY(FirstKernel != PipelineInput)) {
+//        for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
+//            StreamSetIORate[i - FirstStreamSet] /= lowestSourceStreamSetIORate;
+//        }
+//    }
 
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         if (LLVM_UNLIKELY(mBufferGraph[output].isManaged())) {
@@ -744,9 +744,6 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
         return;
     }
 
-    assert (MinimumNumOfStrides[PipelineInput] == MaximumNumOfStrides[PipelineInput]);
-    assert (MinimumNumOfStrides[PipelineInput] > 0);
-
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & currentNode = mBufferGraph[streamSet];
@@ -770,38 +767,15 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
                 goto unhandled_streamset;
             }
 
-            if (LLVM_LIKELY(!bn.isConstant())) {
-
-                const auto producerOutput = in_edge(id, mBufferGraph);
-                const BufferPort & producerRate = mBufferGraph[producerOutput];
-                maxLookBehind = producerRate.LookBehind;
-                const auto producer = source(producerOutput, mBufferGraph);
-                const auto bMin = producerRate.Minimum * MinimumNumOfStrides[producer];
-                assert (bMin.denominator() == 1);
-                const auto bMax = producerRate.Maximum * MaximumNumOfStrides[producer];
-                assert (bMax.denominator() == 1);
-                assert (bMax >= bMin);
-                const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
-                maxOverflow = std::max(maxOverflow, extra);
-
-                minVal = std::min(minVal, bMin);
-                maxVal = std::max(maxVal, bMax);
-            }
+            const auto producerOutput = in_edge(id, mBufferGraph);
+            const BufferPort & producerRate = mBufferGraph[producerOutput];
+            maxLookBehind = producerRate.LookBehind;
+            const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
+            maxOverflow = std::max(maxOverflow, extra);
 
             for (const auto e : make_iterator_range(out_edges(id, mBufferGraph))) {
 
                 const BufferPort & consumerRate = mBufferGraph[e];
-
-                const auto consumer = target(e, mBufferGraph);
-
-                const auto cMin = consumerRate.Minimum * MinimumNumOfStrides[consumer];
-                assert (cMin.denominator() == 1);
-                const auto cMax = consumerRate.Maximum * MaximumNumOfStrides[consumer];
-                assert (cMax.denominator() == 1);
-                assert (cMax >= cMin);
-
-                minVal = std::min(minVal, cMin);
-                maxVal = std::max(maxVal, cMax);
 
                 maxLookBehind = std::max(maxLookBehind, consumerRate.LookBehind);
                 const auto extra = std::max(consumerRate.LookAhead, consumerRate.Add);
@@ -817,16 +791,10 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
 
         BEGIN_SCOPED_REGION
 
-        auto amount = (maxVal * Rational{2}) - minVal;
-        assert (amount.denominator() == 1);
-        assert (amount.numerator() > 0);
-
         if (maxLookBehind) {
             currentNode.RequiresUnderflow = !currentNode.IsLinear;
         }
 
-        currentNode.MaxQuantityPerSegment = std::max<unsigned>(amount.numerator(), maxOverflow + maxLookBehind);
-        assert (currentNode.MaxQuantityPerSegment > 0);
         currentNode.Overflow = std::max(currentNode.Overflow, maxOverflow);
 
         END_SCOPED_REGION

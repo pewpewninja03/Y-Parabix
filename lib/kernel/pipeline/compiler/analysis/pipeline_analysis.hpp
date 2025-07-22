@@ -34,36 +34,27 @@ public:
 
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
-        auto initialGraph = P.initialPartitioningPass();
+        auto initialGraph = P.generatePartitionGraph();
 
         P.computeIntraPartitionRepetitionVectors(initialGraph);
 
         switch (codegen::PipelineCompilationMode) {
             case codegen::PipelineCompilationModeOptions::DefaultFast:
-                P.simpleEstimateInterPartitionDataflow(initialGraph, rng);
+                P.simpleSchedulePartitionedProgram(initialGraph, rng);
                 break;
             case codegen::PipelineCompilationModeOptions::Expensive:
-                P.estimateInterPartitionDataflow(initialGraph, rng);
-                break;
-        }
-
-        auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
-
-        switch (codegen::PipelineCompilationMode) {
-            case codegen::PipelineCompilationModeOptions::DefaultFast:
-                P.simpleSchedulePartitionedProgram(partitionGraph, rng);
-                break;
-            case codegen::PipelineCompilationModeOptions::Expensive:
-                P.schedulePartitionedProgram(partitionGraph, rng);
+                P.schedulePartitionedProgram(initialGraph, rng);
                 break;
         }
 
         // Construct the Stream and Scalar graphs
-        P.transcribeRelationshipGraph(initialGraph, partitionGraph);
+        P.transcribeRelationshipGraph(initialGraph, initialGraph);
 
         P.generateInitialBufferGraph(b);
 
         P.updateInterPartitionThreadLocalBuffers();
+
+        P.calculateRelativeToInputDataTransferIORates();
 
         P.identifyOutputNodeIds();
 
@@ -160,8 +151,7 @@ private:
 
 
     // partitioning analysis
-    PartitionGraph initialPartitioningPass();
-    PartitionGraph postDataflowAnalysisPartitioningPass(PartitionGraph & initial);
+    PartitionGraph generatePartitionGraph() ;
 
     PartitionGraph identifyKernelPartitions();
 
@@ -234,6 +224,8 @@ private:
     void identifyInterPartitionSymbolicRates();
 
     void calculatePartialSumStepFactors(KernelBuilder & b);
+
+    void calculateRelativeToInputDataTransferIORates();
 
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
@@ -308,8 +300,6 @@ public:
 
     bool                            HasZeroExtendedStream = false;
 
-    Rational                        RequiredThreadLocalStreamSetMemory{0};
-
     unsigned                        MaxNumOfInputPorts = 0;
     unsigned                        MaxNumOfOutputPorts = 0;
 
@@ -321,10 +311,8 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
-    std::vector<Rational>           ThreadLocalExpansionThresholdFactor;
-    flat_map<unsigned, Rational>    StreamSetIORateMap;
-
-    std::vector<Rational>           StreamSetIORate;
+//    flat_map<unsigned, Rational>    StreamSetIORateMap;
+//    std::vector<Rational>           StreamSetIORate;
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;

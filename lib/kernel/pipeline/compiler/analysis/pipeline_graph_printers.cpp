@@ -173,7 +173,7 @@ void PipelineAnalysis::printRelationshipGraph(const RelationshipGraph & G, raw_o
                 out << joiner << "color=gray";
                 break;
             case ReasonType::OrderingConstraint:
-                out << joiner << "color=red";
+                out << joiner << "color=purple";
                 break;
             default:
                 llvm_unreachable("unexpected reason code");
@@ -194,9 +194,13 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
     auto print_rational = [&out](const Rational & r) -> raw_ostream & {
         if (r.denominator() > 1) {
-            const auto n = r.numerator() / r.denominator();
-            const auto p = r.numerator() % r.denominator();
-            out << n << '+' << p << '/' << r.denominator();
+            if (r.numerator() > r.denominator()) {
+                const auto n = r.numerator() / r.denominator();
+                const auto p = r.numerator() % r.denominator();
+                out << n << '+' << p << '/' << r.denominator();
+            } else {
+                out << r.numerator() << '/' << r.denominator();
+            }
         } else {
             out << r.numerator();
         }
@@ -324,8 +328,18 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 //        }
         #endif
 
-        out << "}|{" << bn.MaxQuantityPerSegment;
-
+        out << "}|{IO:";
+        print_rational(bn.RelativeIORate);
+        const auto p = PartitionCount + streamSet - FirstStreamSet;
+        if (in_degree(p, ThreadLocalPlacement) > 0) {
+            out << "|TL:";
+            const auto r = first_in_edge(p, ThreadLocalPlacement);
+            print_rational(ThreadLocalPlacement[r]);
+        }
+        if (out_degree(streamSet, InOutStreamSetReplacement) != 0) {
+            const auto inOutTarget = child(streamSet, InOutStreamSetReplacement);
+            out << "|INOUT:" << inOutTarget;
+        }
         #ifndef USE_SIMPLE_BUFFER_GRAPH
         if (bn.LookBehind) {
             out << "|LB:" << bn.LookBehind;
@@ -333,11 +347,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         if (bn.MaxAdd) {
             out << "|+" << bn.MaxAdd;
         }
-        const auto & IO = StreamSetIORate[streamSet - FirstStreamSet];
-        if (IO.numerator() > 0) {
-            out << "|IO:";
-            print_rational(IO);
-        }
+
         #endif
 
         out << "}}\"];\n";
@@ -423,6 +433,13 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         const auto borders = nonLinear ? '2' : '1';
         out << "v" << kernel << " [label=\"[" <<
                 kernel << "] " << name << "\\n";
+        const BufferNode & kn = mBufferGraph[kernel];
+        if (kn.controlsSlidingWindow()) {
+            out << "<sliding>\\n";
+        } else if (kn.permitSlidingWindow()) {
+            out << "(sliding)\\n";
+        }
+
         if (MinimumNumOfStrides.size() > 0) {
             out << " Expected: [";
             if (MaximumNumOfStrides.size() > 0) {

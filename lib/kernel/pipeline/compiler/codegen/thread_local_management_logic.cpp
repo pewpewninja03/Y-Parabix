@@ -12,14 +12,22 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         return;
     }
 
-    const auto pageSize = getPageSize();
-    assert (is_pow2(pageSize));
-    ConstantInt * const LOG_2_PAGE_SIZE = b.getSize(floor_log2(pageSize));
     ConstantInt * const sz_ZERO = b.getSize(0);
 
     using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
 
+    const auto n = (LastStreamSet - FirstStreamSet) + 1;
+
+    std::vector<Value *> precalculatedOffset(n, nullptr);
+
     std::function<Value *(Vertex)> calculatePlacement = [&](const Vertex v) -> Value * {
+        assert (v >= PartitionCount);
+
+        Value * offset = precalculatedOffset[v - PartitionCount];
+        if (offset) {
+            return offset;
+        }
+
         assert (in_degree(v, ThreadLocalPlacement) > 0);
         ThreadLocalPlacementGraph::in_edge_iterator begin, end;
         std::tie(begin, end) = in_edges(v, ThreadLocalPlacement);
@@ -38,13 +46,18 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         const auto streamSet = FirstStreamSet + v - PartitionCount;
         assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
         const auto producer = parent(streamSet, mBufferGraph);
-        const auto & ioRatio = StreamSetIORate[v - PartitionCount];
-        Value * ex = b.CreateMulRational(segmentSize, ioRatio);
-        ex = b.CreateUMax(ex, b.getSize(MaximumNumOfStrides[producer]));
-        Value * off = b.CreateShl(b.CreateCeilUMulRational(ex, ThreadLocalPlacement[*begin]), LOG_2_PAGE_SIZE);
+        Rational scale{mTarget->getStride() * MaximumNumOfStrides[producer], getKernel(producer)->getStride() * StrideStepLength[producer]};
+        const auto & bn = mBufferGraph[streamSet];
+        assert (bn.isThreadLocal());
+        Value * maxStrides = b.CreateCeilUMulRational(segmentSize, bn.RelativeIORate * scale);
+        if (LLVM_UNLIKELY(bn.Overflow)) {
+            maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.Overflow));
+        }
+        Value * off = b.CreateCeilUMulRational(maxStrides, ThreadLocalPlacement[*begin]);
         if (max) {
             off = b.CreateAdd(off, max);
         }
+        precalculatedOffset[v - PartitionCount] = off;
         return off;
     };
 
@@ -55,9 +68,13 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
     std::tie(ei, end) = in_edges(m, ThreadLocalPlacement);
     Value * memorySize = calculatePlacement(source(*ei, ThreadLocalPlacement));
     while (++ei != end) {
-        memorySize = b.CreateUMax(memorySize, calculatePlacement(source(*ei, ThreadLocalPlacement)));
+        auto ms = calculatePlacement(source(*ei, ThreadLocalPlacement));
+        memorySize = b.CreateUMax(memorySize, ms);
     }
     assert (memorySize);
+    const auto pageSize = getPageSize();
+    assert (is_pow2(pageSize));
+    memorySize = b.CreateShl(memorySize, b.getSize(floor_log2(pageSize)));
 
     assert (mTarget->hasThreadLocal());
     #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
@@ -137,13 +154,13 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 Value * maxStrides = mMaximumNumOfStrides;
                 const auto streamSet = v + FirstStreamSet - PartitionCount;
                 const BufferNode & bn = mBufferGraph[streamSet];
+                assert (bn.isThreadLocal());
                 if (LLVM_UNLIKELY(bn.Overflow)) {
-                    maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
+                    maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.Overflow));
                 }
 
-                const auto & R = ThreadLocalPlacement[e];
-                Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, R), LOG_2_PAGE_SIZE);
-
+                const auto & P = ThreadLocalPlacement[e];
+                Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, P), LOG_2_PAGE_SIZE);
                 Value * start = nullptr;
                 Value * end = nullptr;
                 if (u < PartitionCount) {
@@ -160,7 +177,9 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 mThreadLocalEndOffset[streamSet] = end;
 
                 #ifdef PRINT_DEBUG_MESSAGES
-                debugPrint(b, "mappedAddrRange" + std::to_string(streamSet) + " = [%" PRIx64 ", %" PRIx64 ")", start, end);
+                debugPrint(b, "mappedAddrRange" + std::to_string(streamSet) +
+                           " (" + std::to_string(P.numerator()) + "/" + std::to_string(P.denominator()) +
+                           ") = [%" PRIx64 ", %" PRIx64 ")", start, end);
                 #endif
 
                 if (ThreadLocalPlacement[v]) {

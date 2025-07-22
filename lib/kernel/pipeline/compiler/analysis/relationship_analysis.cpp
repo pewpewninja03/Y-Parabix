@@ -1120,15 +1120,15 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
         assert (rep.denominator() == 1);
         const auto sl = rep.numerator();
         StrideRepetitionVector[newKernelId] = sl;
-        const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
-        Rational ONE{1};
-        const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
-        const auto max = ceiling(ONE + cov3);
-        assert (min <= max);
+//        const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
+//        Rational ONE{1};
+//        const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
+//        const auto max = ceiling(ONE + cov3);
+//        assert (min <= max);
 
 
-        MinimumNumOfStrides[newKernelId] = sl * min;
-        MaximumNumOfStrides[newKernelId] = sl * max;
+//        MinimumNumOfStrides[newKernelId] = sl * min;
+//        MaximumNumOfStrides[newKernelId] = sl * max;
     };
 
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
@@ -1150,11 +1150,11 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
         if (origPartitionId != inputPartitionId) {
             inputPartitionId = origPartitionId;
             const PartitionData & P = partitionGraph[origPartitionId];
-            const auto groupId = P.LinkedGroupId;
-            if (groupId != currentGroupId) {
+//            const auto groupId = P.LinkedGroupId;
+//            if (groupId != currentGroupId) {
                 ++outputPartitionId;
-                currentGroupId = groupId;
-            }
+//                currentGroupId = groupId;
+//            }
         }
         #endif
         KernelPartitionId[out] = outputPartitionId;
@@ -1165,7 +1165,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     subsitution[PipelineOutput] = newPipelineOutput;
 
     BEGIN_SCOPED_REGION
-
     const auto f = PartitionIds.find(PipelineOutput);
     assert (f != PartitionIds.end());
     const auto origPartitionId = f->second;
@@ -1226,13 +1225,13 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     assert (Relationships[kernels[PipelineInput]].Kernel == mPipelineKernel);
     assert (Relationships[kernels[PipelineOutput]].Kernel == mPipelineKernel);
 
-    StreamSetIORate.resize(numOfStreamSets, Rational{0});
+//    StreamSetIORate.resize(numOfStreamSets, Rational{0});
     for (unsigned i = 0; i < numOfStreamSets; ++i) {
         assert (subsitution[streamSets[i]] == -1U);
-        auto f = StreamSetIORateMap.find(streamSets[i]);
-        if (f != StreamSetIORateMap.end()) {
-            StreamSetIORate[i] = f->second;
-        }
+//        auto f = StreamSetIORateMap.find(streamSets[i]);
+//        if (f != StreamSetIORateMap.end()) {
+//            StreamSetIORate[i] = f->second;
+//        }
         subsitution[streamSets[i]] = FirstStreamSet + i;
     }
 
