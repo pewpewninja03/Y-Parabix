@@ -22,6 +22,7 @@
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamsetptr.h>
@@ -443,40 +444,6 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
     writeOutputStreamSet("output_basis", basis);
 }
 
-class ApplyTransform : public pablo::PabloKernel {
-public:
-    ApplyTransform(LLVMTypeSystemInterface & ts,
-                   StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
-protected:
-    void generatePabloMethod() override;
-};
-
-ApplyTransform::ApplyTransform (LLVMTypeSystemInterface & ts,
-                                StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
-: PabloKernel(ts, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
-// inputs
-{Binding{"basis", Basis},
- Binding{"xfrms", Xfrms}
-},
-// output
-{Binding{"output_basis", Output}}) {
-}
-
-void ApplyTransform::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> xfrms = getInputStreamSet("xfrms");
-    std::vector<PabloAST *> transformed(basis.size());
-    for (unsigned i = 0; i < basis.size(); i++) {
-        if (i < xfrms.size()) {
-            transformed[i] = pb.createXor(xfrms[i], basis[i]);
-        } else {
-            transformed[i] = basis[i];
-        }
-    }
-    writeOutputStreamSet("output_basis", transformed);
-}
-
 typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
 
 
@@ -519,7 +486,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     SHOW_BIXNUM(XfrmBasis);
 
     StreamSet * u32basis = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<ApplyTransform>(U21, XfrmBasis, u32basis);
+    XorCombine(P, U21, XfrmBasis, u32basis);
     SHOW_BIXNUM(u32basis);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);

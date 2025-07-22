@@ -125,7 +125,7 @@ UTF8_index::UTF8_index(LLVMTypeSystemInterface & ts, StreamSet * Source, StreamS
 }
 
 U8Spans::U8Spans(LLVMTypeSystemInterface & ts, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
-: PabloKernel(ts, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
+: PabloKernel(ts, "U8Spans_" + marks->shapeString() + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
     mBitMovement(m) {
         if (m == pablo::BitMovementMode::LookAhead) {
             mInputStreamSets.push_back(Binding{"marks", marks, FixedRate(1), LookAhead(3)});
@@ -139,19 +139,25 @@ U8Spans::U8Spans(LLVMTypeSystemInterface & ts, StreamSet * marks, StreamSet * u8
 
 void U8Spans::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * marks = getInputStreamSet("marks")[0];
+    std::vector<PabloAST *> marks = getInputStreamSet("marks");
     PabloAST * u8index = getInputStreamSet("u8index")[0];
-    PabloAST * spans = nullptr;
+    std::vector<PabloAST *> spans(marks.size());
     if (mBitMovement == BitMovementMode::LookAhead) {
-        PabloAST * back1 = pb.createAnd(pb.createLookahead(marks, 1), pb.createNot(u8index));
+        PabloAST * back1InSpan = pb.createNot(u8index);
         PabloAST * ix_or_next = pb.createOr(u8index, pb.createLookahead(u8index, 1));
-        PabloAST * back2 = pb.createAnd(pb.createLookahead(marks, 2), pb.createNot(ix_or_next));
+        PabloAST * back2InSpan = pb.createNot(ix_or_next);
         PabloAST * ix_or_next2 = pb.createOr(ix_or_next, pb.createLookahead(u8index, 2));
-        PabloAST * back3 = pb.createAnd(pb.createLookahead(marks, 3), pb.createNot(ix_or_next2));
-        spans = pb.createOr(marks, pb.createOr3(back1, back2, back3));
+        PabloAST * back3InSpan = pb.createNot(ix_or_next2);
+        for (unsigned i = 0; i < marks.size(); i++) {
+            PabloAST * back1 = pb.createAnd(pb.createLookahead(marks[i], 1), back1InSpan);
+            PabloAST * back2 = pb.createAnd(pb.createLookahead(marks[i], 2), back2InSpan);
+            PabloAST * back3 = pb.createAnd(pb.createLookahead(marks[i], 3), back3InSpan);
+            spans[i] = pb.createOr(marks[i], pb.createOr3(back1, back2, back3));
+        }
     } else {
-        spans = pb.createMatchStar(marks, pb.createNot(u8index));
+        for (unsigned i = 0; i < marks.size(); i++) {
+            spans[i] = pb.createMatchStar(marks[i], pb.createNot(u8index));
+        }
     }
-    Var * spansVar = getOutputStreamVar("spans");
-    pb.createAssign(pb.createExtract(spansVar, 0), spans);
+    writeOutputStreamSet("spans", spans);
 }

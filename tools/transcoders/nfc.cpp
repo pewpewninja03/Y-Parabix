@@ -20,9 +20,12 @@
 #include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
+#include <kernel/streamutils/sorting.h>
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
+#include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
@@ -36,6 +39,7 @@
 #include <unicode/core/unicode_set.h>
 #include <unicode/algo/normalization.h>
 #include <unicode/utf/utf_compiler.h>
+#include <unicode/data/PropertyObjectTable.h>
 #include <re/toolchain/toolchain.h>
 #include <re/unicode/resolve_properties.h>
 #include <kernel/unicode/UCD_property_kernel.h>
@@ -46,77 +50,76 @@ using namespace pablo;
 
 //  These declarations are for command line processing.
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::OptionCategory NFD_Options("Decomposition Options", "Decomposition Options.");
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
-static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFD_Options));
+static cl::OptionCategory NFC_Options("Decomposition Options", "Decomposition Options.");
+static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFC_Options));
+static cl::opt<bool> NoFocus("NoFocus", cl::desc("Process the entire file without filtering to narrow the focus of work"), cl::init(false), cl::cat(NFC_Options));
+//static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFC_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
-
-class ApplyTransform : public pablo::PabloKernel {
+class NFC_Focus : public pablo::PabloKernel {
 public:
-    ApplyTransform(LLVMTypeSystemInterface & ts,
-                   StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
+    NFC_Focus(LLVMTypeSystemInterface & ts,
+              StreamSet * Basis, StreamSet * Composable2nds, StreamSet * Focus);
 protected:
     void generatePabloMethod() override;
 };
 
-ApplyTransform::ApplyTransform (LLVMTypeSystemInterface & ts,
-                                StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
-: PabloKernel(ts, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
+NFC_Focus::NFC_Focus(LLVMTypeSystemInterface & ts, 
+                     StreamSet * Basis, StreamSet * NFC_candidates,
+                     StreamSet * Focus)
+: PabloKernel(ts, "NFC_Focus",
 // inputs
-{Binding{"basis", Basis},
- Binding{"xfrms", Xfrms}
-},
+{Binding{"Basis", Basis},
+ Binding{"NFC_candidates", NFC_candidates, FixedRate(), LookAhead(4)}},
 // output
-{Binding{"output_basis", Output}}) {
+{Binding{"Focus", Focus}}) {
 }
 
-void ApplyTransform::generatePabloMethod() {
+void NFC_Focus::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> xfrms = getInputStreamSet("xfrms");
-    std::vector<PabloAST *> transformed(basis.size());
-    for (unsigned i = 0; i < basis.size(); i++) {
-        if (i < xfrms.size()) {
-            transformed[i] = pb.createXor(xfrms[i], basis[i]);
-        } else {
-            transformed[i] = basis[i];
-        }
-    }
-    writeOutputStreamSet("output_basis", transformed);
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<PabloAST *> NFC_candidates = getInputStreamSet("NFC_candidates");
+    PabloAST * composable_seconds = NFC_candidates[0];
+    PabloAST * excluded_composites = NFC_candidates[1];
+    BixNumCompiler bnc(pb);
+    PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
+    PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
+    PabloAST * pfx = bnc.UGE(Basis, 0xC2);
+    PabloAST * pfx3 = pb.createXor(pfx3or4, pfx4);
+    PabloAST * pfx2 = pb.createXor(pfx, pfx3or4);
+    PabloAST * ASCII = bnc.ULE(Basis, 0x7F);
+    PabloAST * focus = pb.createOr(composable_seconds, pb.createAnd(ASCII, pb.createLookahead(composable_seconds, 1)));
+    focus = pb.createOr(focus, pb.createAnd(pfx2, pb.createLookahead(composable_seconds, 2)));
+    focus = pb.createOr(focus, pb.createAnd(pfx3, pb.createLookahead(composable_seconds, 3)));
+    focus = pb.createOr(focus, pb.createAnd(pfx4, pb.createLookahead(composable_seconds, 4)));
+    focus = pb.createOr(focus, excluded_composites);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("Focus"), pb.getInteger(0)), focus);
 }
 
+using namespace UCD;
 
-class DelPriorToSelectMask : public PabloKernel {
+class ZeroPrior : public PabloKernel {
 public:
-    DelPriorToSelectMask
-        (LLVMTypeSystemInterface & ts,
-         StreamSet * Basis, StreamSet * InputMask, StreamSet * MarkDeletion, StreamSet * DeletePrior,
-         StreamSet * SelectMask);
+    ZeroPrior(LLVMTypeSystemInterface & ts,
+              StreamSet * Basis, StreamSet * DeletePrior, StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
-DelPriorToSelectMask::DelPriorToSelectMask
-    (LLVMTypeSystemInterface & ts,
-     StreamSet * Basis, StreamSet * InputMask, StreamSet * MarkDeletion, StreamSet * DeletePrior,
-     StreamSet * SelectMask)
-: PabloKernel(ts, "DelPriorToSelectMask",
-{Binding{"Basis", Basis}, Binding{"InputMask", InputMask}, Binding{"MarkDeletion", MarkDeletion}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
-{Binding{"SelectMask", SelectMask}}) {}
+ZeroPrior::ZeroPrior(LLVMTypeSystemInterface & ts,
+                     StreamSet * Basis, StreamSet * DeletePrior, StreamSet * OutputBasis)
+: PabloKernel(ts, "ZeroPrior" + Basis->shapeString(),
+{Binding{"Basis", Basis}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
+{Binding{"OutputBasis", OutputBasis, FixedRate(1), InOut("Basis")}}) {}
 
-void DelPriorToSelectMask::generatePabloMethod() {
+void ZeroPrior::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    PabloAST * InputMask = getInputStreamSet("InputMask")[0];
-    PabloAST * MarkDeletion = getInputStreamSet("MarkDeletion")[0];
     PabloAST * DelPrior = getInputStreamSet("DeletePrior")[0];
     BixNumCompiler bnc(pb);
-    PabloAST * nullDeletion = bnc.EQ(Basis, 0);
-    // TODO: keep Nulls in original basis
     PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
     PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
     PabloAST * pfx = bnc.UGE(Basis, 0xC2);
@@ -129,18 +132,131 @@ void DelPriorToSelectMask::generatePabloMethod() {
     PabloAST * del2 = pb.createAnd(secondlast, pb.createLookahead(DelPrior, 2));
     PabloAST * del1 = pb.createLookahead(DelPrior, 1);
     PabloAST * del = pb.createOr(pb.createOr(delpfx4, del3), pb.createOr(del2, del1));
-    del = pb.createOr3(nullDeletion, MarkDeletion, del);
-    std::vector<PabloAST *> select_streamset = {pb.createAnd(InputMask, pb.createInFile(pb.createNot(del)))};
-    writeOutputStreamSet("SelectMask", select_streamset);
+    PabloAST * select = pb.createNot(del);
+    std::vector<PabloAST *> OutputBasis(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        OutputBasis[i] = pb.createAnd(select, Basis[i]);
+    }
+    writeOutputStreamSet("OutputBasis", OutputBasis);
 }
+
 using namespace UCD;
 
+StreamSet * DetermineNFC_WorkSpans(PipelineBuilder & P, StreamSet * U8_Basis, StreamSet * u8index) {
+    StreamSet * NFC_Candidates = P.CreateStreamSet(2, 1);
+    P.CreateKernelCall<NFC_CandidateClass>(U8_Basis, NFC_Candidates);
+    SHOW_BIXNUM(NFC_Candidates);
+
+    StreamSet * NFC_WorkItems = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<NFC_Focus>(U8_Basis, NFC_Candidates, NFC_WorkItems);
+    SHOW_STREAM(NFC_WorkItems);
+
+    StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(NFC_WorkItems, u8index, WorkSelectionMask, BitMovementMode::Advance);
+    SHOW_STREAM(WorkSelectionMask);
+
+    return WorkSelectionMask;
+}
+
+std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * ExpansionMask, StreamSet * U8_Basis) {
+
+    // The SourceNull stream identifies null bytes in the original source
+    // stream, rather than ones generated by insertion or by zeroing out
+    // characters to be deleted.
+    StreamSet * const NullStream = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<bixnum::EQ_immediate>(U8_Basis, 0, NullStream);
+    StreamSet * const SourceNull = P.CreateStreamSet(1, 1);
+    AndCombine(P, NullStream, ExpansionMask, SourceNull);
+    SHOW_STREAM(SourceNull);
+
+    StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<ExcludedCompositeStage>(U8_Basis, EC_Basis);
+    SHOW_BIXNUM(EC_Basis);
+
+    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, EC_Basis, ccc_NR0, BitMovementMode::LookAhead);
+    SHOW_STREAM(ccc_NR0);
+
+    StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
+    AndCombine(P, ccc_NR0, ExpansionMask, ccc_NR);
+    SHOW_STREAM(ccc_NR);
+
+    StreamSet * CanonBasis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonBasis);
+    SHOW_BIXNUM(CanonBasis);
+
+    StreamSet * XorBasis = P.CreateStreamSet(8, 1);
+    StreamSet * DelPrior = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<ShortComposableTranslation>(CanonBasis, DelPrior, XorBasis);
+    SHOW_BIXNUM(XorBasis);
+    SHOW_STREAM(DelPrior);
+
+    StreamSet * XfrmedBasis = P.CreateStreamSet(8, 1);
+    XorCombine(P, CanonBasis, XorBasis, XfrmedBasis);
+    SHOW_BIXNUM(XfrmedBasis);
+
+    StreamSet * ShortBasis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<ZeroPrior>(XfrmedBasis, DelPrior, ShortBasis);
+    SHOW_BIXNUM(ShortBasis);
+
+    StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
+    LongComposablePipeline(P, ShortBasis, ccc_NR, FinalBasis);
+    SHOW_BIXNUM(FinalBasis);
+
+    StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::HC_Kind::Count);
+    P.CreateKernelCall<Hangul_Composables>(FinalBasis, L_V_T, pablo::BitMovementMode::LookAhead);
+    //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
+    SHOW_BIXNUM(L_V_T);
+
+    StreamSet * TranslatedBasis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<Hangul_Composition>(FinalBasis, L_V_T, TranslatedBasis);
+    SHOW_BIXNUM(TranslatedBasis);
+
+    StreamSet * NonZeroResults = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<bixnum::NEQ_immediate>(TranslatedBasis, 0, NonZeroResults);
+    StreamSet * FinalSelectionMask = P.CreateStreamSet(1, 1);
+    OrCombine(P, NonZeroResults, SourceNull, FinalSelectionMask);
+    SHOW_STREAM(FinalSelectionMask);
+
+    StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+    FilterByMask(P, FinalSelectionMask, TranslatedBasis, TransformedBasis);
+
+    UCD::EnumeratedPropertyObject * enumObj = llvm::cast<UCD::EnumeratedPropertyObject>(getPropertyObject(UCD::ccc));
+    StreamSet * const CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+    P.CreateKernelCall<UnicodePropertyBasis>(enumObj, TransformedBasis, CCC_Basis);
+    SHOW_BIXNUM(CCC_Basis);
+
+    StreamSet * const u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(TransformedBasis, u8index);
+    SHOW_STREAM(u8index);
+
+    StreamSet * const CCC_Spans = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+    P.CreateKernelCall<U8Spans>(CCC_Basis, u8index, CCC_Spans);
+    SHOW_BIXNUM(CCC_Spans);
+
+    StreamSet * const CCC_NonZero = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<bixnum::NEQ_immediate>(CCC_Spans, 0, CCC_NonZero);
+    SHOW_STREAM(CCC_NonZero);
+
+    StreamSets ToSort = {CCC_Spans, TransformedBasis};
+
+    StreamSets SortResults = BitonicSortRuns(P, 16, CCC_NonZero, ToSort);
+    SHOW_BIXNUM(SortResults[0]);
+    SHOW_BIXNUM(SortResults[1]);
+
+    return std::make_pair(SortResults[1], FinalSelectionMask);
+}
 
 typedef void (*XfrmFunctionType)(uint32_t fd);
 
 XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
+
+    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
+    re::Name * CCC0_Name = re::makeName("CCC", "NR");
+    CCC0_Name->setDefinition(CCC0_Prop);
 
     auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
 
@@ -158,122 +274,74 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_BIXNUM(u8index);
+
+    StreamSet * WorkSelectionMask = DetermineNFC_WorkSpans(P, BasisBits, u8index);
+
     StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
     SHOW_BIXNUM(InsertionBixNum);
 
-    StreamSet * SpreadMask = InsertionSpreadMask(P, InsertionBixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(SpreadMask);
+    StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
+    ZeroByMask(P, WorkSelectionMask, InsertionBixNum, WorkingInsertionBixNum);
+    SHOW_BIXNUM(WorkingInsertionBixNum);
 
-    StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
-    SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
-    SHOW_BIXNUM(ExpandedBasis);
+    StreamSet * SourceExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(SourceExpansionMask);
 
-    StreamSet * EC_Basis = P.CreateStreamSet(8, 1);
-    StreamSet * EC_SelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ExcludedCompositeStage>(ExpandedBasis, EC_SelectionMask, EC_Basis);
-    SHOW_BIXNUM(EC_Basis);
+    StreamSet * OutputBasis = nullptr;
 
-    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
-    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
-    re::Name * CCC0_Name = re::makeName("CCC", "NR");
-    CCC0_Name->setDefinition(CCC0_Prop);
-    StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, BasisBits, ccc_NR0, BitMovementMode::LookAhead);
-    SHOW_STREAM(ccc_NR0);
+    if (NoFocus) {
+        StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
+        SpreadByMask(P, SourceExpansionMask, BasisBits, ExpandedBasis);
 
-    StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, SpreadMask, ccc_NR0, ccc_NR);
-    SHOW_STREAM(ccc_NR);
-
-    StreamSet * Canon_Basis = P.CreateStreamSet(8, 1);
-    StreamSet * CanonSelectionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonSelectionMask, Canon_Basis);
-    SHOW_BIXNUM(Canon_Basis);
-    SHOW_STREAM(CanonSelectionMask);
-
-    StreamSet * XfrmBasis = P.CreateStreamSet(8, 1);
-    StreamSet * DelPrior = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ShortComposableTranslation>(Canon_Basis, DelPrior, XfrmBasis);
-    SHOW_BIXNUM(XfrmBasis);
-    SHOW_STREAM(DelPrior);
-
-    StreamSet * XfrmedBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ApplyTransform>(Canon_Basis, XfrmBasis, XfrmedBasis);
-    SHOW_BIXNUM(XfrmedBasis);
-
-    StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
-    StreamSet * MarkDeletion = P.CreateStreamSet(1, 1);
-    LongComposablePipeline(P, XfrmedBasis, ccc_NR, FinalBasis, MarkDeletion);
-    SHOW_STREAM(MarkDeletion);
-
-    StreamSet * SelectionMask0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<DelPriorToSelectMask>(FinalBasis, CanonSelectionMask, MarkDeletion, DelPrior, SelectionMask0);
-    SHOW_STREAM(SelectionMask0);
-
-    StreamSet * FilteredBasis = P.CreateStreamSet(8, 1);
-    FilterByMask(P, SelectionMask0, FinalBasis, FilteredBasis);
-    SHOW_BIXNUM(FilteredBasis);
-
-    StreamSet * const OutputBasis = P.CreateStreamSet(8);
-
-    if (U21) {
-        //  The u8index stream marks the final byte of each UTF-8 character sequence.
-        StreamSet * u8index = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<UTF8_index>(FilteredBasis, u8index);
-        SHOW_STREAM(u8index);
-
-        //  To make Unicode calculations simpler, we will construct a stream set of
-        //  all 21 Unicode bits.   As a first step we calculate these bits at
-        //  the u8index positions.
-        StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
-        P.CreateKernelCall<UTF8_Decoder>(FilteredBasis, U21_u8indexed);
-
-        //  Now we construct a compressed stream set which is one-to-one with
-        //  Unicode characters, by filtering out non u8index positions.
-        StreamSet * U21 = P.CreateStreamSet(21, 1);
-        FilterByMask(P, u8index, U21_u8indexed, U21);
-        SHOW_BIXNUM(U21);
-
-        //  Hangul composable characters are of three types, L, V, LV and T.
-        //  Compute a set of 4 parallel bit streams, one for each character class.
-        //auto L_V_T_sets = Hangul_Composables();
-        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
-        P.CreateKernelCall<Hangul_Composables>(U21, L_V_T);
-        //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, U21, L_V_T);
-        SHOW_BIXNUM(L_V_T);
-
-        StreamSet * TranslatedBasis = P.CreateStreamSet(21, 1);
-        StreamSet * SelectionMask = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<Hangul_Composition>(U21, L_V_T, TranslatedBasis, SelectionMask);
-        SHOW_BIXNUM(TranslatedBasis);
-        SHOW_STREAM(SelectionMask);
-
-        StreamSet * NFC_Basis = P.CreateStreamSet(21, 1);
-        FilterByMask(P, SelectionMask, TranslatedBasis, NFC_Basis);
-        SHOW_BIXNUM(NFC_Basis);
-
-        // Given the 21-bit basis representation, we can now transform back
-        // to a UTF-8 representation.
-        U21_to_UTF8(P, NFC_Basis, OutputBasis);
-        SHOW_BIXNUM(OutputBasis);
+        auto rslts = NFC_U8_Pipeline(P, CCC0_Name, SourceExpansionMask, ExpandedBasis);
+        OutputBasis = rslts.first;
     } else {
+        StreamSet * SelectedWorkBasis = P.CreateStreamSet(8, 1);
+        FilterByMask(P, WorkSelectionMask, BasisBits, SelectedWorkBasis);
+
+        StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
+        P.CreateKernelCall<NFC_Initial_Insertion>(SelectedWorkBasis, WorkingInsertionBixNum);
+        SHOW_BIXNUM(WorkingInsertionBixNum);
+
+        StreamSet * WorkingExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+        SHOW_STREAM(WorkingExpansionMask);
+
+        StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
+        SpreadByMask(P, WorkingExpansionMask, SelectedWorkBasis, WorkingBasis);
+
+        auto rslts = NFC_U8_Pipeline(P, CCC0_Name, WorkingExpansionMask, WorkingBasis);
+        StreamSet * TransformedBasis = rslts.first;
+        StreamSet * ValidWorkMask = rslts.second;
+        SHOW_STREAM(ValidWorkMask);
+
+        StreamSet * const ExpandedWorkMask = P.CreateStreamSet(1, 1);
+        ExpandFilter(P, SourceExpansionMask, WorkSelectionMask, ExpandedWorkMask);
+        SHOW_STREAM(ExpandedWorkMask);
+
+        StreamSet * const FinalWorkSelectionMask = P.CreateStreamSet(1, 1);
+        ExpandFilter(P, ExpandedWorkMask, ValidWorkMask, FinalWorkSelectionMask);
+        SHOW_STREAM(FinalWorkSelectionMask);
         
-        //auto L_V_T_sets = Hangul_Composables();
-        StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::Kind::Count);
-        P.CreateKernelCall<Hangul_Composables>(FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
-        //P.CreateKernelCall<CharClassesKernel>(L_V_T_sets, FilteredBasis, L_V_T, pablo::BitMovementMode::LookAhead);
-        SHOW_BIXNUM(L_V_T);
+        StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+        FilterByMask(P, FinalWorkSelectionMask, ExpandedWorkMask, FinalWorkPlacementMask);
 
-        StreamSet * TranslatedBasis = P.CreateStreamSet(8, 1);
-        StreamSet * SelectionMask = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<Hangul_Composition>(FilteredBasis, L_V_T, TranslatedBasis, SelectionMask);
-        SHOW_BIXNUM(TranslatedBasis);
-        SHOW_STREAM(SelectionMask);
+        StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
+        Invert(P, WorkSelectionMask, NonModifiedMask);
+        SHOW_STREAM(NonModifiedMask);
 
-        FilterByMask(P, SelectionMask, TranslatedBasis, OutputBasis);
-        SHOW_BIXNUM(OutputBasis);
+        StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
+        FilterByMask(P, NonModifiedMask, BasisBits, NonModifiedBasis);
+        SHOW_BIXNUM(NonModifiedBasis);
+
+        OutputBasis = P.CreateStreamSet(8);
+        MergeByMask(P, FinalWorkPlacementMask, TransformedBasis, NonModifiedBasis, OutputBasis);
     }
+    SHOW_BIXNUM(OutputBasis);
+
     //  The P2SKernel transforms the basis bit streams into the corresponding
     //  byte stream, inverting the S2P process.
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
@@ -289,8 +357,8 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver driver("NFD_function");
+    codegen::ParseCommandLineOptions(argc, argv, {&NFC_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    CPUDriver driver("NFC_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
     fn = generate_pipeline(driver);

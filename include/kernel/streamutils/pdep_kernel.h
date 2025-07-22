@@ -47,6 +47,11 @@ void SpreadByMask(PipelineBuilder & P,
                   unsigned expansionFieldWidth = 64,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
 
+/*   Applying the given spreadmask, spread a filter mask, filling in 1 bits at the
+     inserted positions.  */
+void ExpandFilter(PipelineBuilder & P,
+                  StreamSet * spreadMask, StreamSet * filter, StreamSet * expanded);
+
 void MergeByMask(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged);
 
 /*  Create a spread mask for inserting a single item into a stream for each position

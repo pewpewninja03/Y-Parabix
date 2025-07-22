@@ -25,10 +25,12 @@
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
+#include <kernel/unicode/normalization.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/utf8_support.h>
@@ -63,6 +65,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
+static cl::opt<bool> NoFocus("NoFocus", cl::desc("Process the entire file without filtering to narrow the focus of work"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteMerging("ByteMerging", cl::desc("Use byte stream merging of transformed and unmodified data"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging using the ByteReplaceByMask kernel"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
@@ -611,43 +614,6 @@ FinalSelection::FinalSelection(LLVMTypeSystemInterface & ts, StreamSet * SelectM
 {Binding{"Output", Output}}) {
 }
 
-class Invert : public PabloKernel {
-public:
-    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(ts, "Invert",
-                      {Binding{"mask", mask}},
-                      {Binding{"inverted", inverted}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void Invert::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * mask = getInputStreamSet("mask")[0];
-    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
-    Var * outVar = getOutputStreamVar("inverted");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
-}
-
-class OrCombine : public PabloKernel {
-public:
-    OrCombine(LLVMTypeSystemInterface & ts, StreamSet * s1, StreamSet * s2, StreamSet * combined)
-        : PabloKernel(ts, "OrCombine",
-                      {Binding{"s1", s1}, Binding{"s2", s2}},
-                      {Binding{"combined", combined}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void OrCombine::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * s1 = getInputStreamSet("s1")[0];
-    PabloAST * s2 = getInputStreamSet("s2")[0];
-    PabloAST * combined = pb.createOr(s1, s2);
-    Var * outVar = getOutputStreamVar("combined");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), combined);
-}
-
 void FinalSelection::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * SelectMask = getInputStreamSet("SelectMask")[0];
@@ -659,47 +625,6 @@ void FinalSelection::generatePabloMethod() {
     }
     writeOutputStreamSet("Output", Output);
 }
-
-class CreateU8_FilterMask : public pablo::PabloKernel {
-public:
-    CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);
-protected:
-    void generatePabloMethod() override;
-private:
-    unsigned mBixBits;
-};
-
-CreateU8_FilterMask::CreateU8_FilterMask (LLVMTypeSystemInterface & ts,
-                                StreamSet * DeletionBixNum,
-                                StreamSet * DelMask)
-: PabloKernel(ts, "u8_delmask@-1_" + DeletionBixNum->shapeString(),
-// inputs
-{Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
-// output
-{Binding{"selection_mask", DelMask}}),
-    mBixBits(DeletionBixNum->getNumElements()) {
-}
-
-void CreateU8_FilterMask::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    Var * deletion_bixnum = getInputStreamVar("deletion_bixnum");
-    Var * del_bixnum0 = pb.createExtract(deletion_bixnum, pb.getInteger(0));
-    // Deletion and insertion bixnums are calculated at the final position of
-    // a UTF-8 sequence.   Deletion masks will preserve this position.
-    //
-    PabloAST * del_mask = pb.createLookahead(del_bixnum0, 1);
-    if (mBixBits == 2) {
-        Var * del_bixnum1 = pb.createExtract(deletion_bixnum, pb.getInteger(1));
-        // Mark two positions for deletion.
-        del_mask = pb.createOr3(del_mask, pb.createLookahead(del_bixnum1, 1), pb.createLookahead(del_bixnum1, 2));
-        // If both del_bixnum0 and del_bixnum1 are 1, then 3 positions must be deleted.
-        del_mask = pb.createOr(del_mask, pb.createAnd(pb.createLookahead(del_bixnum0, 3), pb.createLookahead(del_bixnum1, 3)));
-    }
-    PabloAST * selected = pb.createInFile(pb.createNot(del_mask));
-    Var * const selection_mask = getOutputStreamVar("selection_mask");
-    pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
-}
-
 
 StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U21_Basis) {
     // Now we have a Unicode-indexed representation of all significant
@@ -818,48 +743,6 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
     return NFD_WorkItems;
 }
 
-void ComputeWorkPlacement(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * SelectionMask,
-                          StreamSet * WorkPlacementMask) {
-    auto u8_insert_ccs = NFD_Data.UTF8_Insertion_BixNumCCs();
-    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(u8_insert_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(u8_insert_ccs, U8_Basis, U8_Insertion_BixNum);
-    SHOW_BIXNUM(U8_Insertion_BixNum);
-
-    auto u8_deletion_ccs = NFD_Data.UTF8_Deletion_BixNumCCs();
-    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(u8_deletion_ccs.size());
-    P.CreateKernelCall<CharClassesKernel>(u8_deletion_ccs, U8_Basis, U8_Deletion_BixNum);
-    SHOW_BIXNUM(U8_Deletion_BixNum);
-
-    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
-    SHOW_STREAM(U8_FilterMask);
-
-    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(U8_SpreadMask);
-
-    StreamSet * const ExpandedSpaceMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(U8_SpreadMask, ExpandedSpaceMask);
-
-    StreamSet * const ExpandedFilterMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, U8_FilterMask, ExpandedFilterMask);
-    SHOW_STREAM(ExpandedFilterMask);
-
-    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(ExpandedFilterMask, ExpandedSpaceMask, U8_PostSpreadFilterMask);
-    SHOW_STREAM(U8_PostSpreadFilterMask);
-
-    StreamSet * const WorkSpreadMask = P.CreateStreamSet(1, 1);
-    SpreadByMask(P, U8_SpreadMask, SelectionMask, WorkSpreadMask);
-    SHOW_STREAM(WorkSpreadMask);
-
-    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<OrCombine>(WorkSpreadMask, ExpandedSpaceMask, WorkExpansionMask);
-    SHOW_STREAM(WorkExpansionMask);
-
-    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
-    SHOW_STREAM(WorkPlacementMask);
-}
-
 void source_input_stage(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * BasisBits) {
 
     P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
@@ -895,7 +778,7 @@ void NFD_FilterStage(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * Ba
     P.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
 
-    ComputeWorkPlacement(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
+    ComputeWorkPlacement(P, NFD_Data.UTF8_Insertion_BixNumCCs(), NFD_Data.UTF8_Deletion_BixNumCCs(), BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
     SHOW_STREAM(FinalWorkPlacementMask);
 
     FilterByMask(P, WorkSelectionMask, BasisBits, WorkingBasis);
@@ -954,25 +837,25 @@ NFD_TransformFunctionType NFD_transform_pipeline(CPUDriver & driver, NFD_BixData
     return P.compile();
 }
 
-void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * ByteStream, StreamSet * TransformedBasis) {
+void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * Source, StreamSet * TransformedBasis) {
 
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(WorkSelectionMask, NonModifiedMask);
+    Invert(P, WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
-
-    StreamSet * const NonModified = P.CreateStreamSet(1, 8);
-    FilterByMask(P, NonModifiedMask, ByteStream, NonModified);
-    SHOW_BYTES(NonModified);
-
-    StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<Invert>(FinalWorkPlacementMask, NonModifiedPlacementMask);
-    SHOW_STREAM(NonModifiedPlacementMask);
-
-    StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
-    SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
 
     StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
     if (ByteMerging) {
+        StreamSet * const NonModified = P.CreateStreamSet(1, 8);
+        FilterByMask(P, NonModifiedMask, Source, NonModified);
+        SHOW_BYTES(NonModified);
+        
+        StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
+        Invert(P, FinalWorkPlacementMask, NonModifiedPlacementMask);
+        SHOW_STREAM(NonModifiedPlacementMask);
+        
+        StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
+        SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
+        
         StreamSet * const TransformedBytes = P.CreateStreamSet(1, 8);
         P.CreateKernelCall<P2SKernel>(TransformedBasis, TransformedBytes);
 
@@ -986,7 +869,7 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
         }
     } else {
         StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
-        P.CreateKernelCall<S2PKernel>(NonModified, NonModifiedBasis);
+        FilterByMask(P, NonModifiedMask, Source, NonModifiedBasis);
         SHOW_BIXNUM(NonModifiedBasis);
 
         StreamSet * const OutputBasis = P.CreateStreamSet(8);
@@ -995,6 +878,12 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
 
         P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
     }
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
+}
+
+void SimpleOutputStage(PipelineBuilder & P, StreamSet * TransformedBasis) {
+    StreamSet * const OutputBytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(TransformedBasis, OutputBytes);
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 }
 
@@ -1026,23 +915,21 @@ CombinedWorkFunctionType generate_combined_work_pipeline(CPUDriver & driver, NFD
     return P.compile();
 }
 
-
-
 typedef void (*OutputAssemblyFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
 
 OutputAssemblyFunctionType generate_output_pipeline(CPUDriver & driver) {
     auto P = CreatePipeline(driver,
                             Input<streamset_t>("WorkSelectionMask", 1, 1),
                             Input<streamset_t>("FinalWorkPlacementMask", 1, 1),
-                            Input<streamset_t>("ByteStream", 1, 8),
+                            Input<streamset_t>("Source", ByteMerging ? 1 : 8, ByteMerging ? 8 : 1),
                             Input<streamset_t>("TransformedBasis", 8, 1)
                             );
     StreamSet * const WorkSelectionMask = P.getInputStreamSet("WorkSelectionMask");
     StreamSet * const FinalWorkPlacementMask = P.getInputStreamSet("FinalWorkPlacementMask");
-    StreamSet * const ByteStream = P.getInputStreamSet("ByteStream");
+    StreamSet * const Source = P.getInputStreamSet("Source");
     StreamSet * const TransformedBasis = P.getInputStreamSet("TransformedBasis");
 
-    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, Source, TransformedBasis);
     return P.compile();
 }
 
@@ -1056,15 +943,22 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
     StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
     source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
 
-    StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
-    StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
-    StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
-    NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+    if (NoFocus) {
+        StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+        NFD_Transform_Stage(P, NFD_Data, BasisBits, TransformedBasis);
 
-    StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
-    NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
-
-    OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+        SimpleOutputStage(P, TransformedBasis);
+    } else {
+        StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+        StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
+        StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
+        NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+        
+        StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
+        NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
+        
+        OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteMerging ? ByteStream : BasisBits, TransformedBasis);
+    }
     return P.compile();
 }
 
@@ -1110,7 +1004,7 @@ int main(int argc, char *argv[]) {
         stage2(WorkingBasis, TransformedBasis);
 
         OutputAssemblyFunctionType stage3 = generate_output_pipeline(driver);
-        stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteStream, TransformedBasis);
+        stage3(WorkSelectionMask, FinalWorkPlacementMask, ByteMerging ? ByteStream : BasisBits, TransformedBasis);
     } else {
         XfrmFunctionType fn = generate_unitary_pipeline(driver, NFD_Data);
         fn(fd);

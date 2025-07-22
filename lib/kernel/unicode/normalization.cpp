@@ -11,6 +11,12 @@
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>
 #include <pablo/bixnum/bixnum.h>
+#include <kernel/unicode/charclasses.h>
+#include <toolchain/toolchain.h>
+#include <kernel/bitwise/bixlogic.h>
+#include <kernel/streamutils/deletion.h>
+#include <kernel/streamutils/pdep_kernel.h>
+#include <pablo/pablo_kernel.h>
 
 using namespace pablo;
 using namespace kernel;
@@ -35,39 +41,39 @@ Hangul_Composables::Hangul_Composables (LLVMTypeSystemInterface & ts,
 void Hangul_Composables::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     UTF::UTF_Compiler unicodeCompiler(getInput(0), pb, mBitMovement);
-    std::vector<Var *> Hangul_var(Kind::Count);
-    for (unsigned i = 0; i < Kind::Count; i++) {
+    std::vector<Var *> Hangul_var(HC_Kind::Count);
+    for (unsigned i = 0; i < HC_Kind::Count; i++) {
         Hangul_var[i] = pb.createVar("Composable_" + std::to_string(i), pb.createZeroes());
     }
-    std::vector<UCD::UnicodeSet> Hangul_uset (Kind::Count);
-    Hangul_uset[Kind::L] = UCD::UnicodeSet(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
-    Hangul_uset[Kind::V] = UCD::UnicodeSet(Hangul::VBase, Hangul::VBase + Hangul::VCount - 1);
+    std::vector<UCD::UnicodeSet> Hangul_uset (HC_Kind::Count);
+    Hangul_uset[HC_Kind::L] = UCD::UnicodeSet(Hangul::LBase, Hangul::LBase + Hangul::LCount - 1);
+    Hangul_uset[HC_Kind::V] = UCD::UnicodeSet(Hangul::VBase, Hangul::VBase + Hangul::VCount - 1);
     for (unsigned i = 0; i < Hangul::LCount * Hangul::VCount; i++) {
-        Hangul_uset[Kind::LV].insert(Hangul::SBase + i * Hangul::TCount);
+        Hangul_uset[HC_Kind::LV].insert(Hangul::SBase + i * Hangul::TCount);
     }
-    Hangul_uset[Kind::T] = UCD::UnicodeSet(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
+    Hangul_uset[HC_Kind::T] = UCD::UnicodeSet(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
     unicodeCompiler.compile(Hangul_var, Hangul_uset);
     writeOutputStreamSet("L_V_T_Composables", Hangul_var);
 }
 
 Hangul_Composition::Hangul_Composition (LLVMTypeSystemInterface & ts,
                                               StreamSet * Basis, StreamSet * L_V_T_Composables,
-                                              StreamSet * Output_Basis, StreamSet * SelectionMask)
+                                              StreamSet * Output_Basis)
 : PabloKernel(ts, "Hangul_Composition" + Basis->shapeString(),
 // inputs
     {Binding{"Basis", Basis, FixedRate(1), LookAhead(5)}, Binding{"L_V_T_Composables", L_V_T_Composables, FixedRate(1), LookAhead(5)}},
 // output
-    {Binding{"Output_Basis", Output_Basis}, Binding{"SelectionMask", SelectionMask}}) {
+    {Binding{"Output_Basis", Output_Basis}}) {
 }
 
 void Hangul_Composition::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
     std::vector<PabloAST *> L_V_T_Composables = getInputStreamSet("L_V_T_Composables");
-    PabloAST * Hangul_L = L_V_T_Composables[0];
-    PabloAST * Hangul_V = L_V_T_Composables[1];
-    PabloAST * Hangul_LV = L_V_T_Composables[2];
-    PabloAST * Hangul_T = L_V_T_Composables[3];
+    PabloAST * Hangul_L = L_V_T_Composables[Hangul_Composables::HC_Kind::L];
+    PabloAST * Hangul_V = L_V_T_Composables[Hangul_Composables::HC_Kind::V];
+    PabloAST * Hangul_LV = L_V_T_Composables[Hangul_Composables::HC_Kind::LV];
+    PabloAST * Hangul_T = L_V_T_Composables[Hangul_Composables::HC_Kind::T];
     //
     //  Set up variables to receive the output basis bit streams.
     std::vector<Var *> outputVar(Basis.size());
@@ -184,23 +190,150 @@ void Hangul_Composition::generatePabloMethod() {
         //
         //  Since V, LV and LVT characters all have the same 3-byte UTF-8
         //  structure, only the low 6 bits of each UTF-8 byte change.
-        for (unsigned i = 0; i < 6; i++) {
-            PabloAST * updated = Basis[i];
+        for (unsigned i = 0; i < 8; i++) {
+            PabloAST * updated = nested.createAnd(Basis[i], maskVar);
             if (i < 4) {
                 // At prefix (LV_sequence) positions, set 4 data bits, keep high 4 bits unchanged.
                 updated = nested.createSel(LV_sequence, Composed[i+12], updated);
             }
-            // Suffix bytes - set 6 data bits for each, keep top two bits unchanged.
-            updated = nested.createSel(LV_suffix1, nested.createAdvance(Composed[i+6], 1), updated);
-            updated = nested.createSel(LV_suffix2, nested.createAdvance(Composed[i], 2), updated);
+            if (i < 6) {
+                // Suffix bytes - set 6 data bits for each, keep top two bits unchanged.
+                updated = nested.createSel(LV_suffix1, nested.createAdvance(Composed[i+6], 1), updated);
+                updated = nested.createSel(LV_suffix2, nested.createAdvance(Composed[i], 2), updated);
+            }
             nested.createAssign(outputVar[i], updated);
         }
     } else {
         Composed = bnc.ZeroExtend(Composed, Basis.size());
         for (unsigned i = 0; i < Basis.size(); i++) {
-            nested.createAssign(outputVar[i], nested.createSel(LV_sequence, Composed[i], Basis[i]));
+            PabloAST * selected = nested.createAnd(Basis[i], maskVar);
+            nested.createAssign(outputVar[i], nested.createSel(LV_sequence, Composed[i], selected));
         }
     }
     writeOutputStreamSet("Output_Basis", outputVar);
-    writeOutputStreamSet("SelectionMask", std::vector<Var *>{maskVar});
 }
+
+SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len, PabloAST * A, PabloAST * AA) {
+    SCResults results;
+    PabloAST * A_span = A;
+    PabloAST * AA_span = AA;
+    if (A_len > 1) {
+        A_span = pb.createOr(A_span, pb.createAdvance(A, 1));
+        if (A_len > 2) {
+            A_span = pb.createOr(A_span, pb.createAdvance(A, 2));
+        }
+        if (A_len == 4) {
+            A_span = pb.createOr(A_span, pb.createAdvance(A, 3));
+        }
+    }
+    if (AA_len > 1) {
+        AA_span = pb.createOr(AA_span, pb.createAdvance(AA, 1));
+        if (AA_len > 2) {
+            AA_span = pb.createOr(A_span, pb.createAdvance(AA, 2));
+        }
+        if (AA_len == 4) {
+            AA_span = pb.createOr(A_span, pb.createAdvance(AA, 3));
+        }
+    }
+    PabloAST * A_run_start = pb.createAnd(A, pb.createAdvance(pb.createNot(A_span), 1));
+    PabloAST * A1 = pb.createEveryNth(A, pb.getInteger(2));  //  1st, 3rd, 5th, ... of all the As
+    PabloAST * A2 = pb.createXor(A, A1);  //  2nd, 4th, 6th, ... of the As
+    PabloAST * A1_start = pb.createAnd(A_run_start, A1);
+    PabloAST * A2_start = pb.createAnd(A_run_start, A2);
+    PabloAST * A_or_AA_span = pb.createOr(A_span, AA_span);
+    //  For each span, determine the odd-numbered As (1st, 3rd, 5th, ...)
+    PabloAST * A1_odd = pb.createAnd(pb.createMatchStar(A1_start, A_or_AA_span), A1);
+    PabloAST * A2_odd = pb.createAnd(pb.createMatchStar(A2_start, A_or_AA_span), A2);
+    PabloAST * A_odd = pb.createOr(A1_odd, A2_odd);
+    PabloAST * A_even = pb.createXor(A1, A);
+    //
+    PabloAST * A_ahead = pb.createLookahead(A, A_len);
+    PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
+    PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead);
+    PabloAST * AA_final = pb.createAnd(AA, pb.createNot(A_or_AA_ahead));
+    // Rule 1
+    results.A_to_convert_to_AA = pb.createAnd(A1, A_or_AA_ahead);
+    // Rule 2
+    results.A_to_delete = A_even;
+    // Rule 3
+    // Starting from an odd A, if the remaining span are AAs, convert the final one.
+    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, AA_len));
+    results.AA_to_convert_to_A = pb.createAnd(pb.createMatchStar(AA1, AA_span), AA_final);
+    return results;
+}
+
+class CreateU8_FilterMask : public pablo::PabloKernel {
+public:
+    CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mBixBits;
+};
+
+CreateU8_FilterMask::CreateU8_FilterMask (LLVMTypeSystemInterface & ts,
+                                StreamSet * DeletionBixNum,
+                                StreamSet * DelMask)
+: PabloKernel(ts, "u8_delmask@-1_" + DeletionBixNum->shapeString(),
+// inputs
+{Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
+// output
+{Binding{"selection_mask", DelMask}}),
+    mBixBits(DeletionBixNum->getNumElements()) {
+}
+
+void CreateU8_FilterMask::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    Var * deletion_bixnum = getInputStreamVar("deletion_bixnum");
+    Var * del_bixnum0 = pb.createExtract(deletion_bixnum, pb.getInteger(0));
+    // Deletion and insertion bixnums are calculated at the final position of
+    // a UTF-8 sequence.   Deletion masks will preserve this position.
+    //
+    PabloAST * del_mask = pb.createLookahead(del_bixnum0, 1);
+    if (mBixBits == 2) {
+        Var * del_bixnum1 = pb.createExtract(deletion_bixnum, pb.getInteger(1));
+        // Mark two positions for deletion.
+        del_mask = pb.createOr3(del_mask, pb.createLookahead(del_bixnum1, 1), pb.createLookahead(del_bixnum1, 2));
+        // If both del_bixnum0 and del_bixnum1 are 1, then 3 positions must be deleted.
+        del_mask = pb.createOr(del_mask, pb.createAnd(pb.createLookahead(del_bixnum0, 3), pb.createLookahead(del_bixnum1, 3)));
+    }
+    PabloAST * selected = pb.createInFile(pb.createNot(del_mask));
+    Var * const selection_mask = getOutputStreamVar("selection_mask");
+    pb.createAssign(pb.createExtract(selection_mask, pb.getInteger(0)), selected);
+}
+
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
+
+void ComputeWorkPlacement(PipelineBuilder & P,
+                          std::vector<re::CC *> insertionBixNumCCs,
+                          std::vector<re::CC *> deletionBixNumCCs,
+                          StreamSet * U8_Basis, StreamSet * WorkSelectionMask,
+                          StreamSet * WorkPlacementMask) {
+    StreamSet * const U8_Insertion_BixNum = P.CreateStreamSet(insertionBixNumCCs.size());
+    P.CreateKernelCall<CharClassesKernel>(insertionBixNumCCs, U8_Basis, U8_Insertion_BixNum);
+    SHOW_BIXNUM(U8_Insertion_BixNum);
+
+    StreamSet * const U8_Deletion_BixNum = P.CreateStreamSet(deletionBixNumCCs.size());
+    P.CreateKernelCall<CharClassesKernel>(deletionBixNumCCs, U8_Basis, U8_Deletion_BixNum);
+    SHOW_BIXNUM(U8_Deletion_BixNum);
+
+    StreamSet * const U8_FilterMask = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
+    SHOW_STREAM(U8_FilterMask);
+
+    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
+    SHOW_STREAM(U8_SpreadMask);
+
+    StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);
+    ExpandFilter(P, U8_SpreadMask, U8_FilterMask, U8_PostSpreadFilterMask);
+    SHOW_STREAM(U8_PostSpreadFilterMask);
+
+    StreamSet * const WorkExpansionMask = P.CreateStreamSet(1, 1);
+    ExpandFilter(P, U8_SpreadMask, WorkSelectionMask, WorkExpansionMask);
+
+    FilterByMask(P, U8_PostSpreadFilterMask, WorkExpansionMask, WorkPlacementMask);
+    SHOW_STREAM(WorkPlacementMask);
+}
+

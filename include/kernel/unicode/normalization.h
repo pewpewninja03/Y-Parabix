@@ -10,6 +10,8 @@
 
 using StreamSet = kernel::StreamSet;
 using PipelineBuilder = kernel::PipelineBuilder;
+namespace re {class CC;}
+namespace pablo {class PabloBuilder; class PabloAST;}
 
 // Hangul Composition Kernels for NFC (See Unicode section 3.12).
 //
@@ -29,7 +31,7 @@ using PipelineBuilder = kernel::PipelineBuilder;
 
 class Hangul_Composables : public pablo::PabloKernel {
 public:
-    enum Kind : unsigned {L, V, LV, T, Count};
+    enum HC_Kind : unsigned {L, V, LV, T, Count};
 
     Hangul_Composables(LLVMTypeSystemInterface & ts,
                        StreamSet * Basis, StreamSet * L_V_T_Composables,
@@ -52,10 +54,7 @@ private:
 //
 //  As a result of this transformation, leading L and trailing T
 //  characters become redundant.   This is reflected by zeroing out
-//  such positions in the produced SelectionMask bit stream.
-//  The produced Output Basis will still contain the leading L and
-//  trailing T characters, but they may be subsequently removed using
-//  a FilterByMask operation with the SelectionMask.
+//  such positions in the produced output basis bit streams.
 //
 //  This kernel may be used with basis stream sets having 21 streams
 //  (Unicode indexing), 16 streams (UTF-16 indexing) or 8 streams
@@ -67,7 +66,21 @@ class Hangul_Composition : public pablo::PabloKernel {
 public:
     Hangul_Composition(LLVMTypeSystemInterface & ts,
                        StreamSet * Basis, StreamSet * Hangul_Composables,
-                       StreamSet * Output_Basis, StreamSet * SelectionMask);
+                       StreamSet * Output_Basis);
+protected:
+    void generatePabloMethod() override;
+};
+
+//  The NFC_CandidateClass kernel produces the class of characters
+//  that are relevant to NFC processing by virtue of being reorderable marks or
+//  non-reorderable characters that can occur as the second character of a
+//  composable sequence.
+//
+class NFC_CandidateClass : public pablo::PabloKernel {
+public:
+NFC_CandidateClass
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * NFC_CandidateClass);
 protected:
     void generatePabloMethod() override;
 };
@@ -114,8 +127,7 @@ protected:
 class ExcludedCompositeStage : public pablo::PabloKernel {
 public:
     ExcludedCompositeStage
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-         StreamSet * SelectMask, StreamSet * EC_Basis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * EC_Basis);
 protected:
     void generatePabloMethod() override;
 };
@@ -147,12 +159,59 @@ protected:
 class SingletonCanonicalization : public pablo::PabloKernel {
 public:
     SingletonCanonicalization
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * SelectMask, StreamSet * XfrmBasis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis);
 protected:
     void generatePabloMethod() override;
 };
 
+//
+//  Self-Composable Logic
+//  Given Unicode characters AA and A such that AA has a canonical
+//  decomposition AA ==> [A, A], the character A is called a
+//  self-composable, while the character AA is called a doubleton.
+//
+//  Two sets of such characters are:
+//  0x16121 => [0x1611e, 0x1611e]
+//  0x16d68 => [0x16d67, 0x16d67]
+//
+//  Conversion of sequences of self-composables and doubletons to NFC form
+//  include the following examples.
+//
+//  A AA ==> AA A
+//  A A A ==> AA A
+//  A AA A ==> AA AA
+//  A A AA A  ==> AA AA A
+//
+//  For each span of As and AAs:
+//  1.  The odd numbered As are converted to AAs, except if the A is last of the span.
+//  2.  The even numbered As are marked for deletion.
+//  3.  If the number of As is odd, and the last of the span is AA, it is converted to A.
+
+struct SCResults {
+    pablo::PabloAST * A_to_convert_to_AA;
+    pablo::PabloAST * A_to_delete;
+    pablo::PabloAST * AA_to_convert_to_A;
+};
+
+SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA);
+
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,
-                            StreamSet * FinalBasis, StreamSet * DeletionMask);
+                            StreamSet * FinalBasis);
+//
+//  Compute a mask for final work placement, given
+//  (a) a set of ccs that define the insertion amounts (as a BixNum)
+//      required for the work to be carried out,
+//  (b) a set of ccs that define the deletion amounts (as a BixNum)
+//      required to remove unneeeded positiona after work has been
+//      performed,
+//  (c) a source UTF-8 basis bits stream,
+//  (d) a mask to select only those portions of the basis that are
+//      relevant to the work to be performed.
+
+void ComputeWorkPlacement(PipelineBuilder & P,
+                          std::vector<re::CC *> insertionBixNumCCs,
+                          std::vector<re::CC *> deletionBixNumCCs,
+                          StreamSet * U8_Basis, StreamSet * WorkSelectionMask,
+                          StreamSet * WorkPlacementMask);
+

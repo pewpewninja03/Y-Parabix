@@ -17,6 +17,7 @@ SRC
     utf8_support.cpp
     utf16gen.cpp
 DEPS
+    kernel.bitwise
     kernel.pipeline
     kernel.streamutils
     re.unicode

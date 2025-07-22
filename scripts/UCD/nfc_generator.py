@@ -275,18 +275,16 @@ def range_usets_from_cps(cp_list):
 
 singleton_header = r"""//
 SingletonCanonicalization::SingletonCanonicalization
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis)
 : PabloKernel(ts, "SingletonCanonicalization" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+{Binding{"XfrmBasis", XfrmBasis}}) {}
 
 void SingletonCanonicalization::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // DeleteVar will be inverted to produce SelectMask
     Var * DeleteVar = pb.createVar("DeleteVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -359,30 +357,27 @@ def finalize_nested_pfx_code(pfx_code, has_del):
 
 singleton_final_code = r"""
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    PabloAST * select = pb.createNot(DeleteVar);
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(Basis[i], XfrmVar[i])));
     }
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 """
 
 excluded_composite_header = r"""//
 ExcludedCompositeStage::ExcludedCompositeStage
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * SelectMask, StreamSet * XfrmBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmBasis)
 : PabloKernel(ts, "ExcludedCompositeStage" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"SelectMask", SelectMask}, Binding{"XfrmBasis", XfrmBasis}}) {}
+{Binding{"XfrmBasis", XfrmBasis}}) {}
 
 void ExcludedCompositeStage::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    // DeleteVar will be inverted to produce SelectMask
     Var * DeleteVar = pb.createVar("DeleteVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -392,13 +387,12 @@ void ExcludedCompositeStage::generatePabloMethod() {
 
 excluded_composite_final_code = r"""
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
+    PabloAST * select = pb.createNot(DeleteVar);
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(Basis[i], XfrmVar[i])));
     }
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("SelectMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, pb.createInFile(pb.createNot(DeleteVar)));
 }
 """
 
@@ -417,7 +411,7 @@ FindComposables${pass_no}::FindComposables${pass_no}
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * ccc_NR,
                                    StreamSet * MarkCode, StreamSet * Index_ccc_NR_or_MarksFound)
 : PabloKernel(ts, "FindComposables${pass_no}_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"ccc_NR", ccc_NR}},
 {Binding{"MarkCode", MarkCode}, Binding{"Index_ccc_NR_or_MarksFound", Index_ccc_NR_or_MarksFound}}) {}
 
 void FindComposables${pass_no}::generatePabloMethod() {
@@ -444,7 +438,7 @@ def gen_pass_header_code(pass_no, mark_code_bits):
 pass_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
-    pb.createIf(pb.createAnd(${pfx_test_var}, mark_ahead_${mark_lookahead}), ${builder});
+    pb.createIf(${pfx_test_var}, ${builder});
 """
 
 def gen_pass_pfx_code(pfx_code):
@@ -455,7 +449,6 @@ def gen_pass_pfx_code(pfx_code):
     t = string.Template(pass_pfx_template)
     return t.substitute(builder = scope,
                         pfx_test_var = pfx_test_var,
-                        mark_lookahead = pfx_code_lgth(pfx_code),
                         logic = test)
 
 mark_case_template = r"""
@@ -502,17 +495,17 @@ long_composable_application_template = r"""//
 class ApplyLongComposition${pass_no} : public PabloKernel {
 public:
     ApplyLongComposition${pass_no}
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                        StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
 
 ApplyLongComposition${pass_no}::ApplyLongComposition${pass_no}
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCode,
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * MarkCodeAtStarter, StreamSet * MarkCode,
                                    StreamSet * OutputBasis)
 : PabloKernel(ts, "ApplyLongComposition${pass_no}_" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCode", MarkCode}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"MarkCodeAtStarter", MarkCodeAtStarter}, Binding{"MarkCode", MarkCode}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
 void ApplyLongComposition${pass_no}::generatePabloMethod() {
@@ -520,11 +513,16 @@ void ApplyLongComposition${pass_no}::generatePabloMethod() {
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    std::vector<PabloAST *> markCodeAtStarter = getInputStreamSet("MarkCodeAtStarter");
     const unsigned markCodeBits = ${markCodeBits};
-    PabloAST * markFound = markCode[0];
+    PabloAST * markFoundForStarter = markCodeAtStarter[0];
     for (unsigned i = 1; i < markCodeBits; i++) {
-        markFound = pb.createOr(markFound, markCode[i]);
+        markFoundForStarter = pb.createOr(markFoundForStarter, markCodeAtStarter[i]);
+    }
+    std::vector<PabloAST *> markCode = getInputStreamSet("MarkCode");
+    PabloAST * anyMark = markCode[0];
+    for (unsigned i = 1; i < markCodeBits; i++) {
+        anyMark = pb.createOr(anyMark, markCode[i]);
     }
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -540,7 +538,7 @@ def gen_long_composition_xfrm_header_code(pass_no, mark_code_bits):
 long_composition_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
-    pb.createIf(pb.createAnd(${pfx_test_var}, markFound), ${builder});
+    pb.createIf(pb.createAnd(${pfx_test_var}, markFoundForStarter), ${builder});
     std::vector<PabloAST *> xfrm_${code_str}(8, All0);
     BixNumCompiler ${builder}_bnc(${builder});
 """
@@ -570,11 +568,15 @@ def finalize_long_composable_pfx_code(pfx_code):
                         code_str = code_str)
 
 long_composable_final_code = r"""
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
+    anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xF0), anyMark), 3), anyMark);
+    PabloAST * selectMask = pb.createNot(anyMark);
     Var * XfrmOutputVar = getOutputStreamVar("OutputBasis");
     for (unsigned i = 0; i < 8; i++) {
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         //  pb.createAssign(xfrm_out, XfrmVar[i]);
-        pb.createAssign(xfrm_out, pb.createXor(Basis[i], XfrmVar[i]));
+        pb.createAssign(xfrm_out, pb.createAnd(selectMask, pb.createXor(Basis[i], XfrmVar[i])));
     }
 }
 """
@@ -627,24 +629,23 @@ ${mark_accumulation}
 """
 
 long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify long composable sequences and transform to precomposed characters.
-    StreamSet * MarkCode${pass_no} = P.CreateStreamSet(${mark_code_bits});
-    StreamSet * Index_ccc_NR_or_MarksFound${pass_no} = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<FindComposables${pass_no}>(${input_basis}, ccc_NR, MarkCode${pass_no}, Index_ccc_NR_or_MarksFound${pass_no});
-    SHOW_BIXNUM(MarkCode${pass_no});
-    SHOW_STREAM(Index_ccc_NR_or_MarksFound${pass_no});
+    StreamSet * MarkCode${step} = P.CreateStreamSet(${mark_code_bits});
+    StreamSet * Index_ccc_NR_or_MarksFound${step} = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<FindComposables${pass_no}>(${input_basis}, ccc_NR, MarkCode${step}, Index_ccc_NR_or_MarksFound${step});
+    SHOW_BIXNUM(MarkCode${step});
+    SHOW_STREAM(Index_ccc_NR_or_MarksFound${step});
 
-    StreamSet * MarkCodeAtStarter${pass_no} = P.CreateStreamSet(${mark_code_bits}, 1);
-    P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${pass_no}, MarkCode${pass_no}, MarkCodeAtStarter${pass_no});
-    SHOW_BIXNUM(MarkCodeAtStarter${pass_no});
+    StreamSet * MarkCodeAtStarter${step} = P.CreateStreamSet(${mark_code_bits}, 1);
+    P.CreateKernelCall<IndexedShiftBack>(Index_ccc_NR_or_MarksFound${step}, MarkCode${step}, MarkCodeAtStarter${step});
+    SHOW_BIXNUM(MarkCodeAtStarter${step});
 
-    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${input_basis}, MarkCodeAtStarter${pass_no}, ${output_basis});
+    P.CreateKernelCall<ApplyLongComposition${pass_no}>(${input_basis}, MarkCodeAtStarter${step},  MarkCode${step}, ${output_basis});
     SHOW_BIXNUM(${output_basis});
 """
 
 long_composable_pipeline_template = r"""void LongComposablePipeline(PipelineBuilder & P,
-                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis, StreamSet * DeletionMask) {
+                            StreamSet * Basis, StreamSet * ccc_NR, StreamSet * FinalBasis) {
 ${pipeline_logic}
-    P.CreateKernelCall<MarkDeletion>(FinalBasis, ${mark_code_parms}, DeletionMask);
 }
 """
 
@@ -903,6 +904,37 @@ def insert_map_to_bixnum_usets(ins_map):
             bit = 1 << i
     return bixnum_usets
 
+candidate_class_template = r"""//  The NFC_CandidateClass kernel produces the class of characters 
+//  that are relevant to NFC processing by virtue of being reorderable marks or
+//  non-reorderable characters that can occur as the second character of a
+//  composable sequence.
+//
+//class NFC_CandidateClass : public pablo::PabloKernel {
+//public:
+//NFC_CandidateClass
+//    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+//                                   StreamSet * NFC_CandidateClass);
+//protected:
+//    void generatePabloMethod() override;
+//};
+
+NFC_CandidateClass::NFC_CandidateClass
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis,
+                                   StreamSet * candidates)
+: PabloKernel(ts, "NFC_CandidateClass" + Basis->shapeString(),
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"candidates", candidates}}) {}
+
+void NFC_CandidateClass::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    Var * Basis = getInputStreamVar("Basis");
+    UTF::UTF_Compiler utf_compiler(Basis, pb, pablo::BitMovementMode::LookAhead);
+    std::vector<Var *> targets = {pb.createVar("candidates", pb.createZeroes()), 
+                                  pb.createVar("expandfirst", pb.createZeroes())};
+    utf_compiler.compile(targets, {${candidate_uset}_uset, ${expansion_required_uset}_uset});
+    writeOutputStreamSet("candidates", targets);
+}
+"""
 
 nfc_generated_cpp_template = r"""#include <kernel/unicode/normalization.h>
 #include <unicode/core/unicode_set.h>
@@ -987,21 +1019,36 @@ class NFC_generator:
         if not uset_member(ucd.ccc_map['NR'], cp): return True
         return not uset_member(ucd.ccc_map['NR'], ord(decomp[0]))
 
+    def full_decomp(self, cp):
+        if not uset_member(ucd.dt_map['Can'], cp): return chr(cp)
+        decomp = ucd.decomp_map[cp]
+        cp1 = ord(decomp[0])
+        while cp1 in ucd.decomp_map.keys() and uset_member(ucd.dt_map['Can'], cp1):
+            decomp = ucd.decomp_map[cp1] + decomp[1:]
+            cp1 = ord(decomp[0])
+        return decomp
+
     def create_mappings(self):
+        self.full_decomp_map = {}
         self.singleton_map = {}
         self.short_composable_map = {}
         self.long_composable_map = {}
         self.excluded_composite_map = {}
+        self.non_starter_uset = empty_uset()
         for precomposed in ucd.decomp_map.keys():
             if uset_member(ucd.dt_map['Can'], precomposed):
                 decomp = ucd.decomp_map[precomposed]
+                cp1 = ord(decomp[0])
+                self.full_decomp_map[precomposed] = self.full_decomp(precomposed)
                 if len(decomp) == 1:
-                    self.singleton_map[precomposed] = ord(decomp[0])
+                    self.singleton_map[precomposed] = cp1
                 elif len(decomp) == 2:
-                    cp1 = ord(decomp[0])
+                    if not uset_member(ucd.ccc_map['NR'], precomposed) or not uset_member(ucd.ccc_map['NR'], cp1):
+                        self.non_starter_uset = uset_union(self.non_starter_uset, singleton_uset(precomposed))
                     cp2 = ord(decomp[1])
                     if self.excluded_composite(precomposed):
                         while self.excluded_composite(cp1):
+                            #print("Recursive excluded composite: %x => %x %x => %x %x %x" %(precomposed, cp1, cp2, ord(ucd.decomp_map[cp1][0]), ord(ucd.decomp_map[cp1][1]), cp2))
                             decomp = ucd.decomp_map[cp1] + decomp[1:]
                             cp1 = ord(decomp[0])
                         self.excluded_composite_map[precomposed] = decomp
@@ -1016,9 +1063,19 @@ class NFC_generator:
                             if not cp2 in self.long_composable_map.keys():
                                 # index by the mark (second char of decomposition)
                                 self.long_composable_map[cp2] = {}
-                            self.long_composable_map[cp2][cp1] = precomposed
+                            self.long_composable_map[cp2][cp1] = chr(precomposed)
                 else:
                     raise Exception("Unexpected: decomposition length(%x) = %i" % (precomposed, len(decomp)))
+        for cp in self.singleton_map.keys():
+            canon_cp = self.singleton_map[cp]
+            if self.excluded_composite(canon_cp):
+                decomp = self.excluded_composite_map[canon_cp]
+                self.excluded_composite_map[cp] = decomp
+                print("singleton %x maps to excluded_composite %x => %s" % (cp, canon_cp, " ".join(["%x" % ord(c) for c in decomp])))
+            if uset_member(ucd.dt_map['Can'], canon_cp):
+                decomp = ucd.decomp_map[canon_cp]
+                print("singleton %x maps to %x => %s" % (cp, canon_cp, " ".join(["%x" % ord(c) for c in decomp])))
+
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1044,15 +1101,15 @@ class NFC_generator:
         by_starter = {}
         for cp2 in sorted(self.long_composable_map.keys()):
             for cp1 in self.long_composable_map[cp2].keys():
-                cp = self.long_composable_map[cp2][cp1]
+                s = self.long_composable_map[cp2][cp1]
                 if not cp1 in by_starter.keys():
                     by_starter[cp1] = {}
-                by_starter[cp1][cp2] = cp
+                by_starter[cp1][cp2] = s
         for cp1 in sorted(by_starter.keys()):
             print("%s: " % self.cp_with_ccc(cp1))
             for cp2 in sorted(by_starter[cp1].keys()):
-                cp = by_starter[cp1][cp2]
-                print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
+                s = by_starter[cp1][cp2]
+                print("    + %s => %s" % (self.cp_with_ccc(cp2), " ".join(["%x" % ord(c) for c in s])))
 
     def display_recursive_decomposables(self):
         for precomposed in sorted(ucd.decomp_map.keys()):
@@ -1088,7 +1145,10 @@ class NFC_generator:
         for mark in self.long_composable_map.keys():
             for starter in self.long_composable_map[mark].keys():
                 precomposed = self.long_composable_map[mark][starter]
-                ldiff = u8_encoded_length(precomposed) - u8_encoded_length(starter)
+                u8len = 0
+                for c in precomposed:
+                    u8len += u8_encoded_length(ord(c))
+                ldiff = u8len - u8_encoded_length(starter)
                 if ldiff > 0:
                     self.update_max_insert_map(starter, ldiff)
         for cp in self.excluded_composite_map.keys():
@@ -1099,10 +1159,93 @@ class NFC_generator:
             ldiff = decomp_len - u8_encoded_length(cp)
             if ldiff > 0:
                 self.update_max_insert_map(cp, ldiff)
+        for overridden in sorted(self.overridable_primaries.keys()):
+            for mark in self.overridable_primaries[overridden].keys():
+                decomp = self.overridable_primaries[overridden][mark]
+                decomp_len = 0
+                for c in decomp:
+                    decomp_len += u8_encoded_length(ord(c))
+                ldiff = decomp_len - u8_encoded_length(overridden)
+                if ldiff > 0:
+                    self.update_max_insert_map(overridden, ldiff)
 
     def display_max_insert_map(self):
         for cp in sorted(self.max_insert_map.keys()):
             print("%04x - insert %i" % (cp, self.max_insert_map[cp]))
+
+    # Overridable primaries are primary composites p with
+    # decomposition into starter s and mark m such that there
+    # is a composite p' = <s, m'> where CCC(m) > CCC(m')
+    # In this case the sequence <p ... m'> may be replaced by <p' m ...>
+    #
+    # A special case is when a second composite p'' = <p' m> exists,
+    # in which case, the sequence <p ... m'> can directly be replaced
+    # by <p'' ...>.
+    #
+    def determine_overridable_primaries(self):
+        by_starter_and_ccc = {}
+        for mark in self.long_composable_map.keys():
+            ccc = self.ccc_val_map[mark]
+            ccc_code = self.ccc_enum_map[ccc]
+            for starter in self.long_composable_map[mark].keys():
+                if not starter in by_starter_and_ccc.keys():
+                    by_starter_and_ccc[starter] = {}
+                if not ccc_code in by_starter_and_ccc[starter].keys():
+                    by_starter_and_ccc[starter][ccc_code] = {}
+                by_starter_and_ccc[starter][ccc_code][mark] = ord(self.long_composable_map[mark][starter])
+        self.overridable_primaries = {}
+        for starter in by_starter_and_ccc.keys():
+            ccc_list = sorted(by_starter_and_ccc[starter].keys())
+            for i in range(len(ccc_list) - 1):
+                for j in range(i+1, len(ccc_list)):
+                    lo_ccc = ccc_list[i]
+                    hi_ccc = ccc_list[j]
+                    for m1 in by_starter_and_ccc[starter][hi_ccc].keys():
+                        overridable = by_starter_and_ccc[starter][hi_ccc][m1]
+                        if not overridable in self.overridable_primaries.keys():
+                            self.overridable_primaries[overridable] = {}
+                        overrider_marks = by_starter_and_ccc[starter][lo_ccc].keys()
+                        for m2 in overrider_marks:
+                            overrider_precomp = by_starter_and_ccc[starter][lo_ccc][m2]
+                            if overrider_precomp in self.long_composable_map[m1].keys():
+                                # found a override replacement p''
+                                replacement = self.long_composable_map[m1][overrider_precomp]
+                                self.overridable_primaries[overridable][m2] = replacement
+                            else:
+                                s = chr(overrider_precomp) + chr(m1)
+                                self.overridable_primaries[overridable][m2] = s
+        for overidden in self.overridable_primaries.keys():
+            for mark in self.overridable_primaries[overidden].keys():
+                ccc = self.ccc_val_map[mark]
+                ccc_code = self.ccc_enum_map[ccc]
+                overrider = self.overridable_primaries[overidden][mark]
+                override_primary = ord(overrider[0])
+                if overrider in self.overridable_primaries.keys():
+                    # The overrider is recursively overridable.   Make sure there
+                    # is no mark in its override set that would not have already been 
+                    # considered in the processing of the overridden primary itself.
+                    for mark2 in self.overridable_primaries[overrider].keys():
+                        ccc2 = self.ccc_val_map[mark2]
+                        ccc_code2 = self.ccc_enum_map[ccc2]
+                        if ccc_code2 < ccc_code and not mark2 in self.overridable_primaries[overidden].keys():
+                            print("unexpected recursive override %x %x => %x %x" % (overridden, mark, overrider, mark2))
+
+    def implement_overridable_primaries_as_long_composables(self):
+        for overidden in self.overridable_primaries.keys():
+            for mark in self.overridable_primaries[overidden].keys():
+                overrider = self.overridable_primaries[overidden][mark]
+                self.long_composable_map[mark][overidden] = overrider
+
+    def show_overridable_primaries(self):
+        for cp in sorted(self.overridable_primaries.keys()):
+            decomp = ucd.decomp_map[cp]
+            starter = ord(decomp[0])
+            overridden_mark = ord(decomp[1])
+            print("%x == %x %s" % (cp, starter, self.cp_with_ccc(overridden_mark)))
+            for mark in self.overridable_primaries[cp].keys():
+                overrider = self.overridable_primaries[cp][mark]
+                seq = " ".join(["%x" % ord(c) for c in overrider])
+                print("  %x %s ==> %s" % (cp, self.cp_with_ccc(mark), seq))
 
     #
     # If a given starter has precompositions with marks of
@@ -1296,7 +1439,6 @@ class NFC_generator:
         mark_code_bits = self.max_conditional_code_bits[pass_no]
         s = gen_pass_header_code(pass_no, mark_code_bits)
         pass_data = {}
-        pfx_lgths = []
         for mark in self.long_composable_map.keys():
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
@@ -1305,12 +1447,7 @@ class NFC_generator:
                 for pfx_code in rg_set_map.keys():
                     if not pfx_code in pass_data.keys():
                         pass_data[pfx_code] = {}
-                        pfx_lgth = pfx_code_lgth(pfx_code)
-                        if not pfx_lgth in pfx_lgths:
-                            pfx_lgths.append(pfx_lgth)
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
-        for pfx_lgth in sorted(pfx_lgths):
-            s += "    PabloAST * mark_ahead_%i = pb.createNot(pb.createLookahead(ccc_NR, %i));\n" % (pfx_lgth, pfx_lgth)
         for pfx_code in pass_data.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
@@ -1350,7 +1487,6 @@ class NFC_generator:
         mark_code_bits = self.max_conditional_code_bits[pass_no]
         s = gen_long_composition_xfrm_header_code(pass_no, mark_code_bits)
         pass_data = {}
-        pfx_lgths = []
         for mark in self.long_composable_map.keys():
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
@@ -1359,9 +1495,6 @@ class NFC_generator:
                 for pfx_code in rg_set_map.keys():
                     if not pfx_code in pass_data.keys():
                         pass_data[pfx_code] = {}
-                        pfx_lgth = pfx_code_lgth(pfx_code)
-                        if not pfx_lgth in pfx_lgths:
-                            pfx_lgths.append(pfx_lgth)
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
         by_pos = {}
         for pfx_code in pass_data.keys():
@@ -1374,7 +1507,7 @@ class NFC_generator:
                 starters = uset_to_member_list(pass_data[pfx_code][mark])
                 pfx_xlate_map = {}
                 for cp1 in starters:
-                    pfx_xlate_map[cp1] = chr(self.long_composable_map[mark][cp1])
+                    pfx_xlate_map[cp1] = self.long_composable_map[mark][cp1]
                 bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map, zero_out_excess = True)
                 by_pos[pfx_code][mark] = {}
                 for pos in sorted(bit_xfrm_sets.keys()):
@@ -1387,7 +1520,7 @@ class NFC_generator:
                 if pass_no in self.conditional_mark_codes.keys():
                     if pfx_code in self.conditional_mark_codes[pass_no].keys():
                         mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
-                s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCode, %i);\n" % (mark, scope, mark_code)
+                s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCodeAtStarter, %i);\n" % (mark, scope, mark_code)
                 for pos in sorted(by_pos[pfx_code][mark].keys()):
                     for bit in sorted(by_pos[pfx_code][mark][pos].keys()):
                         bit_xfrm = by_pos[pfx_code][mark][pos][bit]
@@ -1411,6 +1544,9 @@ class NFC_generator:
             bindings += r"""%s Binding{"MarkCodes%i", MarkCodes%i}""" % (",\n", pass_no, pass_no)
             mark_code_bits = self.max_conditional_code_bits[pass_no]
             mark_stmts += t2.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits)
+        stream_sets += "     StreamSet * MarkCodes3A,\n"
+        bindings += r"""%s Binding{"MarkCodes3A", MarkCodes3A}""" % (",\n")
+        mark_stmts += t2.substitute(pass_no = "3A", mark_code_bits = mark_code_bits)
         return t.substitute(mark_code_streamsets = stream_sets,
                             mark_code_bindings = bindings,
                             mark_accumulation = mark_stmts)
@@ -1429,12 +1565,21 @@ class NFC_generator:
                 logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
             mark_code_bits = self.max_conditional_code_bits[pass_no]
             logic += t.substitute(pass_no = pass_no, 
+                                  step = pass_no,
                                   mark_code_bits = mark_code_bits, 
                                   input_basis = input_basis,
                                   output_basis = output_basis)
             input_basis = output_basis # for next pass
-        mark_streamsets = ", " .join(["MarkCode%i" % i for i in range(self.pass_count)])
-        return t2.substitute(pipeline_logic = logic, mark_code_parms = mark_streamsets, final_pass_no = self.pass_count - 1)
+            if pass_no == 3:
+                output_basis = "XfrmedBasis%iA" % pass_no
+                logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
+                logic += t.substitute(pass_no = pass_no,
+                                      step = "%iA" % pass_no,
+                                      mark_code_bits = mark_code_bits,
+                                      input_basis = input_basis,
+                                      output_basis = output_basis)
+            input_basis = output_basis # for next pass
+        return t2.substitute(pipeline_logic = logic, final_pass_no = self.pass_count - 1)
 
     def generate_short_composable_stage(self):
         s = short_composable_header
@@ -1503,6 +1648,41 @@ class NFC_generator:
         s += u8_insertion_final_code
         return s
 
+    #  Generate the two character classes which identify characters
+    #  that may be involved in NFC conversion.
+    #  (1)  candidates which are marks, generate marks (nonstarter decomposition),
+    #       or otherwise potentially composable with a prior character
+    #       (Hangul V and T type characters, second characters of short composables)
+    #  (2)  characters with required expansions (singletons, excluded composites)
+    def generate_candidate_classes(self):
+        t = string.Template(candidate_class_template)
+        # non-starter decompositions are either marks or generate marks
+        candidate_class = self.non_starter_uset
+        for ccc_enum in self.ucd.ccc_map.keys():
+            if ccc_enum != 'NR':  # 
+                candidate_class = uset_union(candidate_class, self.ucd.ccc_map[ccc_enum])
+        for cp1 in self.short_composable_map.keys():
+            for cp2 in self.short_composable_map[cp1].keys():
+                candidate_class = uset_union(candidate_class, singleton_uset(cp2))
+        # Include the Hangul V and T composables
+        VBase = 0x1161
+        VCount = 21
+        TBase = 0x11A7
+        TCount = 28
+        candidate_class = uset_union(candidate_class, range_uset(VBase, VBase + VCount - 1))
+        candidate_class = uset_union(candidate_class, range_uset(TBase, TBase + TCount - 1))
+        candidate_uset = self.builder.install_uset(candidate_class)
+
+        expansion_required_class = empty_uset()
+        #for cp in self.overridable_primaries.keys():
+        #    expansion_required_class = uset_union(expansion_required_class, singleton_uset(cp))
+        for cp in self.singleton_map.keys():
+            expansion_required_class = uset_union(expansion_required_class, singleton_uset(cp))
+        for cp in self.excluded_composite_map.keys():
+            expansion_required_class = uset_union(expansion_required_class, singleton_uset(cp))
+        expansion_required_uset = self.builder.install_uset(expansion_required_class)
+        return t.substitute(candidate_uset = candidate_uset, expansion_required_uset = expansion_required_uset)
+
     def emit_normalization_cpp(self):
         basename = 'normalization-generated'
         f = cformat.open_cpp_file_for_write(basename)
@@ -1514,8 +1694,8 @@ class NFC_generator:
         for pass_no in range(5):
             kernels += self.generate_nfc_stage(pass_no)
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
-        kernels += self.long_composable_mark_deletion()
         kernels += self.generate_long_composable_pipeline()
+        kernels += self.generate_candidate_classes()
         uset_definitions = self.builder.get_uset_definitions()
         t = string.Template(nfc_generated_cpp_template)
         s = t.substitute(uset_declarations = uset_definitions, kernels = kernels)
@@ -1526,13 +1706,15 @@ if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
     generator.create_mappings()
+    generator.determine_overridable_primaries()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
+    generator.implement_overridable_primaries_as_long_composables()
     generator.create_conditional_mark_codes()
+    #generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
-    generator.show_conditional_codes()
+    #generator.show_conditional_codes()
     #generator.display_singletons()
-    #generator.display_non_starter_decomps()
     #generator.display_short_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()

@@ -23,6 +23,7 @@
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
@@ -64,45 +65,6 @@ static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeBy
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
-class Invert : public PabloKernel {
-public:
-    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(ts, "Invert",
-                      {Binding{"mask", mask}},
-                      {Binding{"inverted", inverted}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void Invert::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * mask = getInputStreamSet("mask")[0];
-    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
-    Var * outVar = getOutputStreamVar("inverted");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
-}
-
-class BasisCombine : public PabloKernel {
-public:
-    BasisCombine(LLVMTypeSystemInterface & ts, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
-        : PabloKernel(ts, "BasisCombine",
-                      {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
-                      {Binding{"combined", combined}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void BasisCombine::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis1 = getInputStreamSet("basis1");
-    std::vector<PabloAST *> basis2 = getInputStreamSet("basis2");
-    Var * outVar = getOutputStreamVar("combined");
-    for (unsigned i = 0; i < basis1.size(); i++) {
-        PabloAST * combined = pb.createOr(basis1[i], basis2[i]);
-        pb.createAssign(pb.createExtract(outVar, pb.getInteger(i)), combined);
-    }
-}
-
 inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
     if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
@@ -111,10 +73,10 @@ inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, 
     StreamSet * expandedA = P.CreateStreamSet(elems);
     SpreadByMask(P, mask, a, expandedA);
     StreamSet * inverted = P.CreateStreamSet(1);
-    P.CreateKernelCall<Invert>(mask, inverted);
+    Invert(P, mask, inverted);
     StreamSet * expandedB = P.CreateStreamSet(elems);
     SpreadByMask(P, inverted, b, expandedB);
-    P.CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
+    OrCombine(P, expandedA, expandedB, merged);
 }
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {

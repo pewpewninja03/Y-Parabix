@@ -14,6 +14,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <pablo/pablo_kernel.h>
 #include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
@@ -48,6 +49,16 @@ void SpreadByMask(PipelineBuilder & P,
     }
 }
 
+//  TODO:  Consider adding toFill parameter to SpreadByMask so that filter expansion
+//  can be implemented by a single SpreadByMask call.
+void ExpandFilter(PipelineBuilder & P,
+                  StreamSet * spreadMask, StreamSet * filter, StreamSet * expanded) {
+    StreamSet * initialSpread = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, spreadMask, filter, initialSpread);
+    StreamSet * filler = P.CreateStreamSet(1, 1);
+    Invert(P, spreadMask, filler);
+    OrCombine(P, initialSpread, filler, expanded);
+}
 
 void MergeByMask(PipelineBuilder & P,
                  StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {

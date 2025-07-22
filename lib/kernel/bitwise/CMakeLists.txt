@@ -8,7 +8,9 @@ NAME
     kernel.bitwise
 SRC
     bixnum_kernel.cpp
+    bixlogic.cpp
 DEPS
     pablo
     pablo.bixnum
+    kernel.pipeline
 )

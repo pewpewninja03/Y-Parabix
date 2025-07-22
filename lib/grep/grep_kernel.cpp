@@ -638,7 +638,7 @@ void InvertMatchesKernel::generateDoBlockMethod(KernelBuilder & b) {
 }
 
 InvertMatchesKernel::InvertMatchesKernel(LLVMTypeSystemInterface & ts, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
-: BlockOrientedKernel(ts, "Invert" + std::to_string(Matches->getNumElements()),
+: BlockOrientedKernel(ts, "InvertMatches" + std::to_string(Matches->getNumElements()),
 // Inputs
 {Binding{"matchedLines", Matches},
  Binding{"lineBreaks", LineBreakStream}},
