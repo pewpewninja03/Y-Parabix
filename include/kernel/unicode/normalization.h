@@ -11,6 +11,7 @@
 using StreamSet = kernel::StreamSet;
 using PipelineBuilder = kernel::PipelineBuilder;
 namespace re {class CC;}
+namespace pablo {class PabloBuilder; class PabloAST;}
 
 // Hangul Composition Kernels for NFC (See Unicode section 3.12).
 //
@@ -162,6 +163,37 @@ public:
 protected:
     void generatePabloMethod() override;
 };
+
+//
+//  Self-Composable Logic
+//  Given Unicode characters AA and A such that AA has a canonical
+//  decomposition AA ==> [A, A], the character A is called a
+//  self-composable, while the character AA is called a doubleton.
+//
+//  Two sets of such characters are:
+//  0x16121 => [0x1611e, 0x1611e]
+//  0x16d68 => [0x16d67, 0x16d67]
+//
+//  Conversion of sequences of self-composables and doubletons to NFC form
+//  include the following examples.
+//
+//  A AA ==> AA A
+//  A A A ==> AA A
+//  A AA A ==> AA AA
+//  A A AA A  ==> AA AA A
+//
+//  For each span of As and AAs:
+//  1.  The odd numbered As are converted to AAs, except if the A is last of the span.
+//  2.  The even numbered As are marked for deletion.
+//  3.  If the number of As is odd, and the last of the span is AA, it is converted to A.
+
+struct SCResults {
+    pablo::PabloAST * A_to_convert_to_AA;
+    pablo::PabloAST * A_to_delete;
+    pablo::PabloAST * AA_to_convert_to_A;
+};
+
+SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA);
 
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,

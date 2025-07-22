@@ -213,6 +213,55 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("Output_Basis", outputVar);
 }
 
+SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len, PabloAST * A, PabloAST * AA) {
+    SCResults results;
+    PabloAST * A_span = A;
+    PabloAST * AA_span = AA;
+    if (A_len > 1) {
+        A_span = pb.createOr(A_span, pb.createAdvance(A, 1));
+        if (A_len > 2) {
+            A_span = pb.createOr(A_span, pb.createAdvance(A, 2));
+        }
+        if (A_len == 4) {
+            A_span = pb.createOr(A_span, pb.createAdvance(A, 3));
+        }
+    }
+    if (AA_len > 1) {
+        AA_span = pb.createOr(AA_span, pb.createAdvance(AA, 1));
+        if (AA_len > 2) {
+            AA_span = pb.createOr(A_span, pb.createAdvance(AA, 2));
+        }
+        if (AA_len == 4) {
+            AA_span = pb.createOr(A_span, pb.createAdvance(AA, 3));
+        }
+    }
+    PabloAST * A_run_start = pb.createAnd(A, pb.createAdvance(pb.createNot(A_span), 1));
+    PabloAST * A1 = pb.createEveryNth(A, pb.getInteger(2));  //  1st, 3rd, 5th, ... of all the As
+    PabloAST * A2 = pb.createXor(A, A1);  //  2nd, 4th, 6th, ... of the As
+    PabloAST * A1_start = pb.createAnd(A_run_start, A1);
+    PabloAST * A2_start = pb.createAnd(A_run_start, A2);
+    PabloAST * A_or_AA_span = pb.createOr(A_span, AA_span);
+    //  For each span, determine the odd-numbered As (1st, 3rd, 5th, ...)
+    PabloAST * A1_odd = pb.createAnd(pb.createMatchStar(A1_start, A_or_AA_span), A1);
+    PabloAST * A2_odd = pb.createAnd(pb.createMatchStar(A2_start, A_or_AA_span), A2);
+    PabloAST * A_odd = pb.createOr(A1_odd, A2_odd);
+    PabloAST * A_even = pb.createXor(A1, A);
+    //
+    PabloAST * A_ahead = pb.createLookahead(A, A_len);
+    PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
+    PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead);
+    PabloAST * AA_final = pb.createAnd(AA, pb.createNot(A_or_AA_ahead));
+    // Rule 1
+    results.A_to_convert_to_AA = pb.createAnd(A1, A_or_AA_ahead);
+    // Rule 2
+    results.A_to_delete = A_even;
+    // Rule 3
+    // Starting from an odd A, if the remaining span are AAs, convert the final one.
+    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, AA_len));
+    results.AA_to_convert_to_A = pb.createAnd(pb.createMatchStar(AA1, AA_span), AA_final);
+    return results;
+}
+
 class CreateU8_FilterMask : public pablo::PabloKernel {
 public:
     CreateU8_FilterMask(LLVMTypeSystemInterface & ts, StreamSet * DeletionBixNum, StreamSet * DelMask);

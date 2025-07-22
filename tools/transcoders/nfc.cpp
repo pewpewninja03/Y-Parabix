@@ -299,7 +299,6 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
         auto rslts = NFC_U8_Pipeline(P, CCC0_Name, SourceExpansionMask, ExpandedBasis);
         OutputBasis = rslts.first;
-        StreamSet * FinalSelectionMask = rslts.second;
     } else {
         StreamSet * SelectedWorkBasis = P.CreateStreamSet(8, 1);
         FilterByMask(P, WorkSelectionMask, BasisBits, SelectedWorkBasis);
