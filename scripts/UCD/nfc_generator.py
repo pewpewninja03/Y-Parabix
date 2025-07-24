@@ -751,6 +751,48 @@ short_composable_final_code = r"""
 }
 """
 
+self_composable_header = r"""//
+SelfComposableTranslation::SelfComposableTranslation
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * self_composable_CCs,
+                                   StreamSet * XfrmedBasis)
+: PabloKernel(ts, "SelfComposableTranslation" + Basis->shapeString(),
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"self_composable_CCs", self_composable_CCs, FixedRate(), LookAhead(4)}},
+{Binding{"XfrmedBasis", XfrmedBasis}}) {}
+
+void SelfComposableTranslation::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    std::vector<PabloAST *> self_composable_CCs = getInputStreamSet("self_composable_CCs");
+    Var * DelVar = pb.createVar("DelVar", All0);
+    std::vector<Var *> XfrmVar(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        XfrmVar[i] = pb.createVar("XfrmBasis" + std::to_string(i), All0);
+    }
+"""
+
+self_composable_case_template = r"""    auto b_${A} = pb.createScope();
+    pb.createIf(${A_AST}, b_${A});
+    std::vector<PabloAST *> basisXor_${A}(8, All0);
+    SCResults rslt_${A} = SelfComposableLogic(b_${A}, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST});
+    b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_to_delete));
+    PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
+${bit_xfrms}
+    for (unsigned i = 0; i < 8; i++) {
+        b_${A}.createAssign(XfrmVar[i], b_${A}.createOr(XfrmVar[i], basisXor_${A}[i]));
+    }
+"""
+
+self_composable_final_code = r"""
+    PabloAST * select = pb.createNot(DelVar);
+    Var * XfrmOutputVar = getOutputStreamVar("XfrmedBasis");
+    for (unsigned i = 0; i < 8; i++) {
+        Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
+        pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(XfrmVar[i], Basis[i])));
+    }
+}
+"""
+
 #
 #  UTF-8 character translation using Xor method for cp1 -> cp2.
 #  Assumptions:
@@ -767,21 +809,20 @@ def CharacterTranslationLogic(cp1, cp2, marker, basis_var, pb):
     s = ""
     len1 = u8_encoded_length(cp1)
     len2 = u8_encoded_length(cp2)
-    excess = len1 - len2
     for i in range(len2):
         # position for cp2 byte
         cp2_byte = u8_code_unit(cp2, i + 1)
-        pos = excess + i
+        #pos = excess + i
         cp1_byte = 0 # default for positions corresponding to inserted zeroes
-        if pos < len1:
-            cp1_byte = u8_code_unit(cp1, pos + 1)
+        if i < len1:
+            cp1_byte = u8_code_unit(cp1, i + 1)
         if cp1_byte != cp2_byte:
             diff = cp1_byte ^ cp2_byte
             # advance marker to pos
-            if pos == 0:
+            if i == 0:
                 s += "    PabloAST * m_%x_%x_0 = %s;\n" % (cp1, cp2, marker)
             else:
-                s += "    PabloAST * m_%x_%x_%i = %s.createAdvance(%s, %i);\n" % (cp1, cp2, i, pb, marker, pos)
+                s += "    PabloAST * m_%x_%x_%i = %s.createAdvance(%s, %i);\n" % (cp1, cp2, i, pb, marker, i)
             # apply xor logic for each bit difference between cp1_byte, cp2_byte
             for j in range(8):
                 bv = "%s[%i]" % (basis_var, j)
@@ -831,7 +872,7 @@ def u8_deletion_sets(char2string_map):
             deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], cp_uset)
     return deletion_usets
 
-def u8_bit_transform_sets(char2string_map, zero_out_excess = False):
+def u8_bit_transform_sets(char2string_map):
     bit_xfrm_sets = {}
     for cp in char2string_map.keys():
         cp_uset = singleton_uset(cp)
@@ -842,31 +883,27 @@ def u8_bit_transform_sets(char2string_map, zero_out_excess = False):
             len2 += u8_encoded_length(ord(ch))
         str_bytes = []
         excess = 0
-        if len1 > len2:
-            if zero_out_excess:
-                str_bytes = [0 for i in range(len1 - len2)]
-            else:
-                excess = len1 - len2
         for ch in s:
             cp2 = ord(ch)
             for i in range(u8_encoded_length(cp2)):
                 str_bytes.append(u8_code_unit(cp2, i + 1))
+        if len1 > len2:
+            str_bytes += [0 for i in range(len1 - len2)]
         len2 = len(str_bytes) 
         for i in range(len2):
             xlat_byte = str_bytes[i]
-            pos = excess + i # position relative to cp1 starter
             cp_byte = 0 # default for positions corresponding to inserted zeroes
-            if pos < len1:
-                cp_byte = u8_code_unit(cp, pos + 1)
+            if i < len1:
+                cp_byte = u8_code_unit(cp, i + 1)
             if cp_byte != xlat_byte:
                 diff = cp_byte ^ xlat_byte
-                if not pos in bit_xfrm_sets.keys():
-                    bit_xfrm_sets[pos] = {}
+                if not i in bit_xfrm_sets.keys():
+                    bit_xfrm_sets[i] = {}
                 for j in range(8):
                     if (diff >> j) & 1 == 1:
-                        if not j in bit_xfrm_sets[pos].keys():
-                            bit_xfrm_sets[pos][j] = empty_uset()
-                        bit_xfrm_sets[pos][j] = uset_union(bit_xfrm_sets[pos][j], cp_uset)
+                        if not j in bit_xfrm_sets[i].keys():
+                            bit_xfrm_sets[i][j] = empty_uset()
+                        bit_xfrm_sets[i][j] = uset_union(bit_xfrm_sets[i][j], cp_uset)
     return bit_xfrm_sets
 
 u8_insertion_bixnum_template = r"""//
@@ -1032,6 +1069,7 @@ class NFC_generator:
         self.full_decomp_map = {}
         self.singleton_map = {}
         self.short_composable_map = {}
+        self.self_composables = empty_uset()
         self.long_composable_map = {}
         self.excluded_composite_map = {}
         self.non_starter_uset = empty_uset()
@@ -1059,6 +1097,8 @@ class NFC_generator:
                                 # index by the first character of decomposition
                                 self.short_composable_map[cp1] = {}
                             self.short_composable_map[cp1][cp2] = precomposed
+                            if cp1 == cp2:
+                                self.self_composables = uset_union(self.self_composables, singleton_uset(cp1))
                         else:
                             if not cp2 in self.long_composable_map.keys():
                                 # index by the mark (second char of decomposition)
@@ -1096,6 +1136,10 @@ class NFC_generator:
             for cp2 in sorted(self.short_composable_map[cp1].keys()):
                 cp = self.short_composable_map[cp1][cp2]
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
+
+    def display_self_composables(self):
+        for cp1 in sorted(uset_to_member_list(self.self_composables)):
+            print("%x + %x => %x: " % (cp1, cp1, self.short_composable_map[cp1][cp1]))
 
     def display_long_composables(self):
         by_starter = {}
@@ -1361,10 +1405,10 @@ class NFC_generator:
                 pfx_xlate_map[cp1] = chr(self.singleton_map[cp1])
             bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
             del_usets = u8_deletion_sets(pfx_xlate_map)
-            has_del = len(del_usets.keys()) > 0
-            del_vars = {}
-            for del_amt in del_usets.keys():
-                del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
+            #has_del = len(del_usets.keys()) > 0
+            #del_vars = {}
+            #for del_amt in del_usets.keys():
+            #    del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
             by_pos = {}
             for pos in sorted(bit_xfrm_sets.keys()):
                 by_pos[pos] = {}
@@ -1382,12 +1426,7 @@ class NFC_generator:
                             adv_markers[marker] = adv
                         marker = adv_markers[marker]
                     s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
-            if has_del:
-                for del_amt in sorted(del_usets.keys()):
-                    s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
-                    for d in range(1, del_amt):
-                        s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
-            s += finalize_nested_pfx_code(pfx_code, has_del)
+            s += finalize_nested_pfx_code(pfx_code, False)
             s += self.builder.close_scope()
         s += singleton_final_code
         return s
@@ -1426,11 +1465,7 @@ class NFC_generator:
                             adv_markers[marker] = adv
                         marker = adv_markers[marker]
                     s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
-            for del_amt in sorted(del_usets.keys()):
-                s += "    del_%s = %s.createOr(del_%s, %s);\n" % (code_str, scope, code_str, del_vars[del_amt])
-                for d in range(1, del_amt):
-                    s += "    del_%s = %s.createOr(del_%s, %s.createAdvance(%s, %i));\n" % (code_str, scope, code_str, scope, del_vars[del_amt], d)
-            s += finalize_nested_pfx_code(pfx_code, len(del_usets.keys()) > 0)
+            s += finalize_nested_pfx_code(pfx_code, False)
             s += self.builder.close_scope()
         s += excluded_composite_final_code
         return s
@@ -1508,7 +1543,7 @@ class NFC_generator:
                 pfx_xlate_map = {}
                 for cp1 in starters:
                     pfx_xlate_map[cp1] = self.long_composable_map[mark][cp1]
-                bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map, zero_out_excess = True)
+                bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
                 by_pos[pfx_code][mark] = {}
                 for pos in sorted(bit_xfrm_sets.keys()):
                     by_pos[pfx_code][mark][pos] = {}
@@ -1580,6 +1615,22 @@ class NFC_generator:
                                       output_basis = output_basis)
             input_basis = output_basis # for next pass
         return t2.substitute(pipeline_logic = logic, final_pass_no = self.pass_count - 1)
+
+    def generate_self_composable_stage(self):
+        s = self_composable_header
+        t = string.Template(self_composable_case_template)
+        i = 0
+        for A in uset_to_member_list(self.self_composables):
+            AA = self.short_composable_map[A][A]
+            A_len = u8_encoded_length(A)
+            AA_len = u8_encoded_length(AA)
+            A_AST = "self_composable_CCs[%i]" % i
+            AA_AST = "self_composable_CCs[%i]" % (i + 1)
+            bit_xfrms = CharacterTranslationLogic(A, AA, "xfrm_%x" % A, "basisXor_%x" % A, "b_%x" % A)
+            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST, bit_xfrms = bit_xfrms)
+            i += 2
+        s += self_composable_final_code
+        return s
 
     def generate_short_composable_stage(self):
         s = short_composable_header
@@ -1690,6 +1741,7 @@ class NFC_generator:
         kernels += self.generate_u8_insertion_kernel()
         kernels += self.generate_singleton_stage()
         kernels += self.generate_excluded_composite_stage()
+        kernels += self.generate_self_composable_stage()
         kernels += self.generate_short_composable_stage()
         for pass_no in range(5):
             kernels += self.generate_nfc_stage(pass_no)
@@ -1716,6 +1768,7 @@ if __name__ == "__main__":
     #generator.show_conditional_codes()
     #generator.display_singletons()
     #generator.display_short_composables()
+    #generator.display_self_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()
     #generator.display_recursive_decomposables()
