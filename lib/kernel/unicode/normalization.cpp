@@ -229,30 +229,30 @@ SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len
     if (AA_len > 1) {
         AA_span = pb.createOr(AA_span, pb.createAdvance(AA, 1));
         if (AA_len > 2) {
-            AA_span = pb.createOr(A_span, pb.createAdvance(AA, 2));
+            AA_span = pb.createOr(AA_span, pb.createAdvance(AA, 2));
         }
         if (AA_len == 4) {
-            AA_span = pb.createOr(A_span, pb.createAdvance(AA, 3));
+            AA_span = pb.createOr(AA_span, pb.createAdvance(AA, 3));
         }
     }
-    PabloAST * A_run_start = pb.createAnd(A, pb.createNot(pb.createAdvance(A_span, 1)));
+    PabloAST * A_run_start = pb.createAnd(A, pb.createNot(pb.createAdvance(A_span, 1)), "selfc.A_run_start");
     PabloAST * A1 = pb.createEveryNth(A, pb.getInteger(2));  //  1st, 3rd, 5th, ... of all the As
     PabloAST * A2 = pb.createXor(A, A1);  //  2nd, 4th, 6th, ... of the As
     PabloAST * A1_start = pb.createAnd(A_run_start, A1);
     PabloAST * A2_start = pb.createAnd(A_run_start, A2);
-    PabloAST * A_or_AA_span = pb.createOr(A_span, AA_span);
+    PabloAST * A_or_AA_span = pb.createOr(A_span, AA_span, "selfc.A_or_AA_span");
     //  For each span, determine the odd-numbered As (1st, 3rd, 5th, ...)
     PabloAST * A1_runs = pb.createMatchStar(A1_start, A_or_AA_span);
     PabloAST * A2_runs = pb.createMatchStar(A2_start, A_or_AA_span);
-    PabloAST * A_odd = pb.createOr(pb.createAnd(A1_runs, A1), pb.createAnd(A2_runs, A2));
-    PabloAST * A_even = pb.createOr(pb.createAnd(A1_runs, A2), pb.createAnd(A2_runs, A1));
+    PabloAST * A_odd = pb.createOr(pb.createAnd(A1_runs, A1), pb.createAnd(A2_runs, A2), "selfc.A_odd");
+    PabloAST * A_even = pb.createOr(pb.createAnd(A1_runs, A2), pb.createAnd(A2_runs, A1), "selfc.A_even");
     //
-    PabloAST * A_ahead = pb.createLookahead(A, A_len);
+    PabloAST * A_ahead = pb.createLookahead(A, A_len, "selfc.A_ahead");
     PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
-    PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead);
+    PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead, "selfc.A_or_AA_ahead");
     PabloAST * AA_final = pb.createAnd(AA, pb.createNot(A_or_AA_ahead));
     // Rule 1
-    results.A_to_convert_to_AA = pb.createAnd(A1, A_or_AA_ahead);
+    results.A_to_convert_to_AA = pb.createAnd(A1, A_or_AA_ahead, "selfc.A_to_convert_to_AA");
     // Rule 2
     results.A_to_delete = A_even;
     for (unsigned i = 2; i <= A_len; i++) {
@@ -260,8 +260,8 @@ SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len
     }
     // Rule 3
     // Starting from an odd A, if the remaining span are AAs, convert the final one.
-    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, AA_len));
-    results.AA_to_convert_to_A = pb.createAnd(pb.createMatchStar(AA1, AA_span), AA_final);
+    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, AA_len), "selfc.AA1");
+    results.AA_to_convert_to_A = pb.createAnd(pb.createMatchStar(AA1, AA_span), AA_final, "selfc.AA_to_convert_to_A");
     return results;
 }
 
