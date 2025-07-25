@@ -187,6 +187,23 @@ protected:
 //  2.  The even numbered As are marked for deletion.
 //  3.  If the number of As is odd, and the last of the span is AA, it is converted to A.
 
+class SelfComposableCCs : public pablo::PabloKernel {
+public:
+    SelfComposableCCs
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * short_composable_CCs);
+protected:
+    void generatePabloMethod() override;
+};
+
+class SelfComposableTranslation : public pablo::PabloKernel {
+public:
+    SelfComposableTranslation
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * short_composable_CCs,
+                                       StreamSet * XfrmedBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
 struct SCResults {
     pablo::PabloAST * A_to_convert_to_AA;
     pablo::PabloAST * A_to_delete;

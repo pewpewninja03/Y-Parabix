@@ -751,6 +751,24 @@ short_composable_final_code = r"""
 }
 """
 
+self_composable_CC_header = r"""//
+SelfComposableCCs::SelfComposableCCs
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * self_composable_CCs)
+: PabloKernel(ts, "SelfComposableCCs" + Basis->shapeString(),
+{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
+{Binding{"self_composable_CCs", self_composable_CCs}}) {}
+
+void SelfComposableCCs::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    PabloAST * All0 = pb.createZeroes();
+    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+"""
+
+self_composable_CC_final_code = r"""
+    writeOutputStreamSet("self_composable_CCs", self_composables);
+}
+"""
+
 self_composable_header = r"""//
 SelfComposableTranslation::SelfComposableTranslation
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * self_composable_CCs,
@@ -1616,6 +1634,21 @@ class NFC_generator:
             input_basis = output_basis # for next pass
         return t2.substitute(pipeline_logic = logic, final_pass_no = self.pass_count - 1)
 
+    def generate_self_composable_CC_stage(self):
+        s = self_composable_CC_header
+        self.builder.open_scope("", "pb")
+        self_composable_usets = []
+        for A in uset_to_member_list(self.self_composables):
+            AA = self.short_composable_map[A][A]
+            self_composable_usets.append(self.builder.install_uset(singleton_uset(A)))
+            self_composable_usets.append(self.builder.install_uset(singleton_uset(AA)))
+        s += self.builder.generate_scope_compilations()
+        s += "    std::vector<PabloAST *> self_composables(%i);\n" % len(self_composable_usets)
+        for i in range(len(self_composable_usets)):
+            s += "    self_composables[%i] = %s;\n" % (i, self_composable_usets[i])
+        s += self_composable_CC_final_code
+        return s
+
     def generate_self_composable_stage(self):
         s = self_composable_header
         t = string.Template(self_composable_case_template)
@@ -1715,6 +1748,9 @@ class NFC_generator:
         for cp1 in self.short_composable_map.keys():
             for cp2 in self.short_composable_map[cp1].keys():
                 candidate_class = uset_union(candidate_class, singleton_uset(cp2))
+        for cp in uset_to_member_list(self.self_composables):
+            doubleton = self.short_composable_map[cp][cp]
+            candidate_class = uset_union(candidate_class, singleton_uset(doubleton))
         # Include the Hangul V and T composables
         VBase = 0x1161
         VCount = 21
@@ -1741,6 +1777,7 @@ class NFC_generator:
         kernels += self.generate_u8_insertion_kernel()
         kernels += self.generate_singleton_stage()
         kernels += self.generate_excluded_composite_stage()
+        kernels += self.generate_self_composable_CC_stage()
         kernels += self.generate_self_composable_stage()
         kernels += self.generate_short_composable_stage()
         for pass_no in range(5):
@@ -1767,7 +1804,7 @@ if __name__ == "__main__":
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
-    #generator.display_short_composables()
+    generator.display_short_composables()
     #generator.display_self_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()
