@@ -187,48 +187,6 @@ class Uset_Builder:
     def close_scope(self):
         return "    }\n"
 
-
-def u8_adjustment_bixnums_from_codepoint_map(translation_map):
-    for cp1 in translation_map.keys():
-        cp2 = translation_map[cp1]
-        ldiff = u8_encoded_length(cp2) - u8_encoded_length(cp1)
-        insertion_bixnum_usets = []
-        deletion_bixnum_usets = []
-        if ldiff > 0:
-            bit = 0
-            while ldiff > 0:
-                if len(insertion_bixnum_usets) <= bit:
-                    insertion_bixnum_usets.append(empty_uset())
-                if ldiff & 1 == 1:
-                    insertion_bixnum_usets[bit] = uset_union(insertion_bixnum_usets[bit], singleton_uset(cp1))
-                ldiff >>=  1
-                bit += 1
-        elif ldiff < 0:
-            ldiff = -ldiff
-            bit = 0
-            while ldiff > 0:
-                if len(deletion_bixnum_usets) <= bit:
-                    deletion_bixnum_usets.append(empty_uset())
-                if ldiff & 1 == 1:
-                    deletion_bixnum_usets[bit] = uset_union(deletion_bixnum_usets[bit], singleton_uset(cp1))
-                ldiff >>=  1
-                bit += 1
-    return (insertion_bixnum_usets, deletion_bixnum_usets)
-
-def u8_deletion_usets_from_codepoint_map(translation_map):
-    deletion_usets = {}
-    for cp1 in translation_map.keys():
-        cp2 = translation_map[cp1]
-        len1 = u8_encoded_length(cp1)
-        len2 = u8_encoded_length(cp2)
-        if len1 > len2:
-            ldiff = len1 - len2
-            if not ldiff in deletion_usets.keys():
-                deletion_usets[ldiff] = empty_uset()
-            deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], singleton_uset(cp1))
-    return deletion_usets
-
-
 def get_pfx_code(cp):
     initial = u8_code_unit(cp, 1)
     if initial <= 0x7F: return 0
@@ -581,53 +539,6 @@ long_composable_final_code = r"""
 }
 """
 
-any_mark_template = r"""    std::vector<PabloAST *> MarkCodes${pass_no} = getInputStreamSet("MarkCodes${pass_no}");
-    for (unsigned i = 0; i < MarkCodes${pass_no}.size(); i++) {
-        anyMark = pb.createOr(anyMark, MarkCodes${pass_no}[i]);
-    }
-"""
-mark_deletion_template = r"""//
-class MarkDeletion : public pablo::PabloKernel {
-public:
-MarkDeletion
-    (LLVMTypeSystemInterface & ts, 
-     StreamSet * Basis,
-${mark_code_streamsets}    StreamSet * DeletionMask);
-protected:
-    void generatePabloMethod() override;
-};
-
-MarkDeletion::MarkDeletion
-    (LLVMTypeSystemInterface & ts,
-     StreamSet * Basis,
-${mark_code_streamsets}    StreamSet * DeletionMask)
-: PabloKernel(ts, "MarkDeletion",
-{Binding{"Basis", Basis}${mark_code_bindings}},
-{Binding{"DeletionMask", DeletionMask}}) {}
-
-void MarkDeletion::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    BixNumCompiler bnc(pb);
-    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    PabloAST * anyMark = pb.createZeroes();
-${mark_accumulation}
-    PabloAST * pfxmark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xC2));
-    PabloAST * pfx3or4mark = pb.createAnd(anyMark, bnc.UGE(Basis, 0xE0));
-    Var * markVar = pb.createVar("MarkVar", pb.createZeroes());
-    pb.createAssign(markVar, pb.createOr(anyMark, pb.createAdvance(pfxmark, 1)));
-    auto nested = pb.createScope();
-    pb.createIf(pfx3or4mark, nested);
-    BixNumCompiler bnc2(nested);
-    nested.createAssign(markVar, nested.createOr(markVar, nested.createAdvance(pfx3or4mark, 2)));
-    PabloAST * pfx4mark = nested.createAnd(anyMark, bnc2.UGE(Basis, 0xF0));
-    auto nested2 = nested.createScope();
-    nested.createIf(pfx4mark, nested2);
-    nested2.createAssign(markVar, nested2.createOr(markVar, nested2.createAdvance(pfx4mark, 3)));
-    Var * MaskOutputVar = pb.createExtract(getOutputStreamVar("DeletionMask"), pb.getInteger(0));
-    pb.createAssign(MaskOutputVar, markVar);
-}
-"""
-
 long_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify long composable sequences and transform to precomposed characters.
     StreamSet * MarkCode${step} = P.CreateStreamSet(${mark_code_bits});
     StreamSet * Index_ccc_NR_or_MarksFound${step} = P.CreateStreamSet(1, 1);
@@ -704,7 +615,6 @@ def generate_short_case_code(code_str, cp1, cp2, generated, precomposed):
                         cp1_len=u8_encoded_length(cp1),
                         precomposed = "%x" % precomposed)
     xlate_code = CharacterTranslationLogic(cp2, precomposed, "found_%x_%x" % (cp1, cp2), "xfrm_%s" % code_str, "b_%s" % code_str)
-    #xlate_code = add_u8_bit_translation_case(code_str, cp2, precomposed, "found_%x_%x" % (cp1, cp2))
     return s + xlate_code
 
 short_composable_pfx_template = r"""
@@ -811,6 +721,25 @@ self_composable_final_code = r"""
 }
 """
 
+def u8_byte_xfrms(cp, strg):
+    len1 = u8_encoded_length(cp)
+    len2 = 0
+    for ch in strg:
+        len2 += u8_encoded_length(ord(ch))
+    strg_bytes = []
+    for ch in strg:
+        cp2 = ord(ch)
+        for i in range(u8_encoded_length(cp2)):
+            strg_bytes.append(u8_code_unit(cp2, i + 1))
+    if len1 > len2:
+        strg_bytes += [0 for i in range(len1 - len2)]
+    xfrm_bytes = []
+    for i in range(len(strg_bytes)):
+        cp_byte = 0 # default for positions corresponding to inserted zeroes
+        if i < len1:
+            cp_byte = u8_code_unit(cp, i + 1)
+        xfrm_bytes.append(cp_byte ^ strg_bytes[i])
+    return xfrm_bytes
 #
 #  UTF-8 character translation using Xor method for cp1 -> cp2.
 #  Assumptions:
@@ -819,23 +748,15 @@ self_composable_final_code = r"""
 #      zeroes have been inserted after the last byte of cp1
 #    - if u8_encoded_length(cp2) < u8_encoded_length(cp1):
 #      excess = u8_encoded_length(cp1) - u8_encoded_length(cp2)
-#      The first excess positions are don't cares and will
-#      ultimately be deleted
 #    - pb is the PabloBuilder for logic
 #
 def CharacterTranslationLogic(cp1, cp2, marker, basis_var, pb):
+    xfrm_bytes = u8_byte_xfrms(cp1, chr(cp2))
     s = ""
-    len1 = u8_encoded_length(cp1)
     len2 = u8_encoded_length(cp2)
     for i in range(len2):
-        # position for cp2 byte
-        cp2_byte = u8_code_unit(cp2, i + 1)
-        #pos = excess + i
-        cp1_byte = 0 # default for positions corresponding to inserted zeroes
-        if i < len1:
-            cp1_byte = u8_code_unit(cp1, i + 1)
-        if cp1_byte != cp2_byte:
-            diff = cp1_byte ^ cp2_byte
+        diff = xfrm_bytes[i]
+        if diff != 0:
             # advance marker to pos
             if i == 0:
                 s += "    PabloAST * m_%x_%x_0 = %s;\n" % (cp1, cp2, marker)
@@ -894,27 +815,10 @@ def u8_bit_transform_sets(char2string_map):
     bit_xfrm_sets = {}
     for cp in char2string_map.keys():
         cp_uset = singleton_uset(cp)
-        len1 = u8_encoded_length(cp)
-        s = char2string_map[cp]
-        len2 = 0
-        for ch in s:
-            len2 += u8_encoded_length(ord(ch))
-        str_bytes = []
-        excess = 0
-        for ch in s:
-            cp2 = ord(ch)
-            for i in range(u8_encoded_length(cp2)):
-                str_bytes.append(u8_code_unit(cp2, i + 1))
-        if len1 > len2:
-            str_bytes += [0 for i in range(len1 - len2)]
-        len2 = len(str_bytes) 
-        for i in range(len2):
-            xlat_byte = str_bytes[i]
-            cp_byte = 0 # default for positions corresponding to inserted zeroes
-            if i < len1:
-                cp_byte = u8_code_unit(cp, i + 1)
-            if cp_byte != xlat_byte:
-                diff = cp_byte ^ xlat_byte
+        xfrm_bytes = u8_byte_xfrms(cp, char2string_map[cp])
+        for i in range(len(xfrm_bytes)):
+            diff = xfrm_bytes[i]
+            if diff != 0:
                 if not i in bit_xfrm_sets.keys():
                     bit_xfrm_sets[i] = {}
                 for j in range(8):
@@ -1591,24 +1495,6 @@ class NFC_generator:
             s += self.builder.close_scope()
         s += long_composable_final_code
         return s
-
-    def long_composable_mark_deletion(self):
-        t = string.Template(mark_deletion_template)
-        t2 = string.Template(any_mark_template)
-        stream_sets = ""
-        bindings = ""
-        mark_stmts = ""
-        for pass_no in range(self.pass_count):
-            stream_sets += "     StreamSet * MarkCodes%i,\n" % pass_no
-            bindings += r"""%s Binding{"MarkCodes%i", MarkCodes%i}""" % (",\n", pass_no, pass_no)
-            mark_code_bits = self.max_conditional_code_bits[pass_no]
-            mark_stmts += t2.substitute(pass_no = pass_no, mark_code_bits = mark_code_bits)
-        stream_sets += "     StreamSet * MarkCodes3A,\n"
-        bindings += r"""%s Binding{"MarkCodes3A", MarkCodes3A}""" % (",\n")
-        mark_stmts += t2.substitute(pass_no = "3A", mark_code_bits = mark_code_bits)
-        return t.substitute(mark_code_streamsets = stream_sets,
-                            mark_code_bindings = bindings,
-                            mark_accumulation = mark_stmts)
 
     def generate_long_composable_pipeline(self):
         t = string.Template(long_composable_pipeline_step_template)
