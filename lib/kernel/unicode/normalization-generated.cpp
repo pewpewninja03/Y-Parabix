@@ -7394,8 +7394,8 @@ void ShortComposableTranslation::generatePabloMethod() {
     PabloAST * del_prior_f0 = All0;
     {
     UTF::UTF_Compiler _compiler(getInputStreamVar("Basis"), b_f0, pablo::BitMovementMode::LookAhead);
-    std::vector<Var *> _vars(32);
-    std::vector<UnicodeSet> _usets(32);
+    std::vector<Var *> _vars(33);
+    std::vector<UnicodeSet> _usets(33);
     Var * F0_11131 = b_f0.createVar("F0_11131", All0);
     _vars[0] = F0_11131;
     _usets[0] = F0_11131_uset;
@@ -7489,9 +7489,12 @@ void ShortComposableTranslation::generatePabloMethod() {
     Var * F0_16d67 = b_f0.createVar("F0_16d67", All0);
     _vars[30] = F0_16d67;
     _usets[30] = F0_16d67_uset;
+    Var * F0_16d68 = b_f0.createVar("F0_16d68", All0);
+    _vars[31] = F0_16d68;
+    _usets[31] = F0_16d68_uset;
     Var * F0_16d69 = b_f0.createVar("F0_16d69", All0);
-    _vars[31] = F0_16d69;
-    _usets[31] = F0_16d69_uset;
+    _vars[32] = F0_16d69;
+    _usets[32] = F0_16d69_uset;
 
     _compiler.compile(_vars, _usets);
 //  Cases for 11131
@@ -7692,6 +7695,11 @@ void ShortComposableTranslation::generatePabloMethod() {
     xfrm_f0[1] = b_f0.createOr(xfrm_f0[1], m_16d67_16d69_3);
     xfrm_f0[2] = b_f0.createOr(xfrm_f0[2], m_16d67_16d69_3);
     xfrm_f0[3] = b_f0.createOr(xfrm_f0[3], m_16d67_16d69_3);
+//     16d63 + 16d68 => 16d6a
+    PabloAST * found_16d63_16d68 = b_f0.createAnd(after_16d63, F0_16d68);
+    del_prior_f0 = b_f0.createOr(del_prior_f0, found_16d63_16d68);
+    PabloAST * m_16d68_16d6a_3 = b_f0.createAdvance(found_16d63_16d68, 3);
+    xfrm_f0[1] = b_f0.createOr(xfrm_f0[1], m_16d68_16d6a_3);
 //  Cases for 16d67
     PabloAST * after_16d67 = b_f0.createAdvance(F0_16d67, 4);
 //     16d67 + 16d67 => 16d68

@@ -269,28 +269,6 @@ def gen_nested_pfx_code(pfx_code):
                         pfx_test_var = pfx_test_var,
                         logic = test)
 
-singleton_case_template = r"""//     ${cp} => ${canon}
-${case_logic}
-"""
-
-mark_deletion_template = r"""    del_${code_str} = b_${code_str}.createOr(del_${code_str}, ${del_marker});
-"""
-
-def generate_singleton_code(code_str, cp, canon, cp_var, Num0s, ToDel):
-    xlate_code = CharacterTranslationLogic(cp, canon, cp_var, "xfrm_%s" % code_str, "b_%s" % code_str)
-    if ToDel > 0:
-        t = string.Template(mark_deletion_template)
-        xlate_code += t.substitute(code_str = code_str, del_marker = cp_var)
-        for i in range(1, ToDel):
-            adv_mrkr = "b_%s.createAdvance(%s, %i)" % (code_str, cp_var, i)
-            xlate_code += t.substitute(code_str = code_str, del_marker = adv_mrkr)
-    t = string.Template(singleton_case_template)
-    s = t.substitute(code_str = code_str,
-                        cp = "%x" % cp,
-                        canon = "%x" % canon,
-                        case_logic = xlate_code)
-    return s
-
 nested_pfx_final_template = r"""
     for (unsigned i = 0; i < 8; i++) {
         ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
@@ -769,29 +747,6 @@ def CharacterTranslationLogic(cp1, cp2, marker, basis_var, pb):
                     s += "    %s = %s.createOr(%s, m_%x_%x_%i);\n" % (bv, pb, bv, cp1, cp2, i)
     return s
 
-#
-#  UTF-8 character insertion for a given cp.
-#  Assumptions:
-#    - marker is a bit stream marking the first byte of any cp
-#    - zero bytes have been inserted the each byte position of cp
-#    - pb is the PabloBuilder for logic
-#
-def CharacterInsertionLogic(cp, marker, basis_var, pb):
-    s = ""
-    cp_len = u8_encoded_length(cp)
-    for i in range(cp_len):
-        cp_byte = u8_code_unit(cp, i + 1)
-        if i == 0:
-            s += "    PabloAST * m_%x_0 = %s;\n" % (cp, marker)
-        else:
-            s += "    PabloAST * m_%x_%i = %s.createAdvance(%s, %i);\n" % (cp, i, pb, marker, i)
-        # apply xor logic for each bit difference between cp1_byte, cp2_byte
-        for j in range(8):
-            bv = "%s[%i]" % (basis_var, j)
-            if ((cp_byte >> j) & 1) == 1:
-                s += "    %s = %s.createOr(%s, m_%x_%i);\n" % (bv, pb, bv, cp, i)
-    return s
-
 def u8_deletion_sets(char2string_map):
     deletion_usets = {}
     for cp in char2string_map.keys():
@@ -1044,6 +999,17 @@ class NFC_generator:
                 for cp2 in self.short_composable_map[cp1].keys():
                     precomp = self.short_composable_map[cp1][cp2]
                     self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(precomp))
+
+    def add_doubleton_shorts(self):
+        for A in sorted(uset_to_member_list(self.self_composables)):
+            AA = self.short_composable_map[A][A]
+            for x in self.short_composable_map.keys():
+                if A in self.short_composable_map[x].keys():
+                    y = self.short_composable_map[x][A]
+                    if y in self.short_composable_map.keys():
+                        if A in self.short_composable_map[y].keys():
+                            z = self.short_composable_map[y][A]
+                            self.short_composable_map[x][AA] = z
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1685,6 +1651,7 @@ if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
     generator.create_mappings()
+    generator.add_doubleton_shorts()
     generator.determine_overridable_primaries()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
