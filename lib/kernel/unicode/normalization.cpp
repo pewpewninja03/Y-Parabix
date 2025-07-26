@@ -235,12 +235,16 @@ SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len
             AA_span = pb.createOr(AA_span, pb.createAdvance(AA, 3));
         }
     }
-    PabloAST * A_run_start = pb.createAnd(A, pb.createNot(pb.createAdvance(A_span, 1)), "selfc.A_run_start");
+    PabloAST * A_or_AA_span = pb.createOr(A_span, AA_span, "selfc.A_or_AA_span");
+    PabloAST * AA_run_start = pb.createAnd(AA, pb.createNot(pb.createAdvance(A_or_AA_span, 1)), "selfc.AA_run_start");
+    PabloAST * AA_initial_runs = pb.createMatchStar(AA_run_start, AA_span);
+    PabloAST * internal_AA_span = pb.createAnd(AA_span, pb.createNot(AA_initial_runs), "self.internal_AA_span");
+    PabloAST * A_or_internalAA_span = pb.createOr(A_span, internal_AA_span, "selfc.A_or_internalAA_span");
+    PabloAST * A_run_start = pb.createAnd(A, pb.createNot(pb.createAdvance(A_or_internalAA_span, 1)), "selfc.A_run_start");
     PabloAST * A1 = pb.createEveryNth(A, pb.getInteger(2));  //  1st, 3rd, 5th, ... of all the As
     PabloAST * A2 = pb.createXor(A, A1);  //  2nd, 4th, 6th, ... of the As
     PabloAST * A1_start = pb.createAnd(A_run_start, A1);
     PabloAST * A2_start = pb.createAnd(A_run_start, A2);
-    PabloAST * A_or_AA_span = pb.createOr(A_span, AA_span, "selfc.A_or_AA_span");
     //  For each span, determine the odd-numbered As (1st, 3rd, 5th, ...)
     PabloAST * A1_runs = pb.createMatchStar(A1_start, A_or_AA_span);
     PabloAST * A2_runs = pb.createMatchStar(A2_start, A_or_AA_span);
@@ -252,7 +256,7 @@ SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len
     PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead, "selfc.A_or_AA_ahead");
     PabloAST * AA_final = pb.createAnd(AA, pb.createNot(A_or_AA_ahead));
     // Rule 1
-    results.A_to_convert_to_AA = pb.createAnd(A1, A_or_AA_ahead, "selfc.A_to_convert_to_AA");
+    results.A_to_convert_to_AA = pb.createAnd(A_odd, A_or_AA_ahead, "selfc.A_to_convert_to_AA");
     // Rule 2
     results.A_to_delete = A_even;
     for (unsigned i = 2; i <= A_len; i++) {

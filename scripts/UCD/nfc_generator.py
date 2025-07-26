@@ -1087,6 +1087,7 @@ class NFC_generator:
         self.full_decomp_map = {}
         self.singleton_map = {}
         self.short_composable_map = {}
+        self.composable_seconds = empty_uset()
         self.self_composables = empty_uset()
         self.long_composable_map = {}
         self.excluded_composite_map = {}
@@ -1111,6 +1112,7 @@ class NFC_generator:
                     else:
                         if uset_member(ucd.ccc_map['NR'], cp2):
                             # Decomposition to two consecutive starters
+                            self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(cp2))
                             if not cp1 in self.short_composable_map.keys():
                                 # index by the first character of decomposition
                                 self.short_composable_map[cp1] = {}
@@ -1133,7 +1135,11 @@ class NFC_generator:
             if uset_member(ucd.dt_map['Can'], canon_cp):
                 decomp = ucd.decomp_map[canon_cp]
                 print("singleton %x maps to %x => %s" % (cp, canon_cp, " ".join(["%x" % ord(c) for c in decomp])))
-
+        for cp1 in self.short_composable_map.keys():
+            if uset_member(self.composable_seconds, cp1):
+                for cp2 in self.short_composable_map[cp1].keys():
+                    precomp = self.short_composable_map[cp1][cp2]
+                    self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(precomp))
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1742,12 +1748,10 @@ class NFC_generator:
         t = string.Template(candidate_class_template)
         # non-starter decompositions are either marks or generate marks
         candidate_class = self.non_starter_uset
+        candidate_class = uset_union(candidate_class, self.composable_seconds)
         for ccc_enum in self.ucd.ccc_map.keys():
             if ccc_enum != 'NR':  # 
                 candidate_class = uset_union(candidate_class, self.ucd.ccc_map[ccc_enum])
-        for cp1 in self.short_composable_map.keys():
-            for cp2 in self.short_composable_map[cp1].keys():
-                candidate_class = uset_union(candidate_class, singleton_uset(cp2))
         for cp in uset_to_member_list(self.self_composables):
             doubleton = self.short_composable_map[cp][cp]
             candidate_class = uset_union(candidate_class, singleton_uset(doubleton))
