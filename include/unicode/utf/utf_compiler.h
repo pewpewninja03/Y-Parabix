@@ -35,11 +35,13 @@ public:
     void compile(Target_List targets, CC_List ccs);
     void compile(Target_List targets, std::vector<re::CC *> ccs);
     void compile(std::string varPrefix, CC_List ccs);
+    void setExtraLookahead(unsigned extraLookahead);
 protected:
     pablo::Var *            mVar;
     pablo::PabloBuilder &   mPB;
     pablo::PabloAST *       mMask;
     pablo::BitMovementMode  mBitMovement;
+    unsigned                mExtraLookahead;
 };
 
 }

@@ -920,11 +920,13 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & if_parent, 
 class U8_Lookahead_Compiler : public U8_Compiler {
 public:
     U8_Lookahead_Compiler(pablo::Var * Var, PabloBuilder & pb, pablo::PabloAST * mask);
+    void setExtraLookahead(unsigned extraLookahead);
 protected:
     void prepareSuffix(unsigned scope, PabloBuilder & pb) override;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
     Basis_Set & getBasis(U8_Seq_Kind k, unsigned pos) override;
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
+    unsigned mExtraLookahead;
 };
 
 class U8_Advance_Compiler : public U8_Compiler {
@@ -943,13 +945,17 @@ U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb, 
 U8_Compiler(v, pb, mask) {
 }
 
+void U8_Lookahead_Compiler::setExtraLookahead(unsigned extraLookahead) {
+    mExtraLookahead = extraLookahead;
+}
+
 void U8_Lookahead_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
         if (mSeqData[sfx].suffixTest == nullptr) {
             if (mScopeBasis[0].size() == 8) {
-                PabloAST * sfxbit7 = pb.createLookahead(mScopeBasis[0][7], sfx);
-                PabloAST * sfxbit6 = pb.createLookahead(mScopeBasis[0][6], sfx);
+                PabloAST * sfxbit7 = pb.createLookahead(mScopeBasis[0][7], mExtraLookahead + sfx);
+                PabloAST * sfxbit6 = pb.createLookahead(mScopeBasis[0][6], mExtraLookahead + sfx);
                 mSeqData[sfx].suffixTest = pb.createAnd(sfxbit7, pb.createNot(sfxbit6));
             } else {
                 prepareScope(scope, pb);
@@ -970,11 +976,11 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
         if (basis_needed) {
             mScopeBasis[sfx].resize(mScopeBasis[0].size());
             if (mScopeBasis[0].size() == 1) {
-                mScopeBasis[sfx][0] = pb.createLookahead(mScopeBasis[0][0], sfx);
+                mScopeBasis[sfx][0] = pb.createLookahead(mScopeBasis[0][0], mExtraLookahead + sfx);
                 mCodeUnitCompiler[sfx] = std::make_unique<cc::Direct_CC_Compiler>(mScopeBasis[sfx][0]);
             } else {
                 for (unsigned i = 0; i < 6; i++) {
-                    mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], sfx);
+                    mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], mExtraLookahead + sfx);
                 }
                 // Set the expected suffix bits - the final suffixTest will confirm.
                 mScopeBasis[sfx][6] = pb.createZeroes();
@@ -1093,6 +1099,13 @@ void UTF_Compiler::compile(std::string targetPfx, CC_List ccs) {
     compile(targets, ccs);
 }
 
+void UTF_Compiler::setExtraLookahead(unsigned extraLookahead) {
+    if (mBitMovement == pablo::BitMovementMode::Advance) {
+        llvm::report_fatal_error("Extra lookahead incompatible with BitMovementMode::Advance");
+    }
+    mExtraLookahead = extraLookahead;
+}
+
 void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
     llvm::ArrayType * ty = cast<ArrayType>(mVar->getType());
     unsigned streamCount = ty->getArrayNumElements();
@@ -1107,6 +1120,9 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
     if (codeUnitBits == 8) {
         if (mBitMovement == pablo::BitMovementMode::LookAhead) {
             U8_Lookahead_Compiler utf_compiler(mVar, mPB, mMask);
+            if (mExtraLookahead > 0) {
+                utf_compiler.setExtraLookahead(mExtraLookahead);
+            }
             utf_compiler.compile(targets, ccs);
         } else {
             U8_Advance_Compiler utf_compiler(mVar, mPB, mMask);
