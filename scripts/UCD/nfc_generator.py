@@ -1011,6 +1011,29 @@ class NFC_generator:
                             z = self.short_composable_map[y][A]
                             self.short_composable_map[x][AA] = z
 
+    def show_overridable_seconds(self):
+        by_second = {}
+        for cp1 in self.short_composable_map.keys():
+            for cp2 in self.short_composable_map[cp1].keys():
+                if not cp2 in by_second.keys():
+                    by_second[cp2] = {}
+                by_second[cp2][cp1] = self.short_composable_map[cp1][cp2]
+
+        # look for overridable seconds: A BC ==> AB C
+        for B in self.short_composable_map.keys():
+            for C in self.short_composable_map[B].keys():
+                BC = self.short_composable_map[B][C]
+                if B in by_second.keys():
+                    for A in by_second[B].keys():
+                        # Now have an AB precomposed combo with a following C.
+                        AB = by_second[B][A]
+                        if AB in self.short_composable_map.keys():
+                            if C in self.short_composable_map[AB].keys():
+                                ABC = self.short_composable_map[AB][C]
+                                print("%x %x ==> %x %x ==> %x" %(A, BC, AB, C, ABC))
+                        else:
+                            print("%x %x ==> %x %x" %(A, BC, AB, C))
+
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
 
@@ -1661,7 +1684,8 @@ if __name__ == "__main__":
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
-    generator.display_short_composables()
+    #generator.display_short_composables()
+    generator.show_overridable_seconds()
     #generator.display_self_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()
