@@ -942,7 +942,7 @@ protected:
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
-U8_Compiler(v, pb, mask) {
+U8_Compiler(v, pb, mask), mExtraLookahead(0) {
 }
 
 void U8_Lookahead_Compiler::setExtraLookahead(unsigned extraLookahead) {
@@ -1075,12 +1075,12 @@ PabloAST *  U8_Advance_Compiler::adjustPosition(PabloAST * t, unsigned from, uns
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
              pablo::PabloAST * mask,
              pablo::BitMovementMode mode) :
-mVar(basisVar), mPB(pb), mMask(mask), mBitMovement(mode) {
+mVar(basisVar), mPB(pb), mMask(mask), mBitMovement(mode), mExtraLookahead(0) {
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
              pablo::BitMovementMode mode) :
-mVar(basisVar), mPB(pb), mMask(nullptr), mBitMovement(mode) {}
+mVar(basisVar), mPB(pb), mMask(nullptr), mBitMovement(mode), mExtraLookahead(0) {}
 
 void UTF_Compiler::compile(Target_List targets, std::vector<re::CC *> ccs) {
     std::vector<UCD::UnicodeSet> usets(ccs.size());

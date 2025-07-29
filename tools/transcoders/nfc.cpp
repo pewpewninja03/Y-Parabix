@@ -193,18 +193,8 @@ std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Nam
     P.CreateKernelCall<SelfComposableTranslation>(CanonBasis, SelfComposables, SelfBasis);
     SHOW_BIXNUM(SelfBasis);
 
-    StreamSet * XorBasis = P.CreateStreamSet(8, 1);
-    StreamSet * DelPrior = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ShortComposableTranslation>(SelfBasis, DelPrior, XorBasis);
-    SHOW_BIXNUM(XorBasis);
-    SHOW_STREAM(DelPrior);
-
-    StreamSet * XfrmedBasis = P.CreateStreamSet(8, 1);
-    XorCombine(P, SelfBasis, XorBasis, XfrmedBasis);
-    SHOW_BIXNUM(XfrmedBasis);
-
     StreamSet * ShortBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ZeroPrior>(XfrmedBasis, DelPrior, ShortBasis);
+    P.CreateKernelCall<ShortComposableTranslation>(SelfBasis, ShortBasis);
     SHOW_BIXNUM(ShortBasis);
 
     StreamSet * FinalBasis = P.CreateStreamSet(8, 1);

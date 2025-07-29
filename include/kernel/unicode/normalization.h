@@ -136,16 +136,14 @@ protected:
 //  Short composable sequences are those involving non reorderable
 //  characters.   In this case, precomposition is only applied when
 //  the characters are adjacent.   This kernel replaces the
-//  second character of such short composable sequences with
-//  the resulting precomposed character.   In addition a marker
-//  bit stream DeletePrior is produced identifying that the
-//  previous character must be deleted.
+//  first character of such short composable sequences with
+//  the resulting precomposed character and zeroes out the
+//  second.
 //
 class ShortComposableTranslation : public pablo::PabloKernel {
 public:
     ShortComposableTranslation
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * DeletePrior, StreamSet * XfrmBasis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
