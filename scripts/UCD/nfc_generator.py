@@ -664,6 +664,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    Pablo AST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
     std::vector<PabloAST *> self_composable_CCs = getInputStreamSet("self_composable_CCs");
     Var * DelVar = pb.createVar("DelVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
@@ -675,7 +676,7 @@ void SelfComposableTranslation::generatePabloMethod() {
 self_composable_case_template = r"""    auto b_${A} = pb.createScope();
     pb.createIf(${A_AST}, b_${A});
     std::vector<PabloAST *> basisXor_${A}(8, All0);
-    SCResults rslt_${A} = SelfComposableLogic(b_${A}, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST});
+    SCResults rslt_${A} = SelfComposableLogic(b_${A}, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST}, suffix);
     b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_to_delete));
     PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
 ${bit_xfrms}

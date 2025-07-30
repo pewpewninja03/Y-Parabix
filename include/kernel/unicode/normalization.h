@@ -208,7 +208,7 @@ struct SCResults {
     pablo::PabloAST * AA_to_convert_to_A;
 };
 
-SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA);
+SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA, pablo::PabloAST * suffix);
 
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,

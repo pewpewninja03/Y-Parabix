@@ -6879,6 +6879,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
     std::vector<PabloAST *> self_composable_CCs = getInputStreamSet("self_composable_CCs");
     Var * DelVar = pb.createVar("DelVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
@@ -6888,7 +6889,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     auto b_113c2 = pb.createScope();
     pb.createIf(self_composable_CCs[0], b_113c2);
     std::vector<PabloAST *> basisXor_113c2(8, All0);
-    SCResults rslt_113c2 = SelfComposableLogic(b_113c2, 4, 4, self_composable_CCs[0], self_composable_CCs[1]);
+    SCResults rslt_113c2 = SelfComposableLogic(b_113c2, 4, 4, self_composable_CCs[0], self_composable_CCs[1], suffix);
     b_113c2.createAssign(DelVar, b_113c2.createOr(DelVar, rslt_113c2.A_to_delete));
     PabloAST * xfrm_113c2 = b_113c2.createOr(rslt_113c2.A_to_convert_to_AA, rslt_113c2.AA_to_convert_to_A);
     PabloAST * m_113c2_113c5_3 = b_113c2.createAdvance(xfrm_113c2, 3);
@@ -6902,7 +6903,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     auto b_1611e = pb.createScope();
     pb.createIf(self_composable_CCs[2], b_1611e);
     std::vector<PabloAST *> basisXor_1611e(8, All0);
-    SCResults rslt_1611e = SelfComposableLogic(b_1611e, 4, 4, self_composable_CCs[2], self_composable_CCs[3]);
+    SCResults rslt_1611e = SelfComposableLogic(b_1611e, 4, 4, self_composable_CCs[2], self_composable_CCs[3], suffix);
     b_1611e.createAssign(DelVar, b_1611e.createOr(DelVar, rslt_1611e.A_to_delete));
     PabloAST * xfrm_1611e = b_1611e.createOr(rslt_1611e.A_to_convert_to_AA, rslt_1611e.AA_to_convert_to_A);
     PabloAST * m_1611e_16121_3 = b_1611e.createAdvance(xfrm_1611e, 3);
@@ -6919,7 +6920,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     auto b_16d67 = pb.createScope();
     pb.createIf(self_composable_CCs[4], b_16d67);
     std::vector<PabloAST *> basisXor_16d67(8, All0);
-    SCResults rslt_16d67 = SelfComposableLogic(b_16d67, 4, 4, self_composable_CCs[4], self_composable_CCs[5]);
+    SCResults rslt_16d67 = SelfComposableLogic(b_16d67, 4, 4, self_composable_CCs[4], self_composable_CCs[5], suffix);
     b_16d67.createAssign(DelVar, b_16d67.createOr(DelVar, rslt_16d67.A_to_delete));
     PabloAST * xfrm_16d67 = b_16d67.createOr(rslt_16d67.A_to_convert_to_AA, rslt_16d67.AA_to_convert_to_A);
     PabloAST * m_16d67_16d68_3 = b_16d67.createAdvance(xfrm_16d67, 3);
