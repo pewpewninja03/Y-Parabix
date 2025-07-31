@@ -664,7 +664,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    Pablo AST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
+    PabloAST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
     std::vector<PabloAST *> self_composable_CCs = getInputStreamSet("self_composable_CCs");
     Var * DelVar = pb.createVar("DelVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
