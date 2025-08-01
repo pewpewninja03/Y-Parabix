@@ -230,3 +230,14 @@ void ComputeWorkPlacement(PipelineBuilder & P,
                           StreamSet * U8_Basis, StreamSet * WorkSelectionMask,
                           StreamSet * WorkPlacementMask);
 
+struct BitXfrmSpec {
+    unsigned BitXfrmIndex;
+    unsigned position;
+    unsigned bit;
+};
+
+void UpdateBitXfrms(pablo::PabloBuilder & pb,
+                    std::vector<pablo::PabloAST *> BitXfrmBasis,
+                    pablo::PabloAST * marker,
+                    std::vector<pablo::PabloAST *> & sets,
+                    std::vector<BitXfrmSpec> & xfrmSpecs);

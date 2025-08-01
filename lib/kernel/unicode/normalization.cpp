@@ -213,6 +213,36 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("Output_Basis", outputVar);
 }
 
+void UpdateBitXfrms(PabloBuilder & pb, std::vector<PabloAST *> BitXfrmBasis,
+                    PabloAST * marker, std::vector<PabloAST *> & sets, std::vector<BitXfrmSpec> xfrmSpecs) {
+    unsigned max_pos = 0;
+    for (auto & s : xfrmSpecs) {
+        if (s.position > max_pos) {
+            max_pos = s.position;
+        }
+    }
+    std::vector<std::vector<PabloAST *>> combined(max_pos + 1);
+    if (marker == nullptr) {
+        combined[0] = sets;
+    } else {
+        combined[0].resize(sets.size());
+        for (unsigned i = 0; i < sets.size(); i++) {
+            combined[0][i] = pb.createAnd(sets[i], marker);
+            for (unsigned pos = 1; pos <= max_pos; pos++) {
+                combined[pos][i] = nullptr;
+            }
+        }
+    }
+    for (auto & spec : xfrmSpecs) {
+        unsigned pos = spec.position;
+        unsigned idx = spec.BitXfrmIndex;
+        if (combined[pos][idx] == nullptr) {
+            combined[pos][idx] = pb.createAdvance(combined[0][idx], pos);
+        }
+        BitXfrmBasis[spec.bit] = pb.createOr(BitXfrmBasis[spec.bit], combined[pos][idx]);
+    }
+}
+
 SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len, PabloAST * A, PabloAST * AA, PabloAST * suffix) {
     SCResults results;
     PabloAST * XA = pb.createZeroes();
