@@ -281,28 +281,6 @@ def gen_nested_pfx_code(pfx_code):
                         pfx_test_var = pfx_test_var,
                         logic = test)
 
-nested_pfx_final_template = r"""
-    for (unsigned i = 0; i < 8; i++) {
-        ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
-    }
-"""
-
-update_del_var_template = r"""
-    ${builder}.createAssign(DeleteVar, $builder.createOr(DeleteVar, del_${code_str}));
-"""
-
-def finalize_nested_pfx_code(pfx_code, has_del):
-    code_str = pfx_code_string(pfx_code)
-    scope = "b_%s" % code_str
-    t1 = string.Template(nested_pfx_final_template)
-    s = t1.substitute(builder = scope, code_str = code_str)
-    if has_del:
-        t2 = string.Template(update_del_var_template)
-        s2 = t2.substitute(builder = scope, code_str = code_str)
-        s += s2
-    return s
-
-
 singleton_final_code = r"""
     Var * XfrmOutputVar = getOutputStreamVar("XfrmBasis");
     PabloAST * select = pb.createNot(DeleteVar);
@@ -502,19 +480,6 @@ def gen_long_composition_pfx_code(pfx_code):
                         pfx_test_var = pfx_test_var,
                         logic = test)
 
-long_composable_pfx_final_template = r"""
-    for (unsigned i = 0; i < 8; i++) {
-        ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
-    }
-"""
-
-def finalize_long_composable_pfx_code(pfx_code):
-    code_str = pfx_code_string(pfx_code)
-    scope = "b_%s" % code_str
-    t = string.Template(long_composable_pfx_final_template)
-    return t.substitute(builder = scope,
-                        code_str = code_str)
-
 long_composable_final_code = r"""
     anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xC2), anyMark), 1), anyMark);
     anyMark = pb.createOr(pb.createAdvance(pb.createAnd(bnc.UGE(Basis, 0xE0), anyMark), 2), anyMark);
@@ -679,10 +644,6 @@ self_composable_case_template = r"""    auto b_${A} = pb.createScope();
     SCResults rslt_${A} = SelfComposableLogic(b_${A}, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST}, suffix);
     b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_to_delete));
     PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
-${bit_xfrms}
-    for (unsigned i = 0; i < 8; i++) {
-        b_${A}.createAssign(XfrmVar[i], b_${A}.createOr(XfrmVar[i], basisXor_${A}[i]));
-    }
 """
 
 self_composable_final_code = r"""
@@ -778,6 +739,32 @@ def u8_bit_transform_sets(char2string_map):
                             bit_xfrm_sets[i][j] = empty_uset()
                         bit_xfrm_sets[i][j] = uset_union(bit_xfrm_sets[i][j], cp_uset)
     return bit_xfrm_sets
+
+def install_bit_xfrm_usets(builder, bit_xfrm_sets):
+    bit_xfrm_data = {}
+    for pos in sorted(bit_xfrm_sets.keys()):
+        for bit in bit_xfrm_sets[pos].keys():
+            uset_key = builder.install_uset(bit_xfrm_sets[pos][bit])
+            if not uset_key in bit_xfrm_data.keys():
+                bit_xfrm_data[uset_key] = []
+            bit_xfrm_data[uset_key].append((pos, bit))
+    return bit_xfrm_data
+
+def generateUpdateBitXfrms(scope, bit_xfrm_data, basis, marker):
+    usets = sorted(bit_xfrm_data.keys())
+    s = "    std::vector<PabloAST *> usets(%i);\n" % len(usets)
+    spec_len = 0
+    for i in range(len(usets)):
+        s += "    usets[%i] = %s;\n" % (i, usets[i])
+        spec_len += len(bit_xfrm_data[usets[i]])
+    s += "    std::vector<BitXfrmSpec> xfrmSpecs(%i);\n" % spec_len
+    j = 0
+    for i in range(len(usets)):
+        for (pos, bit) in bit_xfrm_data[usets[i]]:
+            s += "    xfrmSpecs[%i] = {%i, %i, %i};\n" % (j, i, pos, bit)
+            j += 1
+    s += "    UpdateBitXfrms(%s, %s, %s, usets, xfrmSpecs);\n" % (scope, basis, marker)
+    return s
 
 u8_insertion_bixnum_template = r"""//
 NFC_Initial_Insertion::NFC_Initial_Insertion
@@ -1322,24 +1309,9 @@ class NFC_generator:
             #del_vars = {}
             #for del_amt in del_usets.keys():
             #    del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
-            by_pos = {}
-            for pos in sorted(bit_xfrm_sets.keys()):
-                by_pos[pos] = {}
-                for bit in bit_xfrm_sets[pos].keys():
-                    by_pos[pos][bit] = self.builder.install_uset(bit_xfrm_sets[pos][bit])
+            bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
             s += self.builder.generate_scope_compilations()
-            for pos in sorted(bit_xfrm_sets.keys()):
-                adv_markers = {}
-                for bit in bit_xfrm_sets[pos].keys():
-                    marker = by_pos[pos][bit]
-                    if pos > 0:
-                        if not marker in adv_markers.keys():
-                            adv = "%s_adv%i" % (marker, pos)
-                            s += "    PabloAST * %s = %s.createAdvance(%s, %i);\n" % (adv, scope, marker, pos)
-                            adv_markers[marker] = adv
-                        marker = adv_markers[marker]
-                    s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
-            s += finalize_nested_pfx_code(pfx_code, False)
+            s += generateUpdateBitXfrms(scope, bit_xfrm_data, "XfrmVar", "nullptr")
             s += self.builder.close_scope()
         s += singleton_final_code
         return s
@@ -1361,24 +1333,9 @@ class NFC_generator:
             del_vars = {}
             for del_amt in del_usets.keys():
                 del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
-            by_pos = {}
-            for pos in sorted(bit_xfrm_sets.keys()):
-                by_pos[pos] = {}
-                for bit in bit_xfrm_sets[pos].keys():
-                    by_pos[pos][bit] = self.builder.install_uset(bit_xfrm_sets[pos][bit])
+            bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
             s += self.builder.generate_scope_compilations()
-            for pos in sorted(bit_xfrm_sets.keys()):
-                adv_markers = {}
-                for bit in bit_xfrm_sets[pos].keys():
-                    marker = by_pos[pos][bit]
-                    if pos > 0:
-                        if not marker in adv_markers.keys():
-                            adv = "%s_adv%i" % (marker, pos)
-                            s += "    PabloAST * %s = %s.createAdvance(%s, %i);\n" % (adv, scope, marker, pos)
-                            adv_markers[marker] = adv
-                        marker = adv_markers[marker]
-                    s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, marker)
-            s += finalize_nested_pfx_code(pfx_code, False)
+            s += generateUpdateBitXfrms(scope, bit_xfrm_data, "XfrmVar", "nullptr")
             s += self.builder.close_scope()
         s += excluded_composite_final_code
         return s
@@ -1444,24 +1401,20 @@ class NFC_generator:
                     if not pfx_code in pass_data.keys():
                         pass_data[pfx_code] = {}
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
-        by_pos = {}
+        bit_xfrm_data = {}
         for pfx_code in pass_data.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
             s += gen_long_composition_pfx_code(pfx_code)
             s += self.builder.open_scope(code_str, scope)
-            by_pos[pfx_code] = {}
+            bit_xfrm_data[pfx_code] = {}
             for mark in pass_data[pfx_code].keys():
                 starters = uset_to_member_list(pass_data[pfx_code][mark])
                 pfx_xlate_map = {}
                 for cp1 in starters:
                     pfx_xlate_map[cp1] = self.long_composable_map[mark][cp1]
                 bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
-                by_pos[pfx_code][mark] = {}
-                for pos in sorted(bit_xfrm_sets.keys()):
-                    by_pos[pfx_code][mark][pos] = {}
-                    for bit in bit_xfrm_sets[pos].keys():
-                        by_pos[pfx_code][mark][pos][bit] = self.builder.install_uset(bit_xfrm_sets[pos][bit])
+                bit_xfrm_data[pfx_code][mark] = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
             s += self.builder.generate_scope_compilations()
             for mark in sorted(pass_data[pfx_code].keys()):
                 mark_code = 1 # default
@@ -1469,14 +1422,9 @@ class NFC_generator:
                     if pfx_code in self.conditional_mark_codes[pass_no].keys():
                         mark_code = self.conditional_mark_codes[pass_no][pfx_code][mark]
                 s += "    PabloAST * foundMark_%x = %s_bnc.EQ(markCodeAtStarter, %i);\n" % (mark, scope, mark_code)
-                for pos in sorted(by_pos[pfx_code][mark].keys()):
-                    for bit in sorted(by_pos[pfx_code][mark][pos].keys()):
-                        bit_xfrm = by_pos[pfx_code][mark][pos][bit]
-                        bit_xfrm = "%s.createAnd(%s, %s)" % (scope, bit_xfrm, "foundMark_%x" % mark)
-                        if (pos > 0):
-                            bit_xfrm = "%s.createAdvance(%s, %i)" % (scope, bit_xfrm, pos)
-                        s += "    xfrm_%s[%i] = %s.createOr(xfrm_%s[%i], %s);\n" % (code_str, bit, scope, code_str, bit, bit_xfrm)
-            s += finalize_long_composable_pfx_code(pfx_code)
+                s += "    {"
+                s += generateUpdateBitXfrms(scope, bit_xfrm_data[pfx_code][mark], "XfrmVar", "foundMark_%x" % mark)
+                s += "    }"
             s += self.builder.close_scope()
         s += long_composable_final_code
         return s
@@ -1531,13 +1479,24 @@ class NFC_generator:
         t = string.Template(self_composable_case_template)
         i = 0
         for A in uset_to_member_list(self.self_composables):
+            scope = "b_%x" % A
             AA = self.short_composable_map[A][A]
             A_len = u8_encoded_length(A)
             AA_len = u8_encoded_length(AA)
             A_AST = "self_composable_CCs[%i]" % i
             AA_AST = "self_composable_CCs[%i]" % (i + 1)
-            bit_xfrms = CharacterTranslationLogic(A, AA, "xfrm_%x" % A, "basisXor_%x" % A, "b_%x" % A)
-            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST, bit_xfrms = bit_xfrms)
+            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST)
+            s += self.builder.open_scope("x%x" % A, scope)
+            XA_map = {A : chr(AA)}
+            for X in self.short_composable_map.keys():
+                if A in self.short_composable_map[X].keys():
+                    XA = self.short_composable_map[X][A]
+                    XA_map[X] = chr(XA)
+            bit_xfrm_sets = u8_bit_transform_sets(XA_map)
+            bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
+            s += self.builder.generate_scope_compilations()
+            s += generateUpdateBitXfrms("b_%x" % A, bit_xfrm_data, "XfrmVar", "xfrm_%x" % A)
+            s += self.builder.close_scope()
             i += 2
         s += self_composable_final_code
         return s

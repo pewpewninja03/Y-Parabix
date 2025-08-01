@@ -213,8 +213,8 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("Output_Basis", outputVar);
 }
 
-void UpdateBitXfrms(PabloBuilder & pb, std::vector<PabloAST *> BitXfrmBasis,
-                    PabloAST * marker, std::vector<PabloAST *> & sets, std::vector<BitXfrmSpec> xfrmSpecs) {
+void UpdateBitXfrms(PabloBuilder & pb, std::vector<Var *> BitXfrmBasis,
+                    PabloAST * marker, std::vector<PabloAST *> & sets, std::vector<BitXfrmSpec> & xfrmSpecs) {
     unsigned max_pos = 0;
     for (auto & s : xfrmSpecs) {
         if (s.position > max_pos) {
@@ -228,9 +228,12 @@ void UpdateBitXfrms(PabloBuilder & pb, std::vector<PabloAST *> BitXfrmBasis,
         combined[0].resize(sets.size());
         for (unsigned i = 0; i < sets.size(); i++) {
             combined[0][i] = pb.createAnd(sets[i], marker);
-            for (unsigned pos = 1; pos <= max_pos; pos++) {
-                combined[pos][i] = nullptr;
-            }
+        }
+    }
+    for (unsigned pos = 1; pos <= max_pos; pos++) {
+        combined[pos].resize(sets.size());
+        for (unsigned i = 0; i < sets.size(); i++) {
+           combined[pos][i] = nullptr;
         }
     }
     for (auto & spec : xfrmSpecs) {
@@ -239,7 +242,7 @@ void UpdateBitXfrms(PabloBuilder & pb, std::vector<PabloAST *> BitXfrmBasis,
         if (combined[pos][idx] == nullptr) {
             combined[pos][idx] = pb.createAdvance(combined[0][idx], pos);
         }
-        BitXfrmBasis[spec.bit] = pb.createOr(BitXfrmBasis[spec.bit], combined[pos][idx]);
+        pb.createAssign(BitXfrmBasis[spec.bit], pb.createOr(BitXfrmBasis[spec.bit], combined[pos][idx]));
     }
 }
 

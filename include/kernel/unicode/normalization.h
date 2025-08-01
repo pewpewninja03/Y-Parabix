@@ -11,7 +11,7 @@
 using StreamSet = kernel::StreamSet;
 using PipelineBuilder = kernel::PipelineBuilder;
 namespace re {class CC;}
-namespace pablo {class PabloBuilder; class PabloAST;}
+namespace pablo {class PabloBuilder; class PabloAST; class Var;}
 
 // Hangul Composition Kernels for NFC (See Unicode section 3.12).
 //
@@ -237,7 +237,7 @@ struct BitXfrmSpec {
 };
 
 void UpdateBitXfrms(pablo::PabloBuilder & pb,
-                    std::vector<pablo::PabloAST *> BitXfrmBasis,
+                    std::vector<pablo::Var *> BitXfrmBasis,
                     pablo::PabloAST * marker,
                     std::vector<pablo::PabloAST *> & sets,
                     std::vector<BitXfrmSpec> & xfrmSpecs);
