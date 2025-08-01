@@ -51,7 +51,8 @@ BlockOrientedKernel::BlockOrientedKernel(LLVMTypeSystemInterface & ts,
     Bindings && stream_outputs,
     Bindings && scalar_parameters,
     Bindings && scalar_outputs,
-    InternalScalars && internal_scalars)
+    InternalScalars && internal_scalars,
+    const unsigned flags)
 : MultiBlockKernel(ts,
     TypeId::BlockOriented,
     std::move(kernelName),
@@ -59,7 +60,8 @@ BlockOrientedKernel::BlockOrientedKernel(LLVMTypeSystemInterface & ts,
     std::move(stream_outputs),
     std::move(scalar_parameters),
     std::move(scalar_outputs),
-    std::move(internal_scalars)) {
+    std::move(internal_scalars),
+    flags) {
 
 }
 

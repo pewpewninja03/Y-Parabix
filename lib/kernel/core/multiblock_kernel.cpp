@@ -4,17 +4,7 @@
  */
 #include <kernel/core/kernel.h>
 #include <kernel/core/streamset.h>
-#include <toolchain/toolchain.h>
 #include <kernel/core/kernel_builder.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/MDBuilder.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Bitcode/BitcodeWriter.h>
-#include <llvm/Transforms/Utils/Local.h>
-#include <sstream>
 
 using namespace llvm;
 
@@ -40,7 +30,7 @@ MultiBlockKernel::MultiBlockKernel(LLVMTypeSystemInterface & ts,
     Bindings && stream_outputs,
     Bindings && scalar_parameters,
     Bindings && scalar_outputs,
-    InternalScalars && internal_scalars)
+    InternalScalars && internal_scalars, unsigned flags)
 : MultiBlockKernel(ts,
     TypeId::MultiBlock,
     std::move(kernelName),
@@ -48,7 +38,8 @@ MultiBlockKernel::MultiBlockKernel(LLVMTypeSystemInterface & ts,
     std::move(stream_outputs),
     std::move(scalar_parameters),
     std::move(scalar_outputs),
-    std::move(internal_scalars)) {
+    std::move(internal_scalars),
+    flags) {
 
 }
 
@@ -59,14 +50,16 @@ MultiBlockKernel::MultiBlockKernel(LLVMTypeSystemInterface & ts,
     Bindings && stream_outputs,
     Bindings && scalar_parameters,
     Bindings && scalar_outputs,
-    InternalScalars && internal_scalars)
+    InternalScalars && internal_scalars,
+    unsigned flags)
 : Kernel(ts, typeId,
      std::move(kernelName),
      std::move(stream_inputs),
      std::move(stream_outputs),
      std::move(scalar_parameters),
      std::move(scalar_outputs),
-     std::move(internal_scalars)) {
+     std::move(internal_scalars),
+     CompilationStatus::FullyInitialized, flags) {
 
 }
 

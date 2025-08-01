@@ -213,11 +213,11 @@ void PabloKernel::addInternalProperties(KernelBuilder & b) {
 }
 
 bool PabloKernel::isCachable() const {
-    return !codegen::EnableIllustrator;
+    return (mFlags & Kernel::KernelFlags::RequiresIllustratorObject) == 0;
 }
 
 void PabloKernel::linkExternalMethods(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(mFlags & Kernel::KernelFlags::RequiresIllustratorObject)) {
         assert (mSharedStateType);
         BEGIN_SCOPED_REGION
         FixedArray<Type *, 2> params;
@@ -235,7 +235,7 @@ void PabloKernel::linkExternalMethods(KernelBuilder & b) {
 }
 
 void PabloKernel::generateInitializeMethod(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(mFlags & Kernel::KernelFlags::RequiresIllustratorObject)) {
         mPabloCompiler = reinterpret_cast<PabloCompiler *>(b.getCompiler());
         mPabloCompiler->initializeIllustrator(b);
         mPabloCompiler = nullptr;
@@ -257,7 +257,7 @@ void PabloKernel::generateFinalBlockMethod(KernelBuilder & b, Value * const rema
     // the position just past EOF, as well as a mask marking all positions past EOF.
     assert (remainingBytes);
     assert (remainingBytes->getType()->isIntegerTy());
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(mFlags & Kernel::KernelFlags::RequiresIllustratorObject)) {
         b.setScalarField("EOFUnnecessaryData", b.CreateSub(b.getSize(b.getBitBlockWidth()), remainingBytes));
     }
     b.setScalarField("EOFbit", b.bitblock_set_bit(remainingBytes));
@@ -388,7 +388,8 @@ PabloKernel::PabloKernel(LLVMTypeSystemInterface & ts,
                          std::vector<Binding> scalar_outputs)
 : BlockOrientedKernel(ts, annotateKernelNameWithPabloDebugFlags(std::move(kernelName)),
                       std::move(stream_inputs), std::move(stream_outputs),
-                      std::move(scalar_parameters), std::move(scalar_outputs), {})
+                      std::move(scalar_parameters), std::move(scalar_outputs), {},
+                      PabloIllustrateBitstreamRegEx.empty() ? 0 : Kernel::KernelFlags::RequiresIllustratorObject)
 , PabloAST(PabloAST::ClassTypeId::Kernel, nullptr, mAllocator)
 , mPabloCompiler()
 , mSymbolTable()
@@ -398,7 +399,7 @@ PabloKernel::PabloKernel(LLVMTypeSystemInterface & ts,
 , mContext(nullptr) {
     addNonPersistentScalar(ts.getBitBlockType(), "EOFbit");
     addNonPersistentScalar(ts.getBitBlockType(), "EOFmask");
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(mFlags & Kernel::KernelFlags::RequiresIllustratorObject)) {
         addNonPersistentScalar(ts.getSizeTy(), "EOFUnnecessaryData");
         addInternalScalar(ts.getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM);
     }

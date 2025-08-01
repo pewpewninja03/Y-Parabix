@@ -23,9 +23,12 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mRecordHistogramData = recordsAnyHistogramData();
+    mHasPipelineIllustratedStreamSet = kernelHasAnyPipelineIllustratedStreamSet(mKernelId);
+    mKernelRequiresIllustratorObject = (mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) != 0;
+    assert (PipelineRequiresIllustratorObject || !mKernelRequiresIllustratorObject);
     mExecuteStridesIndividually =
         mKernel->hasAttribute(AttrId::ExecuteStridesIndividually)
-            || ((mRecordHistogramData || mUsesIllustrator) && !hasAnyGreedyInput(mKernelId));
+            || ((mRecordHistogramData || mKernelRequiresIllustratorObject || mHasPipelineIllustratedStreamSet) && !hasAnyGreedyInput(mKernelId));
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
     mProducesCrossThreadedData = mKernelProducesCrossThreadedData.test(mKernelId);
     mHasPrincipalInputRate = hasPrincipalInputRate();

@@ -141,9 +141,11 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     const auto onAfterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
 
     if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
-        if (LLVM_LIKELY(firstComputeKernelId <= kernelId && kernelId < onAfterLastComputeKernelId && !mUsesIllustrator)) {
-            isStateless = true;
-            mIsStatelessKernel.set(kernelId);
+        if (LLVM_LIKELY(firstComputeKernelId <= kernelId && kernelId < onAfterLastComputeKernelId)) {
+            if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
+                isStateless = true;
+                mIsStatelessKernel.set(kernelId);
+            }
         }
     }
 
@@ -213,7 +215,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     addFamilyKernelProperties(b, kernelId, groupId);
 
-    if (LLVM_UNLIKELY(isInternallySynchronized || mUsesIllustrator)) {
+    if (LLVM_UNLIKELY(isInternallySynchronized || (mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) || kernelHasAnyPipelineIllustratedStreamSet(kernelId))) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire
         mTarget->addInternalScalar(sizeTy, name + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX, groupId);
     }
@@ -366,12 +368,10 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
             }
         }
 
-        if (LLVM_UNLIKELY(mUsesIllustrator)) {
-            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                const BufferPort & br = mBufferGraph[e];
-                if (LLVM_UNLIKELY(br.isIllustrated())) {
-                    registerStreamSetIllustrator(b, target(e, mBufferGraph));
-                }
+        for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            if (LLVM_UNLIKELY(br.isIllustrated())) {
+                registerStreamSetIllustrator(b, target(e, mBufferGraph));
             }
         }
 

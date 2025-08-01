@@ -61,7 +61,7 @@ void pablo_function_passes(PabloKernel * kernel) {
         PabloVerifier::verify(kernel, "creation");
     }
 
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator && !pablo::PabloIllustrateBitstreamRegEx.empty())) {
+    if (LLVM_UNLIKELY(!pablo::PabloIllustrateBitstreamRegEx.empty())) {
         runIllustratorPass(kernel);
         if (LLVM_UNLIKELY(verify)) {
             PabloVerifier::verify(kernel, "post-illustrator-pass");

@@ -456,7 +456,7 @@ std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(Kernel
  * @brief isCachable
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineKernel::isCachable() const {
-    return codegen::EnablePipelineObjectCache && !codegen::EnableIllustrator;
+    return (getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -563,7 +563,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     Function * createIllustrator = nullptr;
     Function * displayCapturedData = nullptr;
     Function * destroyIllustrator = nullptr;
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         PointerType * voidPtrTy = b.getVoidPtrTy();
         createIllustrator = b.LinkFunction("__createStreamDataIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
         BEGIN_SCOPED_REGION
@@ -810,7 +810,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     } else {
         b.CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         BEGIN_SCOPED_REGION
         FixedArray<Value *, 2> args;
         args[0] = illustratorObj;

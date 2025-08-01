@@ -174,6 +174,8 @@ Kernel * PipelineBuilder::makeKernel() {
     }
     #endif
 
+    auto requiresIllustratorObj = !mTarget->mIllustratorBindings.empty();
+
     if (LLVM_LIKELY(signature.empty())) {
 
         constexpr auto pipelineInput = 0U;
@@ -212,6 +214,9 @@ Kernel * PipelineBuilder::makeKernel() {
             auto obj = K.Object;
             obj->ensureLoaded();
             sig << '\n';
+            if (LLVM_UNLIKELY(obj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+                requiresIllustratorObj = true;
+            }
             if (K.isFamilyCall()) {
                 ++numOfNestedKernelFamilyCalls;
                 sig << 'F';
@@ -464,6 +469,9 @@ Kernel * PipelineBuilder::makeKernel() {
             const auto & K = kernels[i];
             Kernel * const obj = K.Object;
             obj->ensureLoaded();
+            if (LLVM_UNLIKELY(obj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+                requiresIllustratorObj = true;
+            }
             if (K.isFamilyCall()) {
                 numOfNestedKernelFamilyCalls++;
             } else {
@@ -481,10 +489,14 @@ Kernel * PipelineBuilder::makeKernel() {
 
     addKernelProperties(kernels, mTarget);
 
+    if (LLVM_UNLIKELY(requiresIllustratorObj)) {
+        mTarget->mFlags = Kernel::KernelFlags::RequiresIllustratorObject;
+    }
+
     signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
 
     mTarget->mKernelName =
-        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline,
+        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline, mTarget->mFlags,
             PipelineKernel::makePipelineHashName(signature));
 
     mTarget->setCompilationStatus(Kernel::CompilationStatus::FullyInitialized);
