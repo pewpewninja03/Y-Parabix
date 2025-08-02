@@ -629,7 +629,6 @@ void SelfComposableTranslation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    PabloAST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
     std::vector<PabloAST *> self_composable_CCs = getInputStreamSet("self_composable_CCs");
     Var * DelVar = pb.createVar("DelVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
@@ -639,9 +638,9 @@ void SelfComposableTranslation::generatePabloMethod() {
 """
 
 self_composable_case_template = r"""    auto b_${A} = pb.createScope();
-    pb.createIf(${A_AST}, b_${A});
+    pb.createIf(pb.createOr3(${A_AST}, ${AA_AST}, ${XA_AST}), b_${A});
     std::vector<PabloAST *> basisXor_${A}(8, All0);
-    SCResults rslt_${A} = SelfComposableLogic(b_${A}, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST}, suffix);
+    SCResults rslt_${A} = SelfComposableLogic(b_${A}, Basis, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST}, ${XA_AST});
     b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_to_delete));
     PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
 """
@@ -1477,22 +1476,34 @@ class NFC_generator:
     def generate_self_composable_stage(self):
         s = self_composable_header
         t = string.Template(self_composable_case_template)
+        self.builder.open_scope("", "pb")
         i = 0
+        XA_AST = {}
+        xfrm_map = {}
         for A in uset_to_member_list(self.self_composables):
-            scope = "b_%x" % A
+            AA = self.short_composable_map[A][A]
+            print("AA: %x %x => %x" %(A, A, AA))
+            XA_uset = empty_uset()
+            xfrm_map[A] = {A : chr(AA), AA : chr(A)}
+            for X in self.short_composable_map.keys():
+                if A in self.short_composable_map[X].keys():
+                    XA = self.short_composable_map[X][A]
+                    if XA != AA: 
+                        XA_uset = uset_union(XA_uset, singleton_uset(XA))
+                        xfrm_map[A][X] = chr(XA)
+                        print("XA: %x %x => %x" %(X, A, XA))
+            XA_AST[A] = self.builder.install_uset(XA_uset)
+        s += self.builder.generate_scope_compilations()
+        for A in uset_to_member_list(self.self_composables):
             AA = self.short_composable_map[A][A]
             A_len = u8_encoded_length(A)
             AA_len = u8_encoded_length(AA)
             A_AST = "self_composable_CCs[%i]" % i
             AA_AST = "self_composable_CCs[%i]" % (i + 1)
-            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST)
+            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST, XA_AST=XA_AST[A])
+            scope = "b_%x" % A
             s += self.builder.open_scope("x%x" % A, scope)
-            XA_map = {A : chr(AA)}
-            for X in self.short_composable_map.keys():
-                if A in self.short_composable_map[X].keys():
-                    XA = self.short_composable_map[X][A]
-                    XA_map[X] = chr(XA)
-            bit_xfrm_sets = u8_bit_transform_sets(XA_map)
+            bit_xfrm_sets = u8_bit_transform_sets(xfrm_map[A])
             bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
             s += self.builder.generate_scope_compilations()
             s += generateUpdateBitXfrms("b_%x" % A, bit_xfrm_data, "XfrmVar", "xfrm_%x" % A)
