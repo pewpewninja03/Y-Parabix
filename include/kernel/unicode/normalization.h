@@ -212,7 +212,7 @@ SCResults SelfComposableLogic
              (pablo::PabloBuilder & pb,
               std::vector<pablo::PabloAST *> Basis,
               unsigned A_len, unsigned AA_len,
-              pablo::PabloAST * A, pablo::PabloAST * AA, pablo::PabloAST * XA);
+              pablo::PabloAST * A, pablo::PabloAST * AA);
 
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,

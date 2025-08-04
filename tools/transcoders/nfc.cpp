@@ -185,20 +185,20 @@ std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Nam
     P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonBasis);
     SHOW_BIXNUM(CanonBasis);
 
+    StreamSet * ShortBasis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<ShortComposableTranslation>(CanonBasis, ShortBasis);
+    SHOW_BIXNUM(ShortBasis);
+
     StreamSet * SelfComposables = P.CreateStreamSet(6, 1);
-    P.CreateKernelCall<SelfComposableCCs>(CanonBasis, SelfComposables);
+    P.CreateKernelCall<SelfComposableCCs>(ShortBasis, SelfComposables);
     SHOW_BIXNUM(SelfComposables);
 
     StreamSet * SelfBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<SelfComposableTranslation>(CanonBasis, SelfComposables, SelfBasis);
+    P.CreateKernelCall<SelfComposableTranslation>(ShortBasis, SelfComposables, SelfBasis);
     SHOW_BIXNUM(SelfBasis);
 
-    StreamSet * ShortBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ShortComposableTranslation>(SelfBasis, ShortBasis);
-    SHOW_BIXNUM(ShortBasis);
-
     StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
-    LongComposablePipeline(P, ShortBasis, ccc_NR, FinalBasis);
+    LongComposablePipeline(P, SelfBasis, ccc_NR, FinalBasis);
     SHOW_BIXNUM(FinalBasis);
 
     StreamSet * L_V_T =  P.CreateStreamSet(Hangul_Composables::HC_Kind::Count);

@@ -535,8 +535,9 @@ void ShortComposableTranslation::generatePabloMethod() {
 """
 
 short_composable_case_template = r"""//     ${cp1} + ${cp2} => ${precomposed}
-    PabloAST * found_${cp1}_${cp2} = b_${code_str}.createAnd(${cp1_var}, ${cp2_var});
-    found_${code_str} = b_${code_str}.createOr(found_${code_str}, found_${cp1}_${cp2});
+    PabloAST * found_${cp1}_before_${cp2} = b_${code_str}.createAnd(${cp1_var}, ${cp2_var});
+    del_${code_str} = b_${code_str}.createOr(del_${code_str}, found_${cp1}_before_${cp2});
+    PabloAST * found_${cp1}_${cp2} = b_${code_str}.createAdvance(found_${cp1}_before_${cp2}, ${cp1_len});
 """
 
 def generate_short_case_code(code_str, cp1, cp2, generated, generated_seconds, precomposed):
@@ -548,7 +549,8 @@ def generate_short_case_code(code_str, cp1, cp2, generated, generated_seconds, p
                         cp2_var = generated_seconds[cp2],
                         cp1_len=u8_encoded_length(cp1),
                         precomposed = "%x" % precomposed)
-    xlate_code = CharacterTranslationLogic(cp1, precomposed, "found_%x_%x" % (cp1, cp2), "xfrm_%s" % code_str, "b_%s" % code_str)
+    to_xlate = "found_%x_%x" % (cp1, cp2)
+    xlate_code = CharacterTranslationLogic(cp2, precomposed, to_xlate, "xfrm_%s" % code_str, "b_%s" % code_str)
     return s + xlate_code
 
 short_composable_pfx_template = r"""
@@ -556,7 +558,7 @@ short_composable_pfx_template = r"""
     PabloAST * ${pfx_test_var} = ${logic};
     pb.createIf(${pfx_test_var}, ${builder});
     std::vector<PabloAST *> xfrm_${code_str}(8, All0);
-    PabloAST * found_${code_str} = All0;
+    PabloAST * del_${code_str} = All0;
 """
 
 def gen_short_composable_pfx_code(pfx_code):
@@ -574,8 +576,7 @@ short_composable_pfx_final_template = r"""
     for (unsigned i = 0; i < 8; i++) {
         ${builder}.createAssign(XfrmVar[i], $builder.createOr(XfrmVar[i], xfrm_${code_str}[i]));
     }
-    PabloAST * del = ${builder}.createAdvance(found_${code_str}, ${cp1_len});
-    ${builder}.createAssign(DeleteVar, $builder.createOr(DeleteVar, del));
+    ${builder}.createAssign(DeleteVar, $builder.createOr(DeleteVar, del_${code_str}));
 """
 
 def finalize_short_composable_pfx_code(pfx_code):
@@ -638,9 +639,9 @@ void SelfComposableTranslation::generatePabloMethod() {
 """
 
 self_composable_case_template = r"""    auto b_${A} = pb.createScope();
-    pb.createIf(pb.createOr3(${A_AST}, ${AA_AST}, ${XA_AST}), b_${A});
+    pb.createIf(pb.createOr(${A_AST}, ${AA_AST}), b_${A});
     std::vector<PabloAST *> basisXor_${A}(8, All0);
-    SCResults rslt_${A} = SelfComposableLogic(b_${A}, Basis, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST}, ${XA_AST});
+    SCResults rslt_${A} = SelfComposableLogic(b_${A}, Basis, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST});
     b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_to_delete));
     PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
 """
@@ -929,7 +930,7 @@ class NFC_generator:
         self.singleton_map = {}
         self.short_composable_map = {}
         self.composable_seconds = empty_uset()
-        self.self_composables = empty_uset()
+        self.self_composables = {}
         self.long_composable_map = {}
         self.excluded_composite_map = {}
         self.non_starter_uset = empty_uset()
@@ -954,12 +955,13 @@ class NFC_generator:
                         if uset_member(ucd.ccc_map['NR'], cp2):
                             # Decomposition to two consecutive starters
                             self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(cp2))
-                            if not cp1 in self.short_composable_map.keys():
-                                # index by the first character of decomposition
-                                self.short_composable_map[cp1] = {}
-                            self.short_composable_map[cp1][cp2] = precomposed
                             if cp1 == cp2:
-                                self.self_composables = uset_union(self.self_composables, singleton_uset(cp1))
+                                self.self_composables[cp1] = precomposed
+                            else:
+                                if not cp1 in self.short_composable_map.keys():
+                                    # index by the first character of decomposition
+                                    self.short_composable_map[cp1] = {}
+                                self.short_composable_map[cp1][cp2] = precomposed
                         else:
                             if not cp2 in self.long_composable_map.keys():
                                 # index by the mark (second char of decomposition)
@@ -983,8 +985,8 @@ class NFC_generator:
                     self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(precomp))
 
     def add_doubleton_shorts(self):
-        for A in sorted(uset_to_member_list(self.self_composables)):
-            AA = self.short_composable_map[A][A]
+        for A in sorted(self.self_composables.keys()):
+            AA = self.self_composables[A]
             for x in self.short_composable_map.keys():
                 if A in self.short_composable_map[x].keys():
                     y = self.short_composable_map[x][A]
@@ -993,7 +995,7 @@ class NFC_generator:
                             z = self.short_composable_map[y][A]
                             self.short_composable_map[x][AA] = z
 
-    def show_overridable_seconds(self):
+    def add_overridable_seconds(self):
         by_second = {}
         for cp1 in self.short_composable_map.keys():
             for cp2 in self.short_composable_map[cp1].keys():
@@ -1012,9 +1014,25 @@ class NFC_generator:
                         if AB in self.short_composable_map.keys():
                             if C in self.short_composable_map[AB].keys():
                                 ABC = self.short_composable_map[AB][C]
+                                self.short_composable_map[A][BC] = ABC
                                 print("%x %x ==> %x %x ==> %x" %(A, BC, AB, C, ABC))
                         else:
                             print("%x %x ==> %x %x" %(A, BC, AB, C))
+        for A in self.self_composables.keys():
+            AA = self.self_composables[A]
+            if A in self.short_composable_map.keys():
+                if AA in self.short_composable_map.keys():
+                    for X in self.short_composable_map[AA].keys():
+                        AAX = self.short_composable_map[AA][X]
+                        if X in self.short_composable_map[A].keys():
+                            AX = self.short_composable_map[A][X]
+                            self.short_composable_map[A][AX] = AAX
+                            print("%x %x ==> %x %x ==> %x" %(A, AX, AA, X, AAX))
+                for X in self.short_composable_map[A].keys():
+                    if AA in self.short_composable_map.keys() and X in self.short_composable_map[AA].keys():
+                        continue
+                    AX = self.short_composable_map[A][X]
+                    print("%x %x ==> %x %x" %(A, AX, AA, X))
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1037,8 +1055,8 @@ class NFC_generator:
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
 
     def display_self_composables(self):
-        for cp1 in sorted(uset_to_member_list(self.self_composables)):
-            print("%x + %x => %x: " % (cp1, cp1, self.short_composable_map[cp1][cp1]))
+        for cp1 in sorted(self.self_composables.keys()):
+            print("%x + %x => %x: " % (cp1, cp1, self.self_composables[cp1]))
 
     def display_long_composables(self):
         by_starter = {}
@@ -1462,8 +1480,8 @@ class NFC_generator:
         s = self_composable_CC_header
         self.builder.open_scope("", "pb")
         self_composable_usets = []
-        for A in uset_to_member_list(self.self_composables):
-            AA = self.short_composable_map[A][A]
+        for A in self.self_composables.keys():
+            AA = self.self_composables[A]
             self_composable_usets.append(self.builder.install_uset(singleton_uset(A)))
             self_composable_usets.append(self.builder.install_uset(singleton_uset(AA)))
         s += self.builder.generate_scope_compilations()
@@ -1478,32 +1496,18 @@ class NFC_generator:
         t = string.Template(self_composable_case_template)
         self.builder.open_scope("", "pb")
         i = 0
-        XA_AST = {}
-        xfrm_map = {}
-        for A in uset_to_member_list(self.self_composables):
-            AA = self.short_composable_map[A][A]
-            print("AA: %x %x => %x" %(A, A, AA))
-            XA_uset = empty_uset()
-            xfrm_map[A] = {A : chr(AA), AA : chr(A)}
-            for X in self.short_composable_map.keys():
-                if A in self.short_composable_map[X].keys():
-                    XA = self.short_composable_map[X][A]
-                    if XA != AA: 
-                        XA_uset = uset_union(XA_uset, singleton_uset(XA))
-                        xfrm_map[A][X] = chr(XA)
-                        print("XA: %x %x => %x" %(X, A, XA))
-            XA_AST[A] = self.builder.install_uset(XA_uset)
         s += self.builder.generate_scope_compilations()
-        for A in uset_to_member_list(self.self_composables):
-            AA = self.short_composable_map[A][A]
+        for A in self.self_composables.keys():
+            AA = self.self_composables[A]
+            xfrm_map = {A : chr(AA), AA : chr(A)}
             A_len = u8_encoded_length(A)
             AA_len = u8_encoded_length(AA)
             A_AST = "self_composable_CCs[%i]" % i
             AA_AST = "self_composable_CCs[%i]" % (i + 1)
-            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST, XA_AST=XA_AST[A])
+            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST)
             scope = "b_%x" % A
             s += self.builder.open_scope("x%x" % A, scope)
-            bit_xfrm_sets = u8_bit_transform_sets(xfrm_map[A])
+            bit_xfrm_sets = u8_bit_transform_sets(xfrm_map)
             bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
             s += self.builder.generate_scope_compilations()
             s += generateUpdateBitXfrms("b_%x" % A, bit_xfrm_data, "XfrmVar", "xfrm_%x" % A)
@@ -1525,7 +1529,7 @@ class NFC_generator:
             cp1_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in cp1_list:
                 for cp2 in self.short_composable_map[cp1].keys():
-                    if not cp2 in generated.keys():
+                    if not cp2 in generated_seconds.keys():
                         generated_seconds[cp2] = self.builder.install_uset(singleton_uset(cp2), pfx_code_lgth(pfx_code))
             s += self.builder.generate_scope_compilations("LookAhead", pfx_code_lgth(pfx_code))
             # Have finished compiling all seconds with lookaheads
@@ -1543,6 +1547,7 @@ class NFC_generator:
                     case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, generated_seconds, precomposed)
                     if precomposed in cp1_list:
                         deferred.append(precomposed)
+                        print("Deferring %x" % precomposed)
             precomposed_generated = {}
             for cp1 in cp1_list:
                 if not cp1 in deferred:
@@ -1555,11 +1560,10 @@ class NFC_generator:
                 next_deferred = []
                 for cp1 in deferred:
                     if cp1 in precomposed_generated.keys():
-                        generated[cp1] = "%s.createOr(%s, %s)" % (scope, generated[cp1], precomposed_generated[cp1]) 
+                        s += "    %s.createAssign(%s, %s.createOr(%s, %s));\n" % (scope, generated[cp1], scope, generated[cp1], precomposed_generated[cp1])
                         for cp2 in self.short_composable_map[cp1].keys():
                             s += case_code[(cp1, cp2)]
                             precomp = self.short_composable_map[cp1][cp2]
-                            found = "found_%x_%x" % (cp1, cp2)
                             precomposed_generated[precomp] = found
                     else: next_deferred.append(cp1)
                 deferred = next_deferred
@@ -1597,8 +1601,8 @@ class NFC_generator:
         for ccc_enum in self.ucd.ccc_map.keys():
             if ccc_enum != 'NR':  # 
                 candidate_class = uset_union(candidate_class, self.ucd.ccc_map[ccc_enum])
-        for cp in uset_to_member_list(self.self_composables):
-            doubleton = self.short_composable_map[cp][cp]
+        for cp in self.self_composables.keys():
+            doubleton = self.self_composables[cp]
             candidate_class = uset_union(candidate_class, singleton_uset(doubleton))
         # Include the Hangul V and T composables
         VBase = 0x1161
@@ -1645,6 +1649,7 @@ if __name__ == "__main__":
     generator = NFC_generator(ucd)
     generator.create_mappings()
     generator.add_doubleton_shorts()
+    generator.add_overridable_seconds()
     generator.determine_overridable_primaries()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
@@ -1654,8 +1659,7 @@ if __name__ == "__main__":
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
-    #generator.display_short_composables()
-    generator.show_overridable_seconds()
+    generator.display_short_composables()
     #generator.display_self_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()

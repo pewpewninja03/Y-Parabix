@@ -248,23 +248,29 @@ void UpdateBitXfrms(PabloBuilder & pb, std::vector<Var *> BitXfrmBasis,
 
 SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
                               unsigned A_len, unsigned AA_len,
-                              PabloAST * A, PabloAST * AA, PabloAST * XA) {
+                              PabloAST * A, PabloAST * AA) {
     SCResults results;
     PabloAST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
-    PabloAST * any_A_follow = pb.createAdvanceThenScanThru(pb.createOr3(A, AA, XA), suffix, "selfc.any_A_follow");
-    PabloAST * AA_run_start = pb.createAnd(AA, pb.createNot(any_A_follow), "selfc.AA_run_start");
+    PabloAST * A_or_AA_follow = pb.createAdvanceThenScanThru(pb.createOr(A, AA), suffix, "selfc.A_or_AA_follow");
+    PabloAST * AA_run_start = pb.createAnd(AA, pb.createNot(A_or_AA_follow), "selfc.AA_run_start");
     PabloAST * AA_run_continue = pb.createOr(suffix, AA);
     PabloAST * AA_run_follow = pb.createScanThru(AA_run_start, AA_run_continue, "selfc.AA_run_follow");
-    PabloAST * A_run_start = pb.createAnd(A, pb.createOr(AA_run_follow, pb.createNot(any_A_follow)), "selfc.A_run_start");
-    PabloAST * A_or_XA_run_start = pb.createOr(A_run_start, XA, "selfc.A_or_XA_run_start");
-    PabloAST * A_or_XA = pb.createOr(A, XA, "selfc.A_or_XA");
-    PabloAST * A1 = pb.createEveryNth(A_or_XA, pb.getInteger(2));  //  1st, 3rd, 5th, ... of all the As
-    PabloAST * A2 = pb.createXor(A_or_XA, A1, "selfc.A2");  //  2nd, 4th, 6th, ... of the As
-    PabloAST * A1_start = pb.createAnd(A_or_XA_run_start, A1, "selfc.A1_start");
-    PabloAST * A2_start = pb.createAnd(A_or_XA_run_start, A2, "selfc.A2_start");
-    PabloAST * run_stop = pb.createNot(pb.createOr(A, AA_run_continue));
-    PabloAST * A1_runs = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {A1_start, run_stop});
-    PabloAST * A2_runs = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {A2_start, run_stop});
+    PabloAST * A_run_start = pb.createAnd(A, pb.createOr(AA_run_follow, pb.createNot(A_or_AA_follow)), "selfc.A_run_start");
+    PabloAST * A1 = pb.createEveryNth(A, pb.getInteger(2), "selfc.A1");  //  1st, 3rd, 5th, ... of all the As
+    PabloAST * A2 = pb.createXor(A, A1, "selfc.A2");  //  2nd, 4th, 6th, ... of the As
+    PabloAST * A1_start = pb.createAnd(A_run_start, A1, "selfc.A1_start");
+    PabloAST * A2_start = pb.createAnd(A_run_start, A2, "selfc.A2_start");
+    PabloAST * A_continue = A;
+    for (unsigned i = 1; i < AA_len; i++) {
+        A_continue = pb.createOr(A_continue, pb.createLookahead(A, i));
+    }
+    PabloAST * AA_continue = AA;
+    for (unsigned i = 1; i < AA_len; i++) {
+        AA_continue = pb.createOr(AA_continue, pb.createLookahead(AA, i));
+    }
+    PabloAST * run_continue = pb.createOr3(A_run_start, A_continue, AA_continue, "selfc.run_continue");
+    PabloAST * A1_runs = pb.createMatchStar(A1_start, run_continue, "selfc.A1_runs");
+    PabloAST * A2_runs = pb.createMatchStar(A2_start, run_continue, "selfc.A2_runs");
     PabloAST * A_odd = pb.createOr(pb.createAnd(A1_runs, A1), pb.createAnd(A2_runs, A2), "selfc.A_odd");
     PabloAST * A_even = pb.createOr(pb.createAnd(A1_runs, A2), pb.createAnd(A2_runs, A1), "selfc.A_even");
     //
