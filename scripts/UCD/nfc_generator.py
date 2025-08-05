@@ -540,7 +540,7 @@ short_composable_case_template = r"""//     ${cp1} + ${cp2} => ${precomposed}
     PabloAST * found_${cp1}_${cp2} = b_${code_str}.createAdvance(found_${cp1}_before_${cp2}, ${cp1_len});
 """
 
-def generate_short_case_code(code_str, cp1, cp2, generated, generated_seconds, precomposed):
+def generate_short_case_code(builder, code_str, cp1, cp2, generated, generated_seconds, precomposed):
     t = string.Template(short_composable_case_template)
     s = t.substitute(code_str = code_str,
                         cp1 = "%x" % cp1,
@@ -550,6 +550,12 @@ def generate_short_case_code(code_str, cp1, cp2, generated, generated_seconds, p
                         cp1_len=u8_encoded_length(cp1),
                         precomposed = "%x" % precomposed)
     to_xlate = "found_%x_%x" % (cp1, cp2)
+    xlate_map = {cp2 : chr(precomposed)}
+    bit_xfrm_sets = u8_bit_transform_sets(xlate_map)
+    del_usets = u8_deletion_sets(xlate_map)
+    bit_xfrm_data = install_bit_xfrm_usets(builder, bit_xfrm_sets)
+    del_vars = install_del_usets(builder, del_usets)
+    #xlate_code = generateUpdateBitXfrms("b_%s" % code_str, bit_xfrm_data, "xfrm_%s" % code_str, to_xlate)
     xlate_code = CharacterTranslationLogic(cp2, precomposed, to_xlate, "xfrm_%s" % code_str, "b_%s" % code_str)
     return s + xlate_code
 
@@ -718,9 +724,13 @@ def u8_deletion_sets(char2string_map):
         len2 = len(str_bytes)
         if len1 > len2:
             ldiff = len1 - len2
+            #print("cp %x, ldiff: %i" % (cp, ldiff))
             if not ldiff in deletion_usets.keys():
                 deletion_usets[ldiff] = empty_uset()
             deletion_usets[ldiff] = uset_union(deletion_usets[ldiff], cp_uset)
+        #if len(deletion_usets.keys()) > 0:
+            #for diff in deletion_usets.keys():
+                #print("deletion_uset[%i]:" % diff)
     return deletion_usets
 
 def u8_bit_transform_sets(char2string_map):
@@ -739,6 +749,12 @@ def u8_bit_transform_sets(char2string_map):
                             bit_xfrm_sets[i][j] = empty_uset()
                         bit_xfrm_sets[i][j] = uset_union(bit_xfrm_sets[i][j], cp_uset)
     return bit_xfrm_sets
+
+def install_del_usets(builder, del_sets):
+    del_vars = {}
+    for del_amt in del_sets.keys():
+        del_vars[del_amt] = builder.install_uset(del_sets[del_amt])
+    return del_vars
 
 def install_bit_xfrm_usets(builder, bit_xfrm_sets):
     bit_xfrm_data = {}
@@ -1038,16 +1054,19 @@ class NFC_generator:
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
 
     def display_singletons(self):
+        print("Singletons:")
         for cp in sorted(self.singleton_map.keys()):
             canon_cp = self.singleton_map[cp]
             print("%s => %s" % (self.cp_with_ccc(cp), self.cp_with_ccc(canon_cp)))
 
     def display_excluded_composites(self):
+        print("Excluded Composites:")
         for cp in sorted(self.excluded_composite_map.keys()):
             decomp = self.excluded_composite_map[cp]
             print("%s => %s" % (self.cp_with_ccc(cp), " ".join([self.cp_with_ccc(ord(c)) for c in decomp])))
 
     def display_short_composables(self):
+        print("Short Composables:")
         for cp1 in sorted(self.short_composable_map.keys()):
             print("%s: " % self.cp_with_ccc(cp1))
             for cp2 in sorted(self.short_composable_map[cp1].keys()):
@@ -1055,10 +1074,12 @@ class NFC_generator:
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), self.cp_with_ccc(cp)))
 
     def display_self_composables(self):
+        print("Self Composables:")
         for cp1 in sorted(self.self_composables.keys()):
             print("%x + %x => %x: " % (cp1, cp1, self.self_composables[cp1]))
 
     def display_long_composables(self):
+        print("Long Composables:")
         by_starter = {}
         for cp2 in sorted(self.long_composable_map.keys()):
             for cp1 in self.long_composable_map[cp2].keys():
@@ -1073,6 +1094,7 @@ class NFC_generator:
                 print("    + %s => %s" % (self.cp_with_ccc(cp2), " ".join(["%x" % ord(c) for c in s])))
 
     def display_recursive_decomposables(self):
+        print("Recursive Composables:")
         for precomposed in sorted(ucd.decomp_map.keys()):
             if uset_member(ucd.dt_map['Can'], precomposed):
                 decomp = ucd.decomp_map[precomposed]
@@ -1322,13 +1344,11 @@ class NFC_generator:
                 pfx_xlate_map[cp1] = chr(self.singleton_map[cp1])
             bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
             del_usets = u8_deletion_sets(pfx_xlate_map)
-            #has_del = len(del_usets.keys()) > 0
-            #del_vars = {}
-            #for del_amt in del_usets.keys():
-            #    del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
             bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
+            del_vars = install_del_usets(self.builder, del_usets)
             s += self.builder.generate_scope_compilations()
             s += generateUpdateBitXfrms(scope, bit_xfrm_data, "XfrmVar", "nullptr")
+            #s += generateDel
             s += self.builder.close_scope()
         s += singleton_final_code
         return s
@@ -1347,10 +1367,8 @@ class NFC_generator:
                 pfx_xlate_map[cp] = self.excluded_composite_map[cp]
             bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
             del_usets = u8_deletion_sets(pfx_xlate_map)
-            del_vars = {}
-            for del_amt in del_usets.keys():
-                del_vars[del_amt] = self.builder.install_uset(del_usets[del_amt])
             bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
+            del_vars = install_del_usets(self.builder, del_usets)
             s += self.builder.generate_scope_compilations()
             s += generateUpdateBitXfrms(scope, bit_xfrm_data, "XfrmVar", "nullptr")
             s += self.builder.close_scope()
@@ -1419,12 +1437,14 @@ class NFC_generator:
                         pass_data[pfx_code] = {}
                     pass_data[pfx_code][mark] = rg_set_map[pfx_code]
         bit_xfrm_data = {}
+        del_vars = {}
         for pfx_code in pass_data.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
             s += gen_long_composition_pfx_code(pfx_code)
             s += self.builder.open_scope(code_str, scope)
             bit_xfrm_data[pfx_code] = {}
+            del_vars[pfx_code] = {}
             for mark in pass_data[pfx_code].keys():
                 starters = uset_to_member_list(pass_data[pfx_code][mark])
                 pfx_xlate_map = {}
@@ -1432,6 +1452,8 @@ class NFC_generator:
                     pfx_xlate_map[cp1] = self.long_composable_map[mark][cp1]
                 bit_xfrm_sets = u8_bit_transform_sets(pfx_xlate_map)
                 bit_xfrm_data[pfx_code][mark] = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
+                del_usets = u8_deletion_sets(pfx_xlate_map)
+                del_vars[pfx_code][mark] = install_del_usets(self.builder, del_usets)
             s += self.builder.generate_scope_compilations()
             for mark in sorted(pass_data[pfx_code].keys()):
                 mark_code = 1 # default
@@ -1509,6 +1531,8 @@ class NFC_generator:
             s += self.builder.open_scope("x%x" % A, scope)
             bit_xfrm_sets = u8_bit_transform_sets(xfrm_map)
             bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
+            del_usets = u8_deletion_sets(xfrm_map)
+            del_vars = install_del_usets(self.builder, del_usets)
             s += self.builder.generate_scope_compilations()
             s += generateUpdateBitXfrms("b_%x" % A, bit_xfrm_data, "XfrmVar", "xfrm_%x" % A)
             s += self.builder.close_scope()
@@ -1544,7 +1568,7 @@ class NFC_generator:
             for cp1 in cp1_list:
                 for cp2 in self.short_composable_map[cp1].keys():
                     precomposed = self.short_composable_map[cp1][cp2]
-                    case_code[(cp1, cp2)] = generate_short_case_code(code_str, cp1, cp2, generated, generated_seconds, precomposed)
+                    case_code[(cp1, cp2)] = generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, precomposed)
                     if precomposed in cp1_list:
                         deferred.append(precomposed)
                         print("Deferring %x" % precomposed)
@@ -1658,8 +1682,8 @@ if __name__ == "__main__":
     #generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
-    #generator.display_singletons()
-    generator.display_short_composables()
+    generator.display_singletons()
+    #generator.display_short_composables()
     #generator.display_self_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()

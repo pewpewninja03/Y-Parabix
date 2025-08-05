@@ -261,7 +261,7 @@ SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
     PabloAST * A1_start = pb.createAnd(A_run_start, A1, "selfc.A1_start");
     PabloAST * A2_start = pb.createAnd(A_run_start, A2, "selfc.A2_start");
     PabloAST * A_continue = A;
-    for (unsigned i = 1; i < AA_len; i++) {
+    for (unsigned i = 1; i < A_len; i++) {
         A_continue = pb.createOr(A_continue, pb.createLookahead(A, i));
     }
     PabloAST * AA_continue = AA;
