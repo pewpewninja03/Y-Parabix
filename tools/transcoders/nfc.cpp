@@ -238,7 +238,7 @@ std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Nam
 
     StreamSets ToSort = {CCC_Spans, TransformedBasis};
 
-    StreamSets SortResults = BitonicSortRuns(P, 16, CCC_NonZero, ToSort);
+    StreamSets SortResults = BitonicSortRuns(P, 32, CCC_NonZero, ToSort);
     SHOW_BIXNUM(SortResults[0]);
     SHOW_BIXNUM(SortResults[1]);
 

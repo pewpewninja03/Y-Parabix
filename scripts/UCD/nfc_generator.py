@@ -1003,11 +1003,10 @@ class NFC_generator:
                             self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(cp2))
                             if cp1 == cp2:
                                 self.self_composables[cp1] = precomposed
-                            else:
-                                if not cp1 in self.short_composable_map.keys():
-                                    # index by the first character of decomposition
-                                    self.short_composable_map[cp1] = {}
-                                self.short_composable_map[cp1][cp2] = precomposed
+                            if not cp1 in self.short_composable_map.keys():
+                                # index by the first character of decomposition
+                                self.short_composable_map[cp1] = {}
+                            self.short_composable_map[cp1][cp2] = precomposed
                         else:
                             if not cp2 in self.long_composable_map.keys():
                                 # index by the mark (second char of decomposition)
@@ -1056,32 +1055,18 @@ class NFC_generator:
                 BC = self.short_composable_map[B][C]
                 if B in by_second.keys():
                     for A in by_second[B].keys():
+                        if BC in self.short_composable_map[A].keys(): continue # entry already
                         # Now have an AB precomposed combo with a following C.
                         AB = by_second[B][A]
+                        if not A in self.short_overridable_map.keys():
+                            self.short_overridable_map[A] = {}
                         if AB in self.short_composable_map.keys() and C in self.short_composable_map[AB].keys():
                             ABC = self.short_composable_map[AB][C]
-                            self.short_composable_map[A][BC] = ABC
+                            self.short_overridable_map[A][BC] = chr(ABC)
                             print("%x %x ==> %x %x ==> %x" %(A, BC, AB, C, ABC))
                         else:
-                            if not A in self.short_overridable_map.keys():
-                                self.short_overridable_map[A] = {}
                             self.short_overridable_map[A][BC] = chr(AB) + chr(C)
                             print("%x %x ==> %x %x" %(A, BC, AB, C))
-        for A in self.self_composables.keys():
-            AA = self.self_composables[A]
-            if A in self.short_composable_map.keys():
-                if AA in self.short_composable_map.keys():
-                    for X in self.short_composable_map[AA].keys():
-                        AAX = self.short_composable_map[AA][X]
-                        if X in self.short_composable_map[A].keys():
-                            AX = self.short_composable_map[A][X]
-                            self.short_composable_map[A][AX] = AAX
-                            print("%x %x ==> %x %x ==> %x" %(A, AX, AA, X, AAX))
-                for X in self.short_composable_map[A].keys():
-                    if AA in self.short_composable_map.keys() and X in self.short_composable_map[AA].keys():
-                        continue
-                    AX = self.short_composable_map[A][X]
-                    print("%x %x ==> %x %x" %(A, AX, AA, X))
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1603,8 +1588,12 @@ class NFC_generator:
                 if cp1 in self.short_overridable_map.keys():
                     for cp2 in self.short_overridable_map[cp1].keys():
                         recomposed = self.short_overridable_map[cp1][cp2]
-                        s += generate_recomposed_case(self.builder, code_str, cp1, cp2, generated, generated_seconds, recomposed)
+                        if len(recomposed) == 1:
+                            s += generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, ord(recomposed[0]))
+                        else:
+                            s += generate_recomposed_case(self.builder, code_str, cp1, cp2, generated, generated_seconds, recomposed)
                 for cp2 in self.short_composable_map[cp1].keys():
+                    if cp1 == cp2: continue
                     precomposed = self.short_composable_map[cp1][cp2]
                     case_code[(cp1, cp2)] = generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, precomposed)
                     if precomposed in cp1_list:
@@ -1614,6 +1603,7 @@ class NFC_generator:
             for cp1 in cp1_list:
                 if not cp1 in deferred:
                     for cp2 in self.short_composable_map[cp1].keys():
+                        if cp1 == cp2: continue
                         s += case_code[(cp1, cp2)]
                         precomp = self.short_composable_map[cp1][cp2]
                         found = "found_%x_%x" % (cp1, cp2)
@@ -1710,7 +1700,7 @@ if __name__ == "__main__":
     ucd = UCD_database()
     generator = NFC_generator(ucd)
     generator.create_mappings()
-    generator.add_doubleton_shorts()
+    #generator.add_doubleton_shorts()
     generator.add_overridable_seconds()
     generator.determine_overridable_primaries()
     generator.create_max_insert_map()
@@ -1721,7 +1711,7 @@ if __name__ == "__main__":
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
-    #generator.display_short_composables()
+    generator.display_short_composables()
     #generator.display_self_composables()
     #generator.display_long_composables()
     #generator.display_excluded_composites()
