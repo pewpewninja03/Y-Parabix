@@ -559,6 +559,29 @@ def generate_short_case_code(builder, code_str, cp1, cp2, generated, generated_s
     xlate_code = CharacterTranslationLogic(cp2, precomposed, to_xlate, "xfrm_%s" % code_str, "b_%s" % code_str)
     return s + xlate_code
 
+recomposed_case_template = r"""//     ${cp1} + ${cp2} => ${recomposed1} + ${recomposed2}
+    PabloAST * found_${cp1}_before_${cp2} = b_${code_str}.createAnd(${cp1_var}, ${cp2_var});
+    PabloAST * found_${cp1}_${cp2} = b_${code_str}.createAdvance(found_${cp1}_before_${cp2}, ${cp1_len});
+"""
+
+def generate_recomposed_case(builder, code_str, cp1, cp2, generated, generated_seconds, recomposed):
+    t = string.Template(recomposed_case_template)
+    recomposed1 = ord(recomposed[0])
+    recomposed2 = ord(recomposed[1])
+    s = t.substitute(code_str = code_str,
+                        cp1 = "%x" % cp1,
+                        cp2 = "%x" % cp2,
+                        cp1_var = generated[cp1],
+                        cp2_var = generated_seconds[cp2],
+                        cp1_len=u8_encoded_length(cp1),
+                        recomposed1 = "%x" % recomposed1,
+                        recomposed2 = "%x" % recomposed2)
+    to_xlate = "found_%x_before_%x" % (cp1, cp2)
+    xlate_code = CharacterTranslationLogic(cp1, recomposed1, to_xlate, "xfrm_%s" % code_str, "b_%s" % code_str)
+    to_xlate = "found_%x_%x" % (cp1, cp2)
+    xlate_code += CharacterTranslationLogic(cp2, recomposed2, to_xlate, "xfrm_%s" % code_str, "b_%s" % code_str)
+    return s + xlate_code
+
 short_composable_pfx_template = r"""
     auto ${builder} = pb.createScope();
     PabloAST * ${pfx_test_var} = ${logic};
@@ -698,16 +721,15 @@ def CharacterTranslationLogic(cp1, cp2, marker, basis_var, pb):
     for i in range(len2):
         diff = xfrm_bytes[i]
         if diff != 0:
-            # advance marker to pos
-            if i == 0:
-                s += "    PabloAST * m_%x_%x_0 = %s;\n" % (cp1, cp2, marker)
-            else:
-                s += "    PabloAST * m_%x_%x_%i = %s.createAdvance(%s, %i);\n" % (cp1, cp2, i, pb, marker, i)
+            adv_marker = marker
+            if i > 0:
+                adv_marker = "%s_%i" % (marker, i)
+                s += "    PabloAST * %s = %s.createAdvance(%s, %i);\n" % (adv_marker, pb, marker, i)
             # apply xor logic for each bit difference between cp1_byte, cp2_byte
             for j in range(8):
                 bv = "%s[%i]" % (basis_var, j)
                 if ((diff >> j) & 1) == 1:
-                    s += "    %s = %s.createOr(%s, m_%x_%x_%i);\n" % (bv, pb, bv, cp1, cp2, i)
+                    s += "    %s = %s.createOr(%s, %s);\n" % (bv, pb, bv, adv_marker)
     return s
 
 def u8_deletion_sets(char2string_map):
@@ -944,6 +966,7 @@ class NFC_generator:
     def create_mappings(self):
         self.full_decomp_map = {}
         self.singleton_map = {}
+        self.by_ccc_and_second = {}
         self.short_composable_map = {}
         self.composable_seconds = empty_uset()
         self.self_composables = {}
@@ -968,6 +991,13 @@ class NFC_generator:
                             cp1 = ord(decomp[0])
                         self.excluded_composite_map[precomposed] = decomp
                     else:
+                        ccc = self.ccc_val_map[cp2]
+                        ccc_code = self.ccc_enum_map[ccc]
+                        if not ccc_code in self.by_ccc_and_second.keys():
+                            self.by_ccc_and_second[ccc_code] = {}
+                        if not cp2 in self.by_ccc_and_second[ccc_code].keys():
+                            self.by_ccc_and_second[ccc_code][cp2] = {}
+                        self.by_ccc_and_second[ccc_code][cp2][cp1] = precomposed
                         if uset_member(ucd.ccc_map['NR'], cp2):
                             # Decomposition to two consecutive starters
                             self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(cp2))
@@ -1012,6 +1042,7 @@ class NFC_generator:
                             self.short_composable_map[x][AA] = z
 
     def add_overridable_seconds(self):
+        self.short_overridable_map = {}
         by_second = {}
         for cp1 in self.short_composable_map.keys():
             for cp2 in self.short_composable_map[cp1].keys():
@@ -1027,12 +1058,14 @@ class NFC_generator:
                     for A in by_second[B].keys():
                         # Now have an AB precomposed combo with a following C.
                         AB = by_second[B][A]
-                        if AB in self.short_composable_map.keys():
-                            if C in self.short_composable_map[AB].keys():
-                                ABC = self.short_composable_map[AB][C]
-                                self.short_composable_map[A][BC] = ABC
-                                print("%x %x ==> %x %x ==> %x" %(A, BC, AB, C, ABC))
+                        if AB in self.short_composable_map.keys() and C in self.short_composable_map[AB].keys():
+                            ABC = self.short_composable_map[AB][C]
+                            self.short_composable_map[A][BC] = ABC
+                            print("%x %x ==> %x %x ==> %x" %(A, BC, AB, C, ABC))
                         else:
+                            if not A in self.short_overridable_map.keys():
+                                self.short_overridable_map[A] = {}
+                            self.short_overridable_map[A][BC] = chr(AB) + chr(C)
                             print("%x %x ==> %x %x" %(A, BC, AB, C))
         for A in self.self_composables.keys():
             AA = self.self_composables[A]
@@ -1555,17 +1588,22 @@ class NFC_generator:
                 for cp2 in self.short_composable_map[cp1].keys():
                     if not cp2 in generated_seconds.keys():
                         generated_seconds[cp2] = self.builder.install_uset(singleton_uset(cp2), pfx_code_lgth(pfx_code))
+                if cp1 in self.short_overridable_map.keys():
+                    for cp2 in self.short_overridable_map[cp1].keys():
+                        if not cp2 in generated_seconds.keys():
+                            generated_seconds[cp2] = self.builder.install_uset(singleton_uset(cp2), pfx_code_lgth(pfx_code))
             s += self.builder.generate_scope_compilations("LookAhead", pfx_code_lgth(pfx_code))
             # Have finished compiling all seconds with lookaheads
-            generated = {}
-            cp1_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in cp1_list:
-                if not cp1 in generated.keys():
-                    generated[cp1] = self.builder.install_uset(singleton_uset(cp1))
+                generated[cp1] = self.builder.install_uset(singleton_uset(cp1))
             s += self.builder.generate_scope_compilations()
             case_code = {}
             deferred = []
             for cp1 in cp1_list:
+                if cp1 in self.short_overridable_map.keys():
+                    for cp2 in self.short_overridable_map[cp1].keys():
+                        recomposed = self.short_overridable_map[cp1][cp2]
+                        s += generate_recomposed_case(self.builder, code_str, cp1, cp2, generated, generated_seconds, recomposed)
                 for cp2 in self.short_composable_map[cp1].keys():
                     precomposed = self.short_composable_map[cp1][cp2]
                     case_code[(cp1, cp2)] = generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, precomposed)
@@ -1682,7 +1720,7 @@ if __name__ == "__main__":
     #generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
-    generator.display_singletons()
+    #generator.display_singletons()
     #generator.display_short_composables()
     #generator.display_self_composables()
     #generator.display_long_composables()
