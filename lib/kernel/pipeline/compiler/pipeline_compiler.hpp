@@ -535,6 +535,7 @@ public:
 
     void registerStreamSetIllustrator(KernelBuilder & b, const size_t streamSet) const;
     void illustrateStreamSet(KernelBuilder & b, const size_t streamSet, Value * const initial, Value * const current) const;
+    bool kernelHasAnyPipelineIllustratedStreamSet(const size_t kernel) const;
 
 // dynamic multithreading functions
 
@@ -618,7 +619,7 @@ protected:
     const bool                                  mGenerateDeferredItemCountHistogram;
     const bool                                  mIsNestedPipeline;
     const bool                                  mUseDynamicMultithreading;
-    const bool                                  mUsesIllustrator;
+    const bool                                  PipelineRequiresIllustratorObject;
 
     const LengthAssertions &                    mLengthAssertions;
 
@@ -686,6 +687,7 @@ protected:
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
+    bool                                        mKernelRequiresIllustratorObject = false;
     unsigned                                    mKernelId = 0;
     const Kernel *                              mKernel = nullptr;
     Value *                                     mKernelSharedHandle = nullptr;
@@ -817,6 +819,7 @@ protected:
     bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
     bool                                        mHasPrincipalInputRate = false;
+    bool                                        mHasPipelineIllustratedStreamSet = false;
 
     InputPortVector<Value *>                    mInitiallyProcessedItemCount; // *before* entering the kernel
     InputPortVector<Value *>                    mInitiallyProcessedDeferredItemCount;
@@ -942,7 +945,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mIsNestedPipeline(P.IsNestedPipeline)
 , mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline)
-, mUsesIllustrator(codegen::EnableIllustrator)
+, PipelineRequiresIllustratorObject(P.RequiresIllustratorObject)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
 , FirstKernel(P.FirstKernel)
 , LastKernel(P.LastKernel)

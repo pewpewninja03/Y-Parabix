@@ -219,7 +219,6 @@ protected:
     BaseDriver &            mDriver;
     // eventual pipeline configuration
     PipelineKernel * const  mTarget;
-
     bool                    mExternallySynchronized = false;
 };
 

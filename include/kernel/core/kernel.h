@@ -76,6 +76,10 @@ public:
         , PopCountKernel
     };
 
+    enum KernelFlags {
+        RequiresIllustratorObject = 1
+    };
+
     using InitArgs = llvm::SmallVector<llvm::Value *, 32>;
 
     using NestedStateObjs = llvm::SmallVector<llvm::Value *, 16>;
@@ -481,6 +485,10 @@ public:
         return 0;
     }
 
+    LLVM_READNONE unsigned getKernelFlags() const {
+        return mFlags;
+    }
+
 protected:
 
     llvm::Function * getInitializeFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
@@ -613,7 +621,8 @@ protected:
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars,
-           CompilationStatus status = CompilationStatus::FullyInitialized);
+           CompilationStatus status = CompilationStatus::FullyInitialized,
+           unsigned flags = 0);
 
     // Constructor used by pipeline
     Kernel(LLVMTypeSystemInterface & ts,
@@ -621,14 +630,16 @@ protected:
            AttributeSet && attributes,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
-           CompilationStatus status = CompilationStatus::Uninitialized);
+           CompilationStatus status = CompilationStatus::Uninitialized,
+           unsigned flags = 0);
 
-    static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
+    static std::string annotateKernelNameWithDebugFlags(const TypeId id, const unsigned flags, std::string && name);
 
 protected:
 
     const TypeId                mTypeId;
     unsigned                    mStride;
+    unsigned                    mFlags;
     llvm::Module *              mModule = nullptr;
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
@@ -668,7 +679,8 @@ protected:
                           Bindings &&stream_outputs,
                           Bindings &&scalar_parameters,
                           Bindings &&scalar_outputs,
-                          InternalScalars && internal_scalars);
+                          InternalScalars && internal_scalars,
+                          unsigned flags = 0);
 public:
 
     virtual void generateDoSegmentMethod(KernelBuilder & b) = 0;
@@ -696,7 +708,8 @@ protected:
                      Bindings && stream_outputs,
                      Bindings && scalar_parameters,
                      Bindings && scalar_outputs,
-                     InternalScalars && internal_scalars);
+                     InternalScalars && internal_scalars,
+                     unsigned flags = 0);
 
     MultiBlockKernel(LLVMTypeSystemInterface & ts,
                      const TypeId kernelTypId,
@@ -705,7 +718,8 @@ protected:
                      Bindings && stream_outputs,
                      Bindings && scalar_parameters,
                      Bindings && scalar_outputs,
-                     InternalScalars && internal_scalars);
+                     InternalScalars && internal_scalars,
+                     unsigned flags = 0);
 
     virtual void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) = 0;
 
@@ -751,7 +765,8 @@ protected:
                         Bindings && stream_outputs,
                         Bindings && scalar_parameters,
                         Bindings && scalar_outputs,
-                        InternalScalars && internal_scalars);
+                        InternalScalars && internal_scalars,
+                        const unsigned flags = 0);
 
 private:
 

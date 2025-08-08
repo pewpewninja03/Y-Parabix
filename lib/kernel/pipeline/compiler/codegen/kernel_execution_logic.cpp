@@ -23,7 +23,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         b.CreateMProtect(mKernel->getSharedStateType(), mKernelSharedHandle, CBuilder::Protect::WRITE);
     }
 
-    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mUsesIllustrator)) {
+    if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mKernelRequiresIllustratorObject || mHasPipelineIllustratedStreamSet)) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire.
         // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
         const auto prefix = makeKernelName(mKernelId);
@@ -40,7 +40,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
-        assert (!mUsesIllustrator);
         assert (!mIsIOProcessThread);
 
         if (mCurrentKernelIsStateFree) {
@@ -302,7 +301,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
             }
         }
 
-        if (LLVM_UNLIKELY(mUsesIllustrator)) {
+        if (LLVM_UNLIKELY(mHasPipelineIllustratedStreamSet)) {
 
             auto isCountableType = [](const Value * const ptr, const Binding & binding) {
                 return ptr ? isCountable(binding) : false;

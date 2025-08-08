@@ -314,34 +314,10 @@ inline StreamDataStateObject * getStateObject(const void * address) const {
     return r->second;
 }
 
-
-// using DisplayOrderGraph = adjacency_list<hash_setS, vecS, bidirectionalS>;
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief printGraph
- ** ------------------------------------------------------------------------------------------------------------- */
-template <typename Graph>
-static void printGraph(const Graph & G, raw_ostream & out, const StringRef name = "G") {
-
-    out << "digraph \"" << name << "\" {\n";
-    for (auto v : make_iterator_range(vertices(G))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
-    }
-    for (auto e : make_iterator_range(edges(G))) {
-        const auto s = source(e, G);
-        const auto t = target(e, G);
-        out << "v" << s << " -> v" << t << ";\n";
-    }
-
-    out << "}\n\n";
-    out.flush();
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief displayCapturedData
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void displayCapturedData(const size_t blockWidth) const {
-
     struct KernelNameNode {
         StringRef Label;
         size_t NumOfCopies;

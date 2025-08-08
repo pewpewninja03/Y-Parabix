@@ -136,16 +136,14 @@ protected:
 //  Short composable sequences are those involving non reorderable
 //  characters.   In this case, precomposition is only applied when
 //  the characters are adjacent.   This kernel replaces the
-//  second character of such short composable sequences with
-//  the resulting precomposed character.   In addition a marker
-//  bit stream DeletePrior is produced identifying that the
-//  previous character must be deleted.
+//  first character of such short composable sequences with
+//  the resulting precomposed character and zeroes out the
+//  second.
 //
 class ShortComposableTranslation : public pablo::PabloKernel {
 public:
     ShortComposableTranslation
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * DeletePrior, StreamSet * XfrmBasis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * OutputBasis);
 protected:
     void generatePabloMethod() override;
 };
@@ -187,13 +185,30 @@ protected:
 //  2.  The even numbered As are marked for deletion.
 //  3.  If the number of As is odd, and the last of the span is AA, it is converted to A.
 
+class SelfComposableCCs : public pablo::PabloKernel {
+public:
+    SelfComposableCCs
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * short_composable_CCs);
+protected:
+    void generatePabloMethod() override;
+};
+
+class SelfComposableTranslation : public pablo::PabloKernel {
+public:
+    SelfComposableTranslation
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * short_composable_CCs,
+                                       StreamSet * XfrmedBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
 struct SCResults {
     pablo::PabloAST * A_to_convert_to_AA;
     pablo::PabloAST * A_to_delete;
     pablo::PabloAST * AA_to_convert_to_A;
 };
 
-SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA);
+SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA, pablo::PabloAST * suffix);
 
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,

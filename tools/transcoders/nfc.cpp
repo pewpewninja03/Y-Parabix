@@ -185,18 +185,16 @@ std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Nam
     P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonBasis);
     SHOW_BIXNUM(CanonBasis);
 
-    StreamSet * XorBasis = P.CreateStreamSet(8, 1);
-    StreamSet * DelPrior = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<ShortComposableTranslation>(CanonBasis, DelPrior, XorBasis);
-    SHOW_BIXNUM(XorBasis);
-    SHOW_STREAM(DelPrior);
+    StreamSet * SelfComposables = P.CreateStreamSet(6, 1);
+    P.CreateKernelCall<SelfComposableCCs>(CanonBasis, SelfComposables);
+    SHOW_BIXNUM(SelfComposables);
 
-    StreamSet * XfrmedBasis = P.CreateStreamSet(8, 1);
-    XorCombine(P, CanonBasis, XorBasis, XfrmedBasis);
-    SHOW_BIXNUM(XfrmedBasis);
+    StreamSet * SelfBasis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<SelfComposableTranslation>(CanonBasis, SelfComposables, SelfBasis);
+    SHOW_BIXNUM(SelfBasis);
 
     StreamSet * ShortBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ZeroPrior>(XfrmedBasis, DelPrior, ShortBasis);
+    P.CreateKernelCall<ShortComposableTranslation>(SelfBasis, ShortBasis);
     SHOW_BIXNUM(ShortBasis);
 
     StreamSet * FinalBasis = P.CreateStreamSet(8, 1);

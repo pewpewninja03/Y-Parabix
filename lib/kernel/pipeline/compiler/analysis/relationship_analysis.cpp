@@ -662,6 +662,10 @@ struct RelationshipGraphBuilder {
                         continue;
                     }
 
+                    if (LLVM_UNLIKELY(kernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+                        continue;
+                    }
+
                     const auto n = in_degree(i, G);
                     inputs.resize(n);
                     scalars.resize(n);
@@ -848,10 +852,12 @@ struct RelationshipGraphBuilder {
         }
         for (const auto & K : mKernels) {
             const Kernel * kernel = K.Object;
-            if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
+            #warning replace kernelflags with attribute?
+            if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting) || kernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
                 const auto k = G.find(RelationshipNode::IsKernel, kernel);
-                pending.push(k);
-                visited.insert_unique(k);
+                if (visited.insert(k).second) {
+                     pending.push(k);
+                }
             }
         }
 
@@ -940,6 +946,11 @@ struct RelationshipGraphBuilder {
     assert (p_in == PipelineInput);
     const auto n = mKernels.size();
     KernelVertexVec vertex(n);
+
+    if (LLVM_UNLIKELY(mPipelineKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+        RequiresIllustratorObject = true;
+    }
+
     for (unsigned i = 0; i < n; ++i) {
         const auto & P = mKernels[i];
         const Kernel * K = P.Object;
@@ -952,6 +963,11 @@ struct RelationshipGraphBuilder {
         }
 
         const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
+
+        if (LLVM_UNLIKELY(K->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+            RequiresIllustratorObject = true;
+        }
+
         vertex[i] = Relationships.add(RelationshipNode::IsKernel, K, flags);
     }
     const unsigned p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
@@ -1017,10 +1033,11 @@ struct RelationshipGraphBuilder {
     #endif
 
     // Pipeline optimizations
-    if (LLVM_UNLIKELY(!codegen::EnableIllustrator)) {
-        B.combineDuplicateKernels(vertex);
-        B.removeUnusedKernels(p_in, p_out);
-    }
+    B.combineDuplicateKernels(vertex);
+    B.removeUnusedKernels(p_in, p_out);
+
+
+
 
 }
 

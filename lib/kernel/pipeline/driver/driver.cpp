@@ -105,7 +105,7 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
         }
     }
 
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(kernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         // TODO: temporary design choice; need to rethink how we should handle implicit scalars
         auto illustratorObject = CreateCommandLineScalar(CommandLineScalarType::ParabixIllustratorObject);
         kernel->getInputScalarBindings().emplace_back(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT, illustratorObject);

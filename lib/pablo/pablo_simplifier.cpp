@@ -14,6 +14,8 @@
 #include <pablo/pe_scanthru.h>
 #include <pablo/pe_matchstar.h>
 #include <pablo/pe_var.h>
+#include <pablo/pe_debugprint.h>
+#include <pablo/pe_illustrator.h>
 #include <pablo/pablo_toolchain.h>
 #ifndef NDEBUG
 #include <pablo/pabloverifier.hpp>
@@ -257,6 +259,7 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
             PabloAST * const folded = triviallyFold(stmt, currentScope);
             if (folded) {
                 assert (folded != stmt);
+                assert (!isa<Illustrate>(stmt));
                 Statement * const prior = stmt->getPrevNode();
                 stmt->replaceWith(folded);
                 // Since folding a statement may result in inserting new
@@ -275,6 +278,7 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
             bool added = false;
             std::tie(replacement, added) = expressions.findOrAdd(stmt);
             if (!added) {
+                assert (!isa<Illustrate>(stmt));
                 assert (safe_replacement(replacement, stmt));
                 Statement * const next = stmt->getNextNode();
                 stmt->replaceAllUsesWith(replacement);
@@ -368,6 +372,11 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
         if (LLVM_LIKELY(isa<If>(br))) {
             return flatten(br);
         } else {
+            assert (isa<While>(br));
+            PabloPrinter::print(br->getParent(), errs(), true);
+            errs() << " ----\n";
+            PabloPrinter::print(br, errs(), false);
+            errs() << " ----\n";
             report_fatal_error("While condition is guaranteed to be non-zero");
         }
     }
@@ -1272,9 +1281,16 @@ bool deadCodeElimination(PabloBlock * const block, LiveVarSet & liveSet, const b
                         continue;
                     }
                 }
+            } else if (LLVM_UNLIKELY(isa<Illustrate>(stmt) || isa<DebugPrint>(stmt))) {
+                assert (sideEffecting);
+                PabloAST * const op = stmt->getOperand(0);
+                if (LLVM_UNLIKELY(isa<Var>(op))) {
+                    liveSet.put(cast<Var>(op));
+                }
+                continue;
             }
             if (LLVM_LIKELY(!inspect && !sideEffecting)) {
-                stmt->eraseFromParent();
+                 stmt->eraseFromParent();
             }
         } else {
             assert (!isa<Branch>(stmt) && !isa<Assign>(stmt));

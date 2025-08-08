@@ -77,7 +77,7 @@ public:
         P.identifyZeroExtendedStreamSets();
 
         P.identifyLinearBuffers();
-        if (codegen::EnableIllustrator) {
+        if (P.RequiresIllustratorObject) {
             P.identifyIllustratedStreamSets();
         }
         P.calculatePartialSumStepFactors(b);
@@ -299,6 +299,7 @@ public:
     bool                            AllowIOProcessThread = false;
 
     bool                            HasZeroExtendedStream = false;
+    bool                            RequiresIllustratorObject = false;
 
     unsigned                        MaxNumOfInputPorts = 0;
     unsigned                        MaxNumOfOutputPorts = 0;

@@ -290,7 +290,7 @@ void Kernel::linkExternalMethods(KernelBuilder & b) {
     for (const LinkedFunction & linked : mLinkedFunctions) {
         driver.addLinkFunction(m, linked.Name, linked.Type, linked.FunctionPtr);
     }
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         PointerType * voidPtrTy = b.getVoidPtrTy();
         IntegerType * int8Ty = b.getInt8Ty();
         PointerType * int8PtrTy = b.getInt8PtrTy();
@@ -1640,7 +1640,7 @@ std::string Kernel::getFamilyName() const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief annotateKernelNameWithDebugFlags
  ** ------------------------------------------------------------------------------------------------------------- */
-/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(TypeId id, std::string && name) {
+/* static */ std::string Kernel::annotateKernelNameWithDebugFlags(const TypeId id, const unsigned flags, std::string && name) {
     raw_string_ostream buffer(name);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
@@ -1670,6 +1670,11 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";
     }
+    if (LLVM_UNLIKELY(flags != 0)) {
+        if (flags & Kernel::KernelFlags::RequiresIllustratorObject) {
+            buffer << "_Illustrated";
+        }
+    }
     #ifdef ENABLE_PAPI
     const auto & S = codegen::PapiCounterOptions;
     if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
@@ -1689,16 +1694,17 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs,
                InternalScalars && internal_scalars,
-               CompilationStatus status)
+               CompilationStatus status, unsigned flags)
 : mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
+, mFlags(flags)
 , mCompilationStatus(status)
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
-, mKernelName(annotateKernelNameWithDebugFlags(typeId, std::move(kernelName))) {
+, mKernelName(annotateKernelNameWithDebugFlags(typeId, flags, std::move(kernelName))) {
 
 }
 
@@ -1709,10 +1715,11 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs,
-               CompilationStatus status)
+               CompilationStatus status, unsigned flags)
 : AttributeSet(std::move(attributes))
 , mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
+, mFlags(flags)
 , mCompilationStatus(status)
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
@@ -1732,12 +1739,14 @@ SegmentOrientedKernel::SegmentOrientedKernel(LLVMTypeSystemInterface & ts,
                                              Bindings && stream_outputs,
                                              Bindings && scalar_parameters,
                                              Bindings && scalar_outputs,
-                                             InternalScalars && internal_scalars)
+                                             InternalScalars && internal_scalars,
+                                             unsigned flags)
 : Kernel(ts,
 TypeId::SegmentOriented, std::move(kernelName),
 std::move(stream_inputs), std::move(stream_outputs),
 std::move(scalar_parameters), std::move(scalar_outputs),
-std::move(internal_scalars)) {
+std::move(internal_scalars),
+CompilationStatus::FullyInitialized, flags) {
 
 }
 

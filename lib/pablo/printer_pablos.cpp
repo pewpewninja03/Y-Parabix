@@ -26,6 +26,7 @@
 #include <pablo/pe_string.h>
 #include <pablo/pe_var.h>
 #include <pablo/pe_zeroes.h>
+#include <pablo/pe_illustrator.h>
 #include <pablo/ps_assign.h>
 #include <pablo/ps_terminate.h>
 #include <llvm/IR/Type.h>
@@ -65,6 +66,12 @@ static void PrintStatement(Statement const * stmt, raw_ostream & out, const bool
         } else {
             out << " {...}\n";
         }
+    } else if (const Illustrate * e = dyn_cast<Illustrate>(stmt)) {
+        out << "Illustrate(\"";
+        out << e->getName();
+        out << "\", ";
+        PrintExpression(e->getExpr(), out);
+        out << ")\n";
     } else {
 
         PrintExpression(cast<PabloAST>(stmt), out);

@@ -103,8 +103,6 @@ bool PabloCompiler::identifyIllustratedValues(KernelBuilder & b, const PabloBloc
         if (const Illustrate * il = dyn_cast<Illustrate>(statement)) {
             Constant * kernelName = b.GetString(getName());
             Constant * streamName = b.GetString(il->getName());
-
-
             Type * ty = il->getExpr()->getType();
             size_t rowCount = 1;
             if (LLVM_LIKELY(isa<ArrayType>(ty))) {
@@ -152,7 +150,7 @@ void PabloCompiler::compile(KernelBuilder & b) {
     mBranchCount = 0;
     addBranchCounter(b);
     mEntryBlock = b.GetInsertBlock();
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator && !mContainsIllustratedValue.empty())) {
+    if (LLVM_UNLIKELY(mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject && !mContainsIllustratedValue.empty())) {
         Value * ptr; Type * ty;
         std::tie(ptr, ty) = b.getScalarFieldPtr(KERNEL_ILLUSTRATOR_STRIDE_NUM);
         mIllustratorStrideNum = b.CreateLoad(ty, ptr);
@@ -166,7 +164,7 @@ void PabloCompiler::compile(KernelBuilder & b) {
     }
     compileBlock(b, entryBlock);
     mCarryManager->finalizeCodeGen(b);
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator && !mContainsIllustratedValue.empty())) {
+    if (LLVM_UNLIKELY(mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject && !mContainsIllustratedValue.empty())) {
         Function * exitKernel = b.getModule()->getFunction(KERNEL_ILLUSTRATOR_EXIT_KERNEL);
         FixedArray<Value *, 2> args;
         args[0] = b.CreatePointerCast(b.getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b.getVoidPtrTy());
@@ -430,7 +428,7 @@ void PabloCompiler::compileWhile(KernelBuilder & b, const While * const whileSta
 
     Value * illustratorObj = nullptr;
 
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         const auto f = std::find(mContainsIllustratedValue.begin(), mContainsIllustratedValue.end(), whileStatement);
         if (LLVM_UNLIKELY(f != mContainsIllustratedValue.end())) {
             illustratorObj = b.CreatePointerCast(b.getScalarField(KERNEL_ILLUSTRATOR_CALLBACK_OBJECT), b.getVoidPtrTy());
@@ -827,7 +825,7 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
         } else if (const Illustrate * const il = dyn_cast<Illustrate>(stmt)) {
             // Should we use the name as the streamName? what if this is in a loop?
             // TODO: need to fix pablo printer still
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            if (LLVM_UNLIKELY(mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
                 Value * const op = compileExpression(b, stmt->getOperand(0));
                 Constant * const blockWidth = b.getSize(b.getBitBlockWidth());
                 Value * const from = b.CreateMul(mIllustratorStrideNum, blockWidth);
