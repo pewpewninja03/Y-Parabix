@@ -190,7 +190,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                             assert ((width % fw) == 0);
                             width /= fw;
                         }
-                        bp.EmptyOverflow = width;
+                        bp.EmptyOverflow = std::max(bp.EmptyOverflow, width);
                         END_SCOPED_REGION
                         bn.Type |= BufferType::RequiresEmptyOverflow;
                         bn.Overflow = std::max(bn.Overflow, bp.EmptyOverflow);
@@ -474,6 +474,35 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 //            StreamSetIORate[i - FirstStreamSet] /= lowestSourceStreamSetIORate;
 //        }
 //    }
+
+    const std::string & tlPermitted = codegen::ThreadLocalPermittedOptions;
+
+    if (LLVM_UNLIKELY(!codegen::ThreadLocalPermittedOptions.empty())) {
+
+        const auto permitted = parseCommaDelimitedList(codegen::ThreadLocalPermittedOptions);
+
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            const auto f = permitted.find(streamSet);
+            if (f == permitted.end()) {
+                errs() << "disabling " << streamSet << "\n";
+                for (auto id = streamSet;;) {
+                    if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
+                        break;
+                    }
+                    id = parent(id, InOutStreamSetReplacement);
+                    mNonThreadLocalStreamSets.insert(id);
+                }
+                mNonThreadLocalStreamSets.insert(streamSet);
+                for (auto id = streamSet;;) {
+                    if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
+                        break;
+                    }
+                    id = child(id, InOutStreamSetReplacement);
+                    mNonThreadLocalStreamSets.insert(id);
+                }
+            }
+        }
+    }
 
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         if (LLVM_UNLIKELY(mBufferGraph[output].isManaged())) {
@@ -852,11 +881,11 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
                 // analyze any consumption rates.
 
-                if (LLVM_UNLIKELY(bn.isManagedOutput())) {
-                    buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), 0U);
-                } else {
-                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, bn.IsLinear, 0U);
-                }
+//                if (LLVM_UNLIKELY(bn.isManagedOutput())) {
+                    buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
+//                } else {
+//                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, bn.IsLinear, 0U);
+//                }
             }
         }
 

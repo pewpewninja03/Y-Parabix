@@ -91,7 +91,17 @@ static cl::opt<std::string, true> UnoptimizedIROutputOption("ShowUnoptimizedIR",
 
 std::string ShowIRFilter = "";
 static cl::opt<std::string, true> ToShowIRFilerOption("ToShow", cl::location(ShowIRFilter), cl::ValueOptional,
-                                                            cl::desc("Regex filter to choose which kernels to display when showing LLVM IR "), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+                                                            cl::desc("Regex filter to choose which kernels to display when showing LLVM IR"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+
+
+std::string ThreadLocalPermittedOptions = "";
+static cl::opt<std::string, true> optThreadLocalPermittedOption("permitted-thread-local-streamsets", cl::location(ThreadLocalPermittedOptions), cl::ValueOptional,
+                                                            cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+
+std::string PreserveAllStreamSetDataOptions = "";
+static cl::opt<std::string, true> optPreserveAllStreamSetDataOption("preserve-all-streamset-data", cl::location(PreserveAllStreamSetDataOptions), cl::ValueOptional,
+                                                            cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+
 
 
 #ifdef ENABLE_PAPI

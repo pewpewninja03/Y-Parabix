@@ -107,6 +107,8 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
         report_fatal_error("Failed to generate acyclic partition graph from kernel ordering");
     }
 
+//    printRelationshipGraph(Relationships, errs());
+
     // Convert the relationship graph into a simpler graph G that we can annotate.
     // For simplicity, force the pipeline input to be the first and the pipeline output
     // to be the last one.
@@ -202,7 +204,7 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     unsigned nextRateId = 0;
 
     std::map<std::pair<BitSet, size_t>, size_t> L;
-    std::vector<size_t> LookAheadIds;
+    flat_set<size_t> LookAheadIds;
 
     std::vector<unsigned> potentiallyMergable;
     potentiallyMergable.reserve(numOfKernels);
@@ -221,7 +223,7 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
         if (node.Type == RelationshipNode::IsKernel) {
 
             bool hasInputRateChange = false;
-
+            bool hasLookAheads = false;
             const auto initialRateId = nextRateId;
 
             assert (node.Kernel);
@@ -237,6 +239,41 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                     assert (node.Kernel == mPipelineKernel);
                 }
             } else {
+
+                for (const auto e : make_iterator_range(in_edges(i, G))) {
+
+                    const auto bindingId = G[e];
+                    const RelationshipNode & rn = Relationships[bindingId];
+                    assert (rn.Type == RelationshipNode::IsBinding);
+                    const Binding & bind = rn.Binding;
+                    const ProcessingRate & rate = bind.getRate();
+
+                    if (rate.isFixed()) {
+                        // Check the attributes to see whether any impose a partition change
+                        for (const Attribute & attr : bind.getAttributes()) {
+                            switch (attr.getKind()) {
+                                case AttrId::LookAhead:
+                                    hasLookAheads = true;
+                                    // break;
+                                case AttrId::Add:
+                                case AttrId::BlockSize:
+                                    hasInputRateChange = true;
+                                     goto found_rate_change;
+                                default:
+                                     break;
+                            }
+                        }
+                    } else {
+                        hasInputRateChange = true;
+                        goto found_rate_change;
+                    }
+                }
+            }
+
+            if (hasInputRateChange) {
+found_rate_change:
+                V.set(nextRateId++);
+            } else if (hasLookAheads) {
 
                 assert (LookAheadIds.empty());
 
@@ -256,9 +293,6 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                                 case AttrId::LookAhead:
                                     fixedLookAhead = std::max(fixedLookAhead, attr.amount());
                                     break;
-                                case AttrId::Add:
-                                case AttrId::BlockSize:
-                                    hasInputRateChange = true;
                                 default: break;
                             }
                         }
@@ -268,6 +302,7 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                             if (k) {
                                 fixedLookAhead += stride - k;
                             }
+                            assert (fixedLookAhead > 0);
                             assert ((fixedLookAhead % stride) == 0);
                             const auto m = L.find(std::make_pair(V, fixedLookAhead));
                             size_t rateId = 0;
@@ -277,25 +312,19 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                             } else {
                                 rateId = m->second;
                             }
-                            LookAheadIds.push_back(rateId);
+                            assert (!V.test(rateId));
+                            LookAheadIds.insert(rateId);
                         }
-                    } else {
-                        hasInputRateChange = true;
-                        break;
                     }
                 }
-            }
 
-            if (hasInputRateChange) {
-                V.set(nextRateId++);
-            }
-
-            if (!LookAheadIds.empty()) {
                 for (auto l : LookAheadIds) {
+                    assert (!V.test(l));
                     V.set(l);
                 }
                 LookAheadIds.clear();
                 hasInputRateChange = true;
+
             }
 
             if (hasInputRateChange) {

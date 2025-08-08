@@ -132,7 +132,7 @@ public:
 
     virtual void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
 
-    virtual llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
+    virtual llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
 
     static llvm::Type * resolveType(kernel::KernelBuilder & b, llvm::Type * const streamSetType);
 
@@ -202,7 +202,7 @@ public:
 
     void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
@@ -283,7 +283,7 @@ public:
 
     void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
 //    Rational getInitialCapacity() const {
 //        return mInitialCapacity;
@@ -306,9 +306,8 @@ public:
 
     enum { LinearMallocedAddress = 0,
            LinearInternalCapacity = 1,
-           LinearBaseAddress = 2,
-           LinearEffectiveCapacity = 3,
-           LinearFields = 4 };
+           LinearBaseAddress = 0,
+           LinearEffectiveCapacity = 1 };
 
     enum ThreadLocalField { PriorAddress, PriorCapacity, NewAddress };
 
@@ -316,7 +315,7 @@ public:
         return b->getBufferKind() == BufferKind::ManagedDynamicBuffer;
     }
 
-    ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const unsigned AddressSpace);
+    ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const bool linear, const unsigned AddressSpace);
 
     static llvm::StructType * getInternalThreadLocalHandleType(kernel::KernelBuilder & b);
 
@@ -355,7 +354,7 @@ public:
     void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
 
-    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     llvm::Value * getThreadLocalHandle() const {
         return mThreadLocalHandle;
@@ -365,9 +364,9 @@ public:
         mThreadLocalHandle = handle;
     }
 
-//    Rational getInitialCapacity() const {
-//        return mInitialCapacity;
-//    }
+private:
+
+    llvm::Value * loadSharedValueFromStruct(kernel::KernelBuilder & b, const unsigned i, const unsigned j) const;
 
 private:
 
@@ -416,7 +415,7 @@ public:
 
     void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
-    llvm::Value * expandBuffer(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
 
     void setModulus(llvm::Value * const modulus) {
         mModulus = modulus;

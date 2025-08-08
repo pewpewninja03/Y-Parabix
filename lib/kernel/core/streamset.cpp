@@ -30,6 +30,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <llvm/Support/raw_os_ostream.h>
+
 // #include <sys/memfd.h>
 
 namespace llvm { class Constant; }
@@ -391,7 +393,7 @@ void ExternalBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value *
     unsupported("linearCopyBack", "External");
 }
 
-Value * ExternalBuffer::expandBuffer(KernelBuilder & /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */) const  {
+Value * ExternalBuffer::reserveCapacity(KernelBuilder & /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */) const  {
     unsupported("expandBuffer", "External");
 }
 
@@ -443,19 +445,24 @@ Value * InternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * co
 Value * InternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const producedItems, Value * const consumedItems) const {
     Value * const capacity = getCapacity(b);
     if (LLVM_UNLIKELY(mLinear)) {
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
             Value * const valid = b.CreateICmpULE(producedItems, capacity);
             b.CreateAssert(valid, "produced item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
                             producedItems, capacity);
         }
         return b.CreateSub(capacity, producedItems);
      } else {
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
             Value * const valid = b.CreateICmpULE(consumedItems, producedItems);
             b.CreateAssert(valid, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
                             consumedItems, producedItems);
         }
-        Value * const unconsumedItems = b.CreateSub(producedItems, consumedItems);
+        Value * const unconsumedItems = b.CreateSub(b.CreateRoundUpRational(producedItems, b.getBitBlockWidth()), b.CreateRoundDownRational(consumedItems, b.getBitBlockWidth()));
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
+            Value * const valid = b.CreateICmpULE(unconsumedItems, capacity);
+            b.CreateAssert(valid, "unconsumed item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
+                            unconsumedItems, capacity);
+        }
         return b.CreateSub(capacity, unconsumedItems);
     }
 }
@@ -907,7 +914,7 @@ inline size_t largestPowerOf2ThatDivides(const size_t n) {
     return (n & (~(n - 1)));
 }
 
-Value * DynamicBuffer::expandBuffer(KernelBuilder & b, Value * const produced, Value * const consumed, Value * const required) const {
+Value * DynamicBuffer::reserveCapacity(KernelBuilder & b, Value * const produced, Value * const consumed, Value * const required) const {
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -1152,25 +1159,42 @@ Value * DynamicBuffer::expandBuffer(KernelBuilder & b, Value * const produced, V
 
 StructType * ManagedDynamicBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
-        auto & C = b.getContext();
+
         PointerType * const typePtr = getPointerType();
-        IntegerType * const sizeTy = b.getSizeTy();
-
-        FixedArray<Type *, LinearFields> types;
-        types[LinearMallocedAddress] = typePtr;
-        types[LinearInternalCapacity] = sizeTy;
-        types[LinearBaseAddress] = typePtr;
-        types[LinearEffectiveCapacity] = sizeTy;
-        mHandleType = StructType::get(C, types);
-
-        assert (mHandleType);
-
+        auto & C = b.getContext();
+        auto & DL = b.getModule()->getDataLayout();
+        IntegerType * const intPtrTy = DL.getIntPtrType(C);
+        const auto intSize = intPtrTy->getBitWidth();
+        assert (b.getTypeSize(DL, typePtr) * 8 == intSize);
+        assert ((b.getBitBlockWidth() % intSize) == 0);
+        if (LLVM_LIKELY(b.getBitBlockWidth() >= (2 * intSize))) {
+            VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+            FixedArray<Type *, 2> types;
+            types[0] = vecTy;
+            if (mLinear) {
+                types[1] = vecTy;
+            } else {
+                types[1] = StructType::get(C);
+            }
+            mHandleType = StructType::get(C, types);
+            assert (mHandleType);
+        } else {
+            // TODO: need to use the alternate double pointer flipping technique if we cannot safely SIMD write two int values
+            report_fatal_error("Invalid ManagedDynamicBuffer handle type");
+        }
     }
     return mHandleType;
 }
 
 Value * ManagedDynamicBuffer::getVirtualBasePtr(KernelBuilder & b, Value * const baseAddress, Value * const transferredItems) const {
-    return b.CreatePointerCast(baseAddress, getPointerType());
+    Value * addr = baseAddress;
+    if (!mLinear) {
+        Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
+        Value * const blockIndex = b.CreateLShr(transferredItems, LOG_2_BLOCK_WIDTH);
+        Value * const baseBlockIndex = b.CreateSub(modByCapacity(b, blockIndex), blockIndex);
+        addr = StreamSetBuffer::getStreamBlockPtr(b, baseAddress, b.getSize(0), baseBlockIndex);
+    }
+    return b.CreatePointerCast(addr, getPointerType());
 }
 
 void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
@@ -1181,7 +1205,11 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     assert ("unspecified module" && b.getModule());
 
-    name << "__ManagedDynamicBuffer_initial_alloc";
+    name << "__ManagedDynamicBuffer";
+    if (mLinear) {
+        name << "Linear";
+    }
+    name << "_initial_alloc";
 
     Type * ty = getBaseType();
     const auto streamCount = ty->getArrayNumElements();
@@ -1191,30 +1219,23 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
     const auto itemWidth = ty->getIntegerBitWidth();
     name << itemWidth << '@' << mAddressSpace;
 
-    assert (!mLinear);
-
     Module * const m = b.getModule();
 
     Function * f = m->getFunction(name.str());
 
     if (f == nullptr) {
 
-        IntegerType * const sizeTy = b.getSizeTy();
-
         StructType * handleTy = getHandleType(b);
         PointerType * const handlePtrTy = handleTy->getPointerTo(mAddressSpace);
 
         auto & DL = m->getDataLayout();
 
-        PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
 
-        Constant * const nullAddrPtr = ConstantPointerNull::get(addrPtrTy);
-
-        const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
+        IntegerType * const intPtrTy = b.getIntPtrTy(DL);
 
         FixedArray<Type *, 2> paramTypes;
         paramTypes[0] = handlePtrTy;
-        paramTypes[1] = sizeTy;
+        paramTypes[1] = intPtrTy;
 
         FunctionType * funcTy = FunctionType::get(b.getVoidTy(), paramTypes, false);
 
@@ -1233,8 +1254,8 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
         LLVMContext & C = m->getContext();
         BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
-        BasicBlock * const allocBuffers = BasicBlock::Create(C, "allocBuffers", f);
-        BasicBlock * const exit = BasicBlock::Create(C, "exit", f);
+        BasicBlock * allocBuffers = nullptr;
+        BasicBlock * exit = nullptr;
 
         b.SetInsertPoint(entry);
 
@@ -1252,18 +1273,40 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         capacity->setName("capacity");
         assert (arg == f->arg_end());
 
+        VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+        const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
+        Constant * undefVec = UndefValue::get(vecTy);
+
+        auto writeIntPtrStructVector = [&](Value * ptrVal, Value * intVal, Value * writePtr) {
+            assert (intVal->getType() == intPtrTy);
+            assert (b.getTypeSize(DL, intPtrTy) == b.getTypeSize(DL, ptrVal->getType()));
+            ptrVal = b.CreatePtrToInt(ptrVal, intPtrTy);
+            Value * vecVal = b.CreateInsertElement(undefVec,  ptrVal, b.getInt32(0));
+            vecVal = b.CreateInsertElement(vecVal,  intVal, b.getInt32(1));
+            b.CreateAlignedStore(vecVal, writePtr, vecTyAlign);
+        };
+
+        ConstantInt * i32_ZERO = b.getInt32(0);
+        ConstantInt * i32_ONE = b.getInt32(1);
 
         FixedArray<Value *, 2> indices;
-        indices[0] = b.getInt32(0);
-        indices[1] = b.getInt32(LinearBaseAddress);
-        assert (mHandleType->getElementType(LinearBaseAddress)->isPointerTy());
-        Value * const baseAddressField = b.CreateInBoundsGEP(handleTy, handle, indices);
-        // If the user has filled in a base address in the init function, assume they're handling all
-        // memory management.
-        Value * const currentAddr = b.CreateAlignedLoad(addrPtrTy, baseAddressField, voidPtrTyAlign);
-        b.CreateCondBr(b.CreateICmpEQ(currentAddr, nullAddrPtr), allocBuffers, exit);
+        indices[0] = i32_ZERO;
 
-        b.SetInsertPoint(allocBuffers);
+        if (mLinear) {
+
+            allocBuffers = BasicBlock::Create(C, "allocBuffers", f);
+            exit = BasicBlock::Create(C, "exit", f);
+            indices[1] = i32_ONE;
+
+            Value * baseAddressVecField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            Value * baseAddrVec = b.CreateAlignedLoad(vecTy, baseAddressVecField, vecTyAlign);
+            Value * currentAddr = b.CreateExtractElement(baseAddrVec, b.getInt32(LinearBaseAddress));
+            // If the user has filled in a base address in the init function, assume they're handling all
+            // memory management.
+            b.CreateCondBr(b.CreateICmpEQ(currentAddr, ConstantInt::getNullValue(intPtrTy)), allocBuffers, exit);
+
+            b.SetInsertPoint(allocBuffers);
+        }
 
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
             b.CreateAssert(capacity, "capacity cannot be 0.");
@@ -1272,7 +1315,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         const auto typeSize = b.getTypeSize(DL, mType);
         Rational stridesPerPage{getPageSize(), typeSize};
         capacity = b.CreateRoundUpRational(capacity, stridesPerPage.numerator());
-        Value * capacityBytes = b.CreateMul(b.getSize(typeSize), capacity);
+        Value * capacityBytes = b.CreateMul(ConstantInt::get(intPtrTy, typeSize), capacity);
 
         FixedArray<Value *, 2> makeArgs;
         makeArgs[0] = capacityBytes;
@@ -1280,25 +1323,19 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         Function * makeBuffer = m->getFunction(__MAKE_CIRCULAR_BUFFER); assert (makeBuffer);
         Value * baseAddress = b.CreateCall(makeBuffer, makeArgs);
 
-        indices[1] = b.getInt32(LinearInternalCapacity);
-        assert (mHandleType->getElementType(LinearInternalCapacity)->isIntegerTy());
-        Value * const capacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        indices[1] = i32_ZERO;
 
-        indices[1] = b.getInt32(LinearMallocedAddress);
-        Value * const initialField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        writeIntPtrStructVector(baseAddress, capacity, b.CreateInBoundsGEP(handleTy, handle, indices));
 
-        indices[1] = b.getInt32(LinearEffectiveCapacity);
-        Value * const effCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        if (mLinear) {
 
-        b.CreateStore(baseAddress, baseAddressField);
-        b.CreateStore(capacity, capacityField);
-        b.CreateStore(baseAddress, initialField);
-        b.CreateStore(capacity, effCapacityField);
+            indices[1] = i32_ONE;
 
-        b.CreateBr(exit);
+            writeIntPtrStructVector(baseAddress, capacity, b.CreateInBoundsGEP(handleTy, handle, indices));
+            b.CreateBr(exit);
 
-        b.SetInsertPoint(exit);
-
+            b.SetInsertPoint(exit);
+        }
         b.CreateRetVoid();
 
         b.restoreIP(ip);
@@ -1314,15 +1351,21 @@ void ManagedDynamicBuffer::releaseBuffer(KernelBuilder & b) const {
     /* Free the dynamically allocated buffer(s). */
     Value * const handle = getHandle();
     FixedArray<Value *, 2> indices;
-    indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(LinearMallocedAddress);
-    Value * const baseAddressField = b.CreateInBoundsGEP(mHandleType, handle, indices);
-    Value * const baseAddress = b.CreateLoad(getPointerType(), baseAddressField);
-    indices[1] = b.getInt32(LinearInternalCapacity);
-    Value * const capacityField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
-    Value * const capacity = b.CreateLoad(b.getSizeTy(), capacityField);
-    destroyBuffer(b, baseAddress, capacity);
-    b.CreateStore(ConstantPointerNull::get(getPointerType()), baseAddressField);
+    ConstantInt * i32_ZERO = b.getInt32(0);
+    indices[0] = i32_ZERO;
+    indices[1] = i32_ZERO;
+    PointerType * const typePtr = getPointerType();
+    auto & C = b.getContext();
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = DL.getIntPtrType(C);
+    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
+    Value * const mallocFieldPtr = b.CreateInBoundsGEP(mHandleType, handle, indices);
+    Value * const mallocField = b.CreateAlignedLoad(vecTy, mallocFieldPtr, vecTyAlign);
+    Value * const baseAddress = b.CreateExtractElement(mallocField, i32_ZERO);
+    Value * const capacity = b.CreateExtractElement(mallocField, b.getInt32(1));
+    destroyBuffer(b, b.CreateIntToPtr(baseAddress, b.getInt8PtrTy()), capacity);
+    b.CreateAlignedStore(ConstantVector::getNullValue(vecTy), mallocFieldPtr, vecTyAlign);
 }
 
 
@@ -1334,66 +1377,77 @@ void ManagedDynamicBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress,
     b.CreateCall(b.getModule()->getFunction(__DESTROY_CIRCULAR_BUFFER), destroyArgs);
 }
 
-Value * ManagedDynamicBuffer::getBaseAddress(KernelBuilder & b) const {
-    assert (getHandle());
+inline Value * ManagedDynamicBuffer::loadSharedValueFromStruct(KernelBuilder & b, const unsigned i, const unsigned j) const {
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
-    Value * ptr = nullptr;
-    indices[1] = b.getInt32(LinearBaseAddress);
-    ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
-    return b.CreateLoad(getPointerType(), ptr);
+    indices[1] = b.getInt32(i);
+    Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    Value * vec = b.CreateAlignedLoad(vecTy, ptr, vecTyAlign);
+    return b.CreateExtractElement(vec, b.getInt32(j));
+}
+
+Value * ManagedDynamicBuffer::getBaseAddress(KernelBuilder & b) const {
+    return b.CreateIntToPtr(loadSharedValueFromStruct(b, mLinear ? 1 : 0, 0), getPointerType());
 }
 
 Value * ManagedDynamicBuffer::getMallocAddress(KernelBuilder & b) const {
-    FixedArray<Value *, 2> indices;
-    indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(LinearMallocedAddress);
-    Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
-    return b.CreateLoad(getPointerType(), ptr);
+return b.CreateIntToPtr(loadSharedValueFromStruct(b, 0, 0), getPointerType());
 }
 
 Value * ManagedDynamicBuffer::getCapacity(KernelBuilder & b) const {
-    FixedArray<Value *, 2> indices;
-    indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(LinearEffectiveCapacity);
-    Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
     ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
-    Value * const capacity = b.CreateLoad(b.getSizeTy(), ptr);
-    assert (capacity->getType()->isIntegerTy());
-    return b.CreateMul(capacity, BLOCK_WIDTH, "capacity");
+    return b.CreateMul(BLOCK_WIDTH, loadSharedValueFromStruct(b, mLinear ? 1 : 0, 1));
 }
 
 Value * ManagedDynamicBuffer::getInternalCapacity(KernelBuilder & b) const {
-    FixedArray<Value *, 2> indices;
-    indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(LinearInternalCapacity);
-    Value * const intCapacityField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
     ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
-    Value * const capacity = b.CreateLoad(b.getSizeTy(), intCapacityField);
-    assert (capacity->getType()->isIntegerTy());
-    return b.CreateMul(capacity, BLOCK_WIDTH, "internalCapacity");
+    return b.CreateMul(BLOCK_WIDTH, loadSharedValueFromStruct(b, 0, 1));
 }
 
-
 void ManagedDynamicBuffer::setBaseAddress(KernelBuilder & b, Value * const addr) const {
+    assert (mLinear);
     assert (mHandle && "has not been set prior to calling setBaseAddress");
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(LinearBaseAddress);
-    Value * ptr = b.CreatePointerBitCastOrAddrSpaceCast(addr, getPointerType());
-    b.CreateStore(ptr, b.CreateInBoundsGEP(mHandleType, mHandle, indices));
+    indices[1] = b.getInt32(1);
+    Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    Value * vec = b.CreateAlignedLoad(vecTy, ptr, vecTyAlign);
+    vec = b.CreateInsertElement(vec, b.CreatePtrToInt(addr, intPtrTy), b.getInt32(0));
+    b.CreateAlignedStore(vec, ptr, vecTyAlign);
 }
 
 void ManagedDynamicBuffer::setCapacity(KernelBuilder & b, Value * const capacity) const {
+    assert (mLinear);
     assert (mHandle && "has not been set prior to calling setCapacity");
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(LinearEffectiveCapacity);
-    b.CreateStore(capacity, b.CreateInBoundsGEP(mHandleType, mHandle, indices));
+    indices[1] = b.getInt32(1);
+    Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    Value * vec = b.CreateAlignedLoad(vecTy, ptr, vecTyAlign);
+    vec = b.CreateInsertElement(vec, capacity, b.getInt32(1));
+    b.CreateAlignedStore(vec, ptr, vecTyAlign);
 }
 
 Value * ManagedDynamicBuffer::modByCapacity(KernelBuilder & b, Value * const offset) const {
-    return offset;
+    assert (offset->getType()->isIntegerTy());
+    if (mLinear) {
+        return offset;
+    } else {
+        assert (getHandle());
+        return b.CreateURem(offset, loadSharedValueFromStruct(b, 0, 1));
+    }
 }
 
 Value * ManagedDynamicBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
@@ -1430,14 +1484,18 @@ void ManagedDynamicBuffer::freePendingDeletion(KernelBuilder & b, Value * thread
     destroyBuffer(b, ptr, capacity);
 }
 
-Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
 
     assert ("unspecified module" && b.getModule());
 
-    name << "__ManagedDynamicBuffer_reserve_capacity";
+    name << "__ManagedDynamicBuffer";
+    if (mLinear) {
+        name << "Linear";
+    }
+    name << "_reserve_capacity";
 
     Type * ty = getBaseType();
     const auto streamCount = ty->getArrayNumElements();
@@ -1447,43 +1505,49 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
     const auto itemWidth = ty->getIntegerBitWidth();
     name << itemWidth << '@' << mAddressSpace;
 
-    assert (!mLinear);
-
     Module * const m = b.getModule();
 
     Function * f = m->getFunction(name.str());
 
     if (f == nullptr) {
 
-        IntegerType * const sizeTy = b.getSizeTy();
-
-        StructType * handleTy = getHandleType(b);
+        StructType * const handleTy = getHandleType(b);
         PointerType * const handlePtrTy = handleTy->getPointerTo(mAddressSpace);
 
-        StructType * threadLocalTy = getThreadLocalHandleType(b);
-        PointerType * threadLocalPtrTy = threadLocalTy->getPointerTo(mAddressSpace);
-
-
-
-        ConstantInt * const sz_ZERO = b.getSize(0);
+        StructType * const threadLocalTy = getThreadLocalHandleType(b);
+        PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo(mAddressSpace);
 
         auto & DL = m->getDataLayout();
-
         PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
-
         Constant * const nullAddrPtr = ConstantPointerNull::get(addrPtrTy);
-
         const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
-        const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+
+        auto & C = b.getContext();
+        IntegerType * const intPtrTy = DL.getIntPtrType(C);
+
+        const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+
+        VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
+        const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
+        Constant * undefVec = UndefValue::get(vecTy);
+
+        auto writeIntPtrStructVector = [&](Value * ptrVal, Value * intVal, Value * writePtr) {
+            assert (intVal->getType() == intPtrTy);
+            assert (b.getTypeSize(DL, intPtrTy) == b.getTypeSize(DL, ptrVal->getType()));
+            ptrVal = b.CreatePtrToInt(ptrVal, intPtrTy);
+            Value * vecVal = b.CreateInsertElement(undefVec,  ptrVal, b.getInt32(0));
+            vecVal = b.CreateInsertElement(vecVal,  intVal, b.getInt32(1));
+            b.CreateAlignedStore(vecVal, writePtr, vecTyAlign);
+        };
 
         FixedArray<Type *, 5> paramTypes;
         paramTypes[0] = handlePtrTy;
         paramTypes[1] = threadLocalPtrTy; // thread local struct ptr
-        paramTypes[2] = sizeTy;
-        paramTypes[3] = sizeTy;
-        paramTypes[4] = sizeTy;
+        paramTypes[2] = intPtrTy;
+        paramTypes[3] = intPtrTy;
+        paramTypes[4] = intPtrTy;
 
-        FunctionType * funcTy = FunctionType::get(b.getVoidTy(), paramTypes, false);
+        FunctionType * funcTy = FunctionType::get(intPtrTy, paramTypes, false);
 
         const auto ip = b.saveIP();
 
@@ -1498,7 +1562,6 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
             f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
         }
 
-        LLVMContext & C = m->getContext();
         BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
         BasicBlock * const checkPendingDeletion = BasicBlock::Create(C, "checkPendingDeletion", f);
         BasicBlock * const freeExistingBuffer = BasicBlock::Create(C, "freeExistingBuffer", f);
@@ -1534,37 +1597,33 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
 
         Value * const consumedChunks = b.CreateUDiv(consumed, BLOCK_WIDTH);
         Value * const producedChunks = b.CreateCeilUDiv(produced, BLOCK_WIDTH);
-        Value * const requiredCapacity = b.CreateAdd(produced, required);
-        Value * const requiredChunks = b.CreateCeilUDiv(requiredCapacity, BLOCK_WIDTH);
+        Value * const requiredChunks = b.CreateAdd(producedChunks, b.CreateUDiv(required, BLOCK_WIDTH));
+
+        ConstantInt * const i32_ZERO = b.getInt32(0);
+        ConstantInt * const i32_ONE = b.getInt32(1);
 
         FixedArray<Value *, 2> indices;
-        indices[0] = b.getInt32(0);
-
-        indices[1] = b.getInt32(LinearMallocedAddress);
+        indices[0] = i32_ZERO;
+        indices[1] = i32_ZERO;
         Value * const currentAddressPtr = b.CreateInBoundsGEP(handleTy, handle, indices);
-        Value * currentAddress = b.CreateAlignedLoad(addrPtrTy, currentAddressPtr, voidPtrTyAlign);
-
-        indices[1] = b.getInt32(LinearInternalCapacity);
-        Value * const internalCapacityPtr = b.CreateInBoundsGEP(handleTy, handle, indices);
-        Value * const initialCapacity = b.CreateAlignedLoad(sizeTy, internalCapacityPtr, sizeTyAlign);
-
-        Value * const unread = b.CreateSub(requiredChunks, consumedChunks);
-        Value * const permitted = b.CreateICmpULT(unread, initialCapacity);
+        Value * const vectorVal = b.CreateAlignedLoad(vecTy, currentAddressPtr, vecTyAlign);
+        Value * const initialAddr = b.CreateExtractElement(vectorVal, i32_ZERO);
+        Value * const initialCapacity = b.CreateExtractElement(vectorVal, i32_ONE);
+        Value * const pendingChunks = b.CreateSub(requiredChunks, consumedChunks);
+        Value * const permitted = b.CreateICmpULT(pendingChunks, initialCapacity);
+        Value * const currentAddress = b.CreateIntToPtr(initialAddr, addrPtrTy);
         b.CreateLikelyCondBr(permitted, exit, expandInternalBuffer);
 
         // Otherwise, allocate a buffer with at least twice the capacity and copy the unconsumed data back into it
         b.SetInsertPoint(expandInternalBuffer);
 
         const auto typeSize = b.getTypeSize(DL, mType);
+        assert ((typeSize % (blockWidth / 8)) == 0);
+        assert (typeSize > 0);
+        Value * const expandedCapacity = b.CreateAdd(initialCapacity, b.CreateRoundUp(pendingChunks, initialCapacity));
+        Value * const expandedBytes = b.CreateMulRational(expandedCapacity, typeSize);
 
-        Rational stridesPerPage{getPageSize(), typeSize};
-
-        Value * expandedCapacity = b.CreateRoundUp(requiredChunks, initialCapacity);
-        expandedCapacity = b.CreateRoundUpRational(expandedCapacity, stridesPerPage);
-
-        ConstantInt * const sz_TypeSize = b.getSize(typeSize);
-
-        Value * expandedBytes = b.CreateMul(expandedCapacity, sz_TypeSize);
+        ConstantInt * const sz_ZERO = b.getSize(0);
 
         FixedArray<Value *, 2> makeArgs;
         makeArgs[0] = expandedBytes;
@@ -1575,21 +1634,20 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
         // copy the data over to the new buffer
         Value * const newBufferOffset = b.CreateURem(consumedChunks, expandedCapacity);
         Value * const toCopyPtr = b.CreateInBoundsGEP(mType, expandedBuffer, newBufferOffset);
-
         Value * const oldBufferOffset = b.CreateURem(consumedChunks, initialCapacity);
         Value * const unreadDataPtr = b.CreateInBoundsGEP(mType, currentAddress, oldBufferOffset);
-
         Value * const unreadChunks = b.CreateSub(producedChunks, consumedChunks);
 
         // TODO: make this into a duff's loop
-        Value * const remainingBytes = b.CreateMul(unreadChunks, sz_TypeSize);
+
+        // TODO: if we keep the buffer fd, manual indicates we can resize it by calling ftruncate again. How would this
+        // affect users of the buffer prior to setting the new addr/capacity? The mmap'ed buffer pointing to the fds
+        // have a set size that may mean its a non-issue as long as ftruncating the buffer doesn't invalidate them.
+
+        Value * const remainingBytes = b.CreateMulRational(unreadChunks, typeSize);
         b.CreateMemCpy(toCopyPtr, unreadDataPtr, remainingBytes, blockWidth / 8);
 
-        // TODO: does this need the double buffer trick used in dynamicbuffer?
-
-        b.CreateAlignedStore(expandedBuffer, currentAddressPtr, voidPtrTyAlign);
-
-        b.CreateAlignedStore(expandedCapacity, internalCapacityPtr, sizeTyAlign);
+        writeIntPtrStructVector(expandedBuffer, expandedCapacity, currentAddressPtr);
 
         // now check if there is anything to delete
         indices[1] = b.getInt32(ThreadLocalField::PriorAddress);
@@ -1598,7 +1656,7 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
 
         indices[1] = b.getInt32(ThreadLocalField::PriorCapacity);
         Value * const priorCapacityPtr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
-        Value * const priorCapacity = b.CreateAlignedLoad(sizeTy, priorCapacityPtr, sizeTyAlign);
+        Value * const priorCapacity = b.CreateAlignedLoad(intPtrTy, priorCapacityPtr, intPtrTyAlign);
 
         indices[1] = b.getInt32(ThreadLocalField::NewAddress);
         Value * const recentAddressPtr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
@@ -1620,7 +1678,7 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
         toDeleteBufferPhi->addIncoming(currentAddress, expandInternalBuffer);
         toDeleteBufferPhi->addIncoming(priorBuffer, checkPendingDeletion);
 
-        PHINode * const toDeleteCapacityPhi = b.CreatePHI(sizeTy, 2);
+        PHINode * const toDeleteCapacityPhi = b.CreatePHI(intPtrTy, 2);
         toDeleteCapacityPhi->addIncoming(initialCapacity, expandInternalBuffer);
         toDeleteCapacityPhi->addIncoming(priorCapacity, checkPendingDeletion);
 
@@ -1628,7 +1686,7 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
         pendingDeleteBufferPhi->addIncoming(priorBuffer, expandInternalBuffer);
         pendingDeleteBufferPhi->addIncoming(nullAddrPtr, checkPendingDeletion);
 
-        PHINode * const pendingDeleteCapacityPhi = b.CreatePHI(sizeTy, 2);
+        PHINode * const pendingDeleteCapacityPhi = b.CreatePHI(intPtrTy, 2);
         pendingDeleteCapacityPhi->addIncoming(priorCapacity, expandInternalBuffer);
         pendingDeleteCapacityPhi->addIncoming(sz_ZERO, checkPendingDeletion);
 
@@ -1641,38 +1699,38 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
         priorAllocAddrPhi->addIncoming(currentAddress, checkPendingDeletion);
         priorAllocAddrPhi->addIncoming(pendingDeleteBufferPhi, freeExistingBuffer);
 
-        PHINode * const priorAllocCapacityPhi = b.CreatePHI(sizeTy, 2);
+        PHINode * const priorAllocCapacityPhi = b.CreatePHI(intPtrTy, 2);
         priorAllocCapacityPhi->addIncoming(initialCapacity, checkPendingDeletion);
         priorAllocCapacityPhi->addIncoming(pendingDeleteCapacityPhi, freeExistingBuffer);
 
         b.CreateAlignedStore(priorAllocAddrPhi, priorBufferPtr, voidPtrTyAlign);
-        b.CreateAlignedStore(priorAllocCapacityPhi, priorCapacityPtr, voidPtrTyAlign);
-        b.CreateAlignedStore(expandedBuffer, currentAddressPtr, voidPtrTyAlign);
+        b.CreateAlignedStore(priorAllocCapacityPhi, priorCapacityPtr, intPtrTyAlign);
         b.CreateAlignedStore(expandedBuffer, recentAddressPtr, voidPtrTyAlign);
+
         b.CreateBr(exit);
 
         b.SetInsertPoint(exit);
-        PHINode * const currentAllocAddrPhi = b.CreatePHI(addrPtrTy, 2);
-        currentAllocAddrPhi->addIncoming(currentAddress, entry);
-        currentAllocAddrPhi->addIncoming(expandedBuffer, afterExpandInternalBuffer);
+        PHINode * const retValPhi = b.CreatePHI(intPtrTy, 2);
+        retValPhi->addIncoming(sz_ZERO, entry);
+        retValPhi->addIncoming(b.getSize(1), afterExpandInternalBuffer);
 
-        PHINode * const currentAllocCapacityPhi = b.CreatePHI(sizeTy, 2);
-        currentAllocCapacityPhi->addIncoming(initialCapacity, entry);
-        currentAllocCapacityPhi->addIncoming(expandedCapacity, afterExpandInternalBuffer);
+        if (mLinear) {
+            PHINode * const currentAllocAddrPhi = b.CreatePHI(addrPtrTy, 2);
+            currentAllocAddrPhi->addIncoming(currentAddress, entry);
+            currentAllocAddrPhi->addIncoming(expandedBuffer, afterExpandInternalBuffer);
 
-        indices[1] = b.getInt32(LinearBaseAddress);
-        Value * const virtualBaseField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            PHINode * const currentAllocCapacityPhi = b.CreatePHI(intPtrTy, 2);
+            currentAllocCapacityPhi->addIncoming(initialCapacity, entry);
+            currentAllocCapacityPhi->addIncoming(expandedCapacity, afterExpandInternalBuffer);
 
-        Value * consumedOffset = b.CreateSub(b.CreateURem(consumedChunks, currentAllocCapacityPhi), consumedChunks);
+            Value * consumedOffset = b.CreateSub(b.CreateURem(consumedChunks, currentAllocCapacityPhi), consumedChunks);
+            Value * const newVirtualAddress = b.CreateInBoundsGEP(mType, currentAllocAddrPhi, consumedOffset);
 
-        Value * const newVirtualAddress = b.CreateInBoundsGEP(mType, currentAllocAddrPhi, consumedOffset);
-        b.CreateAlignedStore(newVirtualAddress, virtualBaseField, voidPtrTyAlign);
-
-        indices[1] = b.getInt32(LinearEffectiveCapacity);
-        Value * const effCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
-        b.CreateAlignedStore(requiredChunks, effCapacityField, sizeTyAlign);
-
-        b.CreateRetVoid();
+            indices[1] = i32_ONE;
+            Value * const updatedAddressPtr = b.CreateInBoundsGEP(handleTy, handle, indices);
+            writeIntPtrStructVector(newVirtualAddress, requiredChunks, updatedAddressPtr);
+        }
+        b.CreateRet(retValPhi);
 
         b.restoreIP(ip);
 
@@ -1684,7 +1742,6 @@ Value * ManagedDynamicBuffer::expandBuffer(KernelBuilder & b, Value * produced, 
     args[2] = produced;
     args[3] = consumed;
     args[4] = required;
-
     return b.CreateCall(f, args);
 
 }
@@ -1795,7 +1852,7 @@ void RepeatingBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value 
     unsupported("linearCopyBack", "Repeating");
 }
 
-Value * RepeatingBuffer::expandBuffer(KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
+Value * RepeatingBuffer::reserveCapacity(KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
     unsupported("linearCopyBack", "Repeating");
 }
 
@@ -1816,8 +1873,8 @@ DynamicBuffer::DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, Type 
 }
 
 ManagedDynamicBuffer::ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b,
-                                           llvm::Type * const type, const unsigned AddressSpace)
-: InternalBuffer(id, BufferKind::ManagedDynamicBuffer, b, type, false, AddressSpace) {
+                                           llvm::Type * const type, const bool linear, const unsigned AddressSpace)
+: InternalBuffer(id, BufferKind::ManagedDynamicBuffer, b, type, linear, AddressSpace) {
 
 }
 

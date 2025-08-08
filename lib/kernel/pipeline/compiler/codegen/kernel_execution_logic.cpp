@@ -501,6 +501,20 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 addNextArg(inputItems);
             }
 
+            if (LLVM_UNLIKELY(CheckAssertions && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
+                const Binding & input = rt.Binding;
+                const auto streamSet = source(port, mBufferGraph);
+                Value * required = b.CreateAdd(mCurrentProcessedItemCountPhi[rt.Port], mLinearInputItemsPhi[inputPort]);
+                Value * avail = mLocallyAvailableItems[streamSet];
+                Value * const isValid = b.CreateICmpUGE(avail, required);
+                b.CreateAssert(isValid,
+                                "%s.%s: requires more input (%" PRIu64 ") "
+                                "than available (%" PRIu64 ")",
+                                mCurrentKernelName,
+                                b.GetString(input.getName()),
+                                required, avail);
+            }
+
             if (LLVM_UNLIKELY(checkStreamSet)) {
                 const auto streamSet = source(port, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
@@ -509,7 +523,14 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 if (bn.isConstant()) {
                     max = getGuaranteedRepeatingStreamSetLength(b, streamSet);
                 } else {
-                    max = b.CreateAdd(readConsumedItemCount(b, streamSet), bn.Buffer->getInternalCapacity(b));
+                    Value * base = nullptr;
+                    const BufferNode & bn = mBufferGraph[streamSet];
+                    if (bn.isThreadLocal()) {
+                        base = mCurrentProcessedItemCountPhi[rt.Port];
+                    } else {
+                        base = readConsumedItemCount(b, streamSet); assert (base);
+                    }
+                    max = b.CreateAdd(base, bn.Buffer->getInternalCapacity(b));
                 }
                 addNextArg(max);
             }
@@ -573,9 +594,14 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 addNextArg(mLinearOutputItemsPhi[rt.Port]);
             }
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
-                // buffer->getLinearlyWritableItems(b, produced, consumed)
-                Value * cap = b.CreateAdd(consumed, buffer->getInternalCapacity(b));
+                Value * base = nullptr;
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isThreadLocal()) {
+                    base = mCurrentProducedItemCountPhi[rt.Port];
+                } else {
+                    base = readConsumedItemCount(b, streamSet); assert (base);
+                }
+                Value * cap = b.CreateAdd(base, buffer->getInternalCapacity(b));
                 #ifdef PRINT_DEBUG_MESSAGES
                 debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_capacity = %" PRIu64, cap);
                 #endif

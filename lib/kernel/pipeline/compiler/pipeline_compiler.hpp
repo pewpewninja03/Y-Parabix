@@ -132,8 +132,7 @@ const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDM
 
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
-const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
-const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
+const static std::string MANAGED_DYNAMIC_BUFFER_STRUCT = ".MDBS";
 
 const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
 
@@ -394,6 +393,7 @@ public:
     void loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal);
     void releaseOwnedBuffers(KernelBuilder & b);
     void freePendingFreeableDynamicBuffers(KernelBuilder & b);
+    bool initializeOutputStreamSetBuffersBeforeSegmentInvocation(KernelBuilder & b) const;
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
 
@@ -601,6 +601,11 @@ public:
 
     void getABIAlignments(KernelBuilder & b);
 
+    inline bool preserveAllStreamSetData(const size_t streamSet) const {
+        const auto f = PreserveAllStreamSetData.find(streamSet);
+        return f != PreserveAllStreamSetData.end();
+    }
+
 protected:
 
     CompilerAllocator                           mAllocator;
@@ -677,6 +682,7 @@ protected:
     const InOutGraph                            InOutStreamSetReplacement;
     const ThreadLocalPlacementGraph             ThreadLocalPlacement;
     const ThreadLocalConflictGraphType          ThreadLocalConflictGraph;
+    const IntervalSet                           PreserveAllStreamSetData;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -993,6 +999,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , ThreadLocalPlacement(std::move(P.ThreadLocalPlacement))
 
 , ThreadLocalConflictGraph(std::move(P.ThreadLocalConflictGraph))
+, PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)

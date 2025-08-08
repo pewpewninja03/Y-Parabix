@@ -107,8 +107,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         const BufferPort & port = mBufferGraph[output];
         if (port.canModifySegmentLength()) {
             Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
-            if (strides)
-            b.CallPrintInt("strides" + std::to_string(target(output, mBufferGraph)), strides);
             numOfLinearStrides = b.CreateUMin(numOfLinearStrides, strides);
         }
     }
@@ -481,6 +479,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(KernelBuilder & b, const Bu
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
+        assert (!isa<ManagedDynamicBuffer>(bn.Buffer));
         return;
     }
 
@@ -798,11 +797,11 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     Value * const required = mLinearOutputItemsPhi[outputPort];
 
-    BasicBlock * const expandBuffer = b.CreateBasicBlock(prefix + "_mustModifyBuffer", mKernelLoopCall);
+    BasicBlock * const expandBuffer = b.CreateBasicBlock(prefix + "_expandBuffer", mKernelLoopCall);
     BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
-    Value * beforeExpansion = getWritableOutputItems(b, port);
+    Value * const beforeExpansion = getWritableOutputItems(b, port);
 
-    Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
+    Value * const hasEnoughSpace = b.getFalse(); // b.CreateICmpULE(required, beforeExpansion);
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), required);
@@ -820,20 +819,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     #endif
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
-    }
-    Value * priorBufferPtr = nullptr;
-    Value * priorCapacityPtr = nullptr;
-    if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
-        // delete any old buffer if one exists
-        Type * bufTy;
-        std::tie(priorBufferPtr, bufTy) = getScalarFieldPtr(b, prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
-        Value * const priorBuffer = b.CreateAlignedLoad(bufTy, priorBufferPtr, PtrTyABIAlignment); // <- threadlocal
-        Type * intTy;
-        std::tie(priorCapacityPtr, intTy) = getScalarFieldPtr(b, prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
-        assert (intTy == b.getSizeTy());
-        Value * const priorCapacity = b.CreateAlignedLoad(intTy, priorCapacityPtr, SizeTyABIAlignment);
-        buffer->destroyBuffer(b, priorBuffer, priorCapacity);
-        b.CreateAlignedStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr, PtrTyABIAlignment);
     }
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
@@ -862,61 +847,17 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     Value * mustExpand = nullptr;
 
     if (buffer->isLinear()) {
-
-        assert (!isa<ManagedDynamicBuffer>(buffer));
-
-        BasicBlock * expand = nullptr;
-
-        if (isa<DynamicBuffer>(buffer)) {
-            mustExpand = buffer->requiresExpansion(b, produced, consumed, required); assert (mustExpand);
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, prefix + "_mustExpand = %" PRIu64, mustExpand);
-            #endif
-
-            expand = b.CreateBasicBlock(prefix + "_expandBuffer", afterCopyBackOrExpand);
-            BasicBlock * const copyBack = b.CreateBasicBlock(prefix + "_copyBack", afterCopyBackOrExpand);
-            b.CreateCondBr(mustExpand, expand, copyBack);
-
-            b.SetInsertPoint(copyBack);
-        }
-
         buffer->linearCopyBack(b, produced, consumed, required);
-
-        if (isa<DynamicBuffer>(buffer)) {
-            b.CreateBr(afterCopyBackOrExpand);
-
-            b.SetInsertPoint(expand);
-        }
-    }
-
-    // TODO: we need to calculate the total amount required assuming we process all input. This currently
-    // has a flaw in which if the input buffers had been expanded sufficiently yet processing had been
-    // held back by some input stream, we may end up expanding twice in the same iteration of this kernel,
-    // which could result in free'ing the "old" buffer twice.
-
-    if (isa<ManagedDynamicBuffer>(buffer)) {
-        cast<ManagedDynamicBuffer>(buffer)->expandBuffer(b, produced, consumed, required);
-    } else if (isa<DynamicBuffer>(buffer)) {
-        Value * expandedStruct = cast<DynamicBuffer>(buffer)->expandBuffer(b, produced, consumed, required);
-        Value * priorBuffer = b.CreateExtractValue(expandedStruct, 0);
-        assert (priorBuffer->getType()->isPointerTy());
-        Value * priorCapacity = b.CreateExtractValue(expandedStruct, 1);
-        assert (priorCapacity->getType()->isIntegerTy());
-        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-            recordBufferExpansionHistory(b, streamSet, bn, port, buffer);
-        }
-        if (isMultithreaded()) {
-            b.CreateAlignedStore(priorBuffer, priorBufferPtr, PtrTyABIAlignment);
-            b.CreateAlignedStore(priorCapacity, priorCapacityPtr, SizeTyABIAlignment);
-        } else {
-            buffer->destroyBuffer(b, priorBuffer, priorCapacity);
-        }
+    } else {
+        // TODO: have a delete immediately value when not multithreaded?
+        buffer->reserveCapacity(b, produced, consumed, required);
     }
     b.CreateBr(afterCopyBackOrExpand);
 
     b.SetInsertPoint(afterCopyBackOrExpand);
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        if (mustExpand) {
+        if (buffer->isLinear()) {
+            // TODO: fix this; only linear could need to expand or copy
             updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
         } else {
             updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
@@ -1030,10 +971,6 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     } else {
 
         Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
-
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + "_consumed (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), consumed);
-        #endif
 
         if (LLVM_UNLIKELY(CheckAssertions)) {
             const Binding & output = getOutputBinding(outputPort);

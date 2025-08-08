@@ -418,7 +418,7 @@ void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
-            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), 0);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), true, 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
         }
@@ -848,7 +848,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         const auto isLocal =  Kernel::isLocalBuffer(output);
         if (LLVM_UNLIKELY(isLocal.isShared())) {
             Value * const handle = nextArg();
-            assert (isa<DynamicBuffer>(buffer));
+            assert (isa<ManagedDynamicBuffer>(buffer));
             buffer->setHandle(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
         } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead

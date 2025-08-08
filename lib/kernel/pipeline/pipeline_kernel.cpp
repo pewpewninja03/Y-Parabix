@@ -877,6 +877,12 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (codegen::UseProcessThreadForIO) {
         out << "+IOT";
     }
+    if (!codegen::PreserveAllStreamSetDataOptions.empty()) {
+        out << "+TLP:" << codegen::ThreadLocalPermittedOptions;
+    }
+    if (!codegen::PreserveAllStreamSetDataOptions.empty()) {
+        out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
+    }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
             out << "+CYC";

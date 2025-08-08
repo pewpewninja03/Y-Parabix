@@ -44,29 +44,11 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mHasPrincipalInput |= port.isPrincipal();
     }
 
-    bool checkOutputChannels = false;
-    size_t numOfManagedBuffers = 0;
-    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & port = mBufferGraph[output];
-        if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
-            checkOutputChannels = true;
-        }
-        if (LLVM_UNLIKELY(port.isManaged())) {
-            assert (!mAllowDataParallelExecution);
-            assert (mKernelThreadLocalHandle);
-            StructType * const threadLocalTy = mKernel->getThreadLocalStateType();
-            assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) ==
-                    ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
-            FixedArray<Value *, 4> indices;
-            indices[0] = b.getInt32(0);
-            indices[1] = b.getInt32(0);
-            indices[2] = b.getInt32(numOfManagedBuffers++);
-            indices[3] = b.getInt32(ManagedDynamicBuffer::NewAddress);
-            Value * const newAddrPtr = b.CreateGEP(threadLocalTy, mKernelThreadLocalHandle, indices);
-            // TODO: voidptralign from DL
-            b.CreateAlignedStore(ConstantPointerNull::get(b.getVoidPtrTy()), newAddrPtr, sizeof(void *));
-        }
-    }
+    // We could immediately free the old buffer if one is stored in thread local data, it relies on the idea
+    // that if we have N threads, we will invoke this kernel every N segments. This isn't true if we allow
+    // threads to immediately restart upon reaching a jump that branches to the end of the pipeline.
+
+    const auto checkOutputChannels = initializeOutputStreamSetBuffersBeforeSegmentInvocation(b);
 
     mMayHaveInsufficientIO = checkInputChannels || checkOutputChannels;
 
@@ -326,17 +308,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
         assert (isFromCurrentFunction(b, mFinalPartitionSegmentAtExitPhi, false));
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
-//        if (LLVM_UNLIKELY(mIsIOProcessThread)) {
-//            mThreadLocalScalingFactor = nullptr;
-//        } else {
-//            // NOTE: we use the partition root's max num of strides as a common scaling factor for
-//            // thread local buffer memory placement. Since we won't actually know how many strides
-//            // have been executed until after the root kernel has finished processing, we assume the
-//            // maximum was used.
-//            mThreadLocalScalingFactor =
-//                b.CreateCeilUDivRational(mMaximumNumOfStridesAtExitPhi, MaximumNumOfStrides[mKernelId]);
-//        }
-
     }
 
     if (LLVM_UNLIKELY(CheckAssertions)) {

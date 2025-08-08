@@ -4,6 +4,7 @@
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/intrusive/detail/math.hpp>
+#include <boost/icl/interval_set.hpp>
 #include <random>
 #include <kernel/core/kernel_compiler.h>
 #include <boost/interprocess/mapped_region.hpp>
@@ -16,6 +17,10 @@ using boost::intrusive::detail::is_pow2;
 inline unsigned getPageSize() {
     return boost::interprocess::mapped_region::get_page_size();
 }
+
+using IntervalSet = boost::icl::interval_set<size_t>;
+
+using Interval = IntervalSet::interval_type;
 
 namespace kernel {
 
@@ -497,6 +502,47 @@ struct IllustratedStreamSet {
 };
 
 using IllustratedStreamSetMap = std::vector<IllustratedStreamSet>;
+
+inline static IntervalSet parseCommaDelimitedList(const std::string & list)  {
+    const auto len = list.size();
+    IntervalSet parsedList;
+    if (len > 0) {
+        size_t pos = 0;
+        for (;;) {
+            auto p = pos;
+            size_t rangeStart = 0;
+            size_t num = 0;
+            bool hasRangeStart = false;
+            for (; p < len; ++p) {
+                const auto ch = list.at(p);
+                if (ch == '-') {
+                    if (LLVM_LIKELY(!hasRangeStart)) {
+                        rangeStart = num;
+                        num = 0;
+                        hasRangeStart = true;
+                        continue;
+                    }
+                } else if ('0' <= ch && ch <= '9') {
+                    num *= 10;
+                    num += ch - '0';
+                    continue;
+                } else if (ch == ',') {
+                    break;
+                }
+                report_fatal_error(StringRef{"Illegal comma delimited list given: "} + list);
+            }
+
+            rangeStart = hasRangeStart ? rangeStart : num;
+            parsedList.add(Interval::closed(rangeStart, num));
+            if (p == len) {
+                break;
+            }
+            pos = p + 1;
+        }
+    }
+    return parsedList;
+};
+
 
 }
 

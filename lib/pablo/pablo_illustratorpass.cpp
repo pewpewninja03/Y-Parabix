@@ -46,7 +46,7 @@ void runIllustratorPass(PabloKernel * const kernel) {
                     str = &stmt->getName();
                     value = stmt;
                 }
-                if (LLVM_UNLIKELY(boost::regex_match(str->str(), ex))) {
+                if (LLVM_UNLIKELY(boost::regex_search(str->str(), ex))) {
                     scope->setInsertPoint(stmt);
                     scope->createIllustrateBitstream(value, str);
                 }

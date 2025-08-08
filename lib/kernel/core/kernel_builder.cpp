@@ -456,7 +456,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
             Value * const producedItemPtr = COMPILER->getProducedOutputItemsPtr(port.Number);
             Value * const producedItems = CreateAlignedLoad(getSizeTy(), producedItemPtr,  dl.getABITypeAlign(getSizeTy()).value());
             Value * const consumedItems = COMPILER->getConsumedOutputItems(port.Number);
-            cast<ManagedDynamicBuffer>(buffer)->expandBuffer(*this, producedItems, consumedItems, capacity);
+            cast<ManagedDynamicBuffer>(buffer)->reserveCapacity(*this, producedItems, consumedItems, capacity);
             return;
         }
     }

@@ -747,14 +747,11 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             }
             const auto bit_shift = (l->getAmount() % b.getBitBlockWidth());
             const auto block_shift = (l->getAmount() / b.getBitBlockWidth());
-            Value * ptr = b.getInputStreamBlockPtr(stream->getName(), index, b.getSize(block_shift));
-            // Value * base = b.CreatePointerCast(b.getBaseAddress(cast<Var>(stream)->getName()), ptr->getType());
-            Value * lookAhead = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr);
+            Value * lookAhead = b.loadInputStreamBlock(stream->getName(), index, b.getSize(block_shift));
             if (LLVM_UNLIKELY(bit_shift == 0)) {  // Simple case with no intra-block shifting.
                 value = lookAhead;
             } else { // Need to form shift result from two adjacent blocks.
-                Value * ptr1 = b.getInputStreamBlockPtr(stream->getName(), index, b.getSize(block_shift + 1));
-                Value * lookAhead1 = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr1);
+                Value * lookAhead1 = b.loadInputStreamBlock(stream->getName(), index, b.getSize(block_shift + 1));
                 value = b.mvmd_dslli(1, lookAhead1, lookAhead, b.getBitBlockWidth() - bit_shift);
                 value = b.CreateBitCast(value, b.getBitBlockType());
             }
