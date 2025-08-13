@@ -133,22 +133,6 @@ protected:
 };
 
 //
-//  Short composable sequences are those involving non reorderable
-//  characters.   In this case, precomposition is only applied when
-//  the characters are adjacent.   This kernel replaces the
-//  first character of such short composable sequences with
-//  the resulting precomposed character and zeroes out the
-//  second.
-//
-class ShortComposableTranslation : public pablo::PabloKernel {
-public:
-    ShortComposableTranslation
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * OutputBasis);
-protected:
-    void generatePabloMethod() override;
-};
-
-//
 //  Transform any characters with a singleton decomposition to their
 //  canonical form.   In the case of UTF-8, if the singleton decomposition
 //  produces a shorter transformed sequence, the extra positions will be
@@ -214,6 +198,17 @@ SCResults SelfComposableLogic
               unsigned A_len, unsigned AA_len,
               pablo::PabloAST * A, pablo::PabloAST * AA);
 
+//
+//  Short composable sequences are those involving non reorderable
+//  characters.   In this case, precomposition is only applied when
+//  the characters are adjacent.   This kernel replaces the
+//  first character of such short composable sequences with
+//  the resulting precomposed character and zeroes out the
+//  second.
+//
+void ShortComposablePipeline(PipelineBuilder & P,
+                            StreamSet * Basis, StreamSet * FinalBasis);
+
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,
                             StreamSet * FinalBasis);
@@ -242,6 +237,12 @@ struct BitXfrmSpec {
 
 void UpdateBitXfrms(pablo::PabloBuilder & pb,
                     std::vector<pablo::Var *> BitXfrmBasis,
+                    pablo::PabloAST * marker,
+                    std::vector<pablo::PabloAST *> & sets,
+                    std::vector<BitXfrmSpec> & xfrmSpecs);
+
+void UpdateBitXfrms(pablo::PabloBuilder & pb,
+                    std::vector<pablo::PabloAST *> BitXfrmBasis,
                     pablo::PabloAST * marker,
                     std::vector<pablo::PabloAST *> & sets,
                     std::vector<BitXfrmSpec> & xfrmSpecs);

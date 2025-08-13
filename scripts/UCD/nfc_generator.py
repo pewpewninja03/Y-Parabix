@@ -516,13 +516,21 @@ ${pipeline_logic}
 """
 
 short_composable_header = r"""//
-ShortComposableTranslation::ShortComposableTranslation
+class ShortComposableTranslation${pass_no} : public pablo::PabloKernel {
+public:
+    ShortComposableTranslation${pass_no}
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * OutputBasis);
+protected:
+    void generatePabloMethod() override;
+};
+
+ShortComposableTranslation${pass_no}::ShortComposableTranslation${pass_no}
     (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * OutputBasis)
-: PabloKernel(ts, "ShortComposableTranslation" + Basis->shapeString(),
+: PabloKernel(ts, "ShortComposableTranslation${pass_no}_" + Basis->shapeString(),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(7)}},
 {Binding{"OutputBasis", OutputBasis}}) {}
 
-void ShortComposableTranslation::generatePabloMethod() {
+void ShortComposableTranslation${pass_no}::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     BixNumCompiler bnc(pb);
     PabloAST * All0 = pb.createZeroes();
@@ -682,6 +690,26 @@ self_composable_final_code = r"""
         Var * xfrm_out = pb.createExtract(XfrmOutputVar, pb.getInteger(i));
         pb.createAssign(xfrm_out, pb.createAnd(select, pb.createXor(XfrmVar[i], Basis[i])));
     }
+}
+"""
+
+short_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify short composable sequences and transform to precomposed characters.
+    P.CreateKernelCall<ShortComposableTranslation${pass_no}>(${input_basis}, ${output_basis});
+    SHOW_BIXNUM(${output_basis});
+"""
+
+self_composable_pipeline_step_template = r"""//
+    StreamSet * SelfComposables = P.CreateStreamSet(6, 1);
+    P.CreateKernelCall<SelfComposableCCs>(${input_basis}, SelfComposables);
+    SHOW_BIXNUM(SelfComposables);
+
+    P.CreateKernelCall<SelfComposableTranslation>(${input_basis}, SelfComposables, ${output_basis});
+    SHOW_BIXNUM(${output_basis});
+"""
+
+short_composable_pipeline_template = r"""void ShortComposablePipeline(PipelineBuilder & P,
+                            StreamSet * Basis, StreamSet * FinalBasis) {
+${pipeline_logic}
 }
 """
 
@@ -1042,31 +1070,36 @@ class NFC_generator:
 
     def add_overridable_seconds(self):
         self.short_overridable_map = {}
-        by_second = {}
-        for cp1 in self.short_composable_map.keys():
-            for cp2 in self.short_composable_map[cp1].keys():
-                if not cp2 in by_second.keys():
-                    by_second[cp2] = {}
-                by_second[cp2][cp1] = self.short_composable_map[cp1][cp2]
-
         # look for overridable seconds: A BC ==> AB C
         for B in self.short_composable_map.keys():
             for C in self.short_composable_map[B].keys():
                 BC = self.short_composable_map[B][C]
-                if B in by_second.keys():
-                    for A in by_second[B].keys():
+                if B in self.by_ccc_and_second[0].keys():
+                    for A in self.by_ccc_and_second[0][B].keys():
                         if BC in self.short_composable_map[A].keys(): continue # entry already
                         # Now have an AB precomposed combo with a following C.
-                        AB = by_second[B][A]
+                        AB = self.by_ccc_and_second[0][B][A]
                         if not A in self.short_overridable_map.keys():
                             self.short_overridable_map[A] = {}
                         if AB in self.short_composable_map.keys() and C in self.short_composable_map[AB].keys():
                             ABC = self.short_composable_map[AB][C]
                             self.short_overridable_map[A][BC] = chr(ABC)
-                            print("%x %x ==> %x %x ==> %x" %(A, BC, AB, C, ABC))
                         else:
                             self.short_overridable_map[A][BC] = chr(AB) + chr(C)
-                            print("%x %x ==> %x %x" %(A, BC, AB, C))
+
+    def show_overridable_seconds(self):
+        print("Short overridable seconds:")
+        for A in self.short_overridable_map.keys():
+            for BC in self.short_overridable_map[A].keys():
+                decompBC = self.ucd.decomp_map[BC]
+                B = ord(decompBC[0])
+                C = ord(decompBC[1])
+                AB = self.short_composable_map[A][B]
+                rslt = self.short_overridable_map[A][BC]
+                if len(rslt) == 1:
+                    print("%x %x ==> %x %x ==> %x" % (A, BC, AB, C, ord(rslt[0])))
+                else:
+                    print("%x %x ==> %x %x" % (A, BC, AB, C))
 
     def cp_with_ccc(self, cp):
         return "%x(%s)" % (cp, self.ccc_val_map[cp])
@@ -1132,11 +1165,6 @@ class NFC_generator:
 
     def create_max_insert_map(self):
         self.max_insert_map = {}
-        for cp in self.singleton_map.keys():
-            canon = self.singleton_map[cp]
-            ldiff = u8_encoded_length(canon) - u8_encoded_length(cp)
-            if ldiff > 0:
-                self.update_max_insert_map(cp, ldiff)
         for cp in self.short_composable_map.keys():
             for cp2 in self.short_composable_map[cp].keys():
                 precomposed = self.short_composable_map[cp][cp2]
@@ -1169,6 +1197,14 @@ class NFC_generator:
                 ldiff = decomp_len - u8_encoded_length(overridden)
                 if ldiff > 0:
                     self.update_max_insert_map(overridden, ldiff)
+        for cp in self.singleton_map.keys():
+            canon = self.singleton_map[cp]
+            ldiff = u8_encoded_length(canon) - u8_encoded_length(cp)
+            if canon in self.max_insert_map.keys():
+                canon_insert = self.max_insert_map[canon]
+                ldiff += canon_insert
+            if ldiff > 0:
+                self.update_max_insert_map(cp, ldiff)
 
     def display_max_insert_map(self):
         for cp in sorted(self.max_insert_map.keys()):
@@ -1290,6 +1326,47 @@ class NFC_generator:
         print("%i passes allocated:" % self.pass_count)
         for k in sorted(self.ccc_pass_allocation.keys()):
             print("ccc = %s (%s) allocated to pass %i." % (k, self.ccc_enum_rmap[k], self.ccc_pass_allocation[k]))
+
+    def allocate_chained_short_passes(self):
+        self.short_pass_count = 3
+        self.self_composable_pass_no = 1
+        self.short_pass_map = {0:{}, 2:{}}
+        doubletons = {}
+        for X in self.self_composables.keys():
+            XX = self.self_composables[X]
+            doubletons[XX] = X
+            self.short_pass_map[self.self_composable_pass_no + 1][X] = {}
+            self.short_pass_map[self.self_composable_pass_no + 1][XX] = {}
+        for X in self.short_composable_map.keys():
+            if X in self.self_composables.keys():
+                for Y in self.short_composable_map[X].keys():
+                    if Y != X and Y != self.self_composables[X]:
+                        self.short_pass_map[self.self_composable_pass_no + 1][X][Y] = chr(self.short_composable_map[X][Y])
+            elif X in doubletons.keys():
+                for Y in self.short_composable_map[X].keys():
+                    self.short_pass_map[self.self_composable_pass_no + 1][X][Y] = chr(self.short_composable_map[X][Y])
+            else:
+                if not X in self.short_pass_map[0].keys():
+                    self.short_pass_map[0][X] = {}
+                for Y in self.short_composable_map[X].keys():
+                    self.short_pass_map[0][X][Y] = chr(self.short_composable_map[X][Y])
+        for X in self.short_overridable_map.keys():
+            if X in self.self_composables.keys() or X in doubletons.keys():
+                for Y in self.short_overridable_map[X].keys():
+                    self.short_pass_map[self.self_composable_pass_no + 1][X][Y] = self.short_overridable_map[X][Y]
+            else:
+                for Y in self.short_overridable_map[X].keys():
+                    self.short_pass_map[0][X][Y] = self.short_overridable_map[X][Y]
+
+    def show_allocated_short_passes(self):
+        for p in range(self.short_pass_count):
+            print("Short pass %i:" % p)
+            if p != self.self_composable_pass_no:
+                for X in sorted(self.short_pass_map[p].keys()):
+                    for Y in self.short_pass_map[p][X].keys():
+                        XY = self.short_pass_map[p][X][Y]
+                        XY_chars = " ".join(["%x" % ord(c) for c in XY])
+                        print("  %x %x ==> %s" % (X, Y, XY_chars))
 
     def create_conditional_mark_codes(self):
         self.conditional_mark_codes = {}
@@ -1492,7 +1569,6 @@ class NFC_generator:
         logic = ""
         input_basis = "Basis"
         for pass_no in range(self.pass_count):
-
             if pass_no == self.pass_count - 1:
                 output_basis = "FinalBasis"
             else:
@@ -1558,9 +1634,12 @@ class NFC_generator:
         s += self_composable_final_code
         return s
 
-    def generate_short_composable_stage(self):
-        s = short_composable_header
-        rg_set_map = range_usets_from_cps(self.short_composable_map.keys())
+    def generate_short_composable_stage(self, pass_no):
+        if not pass_no in self.short_pass_map.keys():
+            raise Exception("Unknown pass for short composable stage")
+        t = string.Template(short_composable_header)
+        s = t.substitute(pass_no = pass_no)
+        rg_set_map = range_usets_from_cps(self.short_pass_map[pass_no].keys())
         for pfx_code in rg_set_map.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
@@ -1570,13 +1649,9 @@ class NFC_generator:
             generated_seconds = {}
             cp1_list = uset_to_member_list(rg_set_map[pfx_code])
             for cp1 in cp1_list:
-                for cp2 in self.short_composable_map[cp1].keys():
+                for cp2 in self.short_pass_map[pass_no][cp1].keys():
                     if not cp2 in generated_seconds.keys():
                         generated_seconds[cp2] = self.builder.install_uset(singleton_uset(cp2), pfx_code_lgth(pfx_code))
-                if cp1 in self.short_overridable_map.keys():
-                    for cp2 in self.short_overridable_map[cp1].keys():
-                        if not cp2 in generated_seconds.keys():
-                            generated_seconds[cp2] = self.builder.install_uset(singleton_uset(cp2), pfx_code_lgth(pfx_code))
             s += self.builder.generate_scope_compilations("LookAhead", pfx_code_lgth(pfx_code))
             # Have finished compiling all seconds with lookaheads
             for cp1 in cp1_list:
@@ -1585,44 +1660,69 @@ class NFC_generator:
             case_code = {}
             deferred = []
             for cp1 in cp1_list:
-                if cp1 in self.short_overridable_map.keys():
-                    for cp2 in self.short_overridable_map[cp1].keys():
-                        recomposed = self.short_overridable_map[cp1][cp2]
-                        if len(recomposed) == 1:
-                            s += generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, ord(recomposed[0]))
-                        else:
-                            s += generate_recomposed_case(self.builder, code_str, cp1, cp2, generated, generated_seconds, recomposed)
-                for cp2 in self.short_composable_map[cp1].keys():
+                for cp2 in self.short_pass_map[pass_no][cp1].keys():
                     if cp1 == cp2: continue
-                    precomposed = self.short_composable_map[cp1][cp2]
-                    case_code[(cp1, cp2)] = generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, precomposed)
-                    if precomposed in cp1_list:
-                        deferred.append(precomposed)
-                        print("Deferring %x" % precomposed)
+                    composed = self.short_pass_map[pass_no][cp1][cp2]
+                    if len(composed) == 1:
+                        precomposed = ord(composed[0])
+                        case_code[(cp1, cp2)] = generate_short_case_code(self.builder, code_str, cp1, cp2, generated, generated_seconds, precomposed)
+                        if precomposed in cp1_list:
+                            deferred.append(precomposed)
+                            print("Deferring %x" % precomposed)
+                    else:
+                        case_code[(cp1, cp2)] = generate_recomposed_case(self.builder, code_str, cp1, cp2, generated, generated_seconds, composed)
             precomposed_generated = {}
             for cp1 in cp1_list:
                 if not cp1 in deferred:
-                    for cp2 in self.short_composable_map[cp1].keys():
+                    for cp2 in self.short_pass_map[pass_no][cp1].keys():
                         if cp1 == cp2: continue
                         s += case_code[(cp1, cp2)]
-                        precomp = self.short_composable_map[cp1][cp2]
-                        found = "found_%x_%x" % (cp1, cp2)
-                        precomposed_generated[precomp] = found
+                        composed = self.short_pass_map[pass_no][cp1][cp2]
+                        if len(composed) == 1:
+                            precomp = ord(composed[0])
+                            found = "found_%x_%x" % (cp1, cp2)
+                            precomposed_generated[precomp] = found
             while len(deferred) > 0:
                 next_deferred = []
                 for cp1 in deferred:
                     if cp1 in precomposed_generated.keys():
                         s += "    %s.createAssign(%s, %s.createOr(%s, %s));\n" % (scope, generated[cp1], scope, generated[cp1], precomposed_generated[cp1])
-                        for cp2 in self.short_composable_map[cp1].keys():
+                        for cp2 in self.short_pass_map[pass_no][cp1].keys():
                             s += case_code[(cp1, cp2)]
-                            precomp = self.short_composable_map[cp1][cp2]
-                            precomposed_generated[precomp] = found
+                            composed = self.short_pass_map[pass_no][cp1][cp2]
+                            if len(composed) == 1:
+                                precomp = ord(composed[0])
+                                found = "found_%x_%x" % (cp1, cp2)
+                                precomposed_generated[precomp] = found
                     else: next_deferred.append(cp1)
                 deferred = next_deferred
             s += finalize_short_composable_pfx_code(pfx_code)
             s += self.builder.close_scope()
         s += short_composable_final_code
         return s
+
+    def generate_short_composable_pipeline(self):
+        t = string.Template(short_composable_pipeline_step_template)
+        t2 = string.Template(short_composable_pipeline_template)
+        logic = ""
+        input_basis = "Basis"
+        for pass_no in range(self.short_pass_count):
+            if pass_no == self.short_pass_count - 1:
+                output_basis = "FinalBasis"
+            else:
+                output_basis = "XfrmedBasis%i" % pass_no
+                logic += "    StreamSet * %s = P.CreateStreamSet(8, 1);\n" % output_basis
+            if pass_no == self.self_composable_pass_no:
+                t3 = string.Template(self_composable_pipeline_step_template)
+                logic += t3.substitute(pass_no = pass_no,
+                                       input_basis = input_basis,
+                                       output_basis = output_basis)
+            else:
+                logic += t.substitute(pass_no = pass_no,
+                                      input_basis = input_basis,
+                                      output_basis = output_basis)
+            input_basis = output_basis # for next pass
+        return t2.substitute(pipeline_logic = logic, final_pass_no = self.short_pass_count - 1)
 
     def generate_u8_insertion_kernel(self):
         insertion_usets = insert_map_to_bixnum_usets(self.max_insert_map)
@@ -1684,8 +1784,14 @@ class NFC_generator:
         kernels += self.generate_excluded_composite_stage()
         kernels += self.generate_self_composable_CC_stage()
         kernels += self.generate_self_composable_stage()
-        kernels += self.generate_short_composable_stage()
-        for pass_no in range(5):
+        for pass_no in range(self.short_pass_count):
+            #if pass_no == self.self_composable_pass_no:
+                #kernels += self.generate_self_composable_CC_stage()
+                #kernels += self.generate_self_composable_stage()
+            if pass_no != self.self_composable_pass_no:
+                kernels += self.generate_short_composable_stage(pass_no)
+        kernels += self.generate_short_composable_pipeline()
+        for pass_no in range(self.pass_count):
             kernels += self.generate_nfc_stage(pass_no)
             kernels += self.generate_long_composition_xfrm_stage(pass_no)
         kernels += self.generate_long_composable_pipeline()
@@ -1705,14 +1811,17 @@ if __name__ == "__main__":
     generator.determine_overridable_primaries()
     generator.create_max_insert_map()
     generator.allocate_ccc_passes()
+    generator.allocate_chained_short_passes()
     generator.implement_overridable_primaries_as_long_composables()
     generator.create_conditional_mark_codes()
-    #generator.show_overridable_primaries()
+    generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
-    generator.display_short_composables()
+    #generator.display_short_composables()
+    generator.show_allocated_short_passes()
     #generator.display_self_composables()
+    #generator.show_overridable_seconds()
     #generator.display_long_composables()
     #generator.display_excluded_composites()
     #generator.display_recursive_decomposables()
