@@ -1328,35 +1328,121 @@ class NFC_generator:
             print("ccc = %s (%s) allocated to pass %i." % (k, self.ccc_enum_rmap[k], self.ccc_pass_allocation[k]))
 
     def allocate_chained_short_passes(self):
-        self.short_pass_count = 3
-        self.self_composable_pass_no = 1
-        self.short_pass_map = {0:{}, 2:{}}
-        doubletons = {}
-        for X in self.self_composables.keys():
-            XX = self.self_composables[X]
-            doubletons[XX] = X
-            self.short_pass_map[self.self_composable_pass_no + 1][X] = {}
-            self.short_pass_map[self.self_composable_pass_no + 1][XX] = {}
+        self_composable_pass_found = False
+        dependence_map = {}
+        all_rule_map = {}
         for X in self.short_composable_map.keys():
-            if X in self.self_composables.keys():
-                for Y in self.short_composable_map[X].keys():
-                    if Y != X and Y != self.self_composables[X]:
-                        self.short_pass_map[self.self_composable_pass_no + 1][X][Y] = chr(self.short_composable_map[X][Y])
-            elif X in doubletons.keys():
-                for Y in self.short_composable_map[X].keys():
-                    self.short_pass_map[self.self_composable_pass_no + 1][X][Y] = chr(self.short_composable_map[X][Y])
-            else:
-                if not X in self.short_pass_map[0].keys():
-                    self.short_pass_map[0][X] = {}
-                for Y in self.short_composable_map[X].keys():
-                    self.short_pass_map[0][X][Y] = chr(self.short_composable_map[X][Y])
+            all_rule_map[X] = {}
+            for Y in self.short_composable_map[X].keys():
+                if X == Y: continue   # skip self-composables
+                precomposed = self.short_composable_map[X][Y]
+                all_rule_map[X][Y] = chr(precomposed)
+                if Y in self.short_composable_map.keys():
+                    if not Y in dependence_map.keys():
+                        dependence_map[Y] = []
+                    dependence_map[Y].append((X, Y))
+                if precomposed in self.short_composable_map.keys():
+                    if not precomposed in dependence_map.keys():
+                        dependence_map[precomposed] = []
+                    dependence_map[precomposed].append((X, Y))
         for X in self.short_overridable_map.keys():
-            if X in self.self_composables.keys() or X in doubletons.keys():
-                for Y in self.short_overridable_map[X].keys():
-                    self.short_pass_map[self.self_composable_pass_no + 1][X][Y] = self.short_overridable_map[X][Y]
+            for Y in self.short_overridable_map[X].keys():
+                composed = self.short_overridable_map[X][Y]
+                all_rule_map[X][Y] = composed
+                if Y in self.short_composable_map.keys():
+                    if not Y in dependence_map.keys():
+                        dependence_map[Y] = []
+                    dependence_map[Y].append((X, Y))
+                final_cp = ord(composed[-1])
+                if final_cp in self.short_composable_map.keys():
+                    if not final_cp in dependence_map.keys():
+                        dependence_map[final_cp] = []
+                    dependence_map[final_cp].append((X, Y))
+        self.short_pass_map = {0 :{}}
+        #
+        # All rules without a prior dependence are allocated to pass 0
+        remaining_rule_map = {}
+        pass_no = 0
+        for X in all_rule_map.keys():
+            if X in dependence_map.keys():
+                remaining_rule_map[X] = {}
+                for Y in all_rule_map[X].keys():
+                    remaining_rule_map[X][Y] = all_rule_map[X][Y]
             else:
-                for Y in self.short_overridable_map[X].keys():
-                    self.short_pass_map[0][X][Y] = self.short_overridable_map[X][Y]
+                self.short_pass_map[pass_no][X] = all_rule_map[X]
+        for X in sorted(self.short_pass_map[pass_no].keys()):
+            for Y in self.short_pass_map[pass_no][X].keys():
+                XY = self.short_pass_map[pass_no][X][Y]
+                XY_chars = " ".join(["%x" % ord(c) for c in XY])
+                print("  Pass %i:  %x %x ==> %s" % (pass_no, X, Y, XY_chars))
+        for X in remaining_rule_map.keys():
+            for Y in remaining_rule_map[X].keys():
+                XY = remaining_rule_map[X][Y]
+                XY_chars = " ".join(["%x" % ord(c) for c in XY])
+                print("  Remaining:  %x %x ==> %s" % (X, Y, XY_chars))
+        while remaining_rule_map != {}:
+            prior_pass = pass_no
+            pass_no += 1
+            remaining_dependence_map = {}
+            for X in remaining_rule_map.keys():
+                for (U, V) in dependence_map[X]:
+                    if not U in self.short_pass_map[prior_pass].keys() or not V in self.short_pass_map[prior_pass][U].keys():
+                        if not X in remaining_dependence_map.keys():
+                            remaining_dependence_map[X] = []
+                        remaining_dependence_map[X].append((U, V))
+            for cp in remaining_dependence_map.keys():
+                s = ", ".join(["(%x, %x)" % (X, Y) for (X, Y) in remaining_dependence_map[cp]])
+                print("Remaining %x dependencies: %s" % (cp, s))
+            rule_map = remaining_rule_map
+            dependence_map = remaining_dependence_map
+            self.short_pass_map[pass_no] = {}
+            remaining_rule_map = {}
+
+            self_composable_pass = False
+            if not self_composable_pass_found:
+                self_composable_pass = True
+                for X in self.self_composables.keys():
+                    XX = self.self_composables[X]
+                    s = ", ".join(["(%x, %x)" % (U, V) for (U, V) in dependence_map[X]])
+                    print("Pass %i: self composable %x depends: %s" % (pass_no, X, s))
+                    if dependence_map[X] != [(X, XX)]:
+                        self_composable_pass = False
+                if self_composable_pass:
+                    self.self_composable_pass_no = pass_no
+                    for X in rule_map.keys():
+                        if X in self.self_composables.keys():
+                            self.short_pass_map[pass_no][X] = {}
+                            XX = self.self_composables[X]
+                            self.short_pass_map[pass_no][X][XX] = chr(XX) + chr(X)
+                            self.short_pass_map[pass_no][X][X] = chr(XX)
+                            for Y in rule_map[X].keys():
+                                if Y != X and Y!= XX:
+                                    if not X in remaining_rule_map.keys():
+                                        remaining_rule_map[X] = {}
+                                    remaining_rule_map[X][Y] = rule_map[X][Y]
+                        else:
+                            remaining_rule_map[X] = rule_map[X]
+                    self_composable_pass_found = True
+            if not self_composable_pass:
+                for X in rule_map.keys():
+                    if X in dependence_map.keys():
+                        remaining_rule_map[X] = rule_map[X]
+                    else:
+                        self.short_pass_map[pass_no][X] = rule_map[X]
+                if self.short_pass_map[pass_no] == {}:
+                    #raise Exception("No progress in short pass determination: pass %i" % pass_no)
+                    remaining_rule_map = {}
+            for X in sorted(self.short_pass_map[pass_no].keys()):
+                for Y in self.short_pass_map[pass_no][X].keys():
+                    XY = self.short_pass_map[pass_no][X][Y]
+                    XY_chars = " ".join(["%x" % ord(c) for c in XY])
+                    print("  Pass %i:  %x %x ==> %s" % (pass_no, X, Y, XY_chars))
+            for X in remaining_rule_map.keys():
+                for Y in remaining_rule_map[X].keys():
+                    XY = remaining_rule_map[X][Y]
+                    XY_chars = " ".join(["%x" % ord(c) for c in XY])
+                    print("  Remaining:  %x %x ==> %s" % (X, Y, XY_chars))
+            self.short_pass_count = pass_no + 1
 
     def show_allocated_short_passes(self):
         for p in range(self.short_pass_count):
@@ -1814,7 +1900,7 @@ if __name__ == "__main__":
     generator.allocate_chained_short_passes()
     generator.implement_overridable_primaries_as_long_composables()
     generator.create_conditional_mark_codes()
-    generator.show_overridable_primaries()
+    #generator.show_overridable_primaries()
     #generator.show_ccc_pass_allocation()
     #generator.show_conditional_codes()
     #generator.display_singletons()
