@@ -164,10 +164,6 @@ protected:
 //  A AA A ==> AA AA
 //  A A AA A  ==> AA AA A
 //
-//  For each span of As and AAs:
-//  1.  The odd numbered As are converted to AAs, except if the A is last of the span.
-//  2.  The even numbered As are marked for deletion.
-//  3.  If the number of As is odd, and the last of the span is AA, it is converted to A.
 
 class SelfComposableCCs : public pablo::PabloKernel {
 public:
@@ -188,7 +184,7 @@ protected:
 
 struct SCResults {
     pablo::PabloAST * A_to_convert_to_AA;
-    pablo::PabloAST * A_to_delete;
+    pablo::PabloAST * A_or_AA_to_delete;
     pablo::PabloAST * AA_to_convert_to_A;
 };
 

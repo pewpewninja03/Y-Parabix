@@ -7049,7 +7049,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     pb.createIf(pb.createOr(self_composable_CCs[0], self_composable_CCs[1]), b_113c2);
     std::vector<PabloAST *> basisXor_113c2(8, All0);
     SCResults rslt_113c2 = SelfComposableLogic(b_113c2, Basis, 4, 4, self_composable_CCs[0], self_composable_CCs[1]);
-    b_113c2.createAssign(DelVar, b_113c2.createOr(DelVar, rslt_113c2.A_to_delete));
+    b_113c2.createAssign(DelVar, b_113c2.createOr(DelVar, rslt_113c2.A_or_AA_to_delete));
     PabloAST * xfrm_113c2 = b_113c2.createOr(rslt_113c2.A_to_convert_to_AA, rslt_113c2.AA_to_convert_to_A);
     {
     UTF::UTF_Compiler x113c2_compiler(getInputStreamVar("Basis"), b_113c2, pablo::BitMovementMode::LookAhead);
@@ -7072,7 +7072,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     pb.createIf(pb.createOr(self_composable_CCs[2], self_composable_CCs[3]), b_1611e);
     std::vector<PabloAST *> basisXor_1611e(8, All0);
     SCResults rslt_1611e = SelfComposableLogic(b_1611e, Basis, 4, 4, self_composable_CCs[2], self_composable_CCs[3]);
-    b_1611e.createAssign(DelVar, b_1611e.createOr(DelVar, rslt_1611e.A_to_delete));
+    b_1611e.createAssign(DelVar, b_1611e.createOr(DelVar, rslt_1611e.A_or_AA_to_delete));
     PabloAST * xfrm_1611e = b_1611e.createOr(rslt_1611e.A_to_convert_to_AA, rslt_1611e.AA_to_convert_to_A);
     {
     UTF::UTF_Compiler x1611e_compiler(getInputStreamVar("Basis"), b_1611e, pablo::BitMovementMode::LookAhead);
@@ -7098,7 +7098,7 @@ void SelfComposableTranslation::generatePabloMethod() {
     pb.createIf(pb.createOr(self_composable_CCs[4], self_composable_CCs[5]), b_16d67);
     std::vector<PabloAST *> basisXor_16d67(8, All0);
     SCResults rslt_16d67 = SelfComposableLogic(b_16d67, Basis, 4, 4, self_composable_CCs[4], self_composable_CCs[5]);
-    b_16d67.createAssign(DelVar, b_16d67.createOr(DelVar, rslt_16d67.A_to_delete));
+    b_16d67.createAssign(DelVar, b_16d67.createOr(DelVar, rslt_16d67.A_or_AA_to_delete));
     PabloAST * xfrm_16d67 = b_16d67.createOr(rslt_16d67.A_to_convert_to_AA, rslt_16d67.AA_to_convert_to_A);
     {
     UTF::UTF_Compiler x16d67_compiler(getInputStreamVar("Basis"), b_16d67, pablo::BitMovementMode::LookAhead);

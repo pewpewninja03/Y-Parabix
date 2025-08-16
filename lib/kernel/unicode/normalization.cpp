@@ -246,6 +246,36 @@ void UpdateBitXfrms(PabloBuilder & pb, std::vector<Var *> BitXfrmBasis,
     }
 }
 
+//  Self-Composable Logic
+//  Given Unicode characters AA and A such that AA has a canonical
+//  decomposition AA ==> [A, A], the character A is called a
+//  self-composable, while the character AA is called a doubleton.
+//
+//  Two sets of such characters are:
+//  0x16121 => [0x1611e, 0x1611e]
+//  0x16d68 => [0x16d67, 0x16d67]
+//
+//  Conversion of sequences of self-composables and doubletons to NFC form
+//  include the following examples.
+//
+//  A AA ==> AA A
+//  A A A ==> AA A
+//  A AA A ==> AA AA
+//  A A AA A  ==> AA AA A
+//
+//  For each span of As and AAs:
+//  1.  For each odd_A followed immediately by an A (even_A), 
+//      a.  mark the odd_A for deletion, and
+//      b.  mark the even A for conversion to AA.
+//  2.  For each odd_A followed by a non-empty run of AAs and then an even A:
+//      a. mark the initial odd A for conversion to AA
+//      b. mark the even A for conversion to AA.
+//      c. mark the final AA within the run for deletion
+//  3.  For each odd_A followed by a non-empty run of AAs with no final A,
+//      a. mark the initial odd A for conversion to AA
+//      b. mark the final AA to for conversion to A.
+//      A AA AA AA X => AA AA AA A X
+
 SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
                               unsigned A_len, unsigned AA_len,
                               PabloAST * A, PabloAST * AA) {
@@ -276,19 +306,33 @@ SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
     //
     PabloAST * A_ahead = pb.createLookahead(A, A_len, "selfc.A_ahead");
     PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
-    PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead, "selfc.A_or_AA_ahead");
-    PabloAST * AA_final = pb.createAnd(AA, pb.createNot(A_or_AA_ahead));
-    // Rule 1
-    results.A_to_convert_to_AA = pb.createAnd(A_odd, A_or_AA_ahead, "selfc.A_to_convert_to_AA");
-    // Rule 2
-    results.A_to_delete = A_even;
-    for (unsigned i = 2; i <= A_len; i++) {
-        results.A_to_delete = pb.createOr(results.A_to_delete, pb.createAdvance(A_even, i - 1));
+
+    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, A_len), "selfc.AA1");
+    PabloAST * A_odd_AA_run = pb.createMatchStar(AA1, AA_continue, "selfc.A_odd_AA_run");
+    PabloAST * A_odd_AA_final = pb.createAnd3(A_odd_AA_run, AA, pb.createNot(AA_ahead), "selfc.A_odd_AA_final");
+    // Rule 1a
+    PabloAST * A_to_delete = pb.createAnd(A_odd, A_ahead, "selfc.A_to_delete");
+    // Rules 1b, 2a, 2b, 3a 
+    results.A_to_convert_to_AA = pb.createOr(A_even, pb.createAnd(A_odd, AA_ahead), "selfc.A_to_convert_to_AA");
+    // Rule 2c
+    PabloAST * AA_to_delete = pb.createAnd(A_odd_AA_final, A_ahead, "selfc.AA_to_delete");
+    // Rule 3b
+    results.AA_to_convert_to_A = pb.createAnd(A_odd_AA_final, pb.createNot(A_ahead), "selfc.AA_to_convert_to_A");
+    PabloAST * to_delete = pb.createOr(A_to_delete, AA_to_delete);
+    results.A_or_AA_to_delete = to_delete;
+    auto min_len = std::min(A_len, AA_len);
+    for (unsigned i = 2; i <= min_len; i++) {
+        results.A_or_AA_to_delete = pb.createOr(results.A_or_AA_to_delete, pb.createAdvance(to_delete, i - 1));
     }
-    // Rule 3
-    // Starting from an odd A, if the remaining span are AAs, convert the final one.
-    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, AA_len), "selfc.AA1");
-    results.AA_to_convert_to_A = pb.createAnd(pb.createMatchStar(AA1, AA_run_continue), AA_final, "selfc.AA_to_convert_to_A");
+    if (A_len > min_len) {
+        for (unsigned i = min_len + 1; i <= A_len; i++) {
+            results.A_or_AA_to_delete = pb.createOr(results.A_or_AA_to_delete, pb.createAdvance(A_to_delete, i - 1));
+        }
+    } else if (AA_len > min_len) {
+        for (unsigned i = min_len + 1; i <= AA_len; i++) {
+            results.A_or_AA_to_delete = pb.createOr(results.A_or_AA_to_delete, pb.createAdvance(AA_to_delete, i - 1));
+        }
+    }
     return results;
 }
 

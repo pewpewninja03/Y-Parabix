@@ -679,7 +679,7 @@ self_composable_case_template = r"""    auto b_${A} = pb.createScope();
     pb.createIf(pb.createOr(${A_AST}, ${AA_AST}), b_${A});
     std::vector<PabloAST *> basisXor_${A}(8, All0);
     SCResults rslt_${A} = SelfComposableLogic(b_${A}, Basis, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST});
-    b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_to_delete));
+    b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_or_AA_to_delete));
     PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
 """
 
