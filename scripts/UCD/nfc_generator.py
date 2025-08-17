@@ -16,6 +16,14 @@ import math
 def ceil_log2(x):
     return math.ceil(math.log2(x))
 
+def add_map_entry(m, coords, value):
+    if len(coords) == 1:
+        m[coords[0]] = value
+    else:
+        if not coords[0] in m.keys():
+            m[coords[0]] = {}
+        add_map_entry(m[coords[0]], coords[1:], value)
+
 class UCD_database():
     def __init__(self):
         self.supported_props = []
@@ -1021,25 +1029,15 @@ class NFC_generator:
                     else:
                         ccc = self.ccc_val_map[cp2]
                         ccc_code = self.ccc_enum_map[ccc]
-                        if not ccc_code in self.by_ccc_and_second.keys():
-                            self.by_ccc_and_second[ccc_code] = {}
-                        if not cp2 in self.by_ccc_and_second[ccc_code].keys():
-                            self.by_ccc_and_second[ccc_code][cp2] = {}
-                        self.by_ccc_and_second[ccc_code][cp2][cp1] = precomposed
+                        add_map_entry(self.by_ccc_and_second, [ccc_code, cp2, cp1], precomposed)
                         if uset_member(ucd.ccc_map['NR'], cp2):
                             # Decomposition to two consecutive starters
                             self.composable_seconds = uset_union(self.composable_seconds, singleton_uset(cp2))
                             if cp1 == cp2:
                                 self.self_composables[cp1] = precomposed
-                            if not cp1 in self.short_composable_map.keys():
-                                # index by the first character of decomposition
-                                self.short_composable_map[cp1] = {}
-                            self.short_composable_map[cp1][cp2] = precomposed
+                            add_map_entry(self.short_composable_map, [cp1, cp2], precomposed)
                         else:
-                            if not cp2 in self.long_composable_map.keys():
-                                # index by the mark (second char of decomposition)
-                                self.long_composable_map[cp2] = {}
-                            self.long_composable_map[cp2][cp1] = chr(precomposed)
+                            add_map_entry(self.long_composable_map, [cp2, cp1], chr(precomposed))
                 else:
                     raise Exception("Unexpected: decomposition length(%x) = %i" % (precomposed, len(decomp)))
         for cp in self.singleton_map.keys():
@@ -1086,6 +1084,14 @@ class NFC_generator:
                             self.short_overridable_map[A][BC] = chr(ABC)
                         else:
                             self.short_overridable_map[A][BC] = chr(AB) + chr(C)
+                            # look for A BCD => AB CD
+                            if BC in self.short_composable_map.keys():
+                                for D in self.short_composable_map[BC].keys():
+                                    BCD = self.short_composable_map[BC][D]
+                                    if not C in self.short_composable_map.keys() or not D in self.short_composable_map[C].keys():
+                                        raise("Unexpected expansion %x %x => %x %x %x"   % (A, BCD, AB, C, D))
+                                    CD = self.short_composable_map[C][D]
+                                    self.short_overridable_map[A][BCD] = chr(AB) + chr(CD)
 
     def show_overridable_seconds(self):
         print("Short overridable seconds:")
@@ -1135,9 +1141,7 @@ class NFC_generator:
         for cp2 in sorted(self.long_composable_map.keys()):
             for cp1 in self.long_composable_map[cp2].keys():
                 s = self.long_composable_map[cp2][cp1]
-                if not cp1 in by_starter.keys():
-                    by_starter[cp1] = {}
-                by_starter[cp1][cp2] = s
+                add_map_entry(by_starter, [cp1, cp2], s)
         for cp1 in sorted(by_starter.keys()):
             print("%s: " % self.cp_with_ccc(cp1))
             for cp2 in sorted(by_starter[cp1].keys()):
@@ -1225,11 +1229,8 @@ class NFC_generator:
             ccc = self.ccc_val_map[mark]
             ccc_code = self.ccc_enum_map[ccc]
             for starter in self.long_composable_map[mark].keys():
-                if not starter in by_starter_and_ccc.keys():
-                    by_starter_and_ccc[starter] = {}
-                if not ccc_code in by_starter_and_ccc[starter].keys():
-                    by_starter_and_ccc[starter][ccc_code] = {}
-                by_starter_and_ccc[starter][ccc_code][mark] = ord(self.long_composable_map[mark][starter])
+                entry = ord(self.long_composable_map[mark][starter])
+                add_map_entry(by_starter_and_ccc, [starter, ccc_code, mark], entry)
         self.overridable_primaries = {}
         for starter in by_starter_and_ccc.keys():
             ccc_list = sorted(by_starter_and_ccc[starter].keys())
@@ -1365,9 +1366,7 @@ class NFC_generator:
         pass_no = 0
         for X in all_rule_map.keys():
             if X in dependence_map.keys():
-                remaining_rule_map[X] = {}
-                for Y in all_rule_map[X].keys():
-                    remaining_rule_map[X][Y] = all_rule_map[X][Y]
+                remaining_rule_map[X] = all_rule_map[X]
             else:
                 self.short_pass_map[pass_no][X] = all_rule_map[X]
         for X in sorted(self.short_pass_map[pass_no].keys()):
@@ -1417,9 +1416,7 @@ class NFC_generator:
                             self.short_pass_map[pass_no][X][X] = chr(XX)
                             for Y in rule_map[X].keys():
                                 if Y != X and Y!= XX:
-                                    if not X in remaining_rule_map.keys():
-                                        remaining_rule_map[X] = {}
-                                    remaining_rule_map[X][Y] = rule_map[X][Y]
+                                    add_map_entry(remaining_rule_map, [X, Y], rule_map[X][Y])
                         else:
                             remaining_rule_map[X] = rule_map[X]
                     self_composable_pass_found = True
@@ -1566,9 +1563,7 @@ class NFC_generator:
             if self.ccc_pass_allocation[ccc_code] == pass_no:
                 rg_set_map = range_usets_from_cps(self.long_composable_map[mark].keys())
                 for pfx_code in rg_set_map.keys():
-                    if not pfx_code in pass_data.keys():
-                        pass_data[pfx_code] = {}
-                    pass_data[pfx_code][mark] = rg_set_map[pfx_code]
+                    add_map_entry(pass_data, [pfx_code, mark], rg_set_map[pfx_code])
         for pfx_code in pass_data.keys():
             code_str = pfx_code_string(pfx_code)
             scope = "b_%s" % code_str
