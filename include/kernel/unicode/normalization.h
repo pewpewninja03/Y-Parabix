@@ -11,7 +11,7 @@
 using StreamSet = kernel::StreamSet;
 using PipelineBuilder = kernel::PipelineBuilder;
 namespace re {class CC;}
-namespace pablo {class PabloBuilder; class PabloAST;}
+namespace pablo {class PabloBuilder; class PabloAST; class Var;}
 
 // Hangul Composition Kernels for NFC (See Unicode section 3.12).
 //
@@ -133,22 +133,6 @@ protected:
 };
 
 //
-//  Short composable sequences are those involving non reorderable
-//  characters.   In this case, precomposition is only applied when
-//  the characters are adjacent.   This kernel replaces the
-//  first character of such short composable sequences with
-//  the resulting precomposed character and zeroes out the
-//  second.
-//
-class ShortComposableTranslation : public pablo::PabloKernel {
-public:
-    ShortComposableTranslation
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * OutputBasis);
-protected:
-    void generatePabloMethod() override;
-};
-
-//
 //  Transform any characters with a singleton decomposition to their
 //  canonical form.   In the case of UTF-8, if the singleton decomposition
 //  produces a shorter transformed sequence, the extra positions will be
@@ -180,10 +164,6 @@ protected:
 //  A AA A ==> AA AA
 //  A A AA A  ==> AA AA A
 //
-//  For each span of As and AAs:
-//  1.  The odd numbered As are converted to AAs, except if the A is last of the span.
-//  2.  The even numbered As are marked for deletion.
-//  3.  If the number of As is odd, and the last of the span is AA, it is converted to A.
 
 class SelfComposableCCs : public pablo::PabloKernel {
 public:
@@ -204,11 +184,26 @@ protected:
 
 struct SCResults {
     pablo::PabloAST * A_to_convert_to_AA;
-    pablo::PabloAST * A_to_delete;
+    pablo::PabloAST * A_or_AA_to_delete;
     pablo::PabloAST * AA_to_convert_to_A;
 };
 
-SCResults SelfComposableLogic(pablo::PabloBuilder & pb, unsigned A_len, unsigned AA_len, pablo::PabloAST * A, pablo::PabloAST * AA, pablo::PabloAST * suffix);
+SCResults SelfComposableLogic
+             (pablo::PabloBuilder & pb,
+              std::vector<pablo::PabloAST *> Basis,
+              unsigned A_len, unsigned AA_len,
+              pablo::PabloAST * A, pablo::PabloAST * AA);
+
+//
+//  Short composable sequences are those involving non reorderable
+//  characters.   In this case, precomposition is only applied when
+//  the characters are adjacent.   This kernel replaces the
+//  first character of such short composable sequences with
+//  the resulting precomposed character and zeroes out the
+//  second.
+//
+void ShortComposablePipeline(PipelineBuilder & P,
+                            StreamSet * Basis, StreamSet * FinalBasis);
 
 void LongComposablePipeline(PipelineBuilder & P,
                             StreamSet * Basis, StreamSet * ccc_NR,
@@ -230,3 +225,20 @@ void ComputeWorkPlacement(PipelineBuilder & P,
                           StreamSet * U8_Basis, StreamSet * WorkSelectionMask,
                           StreamSet * WorkPlacementMask);
 
+struct BitXfrmSpec {
+    unsigned BitXfrmIndex;
+    unsigned position;
+    unsigned bit;
+};
+
+void UpdateBitXfrms(pablo::PabloBuilder & pb,
+                    std::vector<pablo::Var *> BitXfrmBasis,
+                    pablo::PabloAST * marker,
+                    std::vector<pablo::PabloAST *> & sets,
+                    std::vector<BitXfrmSpec> & xfrmSpecs);
+
+void UpdateBitXfrms(pablo::PabloBuilder & pb,
+                    std::vector<pablo::PabloAST *> BitXfrmBasis,
+                    pablo::PabloAST * marker,
+                    std::vector<pablo::PabloAST *> & sets,
+                    std::vector<BitXfrmSpec> & xfrmSpecs);

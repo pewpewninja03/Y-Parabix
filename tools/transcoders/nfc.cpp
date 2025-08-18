@@ -185,16 +185,8 @@ std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Nam
     P.CreateKernelCall<SingletonCanonicalization>(EC_Basis, CanonBasis);
     SHOW_BIXNUM(CanonBasis);
 
-    StreamSet * SelfComposables = P.CreateStreamSet(6, 1);
-    P.CreateKernelCall<SelfComposableCCs>(CanonBasis, SelfComposables);
-    SHOW_BIXNUM(SelfComposables);
-
-    StreamSet * SelfBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<SelfComposableTranslation>(CanonBasis, SelfComposables, SelfBasis);
-    SHOW_BIXNUM(SelfBasis);
-
     StreamSet * ShortBasis = P.CreateStreamSet(8, 1);
-    P.CreateKernelCall<ShortComposableTranslation>(SelfBasis, ShortBasis);
+    ShortComposablePipeline(P, CanonBasis, ShortBasis);
     SHOW_BIXNUM(ShortBasis);
 
     StreamSet * FinalBasis = P.CreateStreamSet(8, 1);
@@ -238,7 +230,7 @@ std::pair<StreamSet *, StreamSet *> NFC_U8_Pipeline(PipelineBuilder & P, re::Nam
 
     StreamSets ToSort = {CCC_Spans, TransformedBasis};
 
-    StreamSets SortResults = BitonicSortRuns(P, 16, CCC_NonZero, ToSort);
+    StreamSets SortResults = BitonicSortRuns(P, 32, CCC_NonZero, ToSort);
     SHOW_BIXNUM(SortResults[0]);
     SHOW_BIXNUM(SortResults[1]);
 
