@@ -1,0 +1,46 @@
+#!/bin/bash
+#
+# Robert D. Cameron
+#
+# Usage: ./test_nfc
+#
+test_dir=`echo "$0" | sed "s/[^\/]*$//"`
+
+test_program=$1
+normalization_directory=../Normalization
+input_directory=TestFiles
+output_directory=TestOutput
+expected_directory=ExpectedOutput
+
+
+[ -x "$output_directory.bak" ] && rm -rf $output_directory.bak
+[ -x "$output_directory" ] && mv $output_directory $output_directory.bak
+
+mkdir $output_directory
+
+for f in $normalization_directory/NFK*
+do
+   fbase=`echo $f | sed "s#$normalization_directory/##"`
+   cp $normalization_directory/NFKC $expected_directory/$fbase.nfc
+done
+
+for f in $normalization_directory/NF[^K]*
+do
+   fbase=`echo $f | sed "s#$normalization_directory/##"`
+   cp $normalization_directory/NFC $expected_directory/$fbase.nfc
+done
+
+for f in $normalization_directory/*
+do
+   fbase=`echo $f | sed "s#$normalization_directory/##"`
+   $test_program  $normalization_directory/$fbase >$output_directory/$fbase.nfc
+done
+
+for f in $input_directory/*
+do
+   fbase=`echo $f | sed "s#$input_directory/##"`
+   $test_program  $input_directory/$fbase >$output_directory/$fbase.nfc
+done
+
+echo "diff -q ExpectedOutput TestOutput"
+diff -q $expected_directory $output_directory

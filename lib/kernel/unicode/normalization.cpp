@@ -213,41 +213,126 @@ void Hangul_Composition::generatePabloMethod() {
     writeOutputStreamSet("Output_Basis", outputVar);
 }
 
-SCResults SelfComposableLogic(PabloBuilder & pb, unsigned A_len, unsigned AA_len, PabloAST * A, PabloAST * AA, PabloAST * suffix) {
+void UpdateBitXfrms(PabloBuilder & pb, std::vector<Var *> BitXfrmBasis,
+                    PabloAST * marker, std::vector<PabloAST *> & sets, std::vector<BitXfrmSpec> & xfrmSpecs) {
+    unsigned max_pos = 0;
+    for (auto & s : xfrmSpecs) {
+        if (s.position > max_pos) {
+            max_pos = s.position;
+        }
+    }
+    std::vector<std::vector<PabloAST *>> combined(max_pos + 1);
+    if (marker == nullptr) {
+        combined[0] = sets;
+    } else {
+        combined[0].resize(sets.size());
+        for (unsigned i = 0; i < sets.size(); i++) {
+            combined[0][i] = pb.createAnd(sets[i], marker);
+        }
+    }
+    for (unsigned pos = 1; pos <= max_pos; pos++) {
+        combined[pos].resize(sets.size());
+        for (unsigned i = 0; i < sets.size(); i++) {
+           combined[pos][i] = nullptr;
+        }
+    }
+    for (auto & spec : xfrmSpecs) {
+        unsigned pos = spec.position;
+        unsigned idx = spec.BitXfrmIndex;
+        if (combined[pos][idx] == nullptr) {
+            combined[pos][idx] = pb.createAdvance(combined[0][idx], pos);
+        }
+        pb.createAssign(BitXfrmBasis[spec.bit], pb.createOr(BitXfrmBasis[spec.bit], combined[pos][idx]));
+    }
+}
+
+//  Self-Composable Logic
+//  Given Unicode characters AA and A such that AA has a canonical
+//  decomposition AA ==> [A, A], the character A is called a
+//  self-composable, while the character AA is called a doubleton.
+//
+//  Two sets of such characters are:
+//  0x16121 => [0x1611e, 0x1611e]
+//  0x16d68 => [0x16d67, 0x16d67]
+//
+//  Conversion of sequences of self-composables and doubletons to NFC form
+//  include the following examples.
+//
+//  A AA ==> AA A
+//  A A A ==> AA A
+//  A AA A ==> AA AA
+//  A A AA A  ==> AA AA A
+//
+//  For each span of As and AAs:
+//  1.  For each odd_A followed immediately by an A (even_A), 
+//      a.  mark the odd_A for deletion, and
+//      b.  mark the even A for conversion to AA.
+//  2.  For each odd_A followed by a non-empty run of AAs and then an even A:
+//      a. mark the initial odd A for conversion to AA
+//      b. mark the even A for conversion to AA.
+//      c. mark the final AA within the run for deletion
+//  3.  For each odd_A followed by a non-empty run of AAs with no final A,
+//      a. mark the initial odd A for conversion to AA
+//      b. mark the final AA to for conversion to A.
+//      A AA AA AA X => AA AA AA A X
+
+SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
+                              unsigned A_len, unsigned AA_len,
+                              PabloAST * A, PabloAST * AA) {
     SCResults results;
-    PabloAST * XA = pb.createZeroes();
-    PabloAST * after_any_A = pb.createAdvanceThenScanThru(pb.createOr3(A, AA, XA), suffix, "after_any_A");
-    PabloAST * AA_run_start = pb.createAnd(AA, pb.createNot(after_any_A), "selfc.AA_run_start");
+    PabloAST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
+    PabloAST * A_or_AA_follow = pb.createAdvanceThenScanThru(pb.createOr(A, AA), suffix, "selfc.A_or_AA_follow");
+    PabloAST * AA_run_start = pb.createAnd(AA, pb.createNot(A_or_AA_follow), "selfc.AA_run_start");
     PabloAST * AA_run_continue = pb.createOr(suffix, AA);
     PabloAST * AA_run_follow = pb.createScanThru(AA_run_start, AA_run_continue, "selfc.AA_run_follow");
-    PabloAST * A_run_start = pb.createAnd(A, pb.createOr(AA_run_follow, pb.createNot(after_any_A)), "selfc.A_run_start");
-    PabloAST * A_or_XA_run_start = pb.createOr(A_run_start, XA, "selfc.A_or_XA_run_start");
-    PabloAST * A_or_XA = pb.createOr(A, XA, "selfc.A_or_XA");
-    PabloAST * A1 = pb.createEveryNth(A_or_XA, pb.getInteger(2));  //  1st, 3rd, 5th, ... of all the As
-    PabloAST * A2 = pb.createXor(A_or_XA, A1);  //  2nd, 4th, 6th, ... of the As
-    PabloAST * A1_start = pb.createAnd(A_or_XA_run_start, A1);
-    PabloAST * A2_start = pb.createAnd(A_or_XA_run_start, A2);
-    PabloAST * run_continue = pb.createOr3(suffix, A, AA);
-    PabloAST * A1_runs = pb.createMatchStar(A1_start, run_continue);
-    PabloAST * A2_runs = pb.createMatchStar(A2_start, run_continue);
+    PabloAST * A_run_start = pb.createAnd(A, pb.createOr(AA_run_follow, pb.createNot(A_or_AA_follow)), "selfc.A_run_start");
+    PabloAST * A1 = pb.createEveryNth(A, pb.getInteger(2), "selfc.A1");  //  1st, 3rd, 5th, ... of all the As
+    PabloAST * A2 = pb.createXor(A, A1, "selfc.A2");  //  2nd, 4th, 6th, ... of the As
+    PabloAST * A1_start = pb.createAnd(A_run_start, A1, "selfc.A1_start");
+    PabloAST * A2_start = pb.createAnd(A_run_start, A2, "selfc.A2_start");
+    PabloAST * A_continue = A;
+    for (unsigned i = 1; i < A_len; i++) {
+        A_continue = pb.createOr(A_continue, pb.createLookahead(A, i));
+    }
+    PabloAST * AA_continue = AA;
+    for (unsigned i = 1; i < AA_len; i++) {
+        AA_continue = pb.createOr(AA_continue, pb.createLookahead(AA, i));
+    }
+    PabloAST * run_continue = pb.createOr3(A_run_start, A_continue, AA_continue, "selfc.run_continue");
+    PabloAST * A1_runs = pb.createMatchStar(A1_start, run_continue, "selfc.A1_runs");
+    PabloAST * A2_runs = pb.createMatchStar(A2_start, run_continue, "selfc.A2_runs");
     PabloAST * A_odd = pb.createOr(pb.createAnd(A1_runs, A1), pb.createAnd(A2_runs, A2), "selfc.A_odd");
     PabloAST * A_even = pb.createOr(pb.createAnd(A1_runs, A2), pb.createAnd(A2_runs, A1), "selfc.A_even");
     //
     PabloAST * A_ahead = pb.createLookahead(A, A_len, "selfc.A_ahead");
     PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
-    PabloAST * A_or_AA_ahead = pb.createOr(A_ahead, AA_ahead, "selfc.A_or_AA_ahead");
-    PabloAST * AA_final = pb.createAnd(AA, pb.createNot(A_or_AA_ahead));
-    // Rule 1
-    results.A_to_convert_to_AA = pb.createAnd(A_odd, A_or_AA_ahead, "selfc.A_to_convert_to_AA");
-    // Rule 2
-    results.A_to_delete = A_even;
-    for (unsigned i = 2; i <= A_len; i++) {
-        results.A_to_delete = pb.createOr(results.A_to_delete, pb.createAdvance(A_even, i - 1));
+
+    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, A_len), "selfc.AA1");
+    PabloAST * A_odd_AA_run = pb.createMatchStar(AA1, AA_continue, "selfc.A_odd_AA_run");
+    PabloAST * A_odd_AA_final = pb.createAnd3(A_odd_AA_run, AA, pb.createNot(AA_ahead), "selfc.A_odd_AA_final");
+    // Rule 1a
+    PabloAST * A_to_delete = pb.createAnd(A_odd, A_ahead, "selfc.A_to_delete");
+    // Rules 1b, 2a, 2b, 3a 
+    results.A_to_convert_to_AA = pb.createOr(A_even, pb.createAnd(A_odd, AA_ahead), "selfc.A_to_convert_to_AA");
+    // Rule 2c
+    PabloAST * AA_to_delete = pb.createAnd(A_odd_AA_final, A_ahead, "selfc.AA_to_delete");
+    // Rule 3b
+    results.AA_to_convert_to_A = pb.createAnd(A_odd_AA_final, pb.createNot(A_ahead), "selfc.AA_to_convert_to_A");
+    PabloAST * to_delete = pb.createOr(A_to_delete, AA_to_delete);
+    results.A_or_AA_to_delete = to_delete;
+    auto min_len = std::min(A_len, AA_len);
+    for (unsigned i = 2; i <= min_len; i++) {
+        results.A_or_AA_to_delete = pb.createOr(results.A_or_AA_to_delete, pb.createAdvance(to_delete, i - 1));
     }
-    // Rule 3
-    // Starting from an odd A, if the remaining span are AAs, convert the final one.
-    PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, AA_len), "selfc.AA1");
-    results.AA_to_convert_to_A = pb.createAnd(pb.createMatchStar(AA1, AA_run_continue), AA_final, "selfc.AA_to_convert_to_A");
+    if (A_len > min_len) {
+        for (unsigned i = min_len + 1; i <= A_len; i++) {
+            results.A_or_AA_to_delete = pb.createOr(results.A_or_AA_to_delete, pb.createAdvance(A_to_delete, i - 1));
+        }
+    } else if (AA_len > min_len) {
+        for (unsigned i = min_len + 1; i <= AA_len; i++) {
+            results.A_or_AA_to_delete = pb.createOr(results.A_or_AA_to_delete, pb.createAdvance(AA_to_delete, i - 1));
+        }
+    }
     return results;
 }
 
