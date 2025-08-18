@@ -534,6 +534,9 @@ struct RelationshipGraphBuilder {
             vertex.push_back(k);
             addConsumerStreamSets(PortType::Input, k, popCountKernel->getInputStreamSetBindings(), false);
             addProducerStreamSets(PortType::Output, k, popCountKernel->getOutputStreamSetBindings());
+            #ifndef NDEBUG
+            unsigned _FlagCheck = 0;
+            #endif
 
             // subsitute the popcount relationships
             for (const auto e : make_iterator_range(out_edges(i, H))) {
@@ -541,6 +544,9 @@ struct RelationshipGraphBuilder {
                 const Kernel * const kernel = kernels[target(e, H)].Object;
                 const auto consumer = G.find(RelationshipNode::IsKernel, kernel);
                 assert (ed.Type == CountingType::Positive || ed.Type == CountingType::Negative);
+                #ifndef NDEBUG
+                _FlagCheck |= ed.Type;
+                #endif
                 StreamSet * const stream = ed.Type == CountingType::Positive ? positive : negative; assert (stream);
                 const auto streamVertex = G.find(RelationshipNode::IsStreamSet, stream);
 
@@ -611,6 +617,8 @@ struct RelationshipGraphBuilder {
                     report_fatal_error("Internal error: failed to locate PopCount binding.");
                 }
             }
+            assert ((_FlagCheck & CountingType::Positive) != 0 || positive == nullptr);
+            assert ((_FlagCheck & CountingType::Negative) != 0 || negative == nullptr);
         }
     }
 

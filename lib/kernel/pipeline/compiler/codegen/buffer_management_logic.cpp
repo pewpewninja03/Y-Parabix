@@ -12,10 +12,8 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
 
-
-
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
             continue;
         }
 
@@ -56,8 +54,10 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
+
+
+
         if (bn.isOwned() && isa<ManagedDynamicBuffer>(buffer)) {
-            assert (bn.isNonThreadLocal());
             Type * const threadLocalStructTy = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
             if (LLVM_LIKELY(isMultithreaded())) {
                 mTarget->addThreadLocalScalar(threadLocalStructTy, prefix + MANAGED_DYNAMIC_BUFFER_STRUCT, groupId);
@@ -103,7 +103,6 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
         if (bn.isNonThreadLocal() == nonLocal) {
             if (LLVM_UNLIKELY(bn.isExternal())) {
                 assert (isFromCurrentFunction(b, buffer->getHandle(), true));
-                assert (!isa<ManagedDynamicBuffer>(buffer) || isFromCurrentFunction(b, cast<ManagedDynamicBuffer>(buffer)->getThreadLocalHandle(), false));
             } else if (LLVM_UNLIKELY(bn.isConstant())) {
                 assert (nonLocal);
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
@@ -302,7 +301,7 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
 //                    Value * const capacity = b.getScalarField(prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
 //                    cast<DynamicBuffer>(buffer)->destroyBuffer(b, addr, capacity);
                 } else if (isa<ManagedDynamicBuffer>(buffer)) {
-                    if (bn.isOwned() && isa<ManagedDynamicBuffer>(buffer)) {
+                    if (bn.isOwned()) {
                                             const auto pe = in_edge(streamSet, mBufferGraph);
                                             const auto p = source(pe, mBufferGraph);
                                             const BufferPort & rd = mBufferGraph[pe];
@@ -374,6 +373,10 @@ bool PipelineCompiler::initializeOutputStreamSetBuffersBeforeSegmentInvocation(K
         if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
             outputModifiesSegmentLength = true;
         }
+        const BufferNode & bn = mBufferGraph[target(output, mBufferGraph)];
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
+            continue;
+        }
         if (LLVM_UNLIKELY(port.isManaged())) {
             assert (!mAllowDataParallelExecution);
             assert (mKernelThreadLocalHandle);
@@ -388,8 +391,7 @@ bool PipelineCompiler::initializeOutputStreamSetBuffersBeforeSegmentInvocation(K
             Value * const newAddrPtr = b.CreateGEP(threadLocalTy, mKernelThreadLocalHandle, indices);
             b.CreateAlignedStore(nullPtr, newAddrPtr, PtrTyABIAlignment);
         } else {
-            const BufferNode & bn = mBufferGraph[target(output, mBufferGraph)];
-            if (bn.isOwned() && bn.isNonThreadLocal()) {
+            if (bn.isOwned() && isa<ManagedDynamicBuffer>(bn.Buffer)) {
                 assert (isa<ManagedDynamicBuffer>(bn.Buffer));
                 const auto handleName = makeBufferName(mKernelId, port.Port);
                 auto tlHandle = b.getScalarFieldPtr(handleName + MANAGED_DYNAMIC_BUFFER_STRUCT);
@@ -837,7 +839,7 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(KernelBuilder & b)
 //            }
             buffer->setCapacity(b, mProducedItemCount[port]);
             const auto handleName = makeBufferName(mKernelId, port);
-            #ifdef PRINT_DEBUG_MESSAGES
+            #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
             debugPrint(b, "%s_updatedVirtualBaseAddress = 0x%" PRIx64, b.GetString(handleName), buffer->getBaseAddress(b));
             #endif
             b.setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
@@ -868,7 +870,7 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBu
 //            b.CreateAssert(vba, "%s.%s last good virtual base addresss cannot be null",
 //                            mCurrentKernelName, b.GetString(rd.Binding.get().getName()));
 //        }
-        #ifdef PRINT_DEBUG_MESSAGES
+        #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
         debugPrint(b, "%s_loadPriorVirtualBaseAddress = 0x%" PRIx64, b.GetString(handleName), buffer->getBaseAddress(b));
         #endif
     }

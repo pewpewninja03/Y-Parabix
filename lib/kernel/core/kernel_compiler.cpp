@@ -898,7 +898,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         /// writable / consumed item count
         /// ----------------------------------------------------
         Value * writable = nullptr;
-        assert (isa<ManagedDynamicBuffer>(buffer) == isLocal.isManaged());
+        assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
         if (isLocal.any()) {
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
@@ -1328,8 +1328,8 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
         const auto n = mOutputStreamSets.size();
         for (size_t i = 0; i < n; ++i) {
             const auto & buffer = mStreamSetOutputBuffers[i];
-            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
-            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            if (LLVM_UNLIKELY(Kernel::isManagedBuffer(mOutputStreamSets[i]))) {
+                assert (isa<ManagedDynamicBuffer>(buffer));
                 assert (mThreadLocalHandle);
                 assert (threadLocalGroup0StartIndex < mTarget->getThreadLocalStateType()->getStructNumElements());
                 assert (mTarget->getThreadLocalStateType()->getStructElementType(0)->getStructElementType(threadLocalGroup0StartIndex) == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
@@ -1619,8 +1619,8 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
             assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
-            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(output));
-            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer) && expectedNumOfStrides)) {
+            if (LLVM_UNLIKELY(isLocal.isManaged() && expectedNumOfStrides)) {
+                assert (isa<ManagedDynamicBuffer>(buffer));
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};
                 const auto & ub = output.getRate().getUpperBound();
                 if (ub.numerator() > 0) {

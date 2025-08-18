@@ -505,6 +505,10 @@ protected:
 
     virtual void linkAllNecessaryExternalFunctions() const;
 
+    void InsertIntoUnreadMemory(llvm::Value * const start, llvm::Value * const length, const llvm::Twine failureMessage) const;
+
+    void RemoveFromUnreadMemory(llvm::Value * const start, llvm::Value * const length, const llvm::Twine failureMessage) const;
+
 protected:
 
     llvm::Module *                  mModule;

@@ -64,13 +64,13 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
     LocalBufferFlagSet fs;
     for (const auto & attr : output.getAttributes()) {
         switch (attr.getKind()) {
-            case Binding::AttributeId::SharedManagedBuffer:
+            case AttrId::SharedManagedBuffer:
                 fs.Flags |= LocalBufferFlagSet::LBF_Shared;
                 break;
-            case Binding::AttributeId::ManagedBuffer:
+            case AttrId::ManagedBuffer:
                 fs.Flags |= LocalBufferFlagSet::LBF_Managed;
                 break;
-            case Binding::AttributeId::ReturnedBuffer:
+            case AttrId::ReturnedBuffer:
                 fs.Flags |= LocalBufferFlagSet::LBF_Returned;
                 break;
             default: break;

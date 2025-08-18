@@ -32,6 +32,8 @@ using boost::intrusive::detail::floor_log2;
 
 // #define PRINT_POP_COUNTS_TO_STDERR
 
+// #define PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateMultiBlockLogic
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -64,7 +66,7 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         position = b.getProducedItemCount(POSITIVE_STREAM);
     }
 
-    #ifdef PRINT_POP_COUNTS_TO_STDERR
+    #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
     ConstantInt * const STDERR = b.getInt32(STDERR_FILENO);
     b.CreateDprintfCall(STDERR, "  initial position = %" PRIu64 "\n", position);
     #endif
@@ -85,13 +87,13 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         if (LLVM_LIKELY(mType == PopCountType::POSITIVE)) {
             positiveArray = array;
             initialPositiveCount = count;
-            #ifdef PRINT_POP_COUNTS_TO_STDERR
+            #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
             b.CreateDprintfCall(STDERR, "  initial count(pos) = %" PRIu64 "\n", count);
             #endif
         } else { // if (mType == PopCountType::NEGATIVE) {
             negativeArray = array;
             initialNegativeCount = count;
-            #ifdef PRINT_POP_COUNTS_TO_STDERR
+            #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
             b.CreateDprintfCall(STDERR, "  initial count(neg) = %" PRIu64 "\n", count);
             #endif
         }
@@ -105,7 +107,7 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         initialPositiveCount = b.getScalarField("posCount");
         initialNegativeCount = b.getScalarField("negCount");
         #endif
-        #ifdef PRINT_POP_COUNTS_TO_STDERR
+        #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
         b.CreateDprintfCall(STDERR, "  initial count(pos) = %" PRIu64 "\n", initialPositiveCount);
         b.CreateDprintfCall(STDERR, "  initial count(neg) = %" PRIu64 "\n", initialNegativeCount);
         #endif
@@ -211,7 +213,11 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         positiveSum->addIncoming(positivePartialSum, popCountLoop);
         Value * const ptr = b.CreateInBoundsGEP(sizeTy, positiveArray, index);
         b.CreateStore(positivePartialSum, ptr);
-        #ifdef PRINT_POP_COUNTS_TO_STDERR
+        #ifdef PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY
+        b.CreateDprintfCall(STDERR,
+                             "  > pos[%" PRIu64 "] = %" PRIu64 "\n",
+                             b.CreateAdd(position, index), positivePartialSum);
+        #elif defined(PRINT_POP_COUNTS_TO_STDERR)
         b.CreateDprintfCall(STDERR,
                              "  > pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
                              b.CreateAdd(position, index), positivePartialSum, ptr);
@@ -229,7 +235,11 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         negativeSum->addIncoming(negativePartialSum, popCountLoop);
         Value * const ptr = b.CreateInBoundsGEP(sizeTy, negativeArray, index);
         b.CreateStore(negativePartialSum, ptr);
-        #ifdef PRINT_POP_COUNTS_TO_STDERR
+        #ifdef PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY
+        b.CreateDprintfCall(STDERR,
+                             "  > neg[%" PRIu64 "] = %" PRIu64 "\n",
+                             b.CreateAdd(position, index), negativePartialSum);
+        #elif defined(PRINT_POP_COUNTS_TO_STDERR)
         b.CreateDprintfCall(STDERR,
                              "  > neg[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
                              b.CreateAdd(position, index), negativePartialSum, ptr);

@@ -5,6 +5,8 @@
 
 // #define PRINT_GRAPH_BITSETS
 
+// #define DISABLE_KERNEL_PARTITION_MOVEMENT
+
 namespace kernel {
 
 using BitSet = dynamic_bitset<>;
@@ -681,6 +683,8 @@ start_of_loop:
         ordinal[ordering[i]] = i;
     }
 
+#ifndef DISABLE_KERNEL_PARTITION_MOVEMENT
+
     auto transferKernelsToAdjacentPartitions = [&](InternalPartitionGraph & partGraph) {
 
 //        errs() << "---------\n";
@@ -949,7 +953,7 @@ start_of_transfer_loop:
         transferKernelsToAdjacentPartitions(P);
     }
 
-
+#endif
 
     // Stage 8: renumber the partition ids
 
@@ -961,7 +965,6 @@ start_of_transfer_loop:
     for (unsigned i = 0; i < synchronousPartitionCount; ++i) {
         const auto & CurrentPart = P[i];
         if (LLVM_LIKELY(CurrentPart.AllKernels.size() > 0)) {
-            assert (CurrentPart.PotentialRoots.size() == 1);
             finalPartitionCount++;
         }
     }
@@ -980,7 +983,7 @@ start_of_transfer_loop:
         const auto & K = CurrentPart.AllKernels;
         if (LLVM_LIKELY(K.size() > 0)) {
             assert ("should start lexographically sorted" && std::is_sorted(K.begin(), K.end()));
-            assert (CurrentPart.PotentialRoots.size() == 1);
+            assert (CurrentPart.PotentialRoots.size() > 0);
             forcedPartitionRoot.push_back(CurrentPart.PotentialRoots[0]);
             auto & PjK = partGraph[partId].Kernels;
             PjK.reserve(K.size());

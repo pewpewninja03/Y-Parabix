@@ -314,13 +314,12 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             }
         }
 
+        #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
         for (unsigned i = 0; i != numOfInputs; ++i) {
-            #ifdef PRINT_DEBUG_MESSAGES
             const auto prefix = makeBufferName(mKernelId, StreamSetPort{PortType::Input, i});
             debugPrint(b, prefix + "_inputVirtualBaseAddress = %" PRIx64, inputVirtualBaseAddress[i]);
-            #endif
-
         }
+        #endif
     }
 
     /// -------------------------------------------------------------------------------------
@@ -801,7 +800,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
     Value * const beforeExpansion = getWritableOutputItems(b, port);
 
-    Value * const hasEnoughSpace = b.getFalse(); // b.CreateICmpULE(required, beforeExpansion);
+    Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), required);
@@ -885,7 +884,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
                         required, afterExpansion);
     }
 
-    #ifdef PRINT_DEBUG_MESSAGES
+    #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
     debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion);
     debugPrint(b, prefix + "_capacity' = %" PRIu64, buffer->getCapacity(b));
     #endif
@@ -990,7 +989,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
         }
     }
 
-    #ifdef PRINT_DEBUG_MESSAGES
+    #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
     debugPrint(b, prefix + "_writable = (%" PRIu64 ") %" PRIu64, b.getSize(streamSet), writable);
     #endif
 
@@ -1311,11 +1310,17 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     assert (previouslyTransferred);
 
     const auto srcStreamSet = getInputBufferVertex(mKernelId, ref);
+
+
+
     const auto & srcBufferNode = mBufferGraph[srcStreamSet];
     const StreamSetBuffer * const buffer = srcBufferNode.Buffer;
 
+
+
     ConstantInt * const sz_ZERO = b.getSize(0);
     Value * position = mCurrentProcessedItemCountPhi[ref];
+
     if (offset) {
         if (LLVM_UNLIKELY(CheckAssertions)) {
             const Binding & binding = partialSumPort.Binding;
@@ -1375,6 +1380,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
     Value * current = b.CreateAlignedLoad(b.getSizeTy(), currentPtr, SizeTyABIAlignment);
+
 //    const auto producer = parent(srcStreamSet, mBufferGraph);
 //    if (LLVM_UNLIKELY(HasTerminationSignal.test(producer))) {
 //        current = b.CreateUMax(current, mLocallyAvailableItems[srcStreamSet]);

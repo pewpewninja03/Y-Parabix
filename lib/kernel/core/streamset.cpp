@@ -1277,17 +1277,18 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
         Constant * undefVec = UndefValue::get(vecTy);
 
+        ConstantInt * i32_ZERO = b.getInt32(0);
+        ConstantInt * i32_ONE = b.getInt32(1);
+
         auto writeIntPtrStructVector = [&](Value * ptrVal, Value * intVal, Value * writePtr) {
             assert (intVal->getType() == intPtrTy);
             assert (b.getTypeSize(DL, intPtrTy) == b.getTypeSize(DL, ptrVal->getType()));
             ptrVal = b.CreatePtrToInt(ptrVal, intPtrTy);
-            Value * vecVal = b.CreateInsertElement(undefVec,  ptrVal, b.getInt32(0));
-            vecVal = b.CreateInsertElement(vecVal,  intVal, b.getInt32(1));
+            Value * vecVal = b.CreateInsertElement(undefVec,  ptrVal, i32_ZERO);
+            vecVal = b.CreateInsertElement(vecVal,  intVal, i32_ONE);
             b.CreateAlignedStore(vecVal, writePtr, vecTyAlign);
         };
 
-        ConstantInt * i32_ZERO = b.getInt32(0);
-        ConstantInt * i32_ONE = b.getInt32(1);
 
         FixedArray<Value *, 2> indices;
         indices[0] = i32_ZERO;

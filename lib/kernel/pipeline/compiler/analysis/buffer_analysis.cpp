@@ -851,6 +851,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
         BufferNode & bn = mBufferGraph[streamSet];
 
         if (LLVM_UNLIKELY(bn.Buffer != nullptr)) {
+            assert (bn.isExternal());
             continue;
         }
 
@@ -871,21 +872,13 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             const Binding & output = producerRate.Binding;
 
-            if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
+            if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
                 assert (!bn.isManagedOutput());
                 buffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
+            } else if (LLVM_UNLIKELY(bn.IsLinear)) {
+                buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, true, 0U);
             } else { // is internal buffer
-
-                // A DynamicBuffer is necessary when we cannot bound the amount of unconsumed data a priori.
-                // E.g., if this buffer is externally used, we cannot analyze the dataflow rate of
-                // external consumers.  Similarly if any internal consumer has a deferred rate, we cannot
-                // analyze any consumption rates.
-
-//                if (LLVM_UNLIKELY(bn.isManagedOutput())) {
-                    buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
-//                } else {
-//                    buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, bn.IsLinear, 0U);
-//                }
+                buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), false, 0U);
             }
         }
 

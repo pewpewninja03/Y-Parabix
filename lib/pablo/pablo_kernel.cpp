@@ -389,7 +389,7 @@ PabloKernel::PabloKernel(LLVMTypeSystemInterface & ts,
 : BlockOrientedKernel(ts, annotateKernelNameWithPabloDebugFlags(std::move(kernelName)),
                       std::move(stream_inputs), std::move(stream_outputs),
                       std::move(scalar_parameters), std::move(scalar_outputs), {},
-                      PabloIllustrateBitstreamRegEx.empty() ? 0 : Kernel::KernelFlags::RequiresIllustratorObject)
+                      PabloIllustrateBitstreamRegEx.empty() && PabloIllustrateKernelRegEx.empty() ? 0 : Kernel::KernelFlags::RequiresIllustratorObject)
 , PabloAST(PabloAST::ClassTypeId::Kernel, nullptr, mAllocator)
 , mPabloCompiler()
 , mSymbolTable()

@@ -239,7 +239,7 @@ PEXTFieldCompressKernel::PEXTFieldCompressKernel(LLVMTypeSystemInterface & ts, c
     if ((fieldWidth != 32) && (fieldWidth != 64)) llvm::report_fatal_error("Unsupported PEXT width for PEXTFieldCompressKernel");
 }
 
-constexpr unsigned StreamCompressStrideSize = 1;
+constexpr unsigned StreamCompressStrideSize = 4;
 
 StreamCompressKernel::StreamCompressKernel(LLVMTypeSystemInterface & ts
                                            , StreamSet * extractionMask
@@ -284,8 +284,8 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     Constant * const ZERO = ConstantInt::get(sizeTy, 0);
     Constant * const ONE = ConstantInt::get(sizeTy, 1);
     Value * numOfBlocks = numOfStrides;
-    if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
+    if (StreamCompressStrideSize > 1) {
+        numOfBlocks = b.CreateMulRational(numOfStrides, StreamCompressStrideSize);
     }
 
     Value * const produced = b.getProducedItemCount("compressedOutput");
@@ -1333,7 +1333,6 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
         input[j] = kb.fwCast(mFW, input[j]);
     }
     Value * const newItemCounts = kb.simd_popcount(mFW, extractionMask);
-    //kb.CallPrintRegister("extractionMask", extractionMask);
     // For each swizzle containing mFieldsPerBlock fields.
     for (unsigned i = 0; i < mFieldsPerBlock; i++) {
         Value * producedOffset = kb.CreateLoad(sizeTy, produceOffsetPtr);
@@ -1343,7 +1342,6 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
         }
         Value * const pendingOffset = kb.CreateAnd(producedOffset, FIELD_WIDTH_MASK);
         Value * const newItemCount = kb.CreateExtractElement(newItemCounts, i);
-        //kb.CallPrintInt("newItemCount", newItemCount);
         Value * const pendingSpace = kb.CreateSub(FIELD_WIDTH, pendingOffset);
         Value * const maskedSpace = kb.CreateAnd(pendingSpace, FIELD_WIDTH_MASK);
         Value * const pendingSpaceFilled = kb.CreateICmpUGE(newItemCount, pendingSpace);
@@ -1373,7 +1371,6 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
                 Value * field = kb.CreateExtractElement(input[j], kb.getInt32(i));
                 Value * compressed = Use_BMI_PEXT ? kb.CreatePextract(field, mask[i]) : field;
                 swizzles[swizzleNo] = kb.CreateInsertElement(swizzles[swizzleNo], compressed, j%mFieldsPerBlock);
-                //kb.CallPrintRegister("swizzles" + std::to_string(swizzleNo), swizzles[swizzleNo]);
             }
             // Field compression into the swizzles is now complete.   Next we apply
             // stream compression to compress the fields of each swizzle and generate the
@@ -1390,7 +1387,6 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
                 // Combine as many of the new items as possible into the pending group.
                 Value * const shiftedItems = kb.CreateShl(swizzles[j], shiftVector);
                 Value * const combinedGroup = kb.CreateOr(pendingData[j], shiftedItems);
-                //kb.CallPrintRegister("combinedGroup" + std::to_string(j), combinedGroup);
                 // To avoid an unpredictable branch, always store the combined group, whether full or not.
                 for (unsigned k = 0; k < mFieldsPerBlock; k++) {
                     unsigned strmIdx = j * mFieldsPerBlock + k;
@@ -1406,7 +1402,6 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
                 // If we filled the space, then the overflow group becomes the new pending group and the index is updated.
                 Value * newPending = kb.CreateSelect(pendingSpaceFilled, overFlowGroup, combinedGroup);
                 kb.CreateStore(newPending, pendingDataPtr[j]);
-                //kb.CallPrintRegister("pendingData" + std::to_string(j), pendingData[j]);
             }
         }
         producedOffset = kb.CreateAdd(producedOffset, newItemCount);

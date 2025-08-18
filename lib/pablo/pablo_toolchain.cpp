@@ -69,6 +69,10 @@ std::string BitMovementMode_string(BitMovementMode m) {
     else return "LookAhead";
 }
 
+std::string PabloIllustrateKernelRegEx = "";
+static cl::opt<std::string, true> PabloIllustrateKernelOption("pablo-illustrate-kernel", cl::location(PabloIllustrateBitstreamRegEx), cl::ValueOptional,
+                                                         cl::desc("RegEx describing Pablo kernel names to illustrate"), cl::value_desc("regex"), cl::cat(PabloOptions));
+
 
 std::string PabloIllustrateBitstreamRegEx = "";
 static cl::opt<std::string, true> PabloIllustrateBitstreamOption("pablo-illustrate-bitstream", cl::location(PabloIllustrateBitstreamRegEx), cl::ValueOptional,

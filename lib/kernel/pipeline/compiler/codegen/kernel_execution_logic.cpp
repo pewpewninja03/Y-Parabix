@@ -474,7 +474,9 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             Value * const addr = mInputVirtualBaseAddressPhi[inputPort]; assert (addr);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_processed = %" PRIu64, processed);
+            #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
+            #endif
             #endif
             addNextArg(b.CreatePointerCast(addr, voidPtrTy));
             if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
@@ -494,7 +496,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 Value * inputItems = mLinearInputItemsPhi[inputPort]; assert (inputItems);
                 if (rt.isDeferred()) {
                     const auto prefix = makeBufferName(mKernelId, inputPort);
-                    Value * diff = b.CreateSub(mCurrentProcessedItemCountPhi[inputPort], mCurrentProcessedDeferredItemCountPhi[rt.Port], prefix + "_deferredItems");
+                    Value * diff = b.CreateSub(mCurrentProcessedItemCountPhi[inputPort], mCurrentProcessedDeferredItemCountPhi[inputPort], prefix + "_deferredItems");
                     inputItems = b.CreateAdd(inputItems, diff);
                 }
                 addNextArg(inputItems);
@@ -503,7 +505,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             if (LLVM_UNLIKELY(CheckAssertions && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
                 const Binding & input = rt.Binding;
                 const auto streamSet = source(port, mBufferGraph);
-                Value * required = b.CreateAdd(mCurrentProcessedItemCountPhi[rt.Port], mLinearInputItemsPhi[inputPort]);
+                Value * required = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mLinearInputItemsPhi[inputPort]);
                 Value * avail = mLocallyAvailableItems[streamSet];
                 Value * const isValid = b.CreateICmpUGE(avail, required);
                 b.CreateAssert(isValid,
@@ -525,7 +527,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                     Value * base = nullptr;
                     const BufferNode & bn = mBufferGraph[streamSet];
                     if (bn.isThreadLocal()) {
-                        base = mCurrentProcessedItemCountPhi[rt.Port];
+                        base = mCurrentProcessedItemCountPhi[inputPort];
                     } else {
                         base = readConsumedItemCount(b, streamSet); assert (base);
                     }
@@ -579,7 +581,9 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
+            #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
+            #endif
             #endif
             addNextArg(b.CreatePointerCast(vba, voidPtrTy));
         }

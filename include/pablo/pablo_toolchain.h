@@ -45,6 +45,7 @@ std::string BitMovementMode_string(BitMovementMode m);
 extern llvm::sys::fs::OpenFlags PabloOutputFileFlag;
 extern llvm::sys::fs::OpenFlags PabloOptimizedOutputFileFlag;
 
+extern std::string PabloIllustrateKernelRegEx;
 extern std::string PabloIllustrateBitstreamRegEx;
 
 const llvm::cl::OptionCategory * pablo_toolchain_flags();

@@ -190,11 +190,17 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
         const auto e = getInput(mKernelId, StreamSetPort{PortType::Input, portNum});
 
+        const BufferPort & port = mBufferGraph[e];
+        if (LLVM_UNLIKELY(port.Port.Reason != ReasonType::Explicit)) {
+            continue;
+        }
+
         const auto streamSet = source(e, mBufferGraph);
 
         const BufferNode & bn = mBufferGraph[streamSet];
         const StreamSetBuffer * const buffer = bn.Buffer;
-        const BufferPort & port = mBufferGraph[e];
+
+
         const auto inputPort = port.Port;
         assert (inputPort.Type == PortType::Input);
         const Binding & input = port.Binding;
@@ -580,7 +586,7 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
             inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndexPhi, blockIndex);
         }
 
-        #ifdef PRINT_DEBUG_MESSAGES
+        #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
         Value * const ptrInt = b.CreatePtrToInt(inputPtr, intPtrTy);
         debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
         #endif

@@ -180,7 +180,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 assert (mThreadLocalEndOffset[streamSet] == nullptr);
                 mThreadLocalEndOffset[streamSet] = end;
 
-                #ifdef PRINT_DEBUG_MESSAGES
+                #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
                 debugPrint(b, "mappedAddrRange" + std::to_string(streamSet) +
                            " (" + std::to_string(P.numerator()) + "/" + std::to_string(P.denominator()) +
                            ") = [%" PRIx64 ", %" PRIx64 ")", start, end);
@@ -210,7 +210,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
         BasicBlock * const afterExpansion = b.CreateBasicBlock();
         Value * currentMem = b.CreateAlignedLoad(b.getSizeTy(), mThreadLocalMemorySizePtr, SizeTyABIAlignment);
 
-        #ifdef PRINT_DEBUG_MESSAGES
+        #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
         debugPrint(b, "memoryForSegment(%" PRIx64 ") > currentMem (%" PRIx64 ") ?", memoryForSegment, currentMem);
         #endif
 
