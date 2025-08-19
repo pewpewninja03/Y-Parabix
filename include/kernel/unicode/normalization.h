@@ -176,8 +176,7 @@ protected:
 class SelfComposableTranslation : public pablo::PabloKernel {
 public:
     SelfComposableTranslation
-        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * short_composable_CCs,
-                                       StreamSet * XfrmedBasis);
+        (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmedBasis);
 protected:
     void generatePabloMethod() override;
 };
@@ -192,7 +191,8 @@ SCResults SelfComposableLogic
              (pablo::PabloBuilder & pb,
               std::vector<pablo::PabloAST *> Basis,
               unsigned A_len, unsigned AA_len,
-              pablo::PabloAST * A, pablo::PabloAST * AA);
+              pablo::PabloAST * A, pablo::PabloAST * AA,
+              pablo::PabloAST * A_ahead, pablo::PabloAST * AA_ahead);
 
 //
 //  Short composable sequences are those involving non reorderable
