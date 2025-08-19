@@ -291,14 +291,7 @@ SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
     PabloAST * A1_start = pb.createAnd(A_run_start, A1, "selfc.A1_start");
     PabloAST * A2_start = pb.createAnd(A_run_start, A2, "selfc.A2_start");
     PabloAST * A_continue = A;
-    for (unsigned i = 1; i < A_len; i++) {
-        A_continue = pb.createOr(A_continue, pb.createLookahead(A, i));
-    }
-    PabloAST * AA_continue = AA;
-    for (unsigned i = 1; i < AA_len; i++) {
-        AA_continue = pb.createOr(AA_continue, pb.createLookahead(AA, i));
-    }
-    PabloAST * run_continue = pb.createOr3(A_run_start, A_continue, AA_continue, "selfc.run_continue");
+    PabloAST * run_continue = pb.createOr3(suffix, A, AA, "selfc.run_continue");
     PabloAST * A1_runs = pb.createMatchStar(A1_start, run_continue, "selfc.A1_runs");
     PabloAST * A2_runs = pb.createMatchStar(A2_start, run_continue, "selfc.A2_runs");
     PabloAST * A_odd = pb.createOr(pb.createAnd(A1_runs, A1), pb.createAnd(A2_runs, A2), "selfc.A_odd");
@@ -308,7 +301,7 @@ SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
     PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
 
     PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, A_len), "selfc.AA1");
-    PabloAST * A_odd_AA_run = pb.createMatchStar(AA1, AA_continue, "selfc.A_odd_AA_run");
+    PabloAST * A_odd_AA_run = pb.createMatchStar(AA1, AA_run_continue, "selfc.A_odd_AA_run");
     PabloAST * A_odd_AA_final = pb.createAnd3(A_odd_AA_run, AA, pb.createNot(AA_ahead), "selfc.A_odd_AA_final");
     // Rule 1a
     PabloAST * A_to_delete = pb.createAnd(A_odd, A_ahead, "selfc.A_to_delete");
