@@ -645,37 +645,17 @@ short_composable_final_code = r"""
 }
 """
 
-self_composable_CC_header = r"""//
-SelfComposableCCs::SelfComposableCCs
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * self_composable_CCs)
-: PabloKernel(ts, "SelfComposableCCs" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"self_composable_CCs", self_composable_CCs}}) {}
-
-void SelfComposableCCs::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * All0 = pb.createZeroes();
-    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-"""
-
-self_composable_CC_final_code = r"""
-    writeOutputStreamSet("self_composable_CCs", self_composables);
-}
-"""
-
 self_composable_header = r"""//
 SelfComposableTranslation::SelfComposableTranslation
-    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * self_composable_CCs,
-                                   StreamSet * XfrmedBasis)
+    (LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * XfrmedBasis)
 : PabloKernel(ts, "SelfComposableTranslation" + Basis->shapeString(),
-{Binding{"Basis", Basis, FixedRate(), LookAhead(3)}, Binding{"self_composable_CCs", self_composable_CCs, FixedRate(), LookAhead(4)}},
+{Binding{"Basis", Basis, FixedRate(), LookAhead(7)}},
 {Binding{"XfrmedBasis", XfrmedBasis}}) {}
 
 void SelfComposableTranslation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    std::vector<PabloAST *> self_composable_CCs = getInputStreamSet("self_composable_CCs");
     Var * DelVar = pb.createVar("DelVar", All0);
     std::vector<Var *> XfrmVar(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
@@ -683,10 +663,12 @@ void SelfComposableTranslation::generatePabloMethod() {
     }
 """
 
-self_composable_case_template = r"""    auto b_${A} = pb.createScope();
+self_composable_case_starter_template = r"""    auto b_${A} = pb.createScope();
     pb.createIf(pb.createOr(${A_AST}, ${AA_AST}), b_${A});
     std::vector<PabloAST *> basisXor_${A}(8, All0);
-    SCResults rslt_${A} = SelfComposableLogic(b_${A}, Basis, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST});
+"""
+
+self_composable_case_template = r"""    SCResults rslt_${A} = SelfComposableLogic(b_${A}, Basis, ${A_len}, ${AA_len}, ${A_AST}, ${AA_AST}, ${A_Ahead}, ${AA_Ahead});
     b_${A}.createAssign(DelVar, b_${A}.createOr(DelVar, rslt_${A}.A_or_AA_to_delete));
     PabloAST * xfrm_${A} = b_${A}.createOr(rslt_${A}.A_to_convert_to_AA, rslt_${A}.AA_to_convert_to_A);
 """
@@ -707,11 +689,7 @@ short_composable_pipeline_step_template = r"""//  Pass ${pass_no} to identify sh
 """
 
 self_composable_pipeline_step_template = r"""//
-    StreamSet * SelfComposables = P.CreateStreamSet(6, 1);
-    P.CreateKernelCall<SelfComposableCCs>(${input_basis}, SelfComposables);
-    SHOW_BIXNUM(SelfComposables);
-
-    P.CreateKernelCall<SelfComposableTranslation>(${input_basis}, SelfComposables, ${output_basis});
+    P.CreateKernelCall<SelfComposableTranslation>(${input_basis}, ${output_basis});
     SHOW_BIXNUM(${output_basis});
 """
 
@@ -1673,37 +1651,41 @@ class NFC_generator:
             input_basis = output_basis # for next pass
         return t2.substitute(pipeline_logic = logic, final_pass_no = self.pass_count - 1)
 
-    def generate_self_composable_CC_stage(self):
-        s = self_composable_CC_header
-        self.builder.open_scope("", "pb")
-        self_composable_usets = []
-        for A in self.self_composables.keys():
-            AA = self.self_composables[A]
-            self_composable_usets.append(self.builder.install_uset(singleton_uset(A)))
-            self_composable_usets.append(self.builder.install_uset(singleton_uset(AA)))
-        s += self.builder.generate_scope_compilations()
-        s += "    std::vector<PabloAST *> self_composables(%i);\n" % len(self_composable_usets)
-        for i in range(len(self_composable_usets)):
-            s += "    self_composables[%i] = %s;\n" % (i, self_composable_usets[i])
-        s += self_composable_CC_final_code
-        return s
-
     def generate_self_composable_stage(self):
         s = self_composable_header
-        t = string.Template(self_composable_case_template)
+        t1 = string.Template(self_composable_case_starter_template)
+        t2 = string.Template(self_composable_case_template)
         self.builder.open_scope("", "pb")
-        i = 0
+        AST_key = {}
+        for A in self.self_composables.keys():
+            AA = self.self_composables[A]
+            AST_key[A] = self.builder.install_uset(singleton_uset(A))
+            AST_key[AA] = self.builder.install_uset(singleton_uset(AA))
         s += self.builder.generate_scope_compilations()
         for A in self.self_composables.keys():
             AA = self.self_composables[A]
             xfrm_map = {A : chr(AA), AA : chr(A)}
-            A_len = u8_encoded_length(A)
-            AA_len = u8_encoded_length(AA)
-            A_AST = "self_composable_CCs[%i]" % i
-            AA_AST = "self_composable_CCs[%i]" % (i + 1)
-            s += t.substitute(A = "%x" % A, A_len = A_len, AA_len = AA_len, A_AST = A_AST, AA_AST = AA_AST)
+            s += t1.substitute(A = "%x" % A, A_AST = AST_key[A], AA_AST = AST_key[AA])
             scope = "b_%x" % A
             s += self.builder.open_scope("x%x" % A, scope)
+            lookahead_list = {}
+            la_key = {}
+            for cp in [A, AA]:
+                cp_len = u8_encoded_length(cp)
+                if not cp_len in lookahead_list.keys():
+                    lookahead_list[cp_len] = []
+                lookahead_list[cp_len].append(cp)
+            for la_len in lookahead_list.keys():
+                for cp in lookahead_list[la_len]:
+                    la_key[cp] = self.builder.install_uset(singleton_uset(cp), la_len)
+                s += self.builder.generate_scope_compilations("LookAhead", la_len)
+            s += t2.substitute(A = "%x" % A,
+                               A_len = u8_encoded_length(A),
+                               AA_len = u8_encoded_length(AA),
+                               A_AST = AST_key[A],
+                               AA_AST = AST_key[AA],
+                               A_Ahead = la_key[A],
+                               AA_Ahead = la_key[AA])
             bit_xfrm_sets = u8_bit_transform_sets(xfrm_map)
             bit_xfrm_data = install_bit_xfrm_usets(self.builder, bit_xfrm_sets)
             del_usets = u8_deletion_sets(xfrm_map)
@@ -1711,7 +1693,6 @@ class NFC_generator:
             s += self.builder.generate_scope_compilations()
             s += generateUpdateBitXfrms("b_%x" % A, bit_xfrm_data, "XfrmVar", "xfrm_%x" % A)
             s += self.builder.close_scope()
-            i += 2
         s += self_composable_final_code
         return s
 
@@ -1863,11 +1844,9 @@ class NFC_generator:
         kernels += self.generate_u8_insertion_kernel()
         kernels += self.generate_singleton_stage()
         kernels += self.generate_excluded_composite_stage()
-        kernels += self.generate_self_composable_CC_stage()
         kernels += self.generate_self_composable_stage()
         for pass_no in range(self.short_pass_count):
             #if pass_no == self.self_composable_pass_no:
-                #kernels += self.generate_self_composable_CC_stage()
                 #kernels += self.generate_self_composable_stage()
             if pass_no != self.self_composable_pass_no:
                 kernels += self.generate_short_composable_stage(pass_no)

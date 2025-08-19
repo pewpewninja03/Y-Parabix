@@ -278,7 +278,8 @@ void UpdateBitXfrms(PabloBuilder & pb, std::vector<Var *> BitXfrmBasis,
 
 SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
                               unsigned A_len, unsigned AA_len,
-                              PabloAST * A, PabloAST * AA) {
+                              PabloAST * A, PabloAST * AA,
+                              PabloAST * A_ahead, PabloAST * AA_ahead) {
     SCResults results;
     PabloAST * suffix = pb.createAnd(Basis[7], pb.createNot(Basis[6]));
     PabloAST * A_or_AA_follow = pb.createAdvanceThenScanThru(pb.createOr(A, AA), suffix, "selfc.A_or_AA_follow");
@@ -297,9 +298,6 @@ SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
     PabloAST * A_odd = pb.createOr(pb.createAnd(A1_runs, A1), pb.createAnd(A2_runs, A2), "selfc.A_odd");
     PabloAST * A_even = pb.createOr(pb.createAnd(A1_runs, A2), pb.createAnd(A2_runs, A1), "selfc.A_even");
     //
-    PabloAST * A_ahead = pb.createLookahead(A, A_len, "selfc.A_ahead");
-    PabloAST * AA_ahead = pb.createLookahead(AA, AA_len);
-
     PabloAST * AA1 = pb.createAnd(AA, pb.createAdvance(A_odd, A_len), "selfc.AA1");
     PabloAST * A_odd_AA_run = pb.createMatchStar(AA1, AA_run_continue, "selfc.A_odd_AA_run");
     PabloAST * A_odd_AA_final = pb.createAnd3(A_odd_AA_run, AA, pb.createNot(AA_ahead), "selfc.A_odd_AA_final");
