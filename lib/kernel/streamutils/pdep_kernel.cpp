@@ -60,17 +60,37 @@ void ExpandFilter(PipelineBuilder & P,
     OrCombine(P, initialSpread, filler, expanded);
 }
 
+class ElemMergeKernel final  : public MultiBlockKernel {
+public:
+    ElemMergeKernel(LLVMTypeSystemInterface & ts,
+                       StreamSet * mask,
+                       StreamSet * source1,
+                       StreamSet * source2,
+                       StreamSet * merged);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
+private:
+    const unsigned mElemWidth;
+};
+
 void MergeByMask(PipelineBuilder & P,
                  StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
+    unsigned fw = merged->getFieldWidth();
     if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
         llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
-    unsigned streamOffset = 0;
-    Scalar * base = P.CreateConstant(P.getSize(streamOffset));
-    int expansionFieldWidth=64;
-    P.CreateKernelCall<StreamMergeKernel>(mask,a,b,merged,base,expansionFieldWidth);
-
+    if ((a->getFieldWidth() != fw) || (b->getFieldWidth() != fw)) {
+        llvm::report_fatal_error("MergeByMask called with incompatible field widths");
+    }
+    if (elems == 1) {
+        P.CreateKernelCall<ElemMergeKernel>(mask, a, b, merged);
+    } else {
+        unsigned streamOffset = 0;
+        Scalar * base = P.CreateConstant(P.getSize(streamOffset));
+        int expansionFieldWidth=64;
+        P.CreateKernelCall<StreamMergeKernel>(mask,a,b,merged,base,expansionFieldWidth);
+    }
 }
 
 
@@ -250,6 +270,94 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
     b.SetInsertPoint(expansionDone);
 }
 
+ElemMergeKernel::ElemMergeKernel(LLVMTypeSystemInterface & ts,
+                                       StreamSet * mask,
+                                       StreamSet * source1,
+                                       StreamSet * source2,
+                                       StreamSet * merged)
+: MultiBlockKernel(ts, [&]() -> std::string {
+                        std::string tmp;
+                        raw_string_ostream nm(tmp);
+                        nm << "byteMerge";
+                        nm << '_' << source1->getFieldWidth() << ':' << merged->getNumElements();
+                        nm.flush();
+                        return tmp;
+                    }(),
+{Binding("marker", mask, FixedRate(1), Principal()),
+ Binding("source1", source1, PopcountOf("marker")),
+ Binding("source2", source2, PopcountOfNot("marker"))},
+{Binding{"merged", merged}},
+{}, {}, {}), mElemWidth(source1->getFieldWidth()) {
+    setStride(ts.getBitBlockWidth()/mElemWidth);
+}
+
+void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
+    const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
+    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const maskTy = b.getIntNTy(maskWidth);
+
+    Constant * const ZERO = b.getSize(0);
+    Constant * const ELEM_WIDTH = ConstantInt::get(sizeTy, mElemWidth);
+    Constant * const ELEMS_PER_PACK = ConstantInt::get(sizeTy, maskWidth);
+
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const elemMergeLoop = b.CreateBasicBlock("elemMergeLoop");
+    BasicBlock * const elemMergeDone = b.CreateBasicBlock("elemMergeDone");
+
+    Value * numOfIterations = numOfStrides;
+    if (getStride() != b.getBitBlockWidth()/mElemWidth) {
+        assert ((getStride() % b.getBitBlockWidth()) == 0);
+        numOfIterations = b.CreateMul(numOfStrides, b.getSize(getStride() / mElemWidth));
+    }
+    Value * const processedMaskItems = b.getProcessedItemCount("mask");
+    Value * const rawMaskPtr = b.getRawInputPointer("mask", processedMaskItems);
+    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
+
+    Value * const processedSourceItems1 = b.getProcessedItemCount("source1");
+    Value * const processedSourceItems2 = b.getProcessedItemCount("source2");
+    Value * const producedItems = b.getProducedItemCount("merged");
+
+    b.CreateBr(elemMergeLoop);
+
+    b.SetInsertPoint(elemMergeLoop);
+    PHINode * const maskStridePhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const pendingOffsetPhi1 = b.CreatePHI(sizeTy, 2);
+    PHINode * const pendingOffsetPhi2 = b.CreatePHI(sizeTy, 2);
+    PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, 2);
+    maskStridePhi->addIncoming(ZERO, entry);
+    pendingOffsetPhi1->addIncoming(processedSourceItems1, entry);
+    pendingOffsetPhi2->addIncoming(processedSourceItems2, entry);
+    outputOffsetPhi->addIncoming(producedItems, entry);
+
+    Value * const mask1 = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskStridePhi));
+    Value * const mask2 = b.CreateNot(mask1);
+    Value * const nextStride = b.CreateAdd(maskStridePhi, b.getSize(1));
+    Value * const moreToDo = b.CreateICmpNE(nextStride, numOfIterations);
+
+    Value * const sourcePtr1 = b.getRawInputPointer("source1", pendingOffsetPhi1);
+    Value * const sourcePtr2 = b.getRawInputPointer("source2", pendingOffsetPhi2);
+    Value * const sourceBlock1 = b.CreateAlignedLoad(b.getBitBlockType(), sourcePtr1, 1);
+    Value * const sourceBlock2 = b.CreateAlignedLoad(b.getBitBlockType(), sourcePtr2, 1);
+
+    Value * const spread1 = b.mvmd_expand(8, mask1, sourceBlock1);
+    Value * const spread2 = b.mvmd_expand(8, mask2, sourceBlock2);
+    Value * const merged = b.CreateOr(spread1, spread2);
+
+    Value * const outputPtr = b.getRawOutputPointer("mergedBytes", outputOffsetPhi);
+    b.CreateBlockAlignedStore(merged, outputPtr);
+
+    Value * const newProcessed1 = b.CreateZExtOrTrunc(b.CreatePopcount(mask1), sizeTy);
+    Value * const newProcessed2 = b.CreateSub(ELEMS_PER_PACK, newProcessed1);
+
+    maskStridePhi->addIncoming(nextStride, elemMergeLoop);
+    pendingOffsetPhi1->addIncoming(b.CreateAdd(pendingOffsetPhi1, newProcessed1), elemMergeLoop);
+    pendingOffsetPhi2->addIncoming(b.CreateAdd(pendingOffsetPhi2, newProcessed2), elemMergeLoop);
+    outputOffsetPhi->addIncoming(b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK), elemMergeLoop);
+    b.CreateCondBr(moreToDo, elemMergeLoop, elemMergeDone);
+
+    b.SetInsertPoint(elemMergeDone);
+}
+
 
 
 /*************************StreamMergeKernel*********************************/
@@ -266,7 +374,7 @@ StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                         std::string tmp;
                         raw_string_ostream nm(tmp);
                         nm << "streamMerge"  << StreamMergeStrideSize << ':' << FieldWidth;
-                        nm << '_' << source1->getNumElements() << ':' << merged->getNumElements();
+                        nm << '_' << source1->getFieldWidth() << ':' << merged->getNumElements();
                         nm.flush();
                         return tmp;
                     }(),
@@ -537,7 +645,7 @@ void PDEPFieldDepositLogic(KernelBuilder & b, llvm::Value * const numOfStrides, 
 #endif
         for (unsigned i = 0; i < fieldsPerBlock; i++) {
 #ifdef PREFER_FIELD_LOADS_OVER_EXTRACT_ELEMENT
-            Value * field = b.CreateLoad(fieldTy, b.CreateGEP(fiedlTy, inputPtr, b.getInt32(i)));
+            Value * field = b.CreateLoad(fieldTy, b.CreateGEP(fieldTy, inputPtr, b.getInt32(i)));
 #else
             Value * field = b.CreateExtractElement(inputStrm, b.getInt32(i));
 #endif
