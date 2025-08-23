@@ -396,8 +396,11 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
     IntegerType * const sizeTy = b.getSizeTy();
     IntegerType * const maskTy = b.getIntNTy(maskWidth);
+    IntegerType * const elemTy = b.getIntNTy(mElemWidth);
+    Type * const elemVecTy = b.fwVectorType(mElemWidth);
 
     Constant * const ZERO = b.getSize(0);
+    Constant * const BLOCK_WIDTH = ConstantInt::get(sizeTy, b.getBitBlockWidth());
     Constant * const ELEMS_PER_PACK = ConstantInt::get(sizeTy, maskWidth);
 
     BasicBlock * const entry = b.GetInsertBlock();
@@ -414,34 +417,53 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
 
     Value * const processedSourceItems = b.getProcessedItemCount("source");
+    Value * const initialSourceOffset = b.CreateURem(processedSourceItems, ELEMS_PER_PACK);
+    Value * const sourceItemBase = b.CreateSub(processedSourceItems, initialSourceOffset);
+    Value * const sourceBasePtr = b.getRawInputPointer("source1", sourceItemBase);
+    Value * const sourcePackPtr = b.CreatePointerCast(sourceBasePtr, elemVecTy->getPointerTo());
+
+    Value * const initialPendingData = b.CreateLoad(elemVecTy, sourcePackPtr);
+
     Value * const producedItems = b.getProducedItemCount("spread");
 
     b.CreateBr(elemSpreadLoop);
 
     b.SetInsertPoint(elemSpreadLoop);
     PHINode * const maskStridePhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const pendingPackPhi = b.CreatePHI(sizeTy, 2);
     PHINode * const pendingOffsetPhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const pendingDataPhi = b.CreatePHI(b.getBitBlockType(), 2);
     PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, 2);
     maskStridePhi->addIncoming(ZERO, entry);
-    pendingOffsetPhi->addIncoming(processedSourceItems, entry);
+    pendingPackPhi->addIncoming(ZERO, entry);
+    pendingOffsetPhi->addIncoming(initialSourceOffset, entry);
+    pendingDataPhi->addIncoming(initialPendingData, entry);
     outputOffsetPhi->addIncoming(producedItems, entry);
 
     Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskStridePhi));
     Value * const nextStride = b.CreateAdd(maskStridePhi, b.getSize(1));
     Value * const moreToDo = b.CreateICmpNE(nextStride, numOfIterations);
 
-    Value * const sourcePtr = b.getRawInputPointer("source", pendingOffsetPhi);
-    Value * const sourceBlock = b.CreateAlignedLoad(b.getBitBlockType(), sourcePtr, 1);
+    Value * const newElemCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
+    Value * const updatedOffset = b.CreateAdd(pendingOffsetPhi, newElemCount);
+    Value * const nextPackNo = b.CreateUDiv(updatedOffset, ELEMS_PER_PACK);
+    Value * const nextPackElems = b.CreateURem(updatedOffset, ELEMS_PER_PACK);
+    // We can only safely load a pack if our mask tells us that there are new elements to load.
 
-    Value * const spread = b.mvmd_expand(mElemWidth, b.fwCast(mElemWidth, sourceBlock), mask);
+    Value * const packToLoad = b.CreateSel(b.CreateIsNull(nextPackElems), pendingPackPhi, nextPackNo);
+    Value * const packPtr = b.CreateGEP(elemVecTy, sourcePackPtr, packToLoad);
+    Value * const newPack = b.CreateLoad(elemVecTy, packPtr);
+
+    Value * shiftedData = b.mvmd_dsll(mElemWidth, newData, pendingDataPhi, pendingOffsetPhi);
+    Value * const spread = b.mvmd_expand(mElemWidth, shiftedData, mask);
 
     Value * const outputPtr = b.getRawOutputPointer("spread", outputOffsetPhi);
     b.CreateBlockAlignedStore(spread, outputPtr);
 
-    Value * const newProcessed = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
-
     maskStridePhi->addIncoming(nextStride, elemSpreadLoop);
-    pendingOffsetPhi->addIncoming(b.CreateAdd(pendingOffsetPhi, newProcessed), elemSpreadLoop);
+    pendingPackPhi->addIncoming(nextPackNo, elemSpreadLoop);
+    pendingOffsetPhi->addIncoming(updatedOffset, elemSpreadLoop);
+    pendingDataPhi->addIncoming(newPack, elemSpreadLoop);
     outputOffsetPhi->addIncoming(b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK), elemSpreadLoop);
     b.CreateCondBr(moreToDo, elemSpreadLoop, elemSpreadDone);
 
