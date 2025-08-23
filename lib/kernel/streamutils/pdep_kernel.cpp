@@ -419,7 +419,7 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const processedSourceItems = b.getProcessedItemCount("source");
     Value * const initialSourceOffset = b.CreateURem(processedSourceItems, ELEMS_PER_PACK);
     Value * const sourceItemBase = b.CreateSub(processedSourceItems, initialSourceOffset);
-    Value * const sourceBasePtr = b.getRawInputPointer("source1", sourceItemBase);
+    Value * const sourceBasePtr = b.getRawInputPointer("source", sourceItemBase);
     Value * const sourcePackPtr = b.CreatePointerCast(sourceBasePtr, elemVecTy->getPointerTo());
 
     Value * const initialPendingData = b.CreateLoad(elemVecTy, sourcePackPtr);
@@ -450,11 +450,11 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const nextPackElems = b.CreateURem(updatedOffset, ELEMS_PER_PACK);
     // We can only safely load a pack if our mask tells us that there are new elements to load.
 
-    Value * const packToLoad = b.CreateSel(b.CreateIsNull(nextPackElems), pendingPackPhi, nextPackNo);
+    Value * const packToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), pendingPackPhi, nextPackNo);
     Value * const packPtr = b.CreateGEP(elemVecTy, sourcePackPtr, packToLoad);
     Value * const newPack = b.CreateLoad(elemVecTy, packPtr);
 
-    Value * shiftedData = b.mvmd_dsll(mElemWidth, newData, pendingDataPhi, pendingOffsetPhi);
+    Value * shiftedData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi, pendingOffsetPhi);
     Value * const spread = b.mvmd_expand(mElemWidth, shiftedData, mask);
 
     Value * const outputPtr = b.getRawOutputPointer("spread", outputOffsetPhi);
