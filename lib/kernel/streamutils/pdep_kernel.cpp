@@ -27,6 +27,18 @@ using namespace kernel;
 
 namespace kernel {
 
+class ElemSpreadKernel final  : public MultiBlockKernel {
+public:
+    ElemSpreadKernel(LLVMTypeSystemInterface & ts,
+                       StreamSet * mask,
+                       StreamSet * source,
+                       StreamSet * spread);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
+private:
+    const unsigned mElemWidth;
+};
+
 void SpreadByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                   unsigned streamOffset,
@@ -44,8 +56,10 @@ void SpreadByMask(PipelineBuilder & P,
         Scalar * offset = nullptr;
         if (streamOffset || toSpread->getNumElements() != outputs->getNumElements()) {
             offset = P.CreateConstant(P.getSize(streamOffset));
+            P.CreateKernelCall<ByteSpreadByMaskKernel>(toSpread, mask, outputs, offset);
+        } else {
+            P.CreateKernelCall<ElemSpreadKernel>(mask, toSpread, outputs);
         }
-        P.CreateKernelCall<ByteSpreadByMaskKernel>(toSpread, mask, outputs, offset);
     }
 }
 
@@ -77,6 +91,7 @@ void MergeByMask(PipelineBuilder & P,
                  StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
     unsigned fw = merged->getFieldWidth();
+    llvm::errs() << "MergeByMask fw = " << fw << ", elems = " << elems << "\n";
     if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
         llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
@@ -84,6 +99,7 @@ void MergeByMask(PipelineBuilder & P,
         llvm::report_fatal_error("MergeByMask called with incompatible field widths");
     }
     if (elems == 1) {
+        llvm::errs() << "calling ElemMergeKernel\n";
         P.CreateKernelCall<ElemMergeKernel>(mask, a, b, merged);
     } else {
         unsigned streamOffset = 0;
@@ -283,12 +299,12 @@ ElemMergeKernel::ElemMergeKernel(LLVMTypeSystemInterface & ts,
                         nm.flush();
                         return tmp;
                     }(),
-{Binding("marker", mask, FixedRate(1), Principal()),
- Binding("source1", source1, PopcountOf("marker")),
- Binding("source2", source2, PopcountOfNot("marker"))},
+{Binding("mask", mask, FixedRate(1), Principal()),
+ Binding("source1", source1, PopcountOf("mask")),
+ Binding("source2", source2, PopcountOfNot("mask"))},
 {Binding{"merged", merged}},
 {}, {}, {}), mElemWidth(source1->getFieldWidth()) {
-    setStride(ts.getBitBlockWidth()/mElemWidth);
+    //setStride(ts.getBitBlockWidth()/mElemWidth);
 }
 
 void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
@@ -297,7 +313,6 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
     IntegerType * const maskTy = b.getIntNTy(maskWidth);
 
     Constant * const ZERO = b.getSize(0);
-    Constant * const ELEM_WIDTH = ConstantInt::get(sizeTy, mElemWidth);
     Constant * const ELEMS_PER_PACK = ConstantInt::get(sizeTy, maskWidth);
 
     BasicBlock * const entry = b.GetInsertBlock();
@@ -339,11 +354,11 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
     Value * const sourceBlock1 = b.CreateAlignedLoad(b.getBitBlockType(), sourcePtr1, 1);
     Value * const sourceBlock2 = b.CreateAlignedLoad(b.getBitBlockType(), sourcePtr2, 1);
 
-    Value * const spread1 = b.mvmd_expand(8, mask1, sourceBlock1);
-    Value * const spread2 = b.mvmd_expand(8, mask2, sourceBlock2);
+    Value * const spread1 = b.mvmd_expand(mElemWidth, b.fwCast(mElemWidth, sourceBlock1), mask1);
+    Value * const spread2 = b.mvmd_expand(mElemWidth, b.fwCast(mElemWidth, sourceBlock2), mask2);
     Value * const merged = b.CreateOr(spread1, spread2);
 
-    Value * const outputPtr = b.getRawOutputPointer("mergedBytes", outputOffsetPhi);
+    Value * const outputPtr = b.getRawOutputPointer("merged", outputOffsetPhi);
     b.CreateBlockAlignedStore(merged, outputPtr);
 
     Value * const newProcessed1 = b.CreateZExtOrTrunc(b.CreatePopcount(mask1), sizeTy);
@@ -358,7 +373,80 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
     b.SetInsertPoint(elemMergeDone);
 }
 
+ElemSpreadKernel::ElemSpreadKernel(LLVMTypeSystemInterface & ts,
+                                       StreamSet * mask,
+                                       StreamSet * source,
+                                       StreamSet * spread)
+: MultiBlockKernel(ts, [&]() -> std::string {
+                        std::string tmp;
+                        raw_string_ostream nm(tmp);
+                        nm << "elemSpread";
+                        nm << '_' << source->getFieldWidth();
+                        nm.flush();
+                        return tmp;
+                    }(),
+{Binding("mask", mask, FixedRate(1), Principal()),
+ Binding("source", source, PopcountOf("mask"))},
+{Binding{"spread", spread}},
+{}, {}, {}), mElemWidth(source->getFieldWidth()) {
+    //setStride(ts.getBitBlockWidth()/mElemWidth);
+}
 
+void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
+    const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
+    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const maskTy = b.getIntNTy(maskWidth);
+
+    Constant * const ZERO = b.getSize(0);
+    Constant * const ELEMS_PER_PACK = ConstantInt::get(sizeTy, maskWidth);
+
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const elemSpreadLoop = b.CreateBasicBlock("elemSpreadLoop");
+    BasicBlock * const elemSpreadDone = b.CreateBasicBlock("elemSpreadDone");
+
+    Value * numOfIterations = numOfStrides;
+    if (getStride() != b.getBitBlockWidth()/mElemWidth) {
+        assert ((getStride() % b.getBitBlockWidth()) == 0);
+        numOfIterations = b.CreateMul(numOfStrides, b.getSize(getStride() / mElemWidth));
+    }
+    Value * const processedMaskItems = b.getProcessedItemCount("mask");
+    Value * const rawMaskPtr = b.getRawInputPointer("mask", processedMaskItems);
+    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
+
+    Value * const processedSourceItems = b.getProcessedItemCount("source");
+    Value * const producedItems = b.getProducedItemCount("spread");
+
+    b.CreateBr(elemSpreadLoop);
+
+    b.SetInsertPoint(elemSpreadLoop);
+    PHINode * const maskStridePhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const pendingOffsetPhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, 2);
+    maskStridePhi->addIncoming(ZERO, entry);
+    pendingOffsetPhi->addIncoming(processedSourceItems, entry);
+    outputOffsetPhi->addIncoming(producedItems, entry);
+
+    Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskStridePhi));
+    Value * const nextStride = b.CreateAdd(maskStridePhi, b.getSize(1));
+    Value * const moreToDo = b.CreateICmpNE(nextStride, numOfIterations);
+
+    Value * const sourcePtr = b.getRawInputPointer("source", pendingOffsetPhi);
+    Value * const sourceBlock = b.CreateAlignedLoad(b.getBitBlockType(), sourcePtr, 1);
+
+    Value * const spread = b.mvmd_expand(mElemWidth, b.fwCast(mElemWidth, sourceBlock), mask);
+
+    Value * const outputPtr = b.getRawOutputPointer("spread", outputOffsetPhi);
+    b.CreateBlockAlignedStore(spread, outputPtr);
+
+    Value * const newProcessed = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
+
+    maskStridePhi->addIncoming(nextStride, elemSpreadLoop);
+    pendingOffsetPhi->addIncoming(b.CreateAdd(pendingOffsetPhi, newProcessed), elemSpreadLoop);
+    outputOffsetPhi->addIncoming(b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK), elemSpreadLoop);
+    b.CreateCondBr(moreToDo, elemSpreadLoop, elemSpreadDone);
+
+    b.SetInsertPoint(elemSpreadDone);
+}
 
 /*************************StreamMergeKernel*********************************/
 constexpr unsigned StreamMergeStrideSize = 4;
