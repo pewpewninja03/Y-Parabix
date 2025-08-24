@@ -91,15 +91,13 @@ void MergeByMask(PipelineBuilder & P,
                  StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
     unsigned fw = merged->getFieldWidth();
-    llvm::errs() << "MergeByMask fw = " << fw << ", elems = " << elems << "\n";
     if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
         llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
     if ((a->getFieldWidth() != fw) || (b->getFieldWidth() != fw)) {
         llvm::report_fatal_error("MergeByMask called with incompatible field widths");
     }
-    if (elems == 1) {
-        llvm::errs() << "calling ElemMergeKernel\n";
+    if ((elems == 1) && (fw >= 8)) {
         P.CreateKernelCall<ElemMergeKernel>(mask, a, b, merged);
     } else {
         unsigned streamOffset = 0;
@@ -108,7 +106,6 @@ void MergeByMask(PipelineBuilder & P,
         P.CreateKernelCall<StreamMergeKernel>(mask,a,b,merged,base,expansionFieldWidth);
     }
 }
-
 
 const unsigned StreamExpandStrideSize = 4;
 
@@ -396,12 +393,11 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
     IntegerType * const sizeTy = b.getSizeTy();
     IntegerType * const maskTy = b.getIntNTy(maskWidth);
-    IntegerType * const elemTy = b.getIntNTy(mElemWidth);
     Type * const elemVecTy = b.fwVectorType(mElemWidth);
 
     Constant * const ZERO = b.getSize(0);
-    Constant * const BLOCK_WIDTH = ConstantInt::get(sizeTy, b.getBitBlockWidth());
     Constant * const ELEMS_PER_PACK = ConstantInt::get(sizeTy, maskWidth);
+    Constant * const UREM_MASK = ConstantInt::get(sizeTy, maskWidth - 1);
 
     BasicBlock * const entry = b.GetInsertBlock();
     BasicBlock * const elemSpreadLoop = b.CreateBasicBlock("elemSpreadLoop");
@@ -423,46 +419,65 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const sourcePackPtr = b.CreatePointerCast(sourceBasePtr, elemVecTy->getPointerTo());
 
     Value * const initialPendingData = b.CreateLoad(elemVecTy, sourcePackPtr);
-
     Value * const producedItems = b.getProducedItemCount("spread");
+
+    Value * const rawOutputPtr = b.getRawOutputPointer("spread", producedItems);
+    Value * const outputPackPtr = b.CreatePointerCast(rawOutputPtr, elemVecTy->getPointerTo());
 
     b.CreateBr(elemSpreadLoop);
 
     b.SetInsertPoint(elemSpreadLoop);
     PHINode * const maskStridePhi = b.CreatePHI(sizeTy, 2);
-    PHINode * const pendingPackPhi = b.CreatePHI(sizeTy, 2);
-    PHINode * const pendingOffsetPhi = b.CreatePHI(sizeTy, 2);
-    PHINode * const pendingDataPhi = b.CreatePHI(b.getBitBlockType(), 2);
+    PHINode * const sourceOffsetPhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const pendingDataPhi = b.CreatePHI(elemVecTy, 2);
     PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, 2);
     maskStridePhi->addIncoming(ZERO, entry);
-    pendingPackPhi->addIncoming(ZERO, entry);
-    pendingOffsetPhi->addIncoming(initialSourceOffset, entry);
+    sourceOffsetPhi->addIncoming(initialSourceOffset, entry);
     pendingDataPhi->addIncoming(initialPendingData, entry);
-    outputOffsetPhi->addIncoming(producedItems, entry);
+    outputOffsetPhi->addIncoming(ZERO, entry);
 
     Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskStridePhi));
+    //b.CallPrintInt("mask", mask);
+    Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
+    //b.CallPrintInt("maskPopCount", maskPopCount);
+
+    Value * const pendingPackNo = b.CreateUDiv(sourceOffsetPhi, ELEMS_PER_PACK);
+    //b.CallPrintInt("pendingPackNo", pendingPackNo);
+
+    // Elements in the pending pack may already have been processed.
+    Value * const pendingElemsDone = b.CreateAnd(sourceOffsetPhi, UREM_MASK);
+    // If the offset within the pack is nonzero, we have pending data elements to keep.
+    Value * pendingElemsToKeep = b.CreateAnd(b.CreateSub(ELEMS_PER_PACK, pendingElemsDone), UREM_MASK);
+
+    Value * const updatedSourceOffset = b.CreateAdd(sourceOffsetPhi, maskPopCount);
+    //b.CallPrintInt("updatedSourceOffset", updatedSourceOffset);
+
+    Value * const nextPackNo = b.CreateUDiv(updatedSourceOffset, ELEMS_PER_PACK);
+    //b.CallPrintInt("nextPackNo", nextPackNo);
+
+    Value * const nextPackElems = b.CreateAnd(updatedSourceOffset, UREM_MASK);
+    //b.CallPrintInt("nextPackElems", nextPackElems);
+    // We can only safely load a pack if our mask tells us that there are new elements to load.
+    Value * const packToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), pendingPackNo, nextPackNo);
+
+    Value * const packPtr = b.CreateGEP(elemVecTy, sourcePackPtr, packToLoad);
+    //b.CallPrintInt("packPtr", packPtr);
+    Value * const newPack = b.CreateLoad(elemVecTy, packPtr);
+    //b.CallPrintRegister("newPack", newPack);
+
+    Value * shiftedData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi, pendingElemsToKeep);
+    Value * const spread = b.mvmd_expand(mElemWidth, shiftedData, mask);
+    //b.CallPrintRegister("shiftedData", shiftedData);
+    //b.CallPrintRegister("spread", spread);
+
+    Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, maskStridePhi);
+    b.CreateStore(spread, outputPtr);
+
     Value * const nextStride = b.CreateAdd(maskStridePhi, b.getSize(1));
     Value * const moreToDo = b.CreateICmpNE(nextStride, numOfIterations);
 
-    Value * const newElemCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
-    Value * const updatedOffset = b.CreateAdd(pendingOffsetPhi, newElemCount);
-    Value * const nextPackNo = b.CreateUDiv(updatedOffset, ELEMS_PER_PACK);
-    Value * const nextPackElems = b.CreateURem(updatedOffset, ELEMS_PER_PACK);
-    // We can only safely load a pack if our mask tells us that there are new elements to load.
-
-    Value * const packToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), pendingPackPhi, nextPackNo);
-    Value * const packPtr = b.CreateGEP(elemVecTy, sourcePackPtr, packToLoad);
-    Value * const newPack = b.CreateLoad(elemVecTy, packPtr);
-
-    Value * shiftedData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi, pendingOffsetPhi);
-    Value * const spread = b.mvmd_expand(mElemWidth, shiftedData, mask);
-
-    Value * const outputPtr = b.getRawOutputPointer("spread", outputOffsetPhi);
-    b.CreateBlockAlignedStore(spread, outputPtr);
-
     maskStridePhi->addIncoming(nextStride, elemSpreadLoop);
-    pendingPackPhi->addIncoming(nextPackNo, elemSpreadLoop);
-    pendingOffsetPhi->addIncoming(updatedOffset, elemSpreadLoop);
+    sourceOffsetPhi->addIncoming(updatedSourceOffset, elemSpreadLoop);
     pendingDataPhi->addIncoming(newPack, elemSpreadLoop);
     outputOffsetPhi->addIncoming(b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK), elemSpreadLoop);
     b.CreateCondBr(moreToDo, elemSpreadLoop, elemSpreadDone);
