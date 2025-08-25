@@ -415,15 +415,13 @@ ElemSpreadKernel::ElemSpreadKernel(LLVMTypeSystemInterface & ts,
  Binding("source", source, PopcountOf("mask"))},
 {Binding{"spread", spread}},
 {}, {}, {}), mElemWidth(source->getFieldWidth()) {
-    //setStride(ts.getBitBlockWidth()/mElemWidth);
 }
-
-#define NULL_MASK_CHECK 1
 
 void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
     const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
     IntegerType * const sizeTy = b.getSizeTy();
     IntegerType * const maskTy = b.getIntNTy(maskWidth);
+    IntegerType * const metaMaskTy = b.getIntNTy(mElemWidth);
     Type * const elemVecTy = b.fwVectorType(mElemWidth);
 
     Constant * const ZERO = b.getSize(0);
@@ -431,21 +429,12 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Constant * const UREM_MASK = ConstantInt::get(sizeTy, maskWidth - 1);
 
     BasicBlock * const entry = b.GetInsertBlock();
-    BasicBlock * const elemSpreadLoop = b.CreateBasicBlock("elemSpreadLoop");
-#ifdef NULL_MASK_CHECK
-    BasicBlock * const elemSpreadMain = b.CreateBasicBlock("elemSpreadMain");
-#endif
+    BasicBlock * const blockAtATimeLoop = b.CreateBasicBlock("blockAtATimeLoop");
+    BasicBlock * const scanPackLoop = b.CreateBasicBlock("scanPackLoop");
+    BasicBlock * const packsDone = b.CreateBasicBlock("packsDone");
     BasicBlock * const elemSpreadDone = b.CreateBasicBlock("elemSpreadDone");
 
-    Value * numOfIterations = numOfStrides;
-    if (getStride() != maskWidth) {
-        assert ((getStride() % b.getBitBlockWidth()) == 0);
-        numOfIterations = b.CreateMul(numOfStrides, b.getSize(getStride() / maskWidth));
-    }
-    Value * const processedMaskItems = b.getProcessedItemCount("mask");
-    Value * const rawMaskPtr = b.getRawInputPointer("mask", processedMaskItems);
-    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
-
+    // Set up the source input pointer and initial offset data.
     Value * const processedSourceItems = b.getProcessedItemCount("source");
     Value * const initialSourceOffset = b.CreateURem(processedSourceItems, ELEMS_PER_PACK);
     Value * const sourceItemBase = b.CreateSub(processedSourceItems, initialSourceOffset);
@@ -453,47 +442,59 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const sourcePackPtr = b.CreatePointerCast(sourceBasePtr, elemVecTy->getPointerTo());
 
     Value * const initialPendingData = b.CreateLoad(elemVecTy, sourcePackPtr);
-    Value * const producedItems = b.getProducedItemCount("spread");
 
-    Value * const rawOutputPtr = b.getRawOutputPointer("spread", producedItems);
+
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b.getBitBlockWidth()) {
+        assert ((getStride() % b.getBitBlockWidth()) == 0);
+        ConstantInt * const mult = b.getSize(getStride() / b.getBitBlockWidth());
+        numOfBlocks = b.CreateMul(numOfStrides, mult);
+    }
+
+    b.CreateBr(blockAtATimeLoop);
+
+    b.SetInsertPoint(blockAtATimeLoop);
+    PHINode * blockNoPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockNoPhi->addIncoming(ZERO, entry);
+    PHINode * const blockSourceOffsetPhi = b.CreatePHI(sizeTy, 2);
+    blockSourceOffsetPhi->addIncoming(initialSourceOffset, entry);
+    PHINode * const blockPendingDataPhi = b.CreatePHI(elemVecTy, 2);
+    blockPendingDataPhi->addIncoming(initialPendingData, entry);
+
+    Value * const nextBlock = b.CreateAdd(blockNoPhi, b.getSize(1));
+    Value * const moreBlocksToDo = b.CreateICmpNE(blockNoPhi, numOfBlocks);
+
+    Value * const maskVector = b.loadInputStreamBlock("mask", ZERO, blockNoPhi);
+    //b.CallPrintRegister("maskVector", maskVector);
+    Value * const metaMask = b.CreateZExtOrTrunc(b.hsimd_signmask(maskWidth, b.simd_any(maskWidth, maskVector)), metaMaskTy);
+    //b.CallPrintInt("metaMask", metaMask);
+
+    // I/O pointers for the current block
+    Value * const rawMaskPtr = b.getInputStreamBlockPtr("mask", ZERO, blockNoPhi);
+    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
+    Value * const rawOutputPtr = b.getOutputStreamBlockPtr("spread", ZERO, blockNoPhi);
     Value * const outputPackPtr = b.CreatePointerCast(rawOutputPtr, elemVecTy->getPointerTo());
 
-    b.CreateBr(elemSpreadLoop);
+    // Store zeroes for the entire block, in case we skip packs with
+    // an empty mask.
+    Value * const zeroElemVec = b.fwCast(mElemWidth, b.allZeroes());
+    for (unsigned i = 0; i < mElemWidth; i++) {
+        b.storeOutputStreamPack("spread", ZERO, b.getSize(i), blockNoPhi, zeroElemVec);
+    }
 
-    b.SetInsertPoint(elemSpreadLoop);
+    b.CreateCondBr(b.CreateIsNull(metaMask), packsDone, scanPackLoop);
 
-#ifdef NULL_MASK_CHECK
-#define ELEM_SPREAD_LOOP_INCOMING 3
-#else
-#define ELEM_SPREAD_LOOP_INCOMING 2
-#endif
-    PHINode * const maskNoPhi = b.CreatePHI(sizeTy, ELEM_SPREAD_LOOP_INCOMING);
-    PHINode * const sourceOffsetPhi = b.CreatePHI(sizeTy, ELEM_SPREAD_LOOP_INCOMING);
-    PHINode * const pendingDataPhi = b.CreatePHI(elemVecTy, ELEM_SPREAD_LOOP_INCOMING);
-    PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, ELEM_SPREAD_LOOP_INCOMING);
-    maskNoPhi->addIncoming(ZERO, entry);
-    sourceOffsetPhi->addIncoming(initialSourceOffset, entry);
-    pendingDataPhi->addIncoming(initialPendingData, entry);
-    outputOffsetPhi->addIncoming(ZERO, entry);
+    b.SetInsertPoint(scanPackLoop);
+    PHINode * const metaMaskPhi = b.CreatePHI(metaMaskTy, 2);
+    metaMaskPhi->addIncoming(metaMask, blockAtATimeLoop);
+    PHINode * const sourceOffsetPhi = b.CreatePHI(sizeTy, 2);
+    sourceOffsetPhi->addIncoming(blockSourceOffsetPhi, blockAtATimeLoop);
+    PHINode * const pendingDataPhi = b.CreatePHI(elemVecTy, 2);
+    pendingDataPhi->addIncoming(blockPendingDataPhi, blockAtATimeLoop);
 
-    // Preparation for next iteration.
-    Value * const nextMaskStride = b.CreateAdd(maskNoPhi, b.getSize(1));
-    Value * const moreToDo = b.CreateICmpNE(nextMaskStride, numOfIterations);
-    Value * const nextOutputOffset = b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK);
-
-    Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskNoPhi));
-    Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, maskNoPhi);
-
-#ifdef NULL_MASK_CHECK
-    b.CreateStore(b.fwCast(mElemWidth, b.allZeroes()), outputPtr);
-    maskNoPhi->addIncoming(nextMaskStride, elemSpreadLoop);
-    sourceOffsetPhi->addIncoming(sourceOffsetPhi, elemSpreadLoop);
-    pendingDataPhi->addIncoming(pendingDataPhi, elemSpreadLoop);
-    outputOffsetPhi->addIncoming(nextOutputOffset, elemSpreadLoop);
-    b.CreateCondBr(b.CreateAnd(moreToDo, b.CreateIsNull(mask)), elemSpreadLoop, elemSpreadMain);
-
-    b.SetInsertPoint(elemSpreadMain);
-#endif
+    Value * const nextNonEmptyMaskNo = b.CreateCountForwardZeroes(metaMaskPhi);
+    Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, nextNonEmptyMaskNo));
+    Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, nextNonEmptyMaskNo);
 
     //b.CallPrintInt("mask", mask);
     Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
@@ -523,19 +524,32 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const newPack = b.CreateLoad(elemVecTy, packPtr);
     //b.CallPrintRegister("newPack", newPack);
 
-    Value * shiftedData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi, pendingElemsToKeep);
+    Value * const shiftedData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi, pendingElemsToKeep);
     Value * const spread = b.mvmd_expand(mElemWidth, shiftedData, mask);
     //b.CallPrintRegister("shiftedData", shiftedData);
     //b.CallPrintRegister("spread", spread);
 
     b.CreateStore(spread, outputPtr);
 
-    BasicBlock * elemSpreadFinal = b.GetInsertBlock();
-    maskNoPhi->addIncoming(nextMaskStride, elemSpreadFinal);
-    sourceOffsetPhi->addIncoming(updatedSourceOffset, elemSpreadFinal);
-    pendingDataPhi->addIncoming(newPack, elemSpreadFinal);
-    outputOffsetPhi->addIncoming(nextOutputOffset, elemSpreadFinal);
-    b.CreateCondBr(moreToDo, elemSpreadLoop, elemSpreadDone);
+    Value * const nextMetaMask = b.CreateResetLowestBit(metaMaskPhi, "nextMetaMask");
+    metaMaskPhi->addIncoming(nextMetaMask, scanPackLoop);
+    sourceOffsetPhi->addIncoming(updatedSourceOffset, scanPackLoop);
+    pendingDataPhi->addIncoming(newPack, scanPackLoop);
+    b.CreateCondBr(b.CreateIsNull(nextMetaMask), packsDone, scanPackLoop);
+
+    b.SetInsertPoint(packsDone);
+    PHINode * const loopEndSourceOffsetPhi = b.CreatePHI(sizeTy, 2);
+    PHINode * const loopEndPendingDataPhi = b.CreatePHI(elemVecTy, 2);
+    loopEndSourceOffsetPhi->addIncoming(blockSourceOffsetPhi, blockAtATimeLoop);
+    loopEndPendingDataPhi->addIncoming(blockPendingDataPhi, blockAtATimeLoop);
+    loopEndSourceOffsetPhi->addIncoming(updatedSourceOffset, scanPackLoop);
+    loopEndPendingDataPhi->addIncoming(newPack, scanPackLoop);
+
+    BasicBlock * const elemSpreadFinal = b.GetInsertBlock();
+    blockNoPhi->addIncoming(nextBlock, elemSpreadFinal);
+    blockSourceOffsetPhi->addIncoming(loopEndSourceOffsetPhi, elemSpreadFinal);
+    blockPendingDataPhi->addIncoming(loopEndPendingDataPhi, elemSpreadFinal);
+    b.CreateCondBr(moreBlocksToDo, blockAtATimeLoop, elemSpreadDone);
 
     b.SetInsertPoint(elemSpreadDone);
 }
