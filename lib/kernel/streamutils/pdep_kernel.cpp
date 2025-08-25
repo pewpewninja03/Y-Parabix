@@ -418,6 +418,8 @@ ElemSpreadKernel::ElemSpreadKernel(LLVMTypeSystemInterface & ts,
     //setStride(ts.getBitBlockWidth()/mElemWidth);
 }
 
+#define NULL_MASK_CHECK 1
+
 void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
     const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
     IntegerType * const sizeTy = b.getSizeTy();
@@ -430,6 +432,9 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
 
     BasicBlock * const entry = b.GetInsertBlock();
     BasicBlock * const elemSpreadLoop = b.CreateBasicBlock("elemSpreadLoop");
+#ifdef NULL_MASK_CHECK
+    BasicBlock * const elemSpreadMain = b.CreateBasicBlock("elemSpreadMain");
+#endif
     BasicBlock * const elemSpreadDone = b.CreateBasicBlock("elemSpreadDone");
 
     Value * numOfIterations = numOfStrides;
@@ -456,16 +461,40 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     b.CreateBr(elemSpreadLoop);
 
     b.SetInsertPoint(elemSpreadLoop);
-    PHINode * const maskNoPhi = b.CreatePHI(sizeTy, 2);
-    PHINode * const sourceOffsetPhi = b.CreatePHI(sizeTy, 2);
-    PHINode * const pendingDataPhi = b.CreatePHI(elemVecTy, 2);
-    PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, 2);
+
+#ifdef NULL_MASK_CHECK
+#define ELEM_SPREAD_LOOP_INCOMING 3
+#else
+#define ELEM_SPREAD_LOOP_INCOMING 2
+#endif
+    PHINode * const maskNoPhi = b.CreatePHI(sizeTy, ELEM_SPREAD_LOOP_INCOMING);
+    PHINode * const sourceOffsetPhi = b.CreatePHI(sizeTy, ELEM_SPREAD_LOOP_INCOMING);
+    PHINode * const pendingDataPhi = b.CreatePHI(elemVecTy, ELEM_SPREAD_LOOP_INCOMING);
+    PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, ELEM_SPREAD_LOOP_INCOMING);
     maskNoPhi->addIncoming(ZERO, entry);
     sourceOffsetPhi->addIncoming(initialSourceOffset, entry);
     pendingDataPhi->addIncoming(initialPendingData, entry);
     outputOffsetPhi->addIncoming(ZERO, entry);
 
+    // Preparation for next iteration.
+    Value * const nextMaskStride = b.CreateAdd(maskNoPhi, b.getSize(1));
+    Value * const moreToDo = b.CreateICmpNE(nextMaskStride, numOfIterations);
+    Value * const nextOutputOffset = b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK);
+
     Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskNoPhi));
+    Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, maskNoPhi);
+
+#ifdef NULL_MASK_CHECK
+    b.CreateStore(b.fwCast(mElemWidth, b.allZeroes()), outputPtr);
+    maskNoPhi->addIncoming(nextMaskStride, elemSpreadLoop);
+    sourceOffsetPhi->addIncoming(sourceOffsetPhi, elemSpreadLoop);
+    pendingDataPhi->addIncoming(pendingDataPhi, elemSpreadLoop);
+    outputOffsetPhi->addIncoming(nextOutputOffset, elemSpreadLoop);
+    b.CreateCondBr(b.CreateAnd(moreToDo, b.CreateIsNull(mask)), elemSpreadLoop, elemSpreadMain);
+
+    b.SetInsertPoint(elemSpreadMain);
+#endif
+
     //b.CallPrintInt("mask", mask);
     Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
     //b.CallPrintInt("maskPopCount", maskPopCount);
@@ -499,16 +528,13 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     //b.CallPrintRegister("shiftedData", shiftedData);
     //b.CallPrintRegister("spread", spread);
 
-    Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, maskNoPhi);
     b.CreateStore(spread, outputPtr);
 
-    Value * const nextStride = b.CreateAdd(maskNoPhi, b.getSize(1));
-    Value * const moreToDo = b.CreateICmpNE(nextStride, numOfIterations);
-
-    maskNoPhi->addIncoming(nextStride, elemSpreadLoop);
-    sourceOffsetPhi->addIncoming(updatedSourceOffset, elemSpreadLoop);
-    pendingDataPhi->addIncoming(newPack, elemSpreadLoop);
-    outputOffsetPhi->addIncoming(b.CreateAdd(outputOffsetPhi, ELEMS_PER_PACK), elemSpreadLoop);
+    BasicBlock * elemSpreadFinal = b.GetInsertBlock();
+    maskNoPhi->addIncoming(nextMaskStride, elemSpreadFinal);
+    sourceOffsetPhi->addIncoming(updatedSourceOffset, elemSpreadFinal);
+    pendingDataPhi->addIncoming(newPack, elemSpreadFinal);
+    outputOffsetPhi->addIncoming(nextOutputOffset, elemSpreadFinal);
     b.CreateCondBr(moreToDo, elemSpreadLoop, elemSpreadDone);
 
     b.SetInsertPoint(elemSpreadDone);
