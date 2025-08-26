@@ -19,11 +19,15 @@
 #include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 #include <boost/intrusive/detail/math.hpp>
+#include <toolchain/toolchain.h>
+#include <llvm/Support/CommandLine.h>
 
 using boost::intrusive::detail::floor_log2;
 using namespace llvm;
 using namespace pablo;
 using namespace kernel;
+
+static cl::opt<bool> ElemSpread("ElemSpread", cl::desc("Use ElemSpreadKernel in place of byte spread by mask"), cl::init(true), cl::cat(codegen::CodeGenOptions));
 
 namespace kernel {
 
@@ -54,11 +58,15 @@ void SpreadByMask(PipelineBuilder & P,
         P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
     } else {
         Scalar * offset = nullptr;
+        bool useElemSpread = ElemSpread;
         if (streamOffset || toSpread->getNumElements() != outputs->getNumElements()) {
             offset = P.CreateConstant(P.getSize(streamOffset));
-            P.CreateKernelCall<ByteSpreadByMaskKernel>(toSpread, mask, outputs, offset);
-        } else {
+            useElemSpread = false;
+        }
+        if (useElemSpread) {
             P.CreateKernelCall<ElemSpreadKernel>(mask, toSpread, outputs);
+        } else {
+            P.CreateKernelCall<ByteSpreadByMaskKernel>(toSpread, mask, outputs, offset);
         }
     }
 }
