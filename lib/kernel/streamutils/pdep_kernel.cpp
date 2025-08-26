@@ -462,7 +462,7 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     blockPendingDataPhi->addIncoming(initialPendingData, entry);
 
     Value * const nextBlock = b.CreateAdd(blockNoPhi, b.getSize(1));
-    Value * const moreBlocksToDo = b.CreateICmpNE(blockNoPhi, numOfBlocks);
+    Value * const moreBlocksToDo = b.CreateICmpNE(nextBlock, numOfBlocks);
 
     Value * const maskVector = b.loadInputStreamBlock("mask", ZERO, blockNoPhi);
     //b.CallPrintRegister("maskVector", maskVector);
@@ -492,7 +492,7 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     PHINode * const pendingDataPhi = b.CreatePHI(elemVecTy, 2);
     pendingDataPhi->addIncoming(blockPendingDataPhi, blockAtATimeLoop);
 
-    Value * const nextNonEmptyMaskNo = b.CreateCountForwardZeroes(metaMaskPhi);
+    Value * const nextNonEmptyMaskNo = b.CreateZExtOrTrunc(b.CreateCountForwardZeroes(metaMaskPhi), sizeTy);
     Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, nextNonEmptyMaskNo));
     Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, nextNonEmptyMaskNo);
 
@@ -528,6 +528,8 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const spread = b.mvmd_expand(mElemWidth, shiftedData, mask);
     //b.CallPrintRegister("shiftedData", shiftedData);
     //b.CallPrintRegister("spread", spread);
+    //Value * maskNo =  b.CreateAdd(b.CreateMul(blockNoPhi, b.getSize(8)), nextNonEmptyMaskNo);
+    //b.CallPrintInt("maskNo", maskNo);
 
     b.CreateStore(spread, outputPtr);
 
