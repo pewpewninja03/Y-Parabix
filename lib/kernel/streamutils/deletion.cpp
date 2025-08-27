@@ -15,16 +15,33 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <boost/intrusive/detail/math.hpp>
+#include <toolchain/toolchain.h>
+#include <llvm/Support/CommandLine.h>
 
 using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
+
+static cl::opt<bool> ElemFilter("ElemFilter", cl::desc("Use ElemFilter in place of byte filter by mask"), cl::init(true), cl::cat(codegen::CodeGenOptions));
 
 inline size_t ceil_udiv(const size_t n, const size_t m) {
     return (n + m - 1) / m;
 }
 
 namespace kernel {
+
+class ElemFilterKernel final  : public MultiBlockKernel {
+public:
+    ElemFilterKernel(LLVMTypeSystemInterface & ts,
+                       StreamSet * mask,
+                       StreamSet * source,
+                       StreamSet * filtered);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
+private:
+    const unsigned mElemWidth;
+};
+
 
 void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
@@ -37,11 +54,125 @@ void FilterByMask(PipelineBuilder & P,
         P.CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
     } else {
         Scalar * offset = nullptr;
+        bool useElemFilter = ElemFilter;
         if (streamOffset || inputs->getNumElements() != outputs->getNumElements()) {
             offset = P.CreateConstant(P.getSize(streamOffset));
+            useElemFilter = false;
         }
-        P.CreateKernelCall<ByteFilterByMaskKernel>(inputs, mask, outputs, offset);
+        if (useElemFilter) {
+            P.CreateKernelCall<ElemFilterKernel>(mask, inputs, outputs);
+        } else {
+            P.CreateKernelCall<ByteFilterByMaskKernel>(inputs, mask, outputs, offset);
+        }
     }
+}
+
+ElemFilterKernel::ElemFilterKernel(LLVMTypeSystemInterface & ts,
+                                       StreamSet * mask,
+                                       StreamSet * source,
+                                       StreamSet * filtered)
+: MultiBlockKernel(ts, [&]() -> std::string {
+                        std::string tmp;
+                        raw_string_ostream nm(tmp);
+                        nm << "elemFilter";
+                        nm << '_' << source->getFieldWidth();
+                        nm.flush();
+                        return tmp;
+                    }(),
+{Binding("mask", mask, FixedRate(1), Principal()),
+ Binding("source", source)},
+{Binding{"filtered", filtered, PopcountOf("mask"), EmptyWriteOverflow()}},
+{}, {}, {}), mElemWidth(source->getFieldWidth()) {
+}
+void ElemFilterKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
+    const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
+    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const maskTy = b.getIntNTy(maskWidth);
+    IntegerType * const metaMaskTy = b.getIntNTy(mElemWidth);
+    Type * const elemVecTy = b.fwVectorType(mElemWidth);
+
+    Constant * const ZERO = b.getSize(0);
+
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const blockAtATimeLoop = b.CreateBasicBlock("blockAtATimeLoop");
+    BasicBlock * const scanPackLoop = b.CreateBasicBlock("scanPackLoop");
+    BasicBlock * const packsDone = b.CreateBasicBlock("packsDone");
+    BasicBlock * const elemFilterDone = b.CreateBasicBlock("elemFilterDone");
+
+    // Set up the filtered output pointer and initial offset data.
+    Value * const initialOutputPos = b.getProducedItemCount("filtered");
+
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != b.getBitBlockWidth()) {
+        assert ((getStride() % b.getBitBlockWidth()) == 0);
+        ConstantInt * const mult = b.getSize(getStride() / b.getBitBlockWidth());
+        numOfBlocks = b.CreateMul(numOfStrides, mult);
+    }
+
+    b.CreateBr(blockAtATimeLoop);
+
+    b.SetInsertPoint(blockAtATimeLoop);
+    PHINode * blockNoPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockNoPhi->addIncoming(ZERO, entry);
+    PHINode * const blockOutputPosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockOutputPosPhi->addIncoming(initialOutputPos, entry);
+
+    Value * const nextBlock = b.CreateAdd(blockNoPhi, b.getSize(1));
+    Value * const moreBlocksToDo = b.CreateICmpNE(nextBlock, numOfBlocks);
+
+    Value * const maskVector = b.loadInputStreamBlock("mask", ZERO, blockNoPhi);
+    //b.CallPrintRegister("maskVector", maskVector);
+    Value * const metaMask = b.CreateZExtOrTrunc(b.hsimd_signmask(maskWidth, b.simd_any(maskWidth, maskVector)), metaMaskTy);
+    //b.CallPrintInt("metaMask", metaMask);
+
+    // Input pointers for the current block
+    Value * const rawMaskPtr = b.getInputStreamBlockPtr("mask", ZERO, blockNoPhi);
+    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
+    Value * const rawSourcePtr = b.getInputStreamBlockPtr("source", ZERO, blockNoPhi);
+    Value * const sourcePackPtr = b.CreatePointerCast(rawSourcePtr, elemVecTy->getPointerTo());
+
+    b.CreateCondBr(b.CreateIsNull(metaMask), packsDone, scanPackLoop);
+
+    b.SetInsertPoint(scanPackLoop);
+    PHINode * const metaMaskPhi = b.CreatePHI(metaMaskTy, 2);
+    metaMaskPhi->addIncoming(metaMask, blockAtATimeLoop);
+    PHINode * const outputPosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    outputPosPhi->addIncoming(blockOutputPosPhi, blockAtATimeLoop);
+
+    Value * const nextNonEmptyMaskNo = b.CreateZExtOrTrunc(b.CreateCountForwardZeroes(metaMaskPhi), sizeTy);
+    Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, nextNonEmptyMaskNo));
+    //b.CallPrintInt("mask", mask);
+    Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
+    //b.CallPrintInt("maskPopCount", maskPopCount);
+
+    Value * const sourcePtr = b.CreateGEP(elemVecTy, sourcePackPtr, nextNonEmptyMaskNo);
+    Value * const newPack = b.CreateLoad(elemVecTy, sourcePtr);
+
+    Value * const compressed = b.mvmd_compress(mElemWidth, newPack, mask);
+    //b.CallPrintRegister("compressed", compressed);
+
+    Value * const ptr = b.getRawOutputPointer("filtered", outputPosPhi);
+    Value * const toStorePtr = b.CreatePointerCast(ptr, elemVecTy->getPointerTo());
+    b.CreateAlignedStore(compressed, toStorePtr, 1);
+
+    Value * newOutputPos = b.CreateAdd(outputPosPhi, maskPopCount);
+
+    Value * const nextMetaMask = b.CreateResetLowestBit(metaMaskPhi, "nextMetaMask");
+    metaMaskPhi->addIncoming(nextMetaMask, scanPackLoop);
+    outputPosPhi->addIncoming(newOutputPos, scanPackLoop);
+    b.CreateCondBr(b.CreateIsNull(nextMetaMask), packsDone, scanPackLoop);
+
+    b.SetInsertPoint(packsDone);
+    PHINode * const loopEndOutputPosPhi = b.CreatePHI(sizeTy, 2);
+    loopEndOutputPosPhi->addIncoming(blockOutputPosPhi, blockAtATimeLoop);
+    loopEndOutputPosPhi->addIncoming(newOutputPos, scanPackLoop);
+
+    BasicBlock * const elemFilterFinal = b.GetInsertBlock();
+    blockNoPhi->addIncoming(nextBlock, elemFilterFinal);
+    blockOutputPosPhi->addIncoming(loopEndOutputPosPhi, elemFilterFinal);
+    b.CreateCondBr(moreBlocksToDo, blockAtATimeLoop, elemFilterDone);
+
+    b.SetInsertPoint(elemFilterDone);
 }
 
 inline std::vector<Value *> parallel_prefix_deletion_masks(KernelBuilder & b, const unsigned fw, Value * del_mask) {
