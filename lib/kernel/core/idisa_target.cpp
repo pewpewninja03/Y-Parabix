@@ -156,9 +156,9 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C, const StringMap<bool> & 
         ADD_IF_FOUND(AVX512_VL, "avx512vl");
         // AVX512_VBMI, AVX512_VBMI2 and AVX512_VPOPCNTDQ  have not been tested as we
         //did not have hardware support. It should work in theory (tm)
-        ADD_IF_FOUND(AVX512_VBMI, "avx512_vbmi");
-        ADD_IF_FOUND(AVX512_VBMI2, "avx512_vbmi2");
-        ADD_IF_FOUND(AVX512_VPOPCNTDQ, "avx512_vpopcntdq");
+        ADD_IF_FOUND(AVX512_VBMI, "avx512vbmi");
+        ADD_IF_FOUND(AVX512_VBMI2, "avx512vbmi2");
+        ADD_IF_FOUND(AVX512_VPOPCNTDQ, "avx512vpopcntdq");
     }
     // AVX512BW builder can only be used for BlockSize multiples of 512
     if (codegen::BlockSize >= 512 && HasAVX512F) {
