@@ -107,13 +107,14 @@ TokenizerFunctionType tokenizerPipeline(CPUDriver & driver) {
 
     //  Transpose the ByteSteam into parallel bit stream for
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
 
     StreamSet * u8index = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     
     StreamSet * GCB = P.CreateStreamSet(1, 1);
-    re::UTF8_Transformer U8xfrmer;
     GraphemeClusterLogic(P, BasisBits, u8index, GCB);
+    SHOW_STREAM(GCB);
 
     StreamSet * tokenInsertMask = UnitInsertionSpreadMask(P, GCB, kernel::InsertPosition::After);
     SHOW_STREAM(tokenInsertMask);
