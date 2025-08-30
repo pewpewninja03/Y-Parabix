@@ -101,47 +101,6 @@ void NFC_Focus::generatePabloMethod() {
 
 using namespace UCD;
 
-class ZeroPrior : public PabloKernel {
-public:
-    ZeroPrior(LLVMTypeSystemInterface & ts,
-              StreamSet * Basis, StreamSet * DeletePrior, StreamSet * OutputBasis);
-protected:
-    void generatePabloMethod() override;
-};
-
-ZeroPrior::ZeroPrior(LLVMTypeSystemInterface & ts,
-                     StreamSet * Basis, StreamSet * DeletePrior, StreamSet * OutputBasis)
-: PabloKernel(ts, "ZeroPrior" + Basis->shapeString(),
-{Binding{"Basis", Basis}, Binding{"DeletePrior", DeletePrior, FixedRate(), LookAhead(4)}},
-{Binding{"OutputBasis", OutputBasis, FixedRate(1), InOut("Basis")}}) {}
-
-void ZeroPrior::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
-    PabloAST * DelPrior = getInputStreamSet("DeletePrior")[0];
-    BixNumCompiler bnc(pb);
-    PabloAST * pfx4 = bnc.UGE(Basis, 0xF0);
-    PabloAST * pfx3or4 = bnc.UGE(Basis, 0xE0);
-    PabloAST * pfx = bnc.UGE(Basis, 0xC2);
-    PabloAST * pfx3 = pb.createXor(pfx3or4, pfx4);
-    PabloAST * pfx2 = pb.createXor(pfx, pfx3or4);
-    PabloAST * delpfx4 = pb.createAnd(pfx4, pb.createLookahead(DelPrior, 4));
-    PabloAST * thirdlast = pb.createOr(pfx3, pb.createAdvance(pfx4, 1));
-    PabloAST * del3 = pb.createAnd(thirdlast, pb.createLookahead(DelPrior, 3));
-    PabloAST * secondlast = pb.createOr(pfx2, pb.createAdvance(thirdlast, 1));
-    PabloAST * del2 = pb.createAnd(secondlast, pb.createLookahead(DelPrior, 2));
-    PabloAST * del1 = pb.createLookahead(DelPrior, 1);
-    PabloAST * del = pb.createOr(pb.createOr(delpfx4, del3), pb.createOr(del2, del1));
-    PabloAST * select = pb.createNot(del);
-    std::vector<PabloAST *> OutputBasis(Basis.size());
-    for (unsigned i = 0; i < Basis.size(); i++) {
-        OutputBasis[i] = pb.createAnd(select, Basis[i]);
-    }
-    writeOutputStreamSet("OutputBasis", OutputBasis);
-}
-
-using namespace UCD;
-
 StreamSet * DetermineNFC_WorkSpans(PipelineBuilder & P, StreamSet * U8_Basis, StreamSet * u8index) {
     StreamSet * NFC_Candidates = P.CreateStreamSet(2, 1);
     P.CreateKernelCall<NFC_CandidateClass>(U8_Basis, NFC_Candidates);
@@ -270,20 +229,16 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 
     StreamSet * WorkSelectionMask = DetermineNFC_WorkSpans(P, BasisBits, u8index);
 
-    StreamSet * InsertionBixNum = P.CreateStreamSet(4, 1);
-    P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, InsertionBixNum);
-    SHOW_BIXNUM(InsertionBixNum);
-
-    StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
-    ZeroByMask(P, WorkSelectionMask, InsertionBixNum, WorkingInsertionBixNum);
-    SHOW_BIXNUM(WorkingInsertionBixNum);
-
-    StreamSet * SourceExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
-    SHOW_STREAM(SourceExpansionMask);
-
     StreamSet * OutputBasis = nullptr;
 
     if (NoFocus) {
+        StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
+        P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, WorkingInsertionBixNum, WorkSelectionMask);
+        SHOW_BIXNUM(WorkingInsertionBixNum);
+
+        StreamSet * SourceExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+        SHOW_STREAM(SourceExpansionMask);
+
         StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
         SpreadByMask(P, SourceExpansionMask, BasisBits, ExpandedBasis);
 
@@ -307,6 +262,13 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         StreamSet * TransformedBasis = rslts.first;
         StreamSet * ValidWorkMask = rslts.second;
         SHOW_STREAM(ValidWorkMask);
+
+        StreamSet * FinalInsertionBixNum = P.CreateStreamSet(4, 1);
+        P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, FinalInsertionBixNum, WorkSelectionMask);
+        SHOW_BIXNUM(FinalInsertionBixNum);
+
+        StreamSet * SourceExpansionMask = InsertionSpreadMask(P, FinalInsertionBixNum, kernel::InsertPosition::After);
+        SHOW_STREAM(SourceExpansionMask);
 
         StreamSet * const ExpandedWorkMask = P.CreateStreamSet(1, 1);
         ExpandFilter(P, SourceExpansionMask, WorkSelectionMask, ExpandedWorkMask);

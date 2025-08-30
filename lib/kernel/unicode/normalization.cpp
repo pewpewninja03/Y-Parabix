@@ -291,7 +291,6 @@ SCResults SelfComposableLogic(PabloBuilder & pb, std::vector<PabloAST *> Basis,
     PabloAST * A2 = pb.createXor(A, A1, "selfc.A2");  //  2nd, 4th, 6th, ... of the As
     PabloAST * A1_start = pb.createAnd(A_run_start, A1, "selfc.A1_start");
     PabloAST * A2_start = pb.createAnd(A_run_start, A2, "selfc.A2_start");
-    PabloAST * A_continue = A;
     PabloAST * run_continue = pb.createOr3(suffix, A, AA, "selfc.run_continue");
     PabloAST * A1_runs = pb.createMatchStar(A1_start, run_continue, "selfc.A1_runs");
     PabloAST * A2_runs = pb.createMatchStar(A2_start, run_continue, "selfc.A2_runs");

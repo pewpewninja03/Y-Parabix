@@ -100,9 +100,11 @@ class NFC_Initial_Insertion : public pablo::PabloKernel {
 public:
     NFC_Initial_Insertion
         (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                       StreamSet * InsertionBixNum);
+                                       StreamSet * InsertionBixNum,
+                                       StreamSet * WorkMask = nullptr);
 protected:
     void generatePabloMethod() override;
+    bool mHasWorkMask;
 };
 
 //
