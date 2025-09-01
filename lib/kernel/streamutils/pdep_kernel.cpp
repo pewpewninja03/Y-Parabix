@@ -105,7 +105,7 @@ void MergeByMask(PipelineBuilder & P,
     if ((a->getFieldWidth() != fw) || (b->getFieldWidth() != fw)) {
         llvm::report_fatal_error("MergeByMask called with incompatible field widths");
     }
-    if ((elems == 1) && (fw >= 8)) {
+    if (ElemSpread && (elems == 1) && (fw >= 8)) {
         P.CreateKernelCall<ElemMergeKernel>(mask, a, b, merged);
     } else {
         unsigned streamOffset = 0;
