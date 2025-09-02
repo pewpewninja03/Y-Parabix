@@ -53,7 +53,8 @@ using namespace pablo;
 static cl::OptionCategory NFC_Options("Decomposition Options", "Decomposition Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFC_Options));
 static cl::opt<bool> NoFocus("NoFocus", cl::desc("Process the entire file without filtering to narrow the focus of work"), cl::init(false), cl::cat(NFC_Options));
-static cl::opt<bool> TwoStage("TwoStage", cl::desc("Use two pipeline stages"), cl::init(false), cl::cat(NFC_Options));
+static cl::opt<bool> MultiStage("MultiStage", cl::desc("Use two pipeline stages"), cl::init(false), cl::cat(NFC_Options));
+static cl::opt<bool> ByteFiltering("ByteFiltering", cl::desc("Use byte filtering for focused work"), cl::init(false), cl::cat(NFC_Options));
 //static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFC_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
@@ -195,7 +196,7 @@ void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * Expa
     SHOW_BYTES(TransformedBytes);
 }
 
-void stage1_logic(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * ValidWorkMask, StreamSet * TransformedBytes) {
+void focus_stage_logic(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis) {
 
     P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
@@ -209,18 +210,54 @@ void stage1_logic(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet *
 
     DetermineNFC_WorkSpans(P, BasisBits, u8index, WorkSelectionMask);
 
-    StreamSet * SelectedWorkBasis = P.CreateStreamSet(8, 1);
-    FilterByMask(P, WorkSelectionMask, BasisBits, SelectedWorkBasis);
+    if (ByteFiltering) {
+        FilterByMask(P, WorkSelectionMask, ByteStream, FocusedWorkBasis);
+    } else {
+        FilterByMask(P, WorkSelectionMask, BasisBits, FocusedWorkBasis);
+    }
+}
+
+typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, uint32_t fd);
+
+FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
+    const unsigned selected_work_elems = ByteFiltering ? 1 : 8;
+    const unsigned selected_work_width = ByteFiltering ? 8 : 1;
+
+    auto P = CreatePipeline(driver,
+                            Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
+                            Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("FocusedWorkBasis", selected_work_elems, selected_work_width, ReturnedBuffer(1)),
+                            Input<uint32_t>("inputFileDecriptor")
+                            );
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+
+    StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
+    StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
+    StreamSet * const FocusedWorkBasis = P.getOutputStreamSet("FocusedWorkBasis");
+    focus_stage_logic(P, fileDescriptor, ByteStream, WorkSelectionMask, FocusedWorkBasis);
+    return P.compile();
+}
+
+void stage1_logic(PipelineBuilder & P, StreamSet * SelectedWorkBasis, StreamSet * ValidWorkMask, StreamSet * TransformedBytes) {
+
+    StreamSet * BasisBits = nullptr;
+    if (ByteFiltering) {
+        StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+        P.CreateKernelCall<S2PKernel>(SelectedWorkBasis, BasisBits);
+        SHOW_BIXNUM(BasisBits);
+    } else {
+        BasisBits = SelectedWorkBasis;
+    }
 
     StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
-    P.CreateKernelCall<NFC_Initial_Insertion>(SelectedWorkBasis, WorkingInsertionBixNum);
+    P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, WorkingInsertionBixNum);
     SHOW_BIXNUM(WorkingInsertionBixNum);
 
     StreamSet * WorkingExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
     SHOW_STREAM(WorkingExpansionMask);
 
     StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
-    SpreadByMask(P, WorkingExpansionMask, SelectedWorkBasis, WorkingBasis);
+    SpreadByMask(P, WorkingExpansionMask, BasisBits, WorkingBasis);
 
     re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
     CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
@@ -231,23 +268,21 @@ void stage1_logic(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet *
     SHOW_STREAM(ValidWorkMask);
 }
 
-typedef void (*StageOneFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, uint32_t fd);
+typedef void (*StageOneFunctionType)(const StreamSetPtr &, StreamSetPtr &, StreamSetPtr &);
 
 StageOneFunctionType stage1_pipeline(CPUDriver & driver) {
-    auto P = CreatePipeline(driver,
-                            Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
-                            Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
-                            Output<streamset_t>("ValidWorkMask", 1, 1, ReturnedBuffer(1)),
-                            Output<streamset_t>("TransformedBytes", 1, 8, ReturnedBuffer(1)),
-                            Input<uint32_t>("inputFileDecriptor")
-                            );
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    const unsigned selected_work_elems = ByteFiltering ? 1 : 8;
+    const unsigned selected_work_width = ByteFiltering ? 8 : 1;
 
-    StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
-    StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>("SelectedWorkBasis", selected_work_elems, selected_work_width),
+                            Output<streamset_t>("ValidWorkMask", 1, 1, ReturnedBuffer(1)),
+                            Output<streamset_t>("TransformedBytes", 1, 8, ReturnedBuffer(1))
+                            );
+    StreamSet * const SelectedWorkBasis = P.getInputStreamSet("SelectedWorkBasis");
     StreamSet * const ValidWorkMask = P.getOutputStreamSet("ValidWorkMask");
     StreamSet * const TransformedBytes = P.getOutputStreamSet("TransformedBytes");
-    stage1_logic(P, fileDescriptor, ByteStream, WorkSelectionMask, ValidWorkMask, TransformedBytes);
+    stage1_logic(P, SelectedWorkBasis, ValidWorkMask, TransformedBytes);
     return P.compile();
 }
 
@@ -417,18 +452,20 @@ int main(int argc, char *argv[]) {
     }
     CPUDriver driver("NFC_function");
 
-    if (TwoStage) {
+    if (MultiStage) {
+        FocusStageFunctionType focus_stage = focus_stage_pipeline(driver);
         StageOneFunctionType stage1 = stage1_pipeline(driver);
         StageTwoFunctionType stage2 = stage2_pipeline(driver);
         //
         kernel::StreamSetPtr ByteStream;
         kernel::StreamSetPtr WorkSelectionMask;
+        kernel::StreamSetPtr SelectedWorkBasis;
         kernel::StreamSetPtr ValidWork;
         kernel::StreamSetPtr TransformedBytes;
-        stage1(ByteStream, WorkSelectionMask, ValidWork, TransformedBytes, fd);
+        focus_stage(ByteStream, WorkSelectionMask, SelectedWorkBasis, fd);
+        stage1(SelectedWorkBasis, ValidWork, TransformedBytes);
         stage2(ByteStream, WorkSelectionMask, ValidWork, TransformedBytes);
     } else {
-        //  Build and compile the Parabix pipeline by calling the Pipeline function above.
         XfrmFunctionType fn;
         fn = generate_pipeline(driver);
         //
