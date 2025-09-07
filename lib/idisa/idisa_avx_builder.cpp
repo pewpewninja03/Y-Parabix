@@ -873,10 +873,7 @@ Value * IDISA_AVX512F_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, c
 }
 
 Value * IDISA_AVX512F_Builder::mvmd_shuffle(unsigned fw, Value * data_table, Value * index_vector) {
-    if (mBitBlockWidth == 512 && ((fw == 64) || (fw == 32) | (fw == 16))) {
-        return mvmd_shuffle2(fw, data_table, data_table, index_vector);
-    }
-    return IDISA_Builder::mvmd_shuffle(fw, data_table, index_vector);
+    return mvmd_shuffle2(fw, data_table, data_table, index_vector);
 }
 
 
@@ -1269,18 +1266,18 @@ Value * IDISA_AVX512F_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
         Value * hi_move_fwd = simd_slli(16, high_bits, 8-fw);
         return simd_or(simd_if(1, simd_himask(16), high_bits, low_bits), simd_or(lo_move_back, hi_move_fwd));
     }
-    if (fw == 8)   {
+    if (fw >= 8)   {
         const unsigned fieldCount = mBitBlockWidth/fw;
         SmallVector<Constant *, 8> Idxs(fieldCount/2);
         for (unsigned i = 0; i < fieldCount / 2; i++) {
             Idxs[i] = getInt32(i+fieldCount/2); // selects elements from first reg.
         }
         Constant * high_indexes = ConstantVector::get(Idxs);
-        Value * a_high = CreateShuffleVector(fwCast(8, a), UndefValue::get(fwVectorType(8)), high_indexes);
-        Value * b_high = CreateShuffleVector(fwCast(8, b), UndefValue::get(fwVectorType(8)), high_indexes);
-        Value * a_ext = CreateZExt(a_high, fwVectorType(16));
-        Value * b_ext = CreateZExt(b_high, fwVectorType(16));
-        Value * rslt = simd_or(a_ext, simd_slli(16, b_ext, 8));
+        Value * a_high = CreateShuffleVector(fwCast(fw, a), UndefValue::get(fwVectorType(fw)), high_indexes);
+        Value * b_high = CreateShuffleVector(fwCast(fw, b), UndefValue::get(fwVectorType(fw)), high_indexes);
+        Value * a_ext = CreateZExt(a_high, fwVectorType(fw*2));
+        Value * b_ext = CreateZExt(b_high, fwVectorType(fw*2));
+        Value * rslt = simd_or(a_ext, simd_slli(fw*2, b_ext, fw));
         return rslt;
     }
     // Otherwise use default AVX2 logic.
@@ -1303,18 +1300,18 @@ Value * IDISA_AVX512F_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
         Value * hi_move_fwd = simd_slli(16, high_bits, 8-fw);
         return simd_or(simd_if(1, simd_himask(16), high_bits, low_bits), simd_or(lo_move_back, hi_move_fwd));
     }
-    if (fw == 8) {
+    if (fw >= 8) {
         const unsigned fieldCount = mBitBlockWidth/fw;
         SmallVector<Constant *, 8> Idxs(fieldCount/2);
         for (unsigned i = 0; i < fieldCount / 2; i++) {
             Idxs[i] = getInt32(i); // selects elements from first reg.
         }
         Constant * low_indexes = ConstantVector::get(Idxs);
-        Value * a_low = CreateShuffleVector(fwCast(8, a), UndefValue::get(fwVectorType(8)), low_indexes);
-        Value * b_low = CreateShuffleVector(fwCast(8, b), UndefValue::get(fwVectorType(8)), low_indexes);
-        Value * a_ext = CreateZExt(a_low, fwVectorType(16));
-        Value * b_ext = CreateZExt(b_low, fwVectorType(16));
-        Value * rslt = simd_or(a_ext, simd_slli(16, b_ext, 8));
+        Value * a_low = CreateShuffleVector(fwCast(fw, a), UndefValue::get(fwVectorType(fw)), low_indexes);
+        Value * b_low = CreateShuffleVector(fwCast(fw, b), UndefValue::get(fwVectorType(fw)), low_indexes);
+        Value * a_ext = CreateZExt(a_low, fwVectorType(fw*2));
+        Value * b_ext = CreateZExt(b_low, fwVectorType(fw*2));
+        Value * rslt = simd_or(a_ext, simd_slli(fw*2, b_ext, fw));
         return rslt;
     }
     // Otherwise use default AVX2 logic.

@@ -821,19 +821,30 @@ def generateUpdateBitXfrms(scope, bit_xfrm_data, basis, marker):
 u8_insertion_bixnum_template = r"""//
 NFC_Initial_Insertion::NFC_Initial_Insertion
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * InsertionBixNum)
-: PabloKernel(ts, "NFC_Initial_Insertion" + Basis->shapeString(),
+                                   StreamSet * InsertionBixNum,
+                                   StreamSet * WorkMask)
+: PabloKernel(ts, "NFC_Initial_Insertion" + Basis->shapeString() + (WorkMask == nullptr ? "" : "+wkmsk"),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"InsertionBixNum", InsertionBixNum}}) {}
+{Binding{"InsertionBixNum", InsertionBixNum}}), mHasWorkMask(WorkMask != nullptr) {
+    if (mHasWorkMask) {
+        mInputStreamSets.push_back(Binding{"WorkMask", WorkMask});
+    }
+}
 
 void NFC_Initial_Insertion::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * WorkMask = mHasWorkMask ? getInputStreamSet("WorkMask")[0] : nullptr;
     std::vector<PabloAST *> insertions(${insertion_bixnum_bits}, All0); 
 """
 
-u8_insertion_final_code = r"""    writeOutputStreamSet("InsertionBixNum", insertions);
+u8_insertion_final_code = r"""    if (mHasWorkMask) {
+        for (unsigned i = 0; i < insertions.size(); i++) {
+            insertions[i] = pb.createAnd(insertions[i], WorkMask);
+        }
+    }
+    writeOutputStreamSet("InsertionBixNum", insertions);
 }
 """
 

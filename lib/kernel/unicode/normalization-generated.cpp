@@ -5989,15 +5989,21 @@ using namespace UCD;
 //
 NFC_Initial_Insertion::NFC_Initial_Insertion
     (LLVMTypeSystemInterface & ts, StreamSet * Basis,
-                                   StreamSet * InsertionBixNum)
-: PabloKernel(ts, "NFC_Initial_Insertion" + Basis->shapeString(),
+                                   StreamSet * InsertionBixNum,
+                                   StreamSet * WorkMask)
+: PabloKernel(ts, "NFC_Initial_Insertion" + Basis->shapeString() + (WorkMask == nullptr ? "" : "+wkmsk"),
 {Binding{"Basis", Basis, FixedRate(), LookAhead(3)}},
-{Binding{"InsertionBixNum", InsertionBixNum}}) {}
+{Binding{"InsertionBixNum", InsertionBixNum}}), mHasWorkMask(WorkMask != nullptr) {
+    if (mHasWorkMask) {
+        mInputStreamSets.push_back(Binding{"WorkMask", WorkMask});
+    }
+}
 
 void NFC_Initial_Insertion::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     PabloAST * All0 = pb.createZeroes();
     std::vector<PabloAST *> Basis = getInputStreamSet("Basis");
+    PabloAST * WorkMask = mHasWorkMask ? getInputStreamSet("WorkMask")[0] : nullptr;
     std::vector<PabloAST *> insertions(4, All0); 
     UTF::UTF_Compiler _adv_compiler(getInputStreamVar("Basis"), pb, pablo::BitMovementMode::Advance);
     std::vector<Var *> _adv_vars(4);
@@ -6020,6 +6026,11 @@ void NFC_Initial_Insertion::generatePabloMethod() {
     insertions[1] = ASC_3c___e_41_2_4___9_b___50_2___a_61_2_4___9_b___70_2___a_c0___5_8___f_d1___6_9___d_e0___5_8___f_f1___6_9___d_f___103_8___f_12___7_a___21_4_5_8___d_30_9_a_d_e_43_4_7_8_c___51_4_5_8___d_60_1_4_5_8___71_4___e_a0_1_f_b0_cd___d4_e6___9_f4_5_8_9_200___1b_e_f_26_7_e_f_32_3_344_622_3_958___f_dc_d_f_a33_6_59___b_e_b5c_d_f43_d_52_7_c_69_73_5_6_8_81_93_d_a2_7_c_b9_1e02_3_a___f_12_3_22___7_a_b_30_1_e___41_4_5_58_9_6a_b_7c_d_80___7_e___91_6___9_a2_3_ba___d_c8_9_e_f_da___e1_6___f_f2_3_6___9_1fb3_c_cc_fc_212b_2adc_fb2c_d;
     insertions[2] = F0_1d15e_f_bb_c;
     insertions[3] = F0_1d160___4_bd___c0;
+    if (mHasWorkMask) {
+        for (unsigned i = 0; i < insertions.size(); i++) {
+            insertions[i] = pb.createAnd(insertions[i], WorkMask);
+        }
+    }
     writeOutputStreamSet("InsertionBixNum", insertions);
 }
 //
