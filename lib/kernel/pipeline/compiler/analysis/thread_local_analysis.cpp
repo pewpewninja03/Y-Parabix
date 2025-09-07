@@ -746,12 +746,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     return v;
                 };
 
-                auto addOverflowSpace = [&](size_t v, Z3_ast val) -> Z3_ast {
-
-                    #warning consider overflow here?
-
-                };
-
                 assert (Q.empty());
                 for (auto e : make_iterator_range(out_edges(i, T))) {
                     const auto v = target(e, T);

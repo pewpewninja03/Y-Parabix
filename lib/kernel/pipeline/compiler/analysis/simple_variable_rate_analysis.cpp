@@ -15,6 +15,8 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng) {
 
+    const auto numOfPartitions = num_vertices(P);
+
     using NonFixedTaintGraph = adjacency_list<hash_setS, vecS, bidirectionalS, bool>;
 
     const auto cfg = Z3_mk_config();
@@ -60,11 +62,9 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
         return Z3_mk_mul(ctx, 2, args);
     };
 
+    const auto numOfNodes = num_vertices(Relationships);
 
-
-    const auto numOfPartitions = num_vertices(P);
-
-    std::vector<Z3_ast> VarList(num_vertices(Relationships));
+    std::vector<Z3_ast> VarList(numOfNodes);
 
     assert (P[0].Kernels.size() == 1);
     assert (P[0].Kernels[0] == PipelineInput);
@@ -234,6 +234,8 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
     if (LLVM_UNLIKELY(check() == Z3_L_FALSE)) {
         report_fatal_error("Z3 failed to find a solution to the maximum permitted dataflow problem");
     }
+
+
 
     const auto model = Z3_optimize_get_model(ctx, solver);
     Z3_model_inc_ref(ctx, model);

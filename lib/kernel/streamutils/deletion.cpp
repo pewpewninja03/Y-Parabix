@@ -284,8 +284,8 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     Constant * const ZERO = ConstantInt::get(sizeTy, 0);
     Constant * const ONE = ConstantInt::get(sizeTy, 1);
     Value * numOfBlocks = numOfStrides;
-    if (StreamCompressStrideSize > 1) {
-        numOfBlocks = b.CreateMulRational(numOfStrides, StreamCompressStrideSize);
+    if (getStride() != b.getBitBlockWidth()) {
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
 
     Value * const produced = b.getProducedItemCount("compressedOutput");
@@ -505,8 +505,6 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
 
     b.SetInsertPoint(segmentExit);
 }
-
-
 
 #if 0
 

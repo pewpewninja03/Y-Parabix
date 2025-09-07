@@ -80,12 +80,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         b.SetInsertPoint(resumeKernelExecution);
     }
 
-    #ifdef PRINT_DEBUG_MESSAGES
-    const auto prefix = makeKernelName(mKernelId);
-    debugPrint(b, "* " + prefix + "_isFinal = %" PRIu64, mIsFinalInvocation);
-    debugPrint(b, "* " + prefix + "_executing = %" PRIu64, mNumOfLinearStrides);
-    #endif
-
     BasicBlock * individualStrideLoop = nullptr;
     PHINode * currentIndividualStrideIndexPhi = nullptr;
     PHINode * nextIndividualStrideIndexPhi = nullptr;
@@ -232,6 +226,12 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     buildKernelCallArgumentList(b, args);
 
+    #ifdef PRINT_DEBUG_MESSAGES
+    const auto prefix = makeKernelName(mKernelId);
+    debugPrint(b, "* " + prefix + "_isFinal = %" PRIu64, mIsFinalInvocation);
+    debugPrint(b, "* " + prefix + "_executing = %" PRIu64, mNumOfLinearStrides);
+    #endif
+
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
         startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
@@ -261,6 +261,11 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     }
     #endif
+
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, "* " + prefix + "_executed = %" PRIu64, mNumOfLinearStrides);
+    #endif
+
     if (mKernelCanTerminateEarly) {
         mTerminatedExplicitly = doSegmentRetVal;
         assert (doSegmentRetVal->getType()->isIntegerTy());

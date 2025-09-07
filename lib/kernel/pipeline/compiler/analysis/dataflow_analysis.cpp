@@ -87,6 +87,30 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
             VarList[u] = repVar; // multiply(rootVar, repVar);
         }
 
+    }
+
+    flat_set<size_t> joiningStreamSets;
+
+    for (unsigned producerPartitionId = 0; producerPartitionId < numOfPartitions; ++producerPartitionId) {
+        PartitionData & N = P[producerPartitionId];
+        const auto & K = N.Kernels;
+
+        assert (joiningStreamSets.empty());
+
+        for (auto e : make_iterator_range(in_edges(producerPartitionId, P))) {
+            const PartitionStreamSet & ss = P[e];
+            if (ss.Type == 1) {
+                joiningStreamSets.insert(ss.Id);
+            }
+        }
+
+        for (auto e : make_iterator_range(out_edges(producerPartitionId, P))) {
+            const PartitionStreamSet & ss = P[e];
+            if (ss.Type == 1) {
+                joiningStreamSets.insert(ss.Id);
+            }
+        }
+
         for (const auto producer : K) {
             assert (Relationships[producer].Type == RelationshipNode::IsKernel);
             for (const auto e : make_iterator_range(out_edges(producer, Relationships))) {
@@ -126,7 +150,7 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                                         const auto consumerPartitionId = c->second;
                                         assert (producerPartitionId <= consumerPartitionId);
 
-                                        if (producerPartitionId == consumerPartitionId) {
+                                        if (producerPartitionId == consumerPartitionId || joiningStreamSets.count(streamSet)) {
 
                                             if (expOutRate == nullptr) {
                                                 const RelationshipNode & producerNode = Relationships[producer];
@@ -138,6 +162,7 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
                                             const RelationshipNode & consumerNode = Relationships[consumer];
                                             assert (consumerNode.Type == RelationshipNode::IsKernel);
                                             const auto expectedInput = inputRate.getRate() * consumerNode.Kernel->getStride();
+
                                             const Z3_ast expInRate = multiply(VarList[consumer], constant_real(expectedInput));
 
                                             #ifdef PRINT_INTRA_PARTITION_VECTOR_GRAPH
@@ -161,12 +186,14 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
             }
         }
 
+        joiningStreamSets.clear();
     }
 
 
     if (LLVM_UNLIKELY(Z3_solver_check(ctx, solver) == Z3_L_FALSE)) {
         report_fatal_error("Z3 failed to find a solution to minimum expected dataflow problem");
     }
+
 
     const auto model = Z3_solver_get_model(ctx, solver);
     Z3_model_inc_ref(ctx, model);
@@ -208,6 +235,8 @@ void PipelineAnalysis::computeIntraPartitionRepetitionVectors(PartitionGraph & P
     }
 
     Z3_model_dec_ref(ctx, model);
+
+
 
     Z3_solver_dec_ref(ctx, solver);
     Z3_del_context(ctx);

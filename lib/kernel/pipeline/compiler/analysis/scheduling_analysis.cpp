@@ -1348,10 +1348,10 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
     flat_set<unsigned> externalStreamSets;
 
     for (const auto e : make_iterator_range(in_edges(currentPartitionId, P))) {
-        const auto streamSet = P[e];
+        const auto & streamSet = P[e];
         // a streamSet with a value 0 denotes a non-I/O ordering constraint
-        if (streamSet) {
-            externalStreamSets.insert(streamSet);
+        if (streamSet.Id) {
+            externalStreamSets.insert(streamSet.Id);
         }
     }
 
@@ -1434,10 +1434,10 @@ SchedulingGraph PipelineAnalysis::makeIntraPartitionSchedulingGraph(const Partit
     // add fake output arcs
     externalStreamSets.clear();
     for (const auto e : make_iterator_range(out_edges(currentPartitionId, P))) {
-        const auto streamSet = P[e];
+        const auto & streamSet = P[e];
         // a streamSet with a value 0 denotes a non-I/O ordering constraint
-        if (streamSet) {
-            externalStreamSets.insert(streamSet);
+        if (streamSet.Id) {
+            externalStreamSets.insert(streamSet.Id);
         }
     }
 
@@ -2065,9 +2065,9 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
 
     for (unsigned partitionId = 0; partitionId < PartitionCount; ++partitionId) {
         for (const auto e : make_iterator_range(out_edges(partitionId, P))) {
-            const auto streamSet = P[e];
-            if (LLVM_UNLIKELY(streamSet != 0)) {
-                streamSets.insert(streamSet);
+            const auto & streamSet = P[e];
+            if (LLVM_UNLIKELY(streamSet.Id != 0)) {
+                streamSets.insert(streamSet.Id);
             }
 
             const auto t = target(e, P);
@@ -2137,9 +2137,9 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
             expandCapacity(intersection);
             intersection.set();
             for (const auto e : make_iterator_range(in_edges(partitionId, T))) {
-                const auto streamSet = P[e];
+                const auto & streamSet = P[e];
                 // a streamSet with a value 0 denotes a non-I/O ordering constraint
-                if (LLVM_UNLIKELY(streamSet == 0)) continue;
+                if (LLVM_UNLIKELY(streamSet.Id == 0)) continue;
                 const unsigned producerId = source(e, P);
                 BitSet & input = G[producerId];
                 expandCapacity(input);
@@ -2159,14 +2159,14 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
             }
 
             for (const auto e : make_iterator_range(out_edges(partitionId, P))) {
-                const auto streamSet = P[e];
+                const auto & streamSet = P[e];
                 // a streamSet with a value 0 denotes a non-I/O ordering constraint
-                if (LLVM_UNLIKELY(streamSet == 0)) continue;
+                if (LLVM_UNLIKELY(streamSet.Id == 0)) continue;
 
-                assert (streamSet < num_vertices(Relationships));
-                assert (Relationships[streamSet].Type == RelationshipNode::IsStreamSet);
+                assert (streamSet.Id < num_vertices(Relationships));
+                assert (Relationships[streamSet.Id].Type == RelationshipNode::IsStreamSet);
 
-                const auto f = first_in_edge(streamSet, Relationships);
+                const auto f = first_in_edge(streamSet.Id, Relationships);
                 assert (Relationships[f].Reason != ReasonType::Reference);
                 const auto bindingId = source(f, Relationships);
 
@@ -2183,11 +2183,11 @@ OrderingDAWG PipelineAnalysis::scheduleProgramGraph(const PartitionGraph & P, pi
 
                 const auto addRateId = isNonSynchronousRate(binding);
 
-                const auto h = streamSets.find(streamSet);
+                const auto h = streamSets.find(streamSet.Id);
                 assert (h != streamSets.end());
                 const auto prodRateId = std::distance(streamSets.begin(), h);
 
-                for (const auto e : make_iterator_range(out_edges(streamSet, Relationships))) {
+                for (const auto e : make_iterator_range(out_edges(streamSet.Id, Relationships))) {
                     const auto binding = target(e, Relationships);
                     const RelationshipNode & input = Relationships[binding];
                     if (LLVM_LIKELY(input.Type == RelationshipNode::IsBinding)) {

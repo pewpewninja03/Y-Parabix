@@ -151,7 +151,7 @@ private:
 
 
     // partitioning analysis
-    PartitionGraph generatePartitionGraph() ;
+    PartitionGraph generatePartitionGraph();
 
     PartitionGraph identifyKernelPartitions();
 

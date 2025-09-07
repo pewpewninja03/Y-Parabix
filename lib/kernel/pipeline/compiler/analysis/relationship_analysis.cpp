@@ -1276,9 +1276,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     // thread-local before we considered termination properties.
     mNonThreadLocalStreamSets.reserve(num_edges(initialGraph));
     for (auto e : make_iterator_range(edges(initialGraph))) {
-        const auto streamSet = initialGraph[e];
-        if (streamSet) {
-            mNonThreadLocalStreamSets.insert(subsitution[streamSet]);
+        const auto & streamSet = initialGraph[e];
+        if (streamSet.Id) {
+            mNonThreadLocalStreamSets.insert(subsitution[streamSet.Id]);
         }
     }
 

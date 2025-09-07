@@ -553,6 +553,12 @@ using KernelIdVector = std::vector<unsigned>;
 
 using OrderingDAWG = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 
+struct ComponentLinkage {
+    size_t KernelA;
+    size_t KernelB;
+    Rational Rate;
+};
+
 struct PartitionData {
 
     KernelIdVector          Kernels;
@@ -564,7 +570,14 @@ struct PartitionData {
 
 };
 
-using PartitionGraph = adjacency_list<vecS, vecS, bidirectionalS, PartitionData, StreamSetId>;
+struct PartitionStreamSet {
+    StreamSetId Id = 0;
+    unsigned Type = 0;
+    PartitionStreamSet() = default;
+    PartitionStreamSet(unsigned id, unsigned type) : Id(id), Type(type) {}
+};
+
+using PartitionGraph = adjacency_list<vecS, vecS, bidirectionalS, PartitionData, PartitionStreamSet>;
 
 using PartitionDependencyGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, no_property>;
 

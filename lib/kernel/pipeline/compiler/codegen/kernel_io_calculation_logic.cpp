@@ -1,6 +1,6 @@
 #include "../pipeline_compiler.hpp"
 
-// #define WRITE_POPCOUNT_VALUES_TO_STDERR
+#define WRITE_POPCOUNT_VALUES_TO_STDERR
 
 // TODO: add in assertions to prove whether all countable rate pipeline I/O was satisfied in the single iteration
 // Is it sufficient to verify symbolic rate of the pipeline matches the rate of the I/O?
