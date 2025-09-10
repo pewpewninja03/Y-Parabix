@@ -556,6 +556,7 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     size_t lcmOfDenom = 1UL;
 
     std::vector<Rational> partitionRepVector(PartitionCount);
+    const Rational inRatio{pipelineInputDenom, pipelineInputNum};
 
     for (unsigned partId = 0; partId < PartitionCount; ++partId) {
 
@@ -569,9 +570,16 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
             report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
         }
 
-        Rational rv{pipelineInputDenom * num, pipelineInputNum * denom};
+        assert (num > 0);
+        assert (denom > 0);
+        // Sometimes Z3 may return extremely large pipeline input num/denoms and partiton num/denoms that cancel one
+        // another out. To mitigate potential 64-bit overflows, split the equation into two rational nums.
+        const auto rv = Rational{num, denom} * inRatio;
         const auto firstKernel = FirstKernelInPartition[partId];
         assert (KernelPartitionId[firstKernel] == partId);
+
+        assert (StrideRepetitionVector[firstKernel] > 0);
+
         partitionRepVector[partId] = (rv / StrideRepetitionVector[firstKernel]);
         assert (partitionRepVector[partId].numerator() > 0);
         const auto m = partitionRepVector[partId].denominator();
