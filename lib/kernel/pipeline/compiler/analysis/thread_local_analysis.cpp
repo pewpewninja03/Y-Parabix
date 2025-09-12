@@ -13,7 +13,7 @@
     typedef long long int        Z3_int64;
 #endif
 
-// #define PRINT_Z3_OPTIMIZATION
+#define PRINT_Z3_OPTIMIZATION
 
 using boost::icl::interval_set;
 
