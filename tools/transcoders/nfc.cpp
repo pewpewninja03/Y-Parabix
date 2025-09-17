@@ -33,6 +33,7 @@
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <kernel/unicode/utf8_support.h>
+#include <toolchain/fileutil.h>
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
@@ -52,6 +53,7 @@ using namespace pablo;
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory NFC_Options("Decomposition Options", "Decomposition Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFC_Options));
+static cl::opt<bool> PreferMMap("useMMap", cl::desc("Use mmap for file input, if possible"), cl::init(false), cl::cat(NFC_Options));
 static cl::opt<bool> NoFocus("NoFocus", cl::desc("Process the entire file without filtering to narrow the focus of work"), cl::init(false), cl::cat(NFC_Options));
 static cl::opt<bool> MultiStage("MultiStage", cl::desc("Use two pipeline stages"), cl::init(false), cl::cat(NFC_Options));
 static cl::opt<bool> ByteFiltering("ByteFiltering", cl::desc("Use byte filtering for focused work"), cl::init(false), cl::cat(NFC_Options));
@@ -196,9 +198,12 @@ void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * Expa
     SHOW_BYTES(TransformedBytes);
 }
 
-void focus_stage_logic(PipelineBuilder & P, Scalar *const fileDescriptor, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis) {
+void focus_stage_logic(PipelineBuilder & P, Scalar *const buffer, Scalar * const length, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis) {
 
-    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    //StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+
+    //P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -217,7 +222,7 @@ void focus_stage_logic(PipelineBuilder & P, Scalar *const fileDescriptor, Stream
     }
 }
 
-typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, uint32_t fd);
+typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, const char * buffer, const size_t length); //uint32_t fd);
 
 FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
     const unsigned selected_work_elems = ByteFiltering ? 1 : 8;
@@ -227,14 +232,17 @@ FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
                             Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
                             Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
                             Output<streamset_t>("FocusedWorkBasis", selected_work_elems, selected_work_width, ReturnedBuffer(1)),
-                            Input<uint32_t>("inputFileDecriptor")
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"}
+                            //Input<uint32_t>("inputFileDecriptor")
                             );
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    Scalar * const buffer = P.getInputScalar(0);
+    Scalar * const length = P.getInputScalar(1);
+    //Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
     StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
     StreamSet * const FocusedWorkBasis = P.getOutputStreamSet("FocusedWorkBasis");
-    focus_stage_logic(P, fileDescriptor, ByteStream, WorkSelectionMask, FocusedWorkBasis);
+    focus_stage_logic(P, buffer, length, ByteStream, WorkSelectionMask, FocusedWorkBasis);
     return P.compile();
 }
 
@@ -286,7 +294,12 @@ StageOneFunctionType stage1_pipeline(CPUDriver & driver) {
     return P.compile();
 }
 
+
+//void stage2_logic(PipelineBuilder & P, Scalar *const buffer, Scalar * const length, StreamSet * WorkSelectionMask, StreamSet * ValidWorkMask, StreamSet * TransformedBytes) {
 void stage2_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * ValidWorkMask, StreamSet * TransformedBytes) {
+
+//    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+//    P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
 
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -322,7 +335,9 @@ void stage2_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * WorkS
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 }
 
+
 typedef void (*StageTwoFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
+//typedef void (*StageTwoFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const char * buffer, const size_t length);
 
 StageTwoFunctionType stage2_pipeline(CPUDriver & driver) {
     auto P = CreatePipeline(driver,
@@ -330,12 +345,16 @@ StageTwoFunctionType stage2_pipeline(CPUDriver & driver) {
                             Input<streamset_t>("WorkSelectionMask", 1, 1),
                             Input<streamset_t>("ValidWorkMask", 1, 1),
                             Input<streamset_t>("TransformedBytes", 1, 8)
+                            //Input<const char*>{"buffer"}, Input<size_t>{"length"}
                             );
+    //Scalar * const buffer = P.getInputScalar("buffer");
+    //Scalar * const length = P.getInputScalar("length");
     StreamSet * const ByteStream = P.getInputStreamSet("ByteStream");
     StreamSet * const WorkSelectionMask = P.getInputStreamSet("WorkSelectionMask");
     StreamSet * const ValidWorkMask = P.getInputStreamSet("ValidWorkMask");
     StreamSet * const TransformedBytes = P.getInputStreamSet("TransformedBytes");
     stage2_logic(P, ByteStream, WorkSelectionMask, ValidWorkMask, TransformedBytes);
+    //stage2_logic(P, buffer, length, WorkSelectionMask, ValidWorkMask, TransformedBytes);
     return P.compile();
 }
 
@@ -445,14 +464,16 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFC_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    const int fd = open(inputFile.c_str(), O_RDONLY);
-    if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
-        exit(-1);
-    }
     CPUDriver driver("NFC_function");
 
+
     if (MultiStage) {
+        bool useMMap = PreferMMap && canMMap(inputFile);
+        AlignedFileBuffer buf;
+        buf.load(inputFile, useMMap);
+        size_t bytes_read = buf.getBufSize();
+        if (bytes_read <= 0) return 0;
+
         FocusStageFunctionType focus_stage = focus_stage_pipeline(driver);
         StageOneFunctionType stage1 = stage1_pipeline(driver);
         StageTwoFunctionType stage2 = stage2_pipeline(driver);
@@ -462,15 +483,21 @@ int main(int argc, char *argv[]) {
         kernel::StreamSetPtr SelectedWorkBasis;
         kernel::StreamSetPtr ValidWork;
         kernel::StreamSetPtr TransformedBytes;
-        focus_stage(ByteStream, WorkSelectionMask, SelectedWorkBasis, fd);
+        focus_stage(ByteStream, WorkSelectionMask, SelectedWorkBasis, buf.getBuf(), buf.getBufSize());
         stage1(SelectedWorkBasis, ValidWork, TransformedBytes);
         stage2(ByteStream, WorkSelectionMask, ValidWork, TransformedBytes);
+        buf.release();
     } else {
+        const int fd = open(inputFile.c_str(), O_RDONLY);
+        if (LLVM_UNLIKELY(fd == -1)) {
+            llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
+            exit(-1);
+        }
         XfrmFunctionType fn;
         fn = generate_pipeline(driver);
         //
         fn(fd);
+        close(fd);
     }
-    close(fd);
     return 0;
 }
