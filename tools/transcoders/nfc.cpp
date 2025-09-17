@@ -198,12 +198,18 @@ void NFC_U8_Pipeline(PipelineBuilder & P, re::Name * CCC0_Name, StreamSet * Expa
     SHOW_BYTES(TransformedBytes);
 }
 
-void focus_stage_logic(PipelineBuilder & P, Scalar *const buffer, Scalar * const length, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis) {
 
-    //StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+
+void source_logic(PipelineBuilder & P, StreamSet * ByteStream) {
+    Scalar * const buffer = P.getInputScalar("buffer");
+    Scalar * const length = P.getInputScalar("length");
     P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
-
+    //Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     //P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+}
+
+
+void focus_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis) {
 
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -222,7 +228,7 @@ void focus_stage_logic(PipelineBuilder & P, Scalar *const buffer, Scalar * const
     }
 }
 
-typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, const char * buffer, const size_t length); //uint32_t fd);
+typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, const char * buffer, const size_t length);
 
 FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
     const unsigned selected_work_elems = ByteFiltering ? 1 : 8;
@@ -233,16 +239,14 @@ FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
                             Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
                             Output<streamset_t>("FocusedWorkBasis", selected_work_elems, selected_work_width, ReturnedBuffer(1)),
                             Input<const char*>{"buffer"}, Input<size_t>{"length"}
-                            //Input<uint32_t>("inputFileDecriptor")
                             );
-    Scalar * const buffer = P.getInputScalar(0);
-    Scalar * const length = P.getInputScalar(1);
-    //Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     StreamSet * const ByteStream = P.getOutputStreamSet("ByteStream");
+    source_logic(P, ByteStream);
+
     StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
     StreamSet * const FocusedWorkBasis = P.getOutputStreamSet("FocusedWorkBasis");
-    focus_stage_logic(P, buffer, length, ByteStream, WorkSelectionMask, FocusedWorkBasis);
+    focus_stage_logic(P, ByteStream, WorkSelectionMask, FocusedWorkBasis);
     return P.compile();
 }
 
@@ -250,7 +254,7 @@ void stage1_logic(PipelineBuilder & P, StreamSet * SelectedWorkBasis, StreamSet 
 
     StreamSet * BasisBits = nullptr;
     if (ByteFiltering) {
-        StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+        BasisBits = P.CreateStreamSet(8, 1);
         P.CreateKernelCall<S2PKernel>(SelectedWorkBasis, BasisBits);
         SHOW_BIXNUM(BasisBits);
     } else {
@@ -358,7 +362,7 @@ StageTwoFunctionType stage2_pipeline(CPUDriver & driver) {
     return P.compile();
 }
 
-typedef void (*XfrmFunctionType)(uint32_t fd);
+typedef void (*XfrmFunctionType)(const char * buffer, const size_t length);
 
 XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
@@ -369,15 +373,10 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     re::Name * CCC0_Name = re::makeName("CCC", "NR");
     CCC0_Name->setDefinition(CCC0_Prop);
 
-    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+    auto P = CreatePipeline(driver, Input<const char*>{"buffer"}, Input<size_t>{"length"});
 
-    //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     StreamSet * ByteStream = P.CreateStreamSet(1, 8);
-    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
-    //  from a file descriptor.
-    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    SHOW_BYTES(ByteStream);
+    source_logic(P, ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
@@ -464,16 +463,18 @@ int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&NFC_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+
+    bool useMMap = PreferMMap && canMMap(inputFile);
+    AlignedFileBuffer buf;
+    buf.load(inputFile, useMMap);
+    size_t bytes_read = buf.getBufSize();
+    if (bytes_read <= 0) {
+        llvm::errs() << "Error: unable to read " << inputFile << " for processing.\n";
+        exit(-1);
+    }
+
     CPUDriver driver("NFC_function");
-
-
     if (MultiStage) {
-        bool useMMap = PreferMMap && canMMap(inputFile);
-        AlignedFileBuffer buf;
-        buf.load(inputFile, useMMap);
-        size_t bytes_read = buf.getBufSize();
-        if (bytes_read <= 0) return 0;
-
         FocusStageFunctionType focus_stage = focus_stage_pipeline(driver);
         StageOneFunctionType stage1 = stage1_pipeline(driver);
         StageTwoFunctionType stage2 = stage2_pipeline(driver);
@@ -486,18 +487,12 @@ int main(int argc, char *argv[]) {
         focus_stage(ByteStream, WorkSelectionMask, SelectedWorkBasis, buf.getBuf(), buf.getBufSize());
         stage1(SelectedWorkBasis, ValidWork, TransformedBytes);
         stage2(ByteStream, WorkSelectionMask, ValidWork, TransformedBytes);
-        buf.release();
     } else {
-        const int fd = open(inputFile.c_str(), O_RDONLY);
-        if (LLVM_UNLIKELY(fd == -1)) {
-            llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
-            exit(-1);
-        }
         XfrmFunctionType fn;
         fn = generate_pipeline(driver);
         //
-        fn(fd);
-        close(fd);
+        fn(buf.getBuf(), buf.getBufSize());
     }
+    buf.release();
     return 0;
 }
