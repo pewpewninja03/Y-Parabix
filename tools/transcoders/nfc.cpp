@@ -265,7 +265,8 @@ void stage1_logic(PipelineBuilder & P, StreamSet * SelectedWorkBasis, StreamSet 
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, WorkingInsertionBixNum);
     SHOW_BIXNUM(WorkingInsertionBixNum);
 
-    StreamSet * WorkingExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+    StreamSet * WorkingExpansionMask = P.CreateStreamSet(1, 1);
+    InsertionSpreadMask(P, WorkingInsertionBixNum, WorkingExpansionMask, kernel::InsertPosition::After);
     SHOW_STREAM(WorkingExpansionMask);
 
     StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
@@ -313,7 +314,8 @@ void stage2_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * WorkS
     P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, FinalInsertionBixNum, WorkSelectionMask);
     SHOW_BIXNUM(FinalInsertionBixNum);
 
-    StreamSet * SourceExpansionMask = InsertionSpreadMask(P, FinalInsertionBixNum, kernel::InsertPosition::After);
+    StreamSet * SourceExpansionMask = P.CreateStreamSet(1, 1);
+    InsertionSpreadMask(P, FinalInsertionBixNum, SourceExpansionMask, kernel::InsertPosition::After);
     SHOW_STREAM(SourceExpansionMask);
 
     StreamSet * const ExpandedWorkMask = P.CreateStreamSet(1, 1);
@@ -396,7 +398,8 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, WorkingInsertionBixNum, WorkSelectionMask);
         SHOW_BIXNUM(WorkingInsertionBixNum);
 
-        StreamSet * SourceExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+        StreamSet * SourceExpansionMask = P.CreateStreamSet(1, 1);
+        InsertionSpreadMask(P, WorkingInsertionBixNum, SourceExpansionMask, kernel::InsertPosition::After);
         SHOW_STREAM(SourceExpansionMask);
 
         StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
@@ -415,7 +418,8 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         P.CreateKernelCall<NFC_Initial_Insertion>(SelectedWorkBasis, WorkingInsertionBixNum);
         SHOW_BIXNUM(WorkingInsertionBixNum);
 
-        StreamSet * WorkingExpansionMask = InsertionSpreadMask(P, WorkingInsertionBixNum, kernel::InsertPosition::After);
+        StreamSet * WorkingExpansionMask = P.CreateStreamSet(1, 1);
+        InsertionSpreadMask(P, WorkingInsertionBixNum, WorkingExpansionMask, kernel::InsertPosition::After);
         SHOW_STREAM(WorkingExpansionMask);
 
         StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
@@ -430,7 +434,8 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, FinalInsertionBixNum, WorkSelectionMask);
         SHOW_BIXNUM(FinalInsertionBixNum);
 
-        StreamSet * SourceExpansionMask = InsertionSpreadMask(P, FinalInsertionBixNum, kernel::InsertPosition::After);
+        StreamSet * SourceExpansionMask = P.CreateStreamSet(1, 1);
+        InsertionSpreadMask(P, FinalInsertionBixNum, SourceExpansionMask, kernel::InsertPosition::After);
         SHOW_STREAM(SourceExpansionMask);
 
         StreamSet * const ExpandedWorkMask = P.CreateStreamSet(1, 1);

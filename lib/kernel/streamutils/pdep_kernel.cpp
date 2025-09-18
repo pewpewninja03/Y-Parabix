@@ -1095,12 +1095,14 @@ void UnitInsertionExtractionMasks::generateFinalBlockMethod(KernelBuilder & b, V
     RepeatDoBlockLogic(b);
 }
 #define USE_FILTER_BY_MASK_KERNEL
-StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P, StreamSet * insertion_mask, InsertPosition p,
-                                    ProcessingRateProbabilityDistribution insertionProbabilityDistribution) {
+void UnitInsertionSpreadMask(PipelineBuilder & P,
+                             StreamSet * insertion_mask,
+                             StreamSet * spread_mask,
+                             InsertPosition p,
+                             ProcessingRateProbabilityDistribution insertionProbabilityDistribution) {
     auto stream01 = P.CreateStreamSet(1);
     auto valid01 = P.CreateStreamSet(1);
     P.CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
-    auto spread_mask = P.CreateStreamSet(1);
 #ifndef USE_FILTER_BY_MASK_KERNEL
     FilterByMask(P, valid01, stream01, spread_mask, spreadCountDensity);
 #else
@@ -1109,7 +1111,6 @@ StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P, StreamSet * insertion_m
          SelectOperationList{Select(stream01, {0})},
          spread_mask, 64, insertionProbabilityDistribution);
 #endif
-    return spread_mask;
 }
 
 class UGT_Kernel final : public pablo::PabloKernel {
@@ -1170,29 +1171,31 @@ void SpreadMaskStep::generatePabloMethod() {
     }
 }
 
-StreamSet * InsertionSpreadMask(PipelineBuilder & P,
-                                StreamSet * bixNumInsertCount, InsertPosition pos,
-                                ProcessingRateProbabilityDistribution itemsPerOutputUnit,
-                                ProcessingRateProbabilityDistribution expansionRate) {
+void InsertionSpreadMask(PipelineBuilder & P,
+                         StreamSet * bixNumInsertCount,
+                         StreamSet * spread_mask,
+                         InsertPosition pos,
+                         ProcessingRateProbabilityDistribution itemsPerOutputUnit,
+                         ProcessingRateProbabilityDistribution expansionRate) {
     unsigned steps = bixNumInsertCount->getNumElements();
     if (steps == 1) {
-        return UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
+        UnitInsertionSpreadMask(P, bixNumInsertCount, spread_mask, pos, expansionRate);
+    } else {
+        /* Create a spread mask that adds one spread position for any position
+           at which there is at least one item to insert.  */
+        StreamSet * spread1_mask = P.CreateStreamSet(1);
+        UnitInsertionSpreadMask(P, bixNumInsertCount, spread1_mask, pos, expansionRate);
+        /* Spread out the counts so that there are two positions for each nonzero entry. */
+        StreamSet * spread_counts = P.CreateStreamSet(steps);
+        SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0); // , itemsPerOutputUnit);
+        /* Divide the count at each original position equally into the
+           two positions that were created by the unit spread process. */
+        StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
+        P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
+        StreamSet * submask = P.CreateStreamSet(1);
+        InsertionSpreadMask(P, reduced_counts, submask, pos, itemsPerOutputUnit, expansionRate);
+        SpreadByMask(P, submask, spread1_mask, spread_mask, false, 0); // , itemsPerOutputUnit);
     }
-    /* Create a spread mask that adds one spread position for any position
-       at which there is at least one item to insert.  */
-    StreamSet * spread1_mask = P.CreateStreamSet(1);
-    spread1_mask = UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
-    /* Spread out the counts so that there are two positions for each nonzero entry. */
-    StreamSet * spread_counts = P.CreateStreamSet(steps);
-    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0); // , itemsPerOutputUnit);
-    /* Divide the count at each original position equally into the
-       two positions that were created by the unit spread process. */
-    StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
-    P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
-    StreamSet * submask = InsertionSpreadMask(P, reduced_counts, pos, itemsPerOutputUnit, expansionRate);
-    StreamSet * finalmask = P.CreateStreamSet(1);
-    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0); // , itemsPerOutputUnit);
-    return finalmask;
 }
 
 ByteCombine::ByteCombine(LLVMTypeSystemInterface & ts,

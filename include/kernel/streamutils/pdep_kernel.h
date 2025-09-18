@@ -61,11 +61,11 @@ void MergeByMask(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet
 
 enum class InsertPosition {Before, After};
 
-StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P,
-                                    StreamSet * insertion_mask,
-                                    InsertPosition p = InsertPosition::Before,
-                                    ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
-
+void UnitInsertionSpreadMask(PipelineBuilder & P,
+                             StreamSet * insertion_mask,
+                             StreamSet * spread_mask,
+                             InsertPosition p = InsertPosition::Before,
+                             ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
 
 /*   Prepare a spread mask for inserting data into bit streams.
      At each stream position, a bixnum encodes the number of items
@@ -79,13 +79,12 @@ StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P,
      of either n 0 bits followed by a 1 bit (InsertPostion::Before)
      or a 1 bit followed by n 0 bits (InsertPosition::After).    */
 
-StreamSet * InsertionSpreadMask(PipelineBuilder & P,
-                                StreamSet * bixNumInsertCount,
-                                InsertPosition p = InsertPosition::Before,
-                                ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
-                                ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
-
-
+void InsertionSpreadMask(PipelineBuilder & P,
+                         StreamSet * bixNumInsertCount,
+                         StreamSet * spread_mask,
+                         InsertPosition p = InsertPosition::Before,
+                         ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
+                         ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
 
 class ByteCombine final : public MultiBlockKernel {
 public:

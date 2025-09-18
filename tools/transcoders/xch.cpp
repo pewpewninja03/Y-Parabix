@@ -535,7 +535,8 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
         P.CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
         SHOW_BIXNUM(AdjustedBixNum);
 
-        SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, kernel::InsertPosition::Before);
+        SpreadMask = P.CreateStreamSet(1);
+        InsertionSpreadMask(P, AdjustedBixNum, SpreadMask, kernel::InsertPosition::Before);
         SHOW_STREAM(SpreadMask);
 
         StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
