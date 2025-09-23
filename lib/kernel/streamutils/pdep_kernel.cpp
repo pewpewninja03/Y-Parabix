@@ -29,6 +29,7 @@ using namespace kernel;
 
 static cl::opt<bool> ElemSpread("ElemSpread", cl::desc("Use ElemSpreadKernel in place of byte spread by mask"), cl::init(true), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> UnalignedLoads("UnalignedLoads", cl::desc("Use unaligned loads in ElemSpread"), cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> UnitInsertionKernel("UnitInsertionKernel", cl::desc("Use UnitInsertionSpreadMaskKernel"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 namespace kernel {
 
@@ -488,9 +489,7 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const moreBlocksToDo = b.CreateICmpNE(nextBlock, numOfBlocks);
 
     Value * const maskVector = b.loadInputStreamBlock("mask", ZERO, blockNoPhi);
-    //b.CallPrintRegister("maskVector", maskVector);
     Value * const metaMask = b.CreateZExtOrTrunc(b.hsimd_signmask(maskWidth, b.simd_any(maskWidth, maskVector)), metaMaskTy);
-    //b.CallPrintInt("metaMask", metaMask);
 
     // I/O pointers for the current block
     Value * const rawMaskPtr = b.getInputStreamBlockPtr("mask", ZERO, blockNoPhi);
@@ -522,11 +521,8 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, nextNonEmptyMaskNo));
     Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, nextNonEmptyMaskNo);
 
-    //b.CallPrintInt("mask", mask);
     Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
-    //b.CallPrintInt("maskPopCount", maskPopCount);
     Value * const updatedSourceOffset = b.CreateAdd(sourceOffsetPhi, maskPopCount);
-    //b.CallPrintInt("updatedSourceOffset", updatedSourceOffset);
 
     Value * newPack = nullptr;
     Value * spreadableData = nullptr;
@@ -536,29 +532,21 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
         spreadableData = b.CreateAlignedLoad(elemVecTy, packPtr, 1);
     } else {
         Value * const pendingPackNo = b.CreateUDiv(sourceOffsetPhi, ELEMS_PER_PACK);
-        //b.CallPrintInt("pendingPackNo", pendingPackNo);
         // Elements in the pending pack may already have been processed.
         Value * const pendingElemsDone = b.CreateAnd(sourceOffsetPhi, UREM_MASK);
         // If the offset within the pack is nonzero, we have pending data elements to keep.
         Value * pendingElemsToKeep = b.CreateAnd(b.CreateSub(ELEMS_PER_PACK, pendingElemsDone), UREM_MASK);
         Value * const nextPackNo = b.CreateUDiv(updatedSourceOffset, ELEMS_PER_PACK);
-        //b.CallPrintInt("nextPackNo", nextPackNo);
         Value * const nextPackElems = b.CreateAnd(updatedSourceOffset, UREM_MASK);
-        //b.CallPrintInt("nextPackElems", nextPackElems);
         // We can only safely load a pack if our mask tells us that there are new elements to load.
         Value * const packToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), pendingPackNo, nextPackNo);
         Value * const packPtr = b.CreateGEP(elemVecTy, sourcePtr, packToLoad);
-        //b.CallPrintInt("packPtr", packPtr);
         newPack = b.CreateLoad(elemVecTy, packPtr);
-        //b.CallPrintRegister("newPack", newPack);
         spreadableData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi, pendingElemsToKeep);
     }
     
     Value * const spread = b.mvmd_expand(mElemWidth, spreadableData, mask);
-    //b.CallPrintRegister("shiftedData", shiftedData);
-    //b.CallPrintRegister("spread", spread);
     //Value * maskNo =  b.CreateAdd(b.CreateMul(blockNoPhi, b.getSize(8)), nextNonEmptyMaskNo);
-    //b.CallPrintInt("maskNo", maskNo);
 
     b.CreateStore(spread, outputPtr);
 
@@ -1094,42 +1082,101 @@ void UnitInsertionExtractionMasks::generateFinalBlockMethod(KernelBuilder & b, V
     b.setScalarField("EOFmask", b.bitblock_mask_from(remainingBytes));
     RepeatDoBlockLogic(b);
 }
+
 #define USE_FILTER_BY_MASK_KERNEL
 void UnitInsertionSpreadMask(PipelineBuilder & P,
                              StreamSet * insertion_mask,
                              StreamSet * spread_mask,
                              InsertPosition p,
                              ProcessingRateProbabilityDistribution insertionProbabilityDistribution) {
-    auto stream01 = P.CreateStreamSet(1);
-    auto valid01 = P.CreateStreamSet(1);
-    P.CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
+    if (UnitInsertionKernel) {
+        P.CreateKernelCall<UnitInsertionSpreadMaskKernel>(insertion_mask, spread_mask, p);
+    } else {
+        auto stream01 = P.CreateStreamSet(1);
+        auto valid01 = P.CreateStreamSet(1);
+        P.CreateKernelCall<UnitInsertionExtractionMasks>(insertion_mask, stream01, valid01, p);
 #ifndef USE_FILTER_BY_MASK_KERNEL
-    FilterByMask(P, valid01, stream01, spread_mask, spreadCountDensity);
+        FilterByMask(P, valid01, stream01, spread_mask, spreadCountDensity);
 #else
-    P.CreateKernelCall<FilterByMaskKernel>
-        (Select(valid01, {0}),
-         SelectOperationList{Select(stream01, {0})},
-         spread_mask, 64, insertionProbabilityDistribution);
+        P.CreateKernelCall<FilterByMaskKernel>
+            (Select(valid01, {0}),
+             SelectOperationList{Select(stream01, {0})},
+             spread_mask, 64, insertionProbabilityDistribution);
 #endif
+    }
 }
 
-class UGT_Kernel final : public pablo::PabloKernel {
-public:
-    UGT_Kernel(LLVMTypeSystemInterface & ts, StreamSet * bixnum, unsigned immediate, StreamSet * result) :
-    pablo::PabloKernel(ts, "ugt_" + std::to_string(immediate) + "_" + std::to_string(bixnum->getNumElements()),
-                {Binding{"bixnum", bixnum}}, {Binding{"result", result}}), mTestVal(immediate) {}
-protected:
-    void generatePabloMethod() override;
-private:
-    const unsigned mTestVal;
-};
+UnitInsertionSpreadMaskKernel::UnitInsertionSpreadMaskKernel(LLVMTypeSystemInterface & ts,
+                                 StreamSet * insertion_mask, StreamSet * spread_mask, InsertPosition p)
+    : BlockOrientedKernel(ts, "UnitInsertionSpreadMaskKernel" + InsertString(insertion_mask, p),
+        {Binding{"insertion_mask", insertion_mask}},
+        {Binding{"spread_mask", spread_mask, BoundedRate(1, 2), EmptyWriteOverflow()}},
+        {}, {},
+        {InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"}}),
+    mInsertPos(p) {}
 
-void UGT_Kernel::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    pablo::BixNumCompiler bnc(pb);
-    pablo::BixNum bixnum = getInputStreamSet("bixnum");
-    pablo::Var * output = getOutputStreamVar("result");
-    pb.createAssign(pb.createExtract(output, 0), bnc.UGT(bixnum, mTestVal));
+void UnitInsertionSpreadMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
+    const unsigned packs_per_block = b.getBitBlockWidth()/pack_width;
+    Type * packTy = b.getIntNTy(pack_width);
+    Type * packPtrTy = packTy->getPointerTo();
+    Type * sizeTy = b.getSizeTy();
+    Constant * pONE = b.getIntN(pack_width, 1);
+    Constant * PACK_BITS = b.getSize(pack_width);
+    Value * fileExtentMask = b.CreateNot(b.getScalarField("EOFmask"));
+    Value * insertion_mask = b.loadInputStreamBlock("insertion_mask", b.getSize(0), b.getSize(0));
+    const auto n = b.getInputStreamSet("insertion_mask")->getNumElements();
+    for (unsigned i = 1; i < n; i++) {
+        insertion_mask = b.CreateOr(insertion_mask, b.loadInputStreamBlock("insertion_mask", b.getSize(i), b.getSize(0)));
+    }
+    Value * produced = b.getProducedItemCount("spread_mask");
+    Value * offset = b.CreateURem(produced, PACK_BITS);
+    Value * produced_base = b.CreateSub(produced, offset);
+    Value * spread_mask_pack_ptr = b.getRawOutputPointer("spread_mask", produced_base);
+    spread_mask_pack_ptr = b.CreatePointerCast(spread_mask_pack_ptr, packPtrTy);
+    Value * initial_pending = b.CreateLoad(packTy, spread_mask_pack_ptr);
+    Value * pending_bit_mask = b.CreateSub(b.CreateShl(pONE, b.CreateZExtOrTrunc(offset, packTy)), pONE);
+    Value * pending = b.CreateAnd(initial_pending, pending_bit_mask);
+
+    Constant * mask01 = nullptr;
+    Value * extract_mask[2];
+    if (mInsertPos == InsertPosition::Before) {
+        mask01 = b.simd_himask(2);
+        extract_mask[0] = b.esimd_mergel(1, insertion_mask, fileExtentMask);
+        extract_mask[1] = b.esimd_mergeh(1, insertion_mask, fileExtentMask);
+    } else {
+        mask01 = b.simd_lomask(2);
+        extract_mask[0] = b.esimd_mergel(1, fileExtentMask, insertion_mask);
+        extract_mask[1] = b.esimd_mergeh(1, fileExtentMask, insertion_mask);
+    }
+    for (unsigned blk = 0; blk < 2; blk++) {
+        extract_mask[blk] = b.fwCast(pack_width, extract_mask[blk]);
+        Value * extracted = b.simd_pext(pack_width, mask01, extract_mask[blk]);
+        for (unsigned i = 0; i < packs_per_block; i++) {
+            Value * pack_mask = b.CreateExtractElement(extract_mask[blk], i);
+            Value * newbits = b.CreatePopcount(pack_mask);
+            Value * spread_pack = b.CreateExtractElement(extracted, i);
+            pending = b.CreateOr(pending, b.CreateShl(spread_pack, offset));
+            // We may have filled the pack; write it out in case we move on.
+            b.CreateStore(pending, spread_mask_pack_ptr);
+            Value * Rshift = b.CreateURem(b.CreateSub(PACK_BITS, offset), PACK_BITS);
+            Value * pack_overflow = b.CreateLShr(spread_pack, Rshift);
+            offset = b.CreateAdd(offset, newbits);
+            produced = b.CreateAdd(produced, newbits);
+            Value * pack_filled = b.CreateICmpUGE(offset, PACK_BITS);
+            pending = b.CreateSelect(pack_filled, pack_overflow, pending);
+            spread_mask_pack_ptr = b.CreateGEP(packPtrTy, spread_mask_pack_ptr, b.CreateZExt(pack_filled, sizeTy));
+            offset = b.CreateURem(produced, PACK_BITS);
+        }
+    }
+    b.CreateStore(pending, spread_mask_pack_ptr);
+    b.setProducedItemCount("spread_mask", produced);
+}
+
+void UnitInsertionSpreadMaskKernel::generateFinalBlockMethod(KernelBuilder & b, Value * const remainingBytes) {
+    // Standard Pablo convention for final block processing: set a bit marking
+    // the position just past EOF, as well as a mask marking all positions past EOF.
+    b.setScalarField("EOFmask", b.bitblock_mask_from(remainingBytes));
+    RepeatDoBlockLogic(b);
 }
 
 class SpreadMaskStep final : public pablo::PabloKernel {

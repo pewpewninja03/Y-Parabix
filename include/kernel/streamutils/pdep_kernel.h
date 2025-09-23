@@ -86,6 +86,18 @@ void InsertionSpreadMask(PipelineBuilder & P,
                          ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
                          ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
 
+class UnitInsertionSpreadMaskKernel final : public BlockOrientedKernel {
+public:
+    UnitInsertionSpreadMaskKernel(LLVMTypeSystemInterface & ts,
+                                 StreamSet * insertion_mask, StreamSet * spread_mask, InsertPosition p = InsertPosition::Before);
+protected:
+    const unsigned pack_width = 64;
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * const remainingBytes) override;
+private:
+    const InsertPosition mInsertPos;
+};
+
 class ByteCombine final : public MultiBlockKernel {
 public:
     ByteCombine(LLVMTypeSystemInterface & ts,
