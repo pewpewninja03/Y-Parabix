@@ -17,6 +17,7 @@
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/integer/common_factor_rt.hpp>
 #include <llvm/Analysis/ConstantFolding.h>
+#include <llvm/IR/GlobalVariable.h>
 
 #include <array>
 #ifndef _GNU_SOURCE
@@ -107,6 +108,8 @@ uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
         }
     }
     close(memfd);
+    llvm::errs() << StringRef{"NEW CIRCULAR BUFFER "}; llvm::errs().write_hex((uintptr_t)base) << " -> ";
+    llvm::errs().write_hex(((uintptr_t)base) + size) << '\n';
     return base + (hasUnderflow * size);
 }
 
@@ -117,6 +120,8 @@ void destroy_circular_buffer(uint8_t * base, const size_t size, const size_t has
     const size_t n = hasUnderflow ? 1 : 0;
     const size_t m = n + 2;
     const auto ptr = base - (n * size);
+    llvm::errs() << StringRef{"DELETE CIRCULAR BUFFER "}; llvm::errs().write_hex((uintptr_t)ptr) << " -> ";
+    llvm::errs().write_hex(((uintptr_t)base) + m * size) << '\n';
     munmap(ptr, m * size);
 
 }
@@ -457,7 +462,7 @@ Value * InternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * cons
             b.CreateAssert(valid, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
                             consumedItems, producedItems);
         }
-        Value * const unconsumedItems = b.CreateSub(b.CreateRoundUpRational(producedItems, b.getBitBlockWidth()), b.CreateRoundDownRational(consumedItems, b.getBitBlockWidth()));
+        Value * const unconsumedItems = b.CreateSub(producedItems, consumedItems);
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
             Value * const valid = b.CreateICmpULE(unconsumedItems, capacity);
             b.CreateAssert(valid, "unconsumed item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
@@ -996,6 +1001,8 @@ Value * DynamicBuffer::reserveCapacity(KernelBuilder & b, Value * const produced
 
         setHandle(handle);
 
+        b.CallPrintInt(name.str(), handle);
+
         const auto blockWidth = b.getBitBlockWidth();
         assert (is_pow2(blockWidth));
         const auto blockSize = blockWidth / 8;
@@ -1159,29 +1166,27 @@ Value * DynamicBuffer::reserveCapacity(KernelBuilder & b, Value * const produced
 
 StructType * ManagedDynamicBuffer::getHandleType(KernelBuilder & b) const {
     if (mHandleType == nullptr) {
-
-        PointerType * const typePtr = getPointerType();
         auto & C = b.getContext();
-        auto & DL = b.getModule()->getDataLayout();
-        IntegerType * const intPtrTy = DL.getIntPtrType(C);
-        const auto intSize = intPtrTy->getBitWidth();
-        assert (b.getTypeSize(DL, typePtr) * 8 == intSize);
-        assert ((b.getBitBlockWidth() % intSize) == 0);
-        if (LLVM_LIKELY(b.getBitBlockWidth() >= (2 * intSize))) {
-            VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-            FixedArray<Type *, 2> types;
-            types[0] = vecTy;
-            if (mLinear) {
-                types[1] = vecTy;
-            } else {
-                types[1] = StructType::get(C);
-            }
-            mHandleType = StructType::get(C, types);
-            assert (mHandleType);
+        IntegerType * const sizeTy = b.getSizeTy();
+        PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
+        StructType * const emptTy = StructType::get(C);
+        FixedArray<Type *, 7> fields;
+        fields[LinearMallocedAddress] = addrPtrTy;
+        fields[LinearInternalCapacity] = sizeTy;
+        if (mLinear) {
+            fields[SecondLinearMallocedAddress] = emptTy;
+            fields[SecondLinearInternalCapacity] = emptTy;
+            fields[LinearSelector] = emptTy;
+            fields[LinearBaseAddress] = addrPtrTy;
+            fields[LinearEffectiveCapacity] = sizeTy;
         } else {
-            // TODO: need to use the alternate double pointer flipping technique if we cannot safely SIMD write two int values
-            report_fatal_error("Invalid ManagedDynamicBuffer handle type");
+            fields[SecondLinearMallocedAddress] = addrPtrTy;
+            fields[SecondLinearInternalCapacity] = sizeTy;
+            fields[LinearSelector] = sizeTy;
+            fields[LinearBaseAddress] = emptTy;
+            fields[LinearEffectiveCapacity] = emptTy;
         }
+        mHandleType = StructType::get(C, fields);
     }
     return mHandleType;
 }
@@ -1230,8 +1235,11 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
         auto & DL = m->getDataLayout();
 
-
+        PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
         IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+
+        const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
+        const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
 
         FixedArray<Type *, 2> paramTypes;
         paramTypes[0] = handlePtrTy;
@@ -1273,38 +1281,24 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         capacity->setName("capacity");
         assert (arg == f->arg_end());
 
-        VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-        const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
-        Constant * undefVec = UndefValue::get(vecTy);
-
-        ConstantInt * i32_ZERO = b.getInt32(0);
-        ConstantInt * i32_ONE = b.getInt32(1);
-
-        auto writeIntPtrStructVector = [&](Value * ptrVal, Value * intVal, Value * writePtr) {
-            assert (intVal->getType() == intPtrTy);
-            assert (b.getTypeSize(DL, intPtrTy) == b.getTypeSize(DL, ptrVal->getType()));
-            ptrVal = b.CreatePtrToInt(ptrVal, intPtrTy);
-            Value * vecVal = b.CreateInsertElement(undefVec,  ptrVal, i32_ZERO);
-            vecVal = b.CreateInsertElement(vecVal,  intVal, i32_ONE);
-            b.CreateAlignedStore(vecVal, writePtr, vecTyAlign);
-        };
-
 
         FixedArray<Value *, 2> indices;
-        indices[0] = i32_ZERO;
+        indices[0] = b.getInt32(0);
 
+        Constant * nullVoidPtr = ConstantPointerNull::get(addrPtrTy);
+
+        Value * baseAddressField = nullptr;
         if (mLinear) {
 
             allocBuffers = BasicBlock::Create(C, "allocBuffers", f);
             exit = BasicBlock::Create(C, "exit", f);
-            indices[1] = i32_ONE;
+            indices[1] = b.getInt32(LinearBaseAddress);
 
-            Value * baseAddressVecField = b.CreateInBoundsGEP(handleTy, handle, indices);
-            Value * baseAddrVec = b.CreateAlignedLoad(vecTy, baseAddressVecField, vecTyAlign);
-            Value * currentAddr = b.CreateExtractElement(baseAddrVec, b.getInt32(LinearBaseAddress));
+            baseAddressField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            Value * currentAddr = b.CreateAlignedLoad(addrPtrTy, baseAddressField, voidPtrTyAlign);
             // If the user has filled in a base address in the init function, assume they're handling all
             // memory management.
-            b.CreateCondBr(b.CreateICmpEQ(currentAddr, ConstantInt::getNullValue(intPtrTy)), allocBuffers, exit);
+            b.CreateCondBr(b.CreateICmpEQ(currentAddr, nullVoidPtr), allocBuffers, exit);
 
             b.SetInsertPoint(allocBuffers);
         }
@@ -1318,24 +1312,48 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         capacity = b.CreateRoundUpRational(capacity, stridesPerPage.numerator());
         Value * capacityBytes = b.CreateMul(ConstantInt::get(intPtrTy, typeSize), capacity);
 
+        ConstantInt * const sz_ZERO = b.getSize(0);
+
         FixedArray<Value *, 2> makeArgs;
         makeArgs[0] = capacityBytes;
-        makeArgs[1] = b.getSize(0);
+        makeArgs[1] = sz_ZERO;
         Function * makeBuffer = m->getFunction(__MAKE_CIRCULAR_BUFFER); assert (makeBuffer);
         Value * baseAddress = b.CreateCall(makeBuffer, makeArgs);
 
-        indices[1] = i32_ZERO;
+        indices[1] = b.getInt32(LinearMallocedAddress);
+        Value * mallocAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        b.CreateAlignedStore(baseAddress, mallocAddrField, voidPtrTyAlign);
 
-        writeIntPtrStructVector(baseAddress, capacity, b.CreateInBoundsGEP(handleTy, handle, indices));
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        Value * capacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        b.CreateAlignedStore(capacity, capacityField, intPtrTyAlign);
 
         if (mLinear) {
 
-            indices[1] = i32_ONE;
+            b.CreateAlignedStore(baseAddress, baseAddressField, voidPtrTyAlign);
 
-            writeIntPtrStructVector(baseAddress, capacity, b.CreateInBoundsGEP(handleTy, handle, indices));
+            indices[1] = b.getInt32(LinearEffectiveCapacity);
+            Value * effCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            b.CreateAlignedStore(capacity, effCapacityField, intPtrTyAlign);
+
             b.CreateBr(exit);
 
             b.SetInsertPoint(exit);
+
+        } else {
+
+            indices[1] = b.getInt32(SecondLinearMallocedAddress);
+            Value * toWriteSecondAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            b.CreateAlignedStore(baseAddress, toWriteSecondAddrField, voidPtrTyAlign);
+
+            indices[1] = b.getInt32(SecondLinearInternalCapacity);
+            Value * toWriteSecondCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            b.CreateAlignedStore(capacity, toWriteSecondCapacityField, intPtrTyAlign);
+
+            indices[1] = b.getInt32(LinearSelector);
+            Value * linearSelectorField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            b.CreateAlignedStore(sz_ZERO, linearSelectorField, intPtrTyAlign);
+
         }
         b.CreateRetVoid();
 
@@ -1350,79 +1368,192 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
 void ManagedDynamicBuffer::releaseBuffer(KernelBuilder & b) const {
     /* Free the dynamically allocated buffer(s). */
+
+    StructType * handleTy = getHandleType(b);
+
+    Module * m = b.getModule();
+
+    auto & DL = m->getDataLayout();
+
+    PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+
+    const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
+    const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+
     Value * const handle = getHandle();
     FixedArray<Value *, 2> indices;
-    ConstantInt * i32_ZERO = b.getInt32(0);
-    indices[0] = i32_ZERO;
-    indices[1] = i32_ZERO;
-    PointerType * const typePtr = getPointerType();
-    auto & C = b.getContext();
-    auto & DL = b.getModule()->getDataLayout();
-    IntegerType * const intPtrTy = DL.getIntPtrType(C);
-    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
-    Value * const mallocFieldPtr = b.CreateInBoundsGEP(mHandleType, handle, indices);
-    Value * const mallocField = b.CreateAlignedLoad(vecTy, mallocFieldPtr, vecTyAlign);
-    Value * const baseAddress = b.CreateExtractElement(mallocField, i32_ZERO);
-    Value * const capacity = b.CreateExtractElement(mallocField, b.getInt32(1));
-    destroyBuffer(b, b.CreateIntToPtr(baseAddress, b.getInt8PtrTy()), capacity);
-    b.CreateAlignedStore(ConstantVector::getNullValue(vecTy), mallocFieldPtr, vecTyAlign);
+    indices[0] = b.getInt32(0);
+
+    Value * addrField = nullptr;
+    Value * capacityField = nullptr;
+
+    if (mLinear) {
+        indices[1] = b.getInt32(LinearMallocedAddress);
+        addrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        capacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+
+    } else {
+
+        indices[1] = b.getInt32(LinearSelector);
+        Value * linearSelectorField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        Value * const selector = b.CreateAlignedLoad(intPtrTy, linearSelectorField, intPtrTyAlign);
+        Value * const bSelector = b.CreateICmpEQ(selector, b.getSize(0));
+
+        indices[1] = b.getInt32(LinearMallocedAddress);
+        Value * primaryAddr = b.CreateInBoundsGEP(handleTy, handle, indices);
+        indices[1] = b.getInt32(SecondLinearMallocedAddress);
+        Value * secondaryAddr = b.CreateInBoundsGEP(handleTy, handle, indices);
+
+
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        Value * primaryCap = b.CreateInBoundsGEP(handleTy, handle, indices);
+        indices[1] = b.getInt32(SecondLinearInternalCapacity);
+        Value * secondaryCap = b.CreateInBoundsGEP(handleTy, handle, indices);
+
+
+        addrField = b.CreateSelect(bSelector, primaryAddr, secondaryAddr);
+
+        capacityField = b.CreateSelect(bSelector, primaryCap, secondaryCap);
+    }
+
+    Value * addr = b.CreateAlignedLoad(addrPtrTy, addrField, voidPtrTyAlign);
+    Value * capacity = b.CreateAlignedLoad(intPtrTy, capacityField, intPtrTyAlign);
+
+    destroyBuffer(b, addr, capacity);
+
+    b.CreateAlignedStore(ConstantPointerNull::get(addrPtrTy), addrField, voidPtrTyAlign);
 }
 
 
 void ManagedDynamicBuffer::destroyBuffer(KernelBuilder & b, Value * baseAddress, Value * capacity) const {
     FixedArray<Value *, 3> destroyArgs;
     destroyArgs[0] = b.CreatePointerCast(baseAddress, b.getInt8PtrTy());
+    b.CallPrintInt("destroyBuffer::capacity", capacity);
     destroyArgs[1] = b.CreateMul(b.getTypeSize(mType), capacity);
+    b.CallPrintInt("destroyBuffer::size", destroyArgs[1]);
     destroyArgs[2] = b.getSize(0);
     b.CreateCall(b.getModule()->getFunction(__DESTROY_CIRCULAR_BUFFER), destroyArgs);
 }
 
-inline Value * ManagedDynamicBuffer::loadSharedValueFromStruct(KernelBuilder & b, const unsigned i, const unsigned j) const {
+Value * ManagedDynamicBuffer::getBaseAddress(KernelBuilder & b) const {
+    assert (mHandle && "has not been set prior to calling setBaseAddress");
     auto & DL = b.getModule()->getDataLayout();
     IntegerType * const intPtrTy = b.getIntPtrTy(DL);
-    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
+    const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+    PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
+    const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(i);
-    Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
-    Value * vec = b.CreateAlignedLoad(vecTy, ptr, vecTyAlign);
-    return b.CreateExtractElement(vec, b.getInt32(j));
-}
-
-Value * ManagedDynamicBuffer::getBaseAddress(KernelBuilder & b) const {
-    return b.CreateIntToPtr(loadSharedValueFromStruct(b, mLinear ? 1 : 0, 0), getPointerType());
+    Value * field = nullptr;
+    if (mLinear) {
+        indices[1] = b.getInt32(LinearBaseAddress);
+        field = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    } else {
+        indices[1] = b.getInt32(LinearSelector);
+        Value * selectorField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        Value * selector = b.CreateAlignedLoad(intPtrTy, selectorField, intPtrTyAlign);
+        indices[1] = b.getInt32(LinearMallocedAddress);
+        Value * primaryAddr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        indices[1] = b.getInt32(SecondLinearMallocedAddress);
+        Value * secondaryAddr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        field = b.CreateSelect(b.CreateICmpEQ(selector, b.getSize(0)), primaryAddr, secondaryAddr);
+    }
+    return b.CreateAlignedLoad(addrPtrTy, field, voidPtrTyAlign);
 }
 
 Value * ManagedDynamicBuffer::getMallocAddress(KernelBuilder & b) const {
-return b.CreateIntToPtr(loadSharedValueFromStruct(b, 0, 0), getPointerType());
+    assert (mHandle && "has not been set prior to calling setBaseAddress");
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+    const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+    PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
+    const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
+    FixedArray<Value *, 2> indices;
+    indices[0] = b.getInt32(0);
+    Value * field = nullptr;
+    if (mLinear) {
+        indices[1] = b.getInt32(LinearMallocedAddress);
+        field = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    } else {
+        indices[1] = b.getInt32(LinearSelector);
+        Value * selectorField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        Value * selector = b.CreateAlignedLoad(intPtrTy, selectorField, intPtrTyAlign);
+        indices[1] = b.getInt32(LinearMallocedAddress);
+        Value * primaryAddr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        indices[1] = b.getInt32(SecondLinearMallocedAddress);
+        Value * secondaryAddr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        field = b.CreateSelect(b.CreateICmpEQ(selector, b.getSize(0)), primaryAddr, secondaryAddr);
+    }
+    return b.CreateAlignedLoad(addrPtrTy, field, voidPtrTyAlign);
 }
 
 Value * ManagedDynamicBuffer::getCapacity(KernelBuilder & b) const {
+    assert (mHandle && "has not been set prior to calling setBaseAddress");
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+    const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+    FixedArray<Value *, 2> indices;
+    indices[0] = b.getInt32(0);
+    Value * capField = nullptr;
+    if (mLinear) {
+        indices[1] = b.getInt32(LinearEffectiveCapacity);
+        capField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    } else {
+        indices[1] = b.getInt32(LinearSelector);
+        Value * selectorField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        Value * selector = b.CreateAlignedLoad(intPtrTy, selectorField, intPtrTyAlign);
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        Value * primaryCapField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        indices[1] = b.getInt32(SecondLinearInternalCapacity);
+        Value * secondaryCapField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        capField = b.CreateSelect(b.CreateICmpEQ(selector, b.getSize(0)), primaryCapField, secondaryCapField);
+    }
+    Value * cap = b.CreateAlignedLoad(intPtrTy, capField, intPtrTyAlign);
     ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
-    return b.CreateMul(BLOCK_WIDTH, loadSharedValueFromStruct(b, mLinear ? 1 : 0, 1));
+    return b.CreateMul(BLOCK_WIDTH, cap);
 }
 
 Value * ManagedDynamicBuffer::getInternalCapacity(KernelBuilder & b) const {
+    assert (mHandle && "has not been set prior to calling setBaseAddress");
+    auto & DL = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+    const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+    FixedArray<Value *, 2> indices;
+    indices[0] = b.getInt32(0);
+    Value * capField = nullptr;
+    if (mLinear) {
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        capField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+    } else {
+        indices[1] = b.getInt32(LinearSelector);
+        Value * selectorField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        Value * selector = b.CreateAlignedLoad(intPtrTy, selectorField, intPtrTyAlign);
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        Value * primaryCapField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        indices[1] = b.getInt32(SecondLinearInternalCapacity);
+        Value * secondaryCapField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        capField = b.CreateSelect(b.CreateICmpEQ(selector, b.getSize(0)), primaryCapField, secondaryCapField);
+    }
+    Value * cap = b.CreateAlignedLoad(intPtrTy, capField, intPtrTyAlign);
     ConstantInt * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
-    return b.CreateMul(BLOCK_WIDTH, loadSharedValueFromStruct(b, 0, 1));
+    return b.CreateMul(BLOCK_WIDTH, cap);
 }
 
 void ManagedDynamicBuffer::setBaseAddress(KernelBuilder & b, Value * const addr) const {
     assert (mLinear);
     assert (mHandle && "has not been set prior to calling setBaseAddress");
     auto & DL = b.getModule()->getDataLayout();
-    IntegerType * const intPtrTy = b.getIntPtrTy(DL);
-    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
+
+    PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
+    const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(1);
+    indices[1] = b.getInt32(LinearBaseAddress);
     Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
-    Value * vec = b.CreateAlignedLoad(vecTy, ptr, vecTyAlign);
-    vec = b.CreateInsertElement(vec, b.CreatePtrToInt(addr, intPtrTy), b.getInt32(0));
-    b.CreateAlignedStore(vec, ptr, vecTyAlign);
+    b.CreateAlignedStore(addr, ptr, voidPtrTyAlign);
 }
 
 void ManagedDynamicBuffer::setCapacity(KernelBuilder & b, Value * const capacity) const {
@@ -1430,15 +1561,12 @@ void ManagedDynamicBuffer::setCapacity(KernelBuilder & b, Value * const capacity
     assert (mHandle && "has not been set prior to calling setCapacity");
     auto & DL = b.getModule()->getDataLayout();
     IntegerType * const intPtrTy = b.getIntPtrTy(DL);
-    VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-    const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
+    const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(1);
+    indices[1] = b.getInt32(LinearEffectiveCapacity);
     Value * ptr = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
-    Value * vec = b.CreateAlignedLoad(vecTy, ptr, vecTyAlign);
-    vec = b.CreateInsertElement(vec, capacity, b.getInt32(1));
-    b.CreateAlignedStore(vec, ptr, vecTyAlign);
+    b.CreateAlignedStore(capacity, ptr, intPtrTyAlign);
 }
 
 Value * ManagedDynamicBuffer::modByCapacity(KernelBuilder & b, Value * const offset) const {
@@ -1446,8 +1574,22 @@ Value * ManagedDynamicBuffer::modByCapacity(KernelBuilder & b, Value * const off
     if (mLinear) {
         return offset;
     } else {
-        assert (getHandle());
-        return b.CreateURem(offset, loadSharedValueFromStruct(b, 0, 1));
+        assert (mHandle && "has not been set prior to calling setBaseAddress");
+        auto & DL = b.getModule()->getDataLayout();
+        IntegerType * const intPtrTy = b.getIntPtrTy(DL);
+        const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+        FixedArray<Value *, 2> indices;
+        indices[0] = b.getInt32(0);
+        indices[1] = b.getInt32(LinearSelector);
+        Value * selectorField = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        Value * selector = b.CreateAlignedLoad(intPtrTy, selectorField, intPtrTyAlign);
+        indices[1] = b.getInt32(LinearInternalCapacity);
+        Value * primaryCap = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        indices[1] = b.getInt32(SecondLinearInternalCapacity);
+        Value * secondaryCap = b.CreateInBoundsGEP(mHandleType, getHandle(), indices);
+        Value * field = field = b.CreateSelect(b.CreateICmpEQ(selector, b.getSize(0)), primaryCap, secondaryCap);
+        Value * cap = b.CreateAlignedLoad(intPtrTy, field, intPtrTyAlign);
+        return b.CreateURem(offset, cap);
     }
 }
 
@@ -1461,10 +1603,10 @@ void ManagedDynamicBuffer::linearCopyBack(KernelBuilder & b, Value * produced, V
 
 StructType * ManagedDynamicBuffer::getInternalThreadLocalHandleType(KernelBuilder & b) {
     FixedArray<Type *, 3> fields;
-    PointerType * const voidPtrTy = b.getVoidPtrTy();
-    fields[PriorAddress] = voidPtrTy;
+    PointerType * const addrPtrTy = b.getInt8PtrTy();
+    fields[PriorAddress] = addrPtrTy;
     fields[PriorCapacity] = b.getSizeTy();
-    fields[NewAddress] = voidPtrTy;
+    fields[NewAddress] = addrPtrTy;
     return StructType::get(b.getContext(), fields);
 }
 
@@ -1475,10 +1617,10 @@ void ManagedDynamicBuffer::freePendingDeletion(KernelBuilder & b, Value * thread
     StructType * const threadLocalTy = getInternalThreadLocalHandleType(b);
     Value * addrPtr = b.CreateGEP(threadLocalTy, threadLocalHandle, indices);
     auto & dl = b.getModule()->getDataLayout();
-    PointerType * const voidPtrTy = b.getVoidPtrTy();
+    PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
     IntegerType * const sizeTy = b.getSizeTy();
     FixedArray<Value *, 3> destroyArgs;
-    destroyArgs[0] = b.CreateAlignedLoad(voidPtrTy, addrPtr, dl.getABITypeAlign(voidPtrTy).value());
+    destroyArgs[0] = b.CreateAlignedLoad(addrPtrTy, addrPtr, dl.getABITypeAlign(addrPtrTy).value());
     indices[1] = b.getInt32(PriorCapacity);
     Value * ptr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
     Value * capacity = b.CreateAlignedLoad(sizeTy, ptr, dl.getABITypeAlign(sizeTy).value());
@@ -1486,6 +1628,13 @@ void ManagedDynamicBuffer::freePendingDeletion(KernelBuilder & b, Value * thread
 }
 
 Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+
+    // TODO: if we keep the buffer fd, manual indicates we can resize it by calling ftruncate again. How would this
+    // affect users of the buffer prior to setting the new addr/capacity? The mmap'ed buffer pointing to the fds
+    // have a set size that may mean its a non-issue as long as ftruncating the buffer doesn't invalidate them.
+
+    Module * const m = b.getModule();
+    auto & DL = m->getDataLayout();
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -1496,21 +1645,18 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
     if (mLinear) {
         name << "Linear";
     }
-    name << "_reserve_capacity";
+    name << "_reserve_capacity" << mAddressSpace;
 
-    Type * ty = getBaseType();
-    const auto streamCount = ty->getArrayNumElements();
-    name << streamCount << 'x';
-    ty = ty->getArrayElementType();
-    ty = cast<FixedVectorType>(ty)->getElementType();
-    const auto itemWidth = ty->getIntegerBitWidth();
-    name << itemWidth << '@' << mAddressSpace;
-
-    Module * const m = b.getModule();
+    PointerType * const voidPtrTy = b.getVoidPtrTy();
+    const auto blockWidth = b.getBitBlockWidth();
 
     Function * f = m->getFunction(name.str());
 
+    ConstantInt * const sz_ONE = b.getSize(1);
+
     if (f == nullptr) {
+
+        const auto ip = b.saveIP();
 
         StructType * const handleTy = getHandleType(b);
         PointerType * const handlePtrTy = handleTy->getPointerTo(mAddressSpace);
@@ -1518,39 +1664,29 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         StructType * const threadLocalTy = getThreadLocalHandleType(b);
         PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo(mAddressSpace);
 
-        auto & DL = m->getDataLayout();
         PointerType * const addrPtrTy = mType->getPointerTo(mAddressSpace);
-        Constant * const nullAddrPtr = ConstantPointerNull::get(addrPtrTy);
-        const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
+
+        PointerType * const i8PtrTy = b.getInt8PtrTy();
+        Constant * const nullAddrPtr = ConstantPointerNull::get(i8PtrTy);
+        const auto voidPtrTyAlign = DL.getABITypeAlign(i8PtrTy).value();
 
         auto & C = b.getContext();
         IntegerType * const intPtrTy = DL.getIntPtrType(C);
-
         const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
 
-        VectorType * vecTy = VectorType::get(intPtrTy, 2, false);
-        const auto vecTyAlign = DL.getABITypeAlign(vecTy).value();
-        Constant * undefVec = UndefValue::get(vecTy);
+        constexpr auto DUFF_STEPS = 8;
 
-        auto writeIntPtrStructVector = [&](Value * ptrVal, Value * intVal, Value * writePtr) {
-            assert (intVal->getType() == intPtrTy);
-            assert (b.getTypeSize(DL, intPtrTy) == b.getTypeSize(DL, ptrVal->getType()));
-            ptrVal = b.CreatePtrToInt(ptrVal, intPtrTy);
-            Value * vecVal = b.CreateInsertElement(undefVec,  ptrVal, b.getInt32(0));
-            vecVal = b.CreateInsertElement(vecVal,  intVal, b.getInt32(1));
-            b.CreateAlignedStore(vecVal, writePtr, vecTyAlign);
-        };
-
-        FixedArray<Type *, 5> paramTypes;
-        paramTypes[0] = handlePtrTy;
-        paramTypes[1] = threadLocalPtrTy; // thread local struct ptr
+        FixedArray<Type *, 6> paramTypes;
+        paramTypes[0] = voidPtrTy; // shared struct ptr
+        paramTypes[1] = voidPtrTy; // thread local struct ptr
         paramTypes[2] = intPtrTy;
         paramTypes[3] = intPtrTy;
         paramTypes[4] = intPtrTy;
+        paramTypes[5] = intPtrTy;
 
-        FunctionType * funcTy = FunctionType::get(intPtrTy, paramTypes, false);
+        Type * const retValTy = mLinear ? (Type*)intPtrTy : b.getVoidTy();
 
-        const auto ip = b.saveIP();
+        FunctionType * funcTy = FunctionType::get(retValTy, paramTypes, false);
 
         f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -1559,14 +1695,19 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
             #else
             f->setUWTableKind(UWTableKind::Default);
             #endif
-        } else {
-            f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
         }
 
         BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
-        BasicBlock * const checkPendingDeletion = BasicBlock::Create(C, "checkPendingDeletion", f);
-        BasicBlock * const freeExistingBuffer = BasicBlock::Create(C, "freeExistingBuffer", f);
         BasicBlock * const expandInternalBuffer = BasicBlock::Create(C, "expandAndCopyBack", f);
+        BasicBlock * const copyEntry = BasicBlock::Create(C, "copyEntry", f);
+        FixedArray<BasicBlock *, DUFF_STEPS> copyLoopEntryPoint;
+        if (LLVM_LIKELY(b.supportsIndirectBr())) {
+            for (unsigned i = 0; i < DUFF_STEPS; ++i) {
+                copyLoopEntryPoint[i] = BasicBlock::Create(C, "copyLoopEntryPoint", f);
+            }
+        }
+        BasicBlock * const copyExit = BasicBlock::Create(C, "copyExit", f);
+        BasicBlock * const freeExistingBuffer = BasicBlock::Create(C, "freeExistingBuffer", f);
         BasicBlock * const afterExpandInternalBuffer = BasicBlock::Create(C, "afterCopyBackOrExpand", f);
         BasicBlock * const exit = BasicBlock::Create(C, "exit", f);
 
@@ -1580,9 +1721,9 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
             return v;
         };
 
-        Value * const handle = nextArg();
+        Value * const handle = b.CreatePointerCast(nextArg(), handlePtrTy);
         handle->setName("handle");
-        Value * const threadLocalHandle = nextArg();
+        Value * const threadLocalHandle = b.CreatePointerCast(nextArg(), threadLocalPtrTy);
         threadLocalHandle->setName("threadLocalHandle");
         Value * const produced = nextArg();
         produced->setName("produced");
@@ -1590,161 +1731,304 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         consumed->setName("consumed");
         Value * const required = nextArg();
         required->setName("required");
+        Value * const blocksPerChunk = nextArg();
+        blocksPerChunk->setName("blocksPerChunk");
         assert (arg == f->arg_end());
 
-        const auto blockWidth = b.getBitBlockWidth();
+        b.CallPrintInt(name.str(), handle);
 
         ConstantInt * const BLOCK_WIDTH = b.getSize(blockWidth);
+        ConstantInt * const sz_ZERO = b.getSize(0);
+
 
         Value * const consumedChunks = b.CreateUDiv(consumed, BLOCK_WIDTH);
-        Value * const producedChunks = b.CreateCeilUDiv(produced, BLOCK_WIDTH);
-        Value * const requiredChunks = b.CreateAdd(producedChunks, b.CreateUDiv(required, BLOCK_WIDTH));
-
-        ConstantInt * const i32_ZERO = b.getInt32(0);
-        ConstantInt * const i32_ONE = b.getInt32(1);
+        Value * const requiredChunks = b.CreateCeilUDiv(b.CreateAdd(produced, required), BLOCK_WIDTH);
 
         FixedArray<Value *, 2> indices;
-        indices[0] = i32_ZERO;
-        indices[1] = i32_ZERO;
-        Value * const currentAddressPtr = b.CreateInBoundsGEP(handleTy, handle, indices);
-        Value * const vectorVal = b.CreateAlignedLoad(vecTy, currentAddressPtr, vecTyAlign);
-        Value * const initialAddr = b.CreateExtractElement(vectorVal, i32_ZERO);
-        Value * const initialCapacity = b.CreateExtractElement(vectorVal, i32_ONE);
-        Value * const pendingChunks = b.CreateSub(requiredChunks, consumedChunks);
-        Value * const permitted = b.CreateICmpULT(pendingChunks, initialCapacity);
-        Value * const currentAddress = b.CreateIntToPtr(initialAddr, addrPtrTy);
-        b.CreateLikelyCondBr(permitted, exit, expandInternalBuffer);
+        indices[0] = b.getInt32(0);
+
+        Value * selectorField = nullptr;
+        Value * selector = nullptr;
+        Value * addrField = nullptr;
+        Value * capacityField = nullptr;
+        Value * primaryAddrField = nullptr;
+        Value * primaryCapacityField = nullptr;
+        Value * secondaryAddrField = nullptr;
+        Value * secondaryCapacityField = nullptr;
+
+        if (mLinear) {
+            indices[1] = b.getInt32(LinearMallocedAddress);
+            addrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            indices[1] = b.getInt32(LinearInternalCapacity);
+            capacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        } else {
+            indices[1] = b.getInt32(LinearSelector);
+            selectorField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            selector = b.CreateAlignedLoad(intPtrTy, selectorField, intPtrTyAlign);
+            indices[1] = b.getInt32(LinearMallocedAddress);
+            primaryAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            indices[1] = b.getInt32(LinearInternalCapacity);
+            primaryCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            indices[1] = b.getInt32(SecondLinearMallocedAddress);
+            secondaryAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            indices[1] = b.getInt32(SecondLinearInternalCapacity);
+            secondaryCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            Value * const bSelector = b.CreateICmpEQ(selector, sz_ZERO);
+            addrField = b.CreateSelect(bSelector, primaryAddrField, secondaryAddrField);
+            capacityField = b.CreateSelect(bSelector, primaryCapacityField, secondaryCapacityField);
+        }
+
+        Value * const initialAddr = b.CreateAlignedLoad(i8PtrTy, addrField, voidPtrTyAlign);
+        Value * const initialCapacity = b.CreateAlignedLoad(intPtrTy, capacityField, intPtrTyAlign);
+
+        assert (blockWidth > 8);
+
+        Constant * const log2BytesPerBlock = b.getSize(floor_log2(blockWidth) - 3);
+
+        Value * const bytesPerChunk = b.CreateShl(blocksPerChunk, log2BytesPerBlock);
+
+        BasicBlock * reuseExistingBuffer = nullptr;
+
+        if (mLinear) {
+            reuseExistingBuffer = BasicBlock::Create(C, "reuseExistingBuffer", f, copyEntry);
+            Value * const canReuse = b.CreateICmpULE(requiredChunks, consumedChunks);
+            b.CreateLikelyCondBr(canReuse, reuseExistingBuffer, expandInternalBuffer);
+        } else {
+            b.CreateBr(expandInternalBuffer);
+        }
+
 
         // Otherwise, allocate a buffer with at least twice the capacity and copy the unconsumed data back into it
         b.SetInsertPoint(expandInternalBuffer);
+        Value * const pendingChunks = b.CreateSub(requiredChunks, consumedChunks);
+        Value * expandedCapacity = b.CreateAdd(initialCapacity, b.CreateRoundUp(pendingChunks, initialCapacity));
 
-        const auto typeSize = b.getTypeSize(DL, mType);
-        assert ((typeSize % (blockWidth / 8)) == 0);
-        assert (typeSize > 0);
-        Value * const expandedCapacity = b.CreateAdd(initialCapacity, b.CreateRoundUp(pendingChunks, initialCapacity));
-        Value * const expandedBytes = b.CreateMulRational(expandedCapacity, typeSize);
-
-        ConstantInt * const sz_ZERO = b.getSize(0);
+        Value * const expandedBytes = b.CreateMul(expandedCapacity, bytesPerChunk);
 
         FixedArray<Value *, 2> makeArgs;
         makeArgs[0] = expandedBytes;
         makeArgs[1] = sz_ZERO;
         Function * const makeBuffer = m->getFunction(__MAKE_CIRCULAR_BUFFER); assert (makeBuffer);
-        Value * const expandedBuffer = b.CreatePointerCast(b.CreateCall(makeBuffer, makeArgs), addrPtrTy);
+        Value * expandedAddr = b.CreatePointerCast(b.CreateCall(makeBuffer, makeArgs), i8PtrTy);
+
+        Value * expandedBufferRetVal = nullptr;
+        if (mLinear) {
+            b.CreateBr(reuseExistingBuffer);
+
+            b.SetInsertPoint(reuseExistingBuffer);
+            PHINode * const addrPhi = b.CreatePHI(i8PtrTy, 2);
+            addrPhi->addIncoming(initialAddr, entry);
+            addrPhi->addIncoming(expandedAddr, expandInternalBuffer);
+            expandedAddr = addrPhi;
+            PHINode * const capacityPhi = b.CreatePHI(intPtrTy, 2);
+            capacityPhi->addIncoming(initialCapacity, entry);
+            capacityPhi->addIncoming(expandedCapacity, expandInternalBuffer);
+            expandedCapacity = capacityPhi;
+            // TODO: return 2 if we "reuse" the data but do not copy anything?
+            PHINode * const expandedBufferRetValPhi = b.CreatePHI(intPtrTy, 2);
+            expandedBufferRetValPhi->addIncoming(sz_ZERO, entry);
+            expandedBufferRetValPhi->addIncoming(sz_ONE, expandInternalBuffer);
+            expandedBufferRetVal = expandedBufferRetValPhi;
+        }
+
 
         // copy the data over to the new buffer
-        Value * const newBufferOffset = b.CreateURem(consumedChunks, expandedCapacity);
-        Value * const toCopyPtr = b.CreateInBoundsGEP(mType, expandedBuffer, newBufferOffset);
-        Value * const oldBufferOffset = b.CreateURem(consumedChunks, initialCapacity);
-        Value * const unreadDataPtr = b.CreateInBoundsGEP(mType, currentAddress, oldBufferOffset);
+        Value * const producedChunks = b.CreateCeilUDiv(produced, BLOCK_WIDTH);
         Value * const unreadChunks = b.CreateSub(producedChunks, consumedChunks);
 
-        // TODO: make this into a duff's loop
+        b.CreateUnlikelyCondBr(b.CreateICmpEQ(unreadChunks, sz_ZERO), copyExit, copyEntry);
 
-        // TODO: if we keep the buffer fd, manual indicates we can resize it by calling ftruncate again. How would this
-        // affect users of the buffer prior to setting the new addr/capacity? The mmap'ed buffer pointing to the fds
-        // have a set size that may mean its a non-issue as long as ftruncating the buffer doesn't invalidate them.
+        b.SetInsertPoint(copyEntry);
+        Value * toCopyPtr = nullptr;
+        Value * unreadDataPtr = nullptr;
+        if (mLinear) {
+            toCopyPtr = expandedAddr;
+            indices[1] = b.getInt32(LinearBaseAddress);
+            Value * baseAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            Value * const baseAddr = b.CreateAlignedLoad(i8PtrTy, baseAddrField, voidPtrTyAlign);
+            unreadDataPtr = b.CreateInBoundsGEP(b.getInt8Ty(), baseAddr, b.CreateMul(consumedChunks, bytesPerChunk));
+        } else {
+            Value * const newBufferOffset = b.CreateURem(consumedChunks, expandedCapacity);
+            toCopyPtr = b.CreateInBoundsGEP(b.getInt8Ty(), expandedAddr, b.CreateMul(newBufferOffset, bytesPerChunk));
+            Value * const oldBufferOffset = b.CreateURem(consumedChunks, initialCapacity);
+            unreadDataPtr = b.CreateInBoundsGEP(b.getInt8Ty(), initialAddr, b.CreateMul(oldBufferOffset, bytesPerChunk));
+        }
 
-        Value * const remainingBytes = b.CreateMulRational(unreadChunks, typeSize);
-        b.CreateMemCpy(toCopyPtr, unreadDataPtr, remainingBytes, blockWidth / 8);
+        if (LLVM_LIKELY(b.supportsIndirectBr())) {
 
-        writeIntPtrStructVector(expandedBuffer, expandedCapacity, currentAddressPtr);
+            FixedArray<Constant *, DUFF_STEPS> copyLoopAddr;
+            for (unsigned i = 0; i < DUFF_STEPS; ++i) {
+                copyLoopAddr[i] = BlockAddress::get(f, copyLoopEntryPoint[(DUFF_STEPS - 1U) - i]);
+            }
+
+            ArrayType * const copyLoopArrayAddrTy = ArrayType::get(i8PtrTy, DUFF_STEPS);
+            Constant * const copyLoopAddrArray = ConstantArray::get(copyLoopArrayAddrTy, copyLoopAddr);
+
+            GlobalVariable * const copyLoopTargetArray =
+                new GlobalVariable(*m, copyLoopArrayAddrTy, true, GlobalValue::ExternalLinkage, copyLoopAddrArray);
+
+            FixedVectorType * const vecTy = b.getBitBlockType();
+            PointerType * const vecPtrTy = vecTy->getPointerTo(mAddressSpace);
+
+
+            const auto vecAlign = DL.getABITypeAlign(vecTy).value();
+
+            const auto i8PtrAlign = DL.getABITypeAlign(i8PtrTy).value();
+
+            Value * const maxNumOfBlocks = b.CreateMul(unreadChunks, blocksPerChunk);
+
+            FixedArray<Value *, 2> jumpIndex;
+            jumpIndex[0] = sz_ZERO;
+            jumpIndex[1] = b.CreateAnd(maxNumOfBlocks, b.getSize(DUFF_STEPS - 1U));
+
+            Value * const baseInput = b.CreatePointerCast(unreadDataPtr, vecPtrTy);
+            Value * const baseOutput = b.CreatePointerCast(toCopyPtr, vecPtrTy);
+
+            Value * const initialJumpTargetPtr = b.CreateGEP(copyLoopArrayAddrTy, copyLoopTargetArray, jumpIndex);
+            Value * const initialJumpTarget = b.CreateAlignedLoad(i8PtrTy, initialJumpTargetPtr, i8PtrAlign);
+
+            IndirectBrInst * const br = b.CreateIndirectBr(initialJumpTarget, DUFF_STEPS);
+
+            FixedArray<PHINode *, DUFF_STEPS> copyAddrIndexPhi;
+            for (unsigned i = 0; i < DUFF_STEPS; ++i) {
+                copyAddrIndexPhi[i] = PHINode::Create(intPtrTy, 2, "", copyLoopEntryPoint[i]);
+                copyAddrIndexPhi[i]->addIncoming(sz_ZERO, copyEntry);
+                br->addDestination(copyLoopEntryPoint[i]);
+            }
+
+            for (unsigned i = 0; i < DUFF_STEPS; ++i) {
+                b.SetInsertPoint(copyLoopEntryPoint[i]);
+                Value * inputPtr = b.CreateGEP(vecTy, baseInput, copyAddrIndexPhi[i]);
+                Value * outputPtr = b.CreateGEP(vecTy, baseOutput, copyAddrIndexPhi[i]);
+                Value * in = b.CreateAlignedLoad(vecTy, inputPtr, vecAlign);
+                b.CreateAlignedStore(in, outputPtr, vecAlign);
+                Value * next = b.CreateAdd(copyAddrIndexPhi[i], sz_ONE);
+                const auto k = (i + 1U) % DUFF_STEPS;
+                copyAddrIndexPhi[k]->addIncoming(next, copyLoopEntryPoint[i]);
+                if (k == 0) {
+                    Value * const isDone = b.CreateICmpEQ(copyAddrIndexPhi[i], maxNumOfBlocks);
+                    b.CreateCondBr(isDone, copyExit, copyLoopEntryPoint[0]);
+                } else {
+                    b.CreateBr(copyLoopEntryPoint[k]);
+                }
+            }
+
+        } else {
+
+            Value * const remainingBytes = b.CreateMul(unreadChunks, bytesPerChunk);
+            b.CreateMemCpy(toCopyPtr, unreadDataPtr, remainingBytes, blockWidth / 8);
+
+            b.CreateBr(copyExit);
+        }
+
+        b.SetInsertPoint(copyExit);
+        if (mLinear) {
+            b.CreateAlignedStore(b.CreatePointerCast(expandedAddr, addrPtrTy), addrField, voidPtrTyAlign);
+            b.CreateAlignedStore(expandedCapacity, capacityField, intPtrTyAlign);
+        } else {
+            Value * const bSelector = b.CreateICmpEQ(selector, b.getSize(0));
+            Value * nextAddrField = b.CreateSelect(bSelector, secondaryAddrField, primaryAddrField);
+            Value * nextCapacityField = b.CreateSelect(bSelector, secondaryCapacityField, primaryCapacityField);
+            b.CreateAlignedStore(b.CreatePointerCast(expandedAddr, addrPtrTy), nextAddrField, voidPtrTyAlign);
+            b.CreateAlignedStore(expandedCapacity, nextCapacityField, intPtrTyAlign);
+            Value * const nextSelector = b.CreateXor(selector, b.getSize(1));
+            b.CreateAlignedStore(nextSelector, selectorField, intPtrTyAlign);
+        }
 
         // now check if there is anything to delete
         indices[1] = b.getInt32(ThreadLocalField::PriorAddress);
-        Value * const priorBufferPtr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
-        Value * const priorBuffer = b.CreateAlignedLoad(addrPtrTy, priorBufferPtr, voidPtrTyAlign);
+        Value * const priorBufferField = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
+        Value * const priorBuffer = b.CreateAlignedLoad(i8PtrTy, priorBufferField, voidPtrTyAlign);
 
         indices[1] = b.getInt32(ThreadLocalField::PriorCapacity);
-        Value * const priorCapacityPtr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
-        Value * const priorCapacity = b.CreateAlignedLoad(intPtrTy, priorCapacityPtr, intPtrTyAlign);
+        Value * const priorCapacityField = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
+        Value * const priorCapacity = b.CreateAlignedLoad(intPtrTy, priorCapacityField, intPtrTyAlign);
 
         indices[1] = b.getInt32(ThreadLocalField::NewAddress);
-        Value * const recentAddressPtr = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
-        Value * const recentlyCreatedUnreleasedAddress = b.CreateAlignedLoad(addrPtrTy, recentAddressPtr, voidPtrTyAlign);
+        Value * const recentlyCreatedAddrField = b.CreateInBoundsGEP(threadLocalTy, threadLocalHandle, indices);
+        Value * const recentlyCreatedAddr = b.CreateAlignedLoad(i8PtrTy, recentlyCreatedAddrField, voidPtrTyAlign);
+
+        b.CallPrintInt("expandedAddr", expandedAddr);
+        b.CallPrintInt("priorBuffer", priorBuffer);
+        b.CallPrintInt("initialAddr", initialAddr);
+        b.CallPrintInt("recentlyCreatedUnreleasedAddress", recentlyCreatedAddr);
 
         // If the user created a buffer in the same logical segment, free the old one as it hasn't been released
         // to the outer system. However, if we did just create it then the prior buffer we stored isn't safe to
         // delete yet.
-        Value * const hasRecent = b.CreateICmpEQ(currentAddress, recentlyCreatedUnreleasedAddress);
-        b.CreateUnlikelyCondBr(hasRecent, freeExistingBuffer, checkPendingDeletion);
-
-        b.SetInsertPoint(checkPendingDeletion);
-        // if the user hasn't created a buffer in this segment but expanded the buffer in a prior segment,
-        // free it now as the pipeline has completed a full iteration
-        b.CreateCondBr(b.CreateICmpNE(priorBuffer, nullAddrPtr), freeExistingBuffer, afterExpandInternalBuffer);
+        Value * wasRecentlyCreated = b.CreateICmpEQ(initialAddr, recentlyCreatedAddr);
+        if (mLinear) {
+            wasRecentlyCreated = b.CreateAnd(wasRecentlyCreated, b.CreateICmpNE(expandedBufferRetVal, sz_ZERO));
+        }
+        b.CallPrintInt("wasRecentlyCreated", wasRecentlyCreated);
+        Value * const hasPendingPrior = b.CreateICmpNE(priorBuffer, nullAddrPtr);
+        b.CreateUnlikelyCondBr(b.CreateOr(wasRecentlyCreated, hasPendingPrior), freeExistingBuffer, afterExpandInternalBuffer);
 
         b.SetInsertPoint(freeExistingBuffer);
-        PHINode * const toDeleteBufferPhi = b.CreatePHI(addrPtrTy, 2);
-        toDeleteBufferPhi->addIncoming(currentAddress, expandInternalBuffer);
-        toDeleteBufferPhi->addIncoming(priorBuffer, checkPendingDeletion);
 
-        PHINode * const toDeleteCapacityPhi = b.CreatePHI(intPtrTy, 2);
-        toDeleteCapacityPhi->addIncoming(initialCapacity, expandInternalBuffer);
-        toDeleteCapacityPhi->addIncoming(priorCapacity, checkPendingDeletion);
+        Value * const toDestroyAddr = b.CreateSelect(wasRecentlyCreated, initialAddr, priorBuffer);
+        Value * const toDestroyCapacity = b.CreateSelect(wasRecentlyCreated, initialCapacity, priorCapacity);
 
-        PHINode * const pendingDeleteBufferPhi = b.CreatePHI(addrPtrTy, 2);
-        pendingDeleteBufferPhi->addIncoming(priorBuffer, expandInternalBuffer);
-        pendingDeleteBufferPhi->addIncoming(nullAddrPtr, checkPendingDeletion);
+        b.CallPrintInt("toDestroyAddr", toDestroyAddr);
 
-        PHINode * const pendingDeleteCapacityPhi = b.CreatePHI(intPtrTy, 2);
-        pendingDeleteCapacityPhi->addIncoming(priorCapacity, expandInternalBuffer);
-        pendingDeleteCapacityPhi->addIncoming(sz_ZERO, checkPendingDeletion);
-
-        destroyBuffer(b, toDeleteBufferPhi, toDeleteCapacityPhi);
+        destroyBuffer(b, toDestroyAddr, toDestroyCapacity);
 
         b.CreateBr(afterExpandInternalBuffer);
 
         b.SetInsertPoint(afterExpandInternalBuffer);
-        PHINode * const priorAllocAddrPhi = b.CreatePHI(addrPtrTy, 2);
-        priorAllocAddrPhi->addIncoming(currentAddress, checkPendingDeletion);
-        priorAllocAddrPhi->addIncoming(pendingDeleteBufferPhi, freeExistingBuffer);
+        PHINode * const priorAllocAddrPhi = b.CreatePHI(i8PtrTy, 2);
+        priorAllocAddrPhi->addIncoming(initialAddr, copyExit);
+        priorAllocAddrPhi->addIncoming(nullAddrPtr, freeExistingBuffer);
 
         PHINode * const priorAllocCapacityPhi = b.CreatePHI(intPtrTy, 2);
-        priorAllocCapacityPhi->addIncoming(initialCapacity, checkPendingDeletion);
-        priorAllocCapacityPhi->addIncoming(pendingDeleteCapacityPhi, freeExistingBuffer);
+        priorAllocCapacityPhi->addIncoming(initialCapacity, copyExit);
+        priorAllocCapacityPhi->addIncoming(sz_ZERO, freeExistingBuffer);
 
-        b.CreateAlignedStore(priorAllocAddrPhi, priorBufferPtr, voidPtrTyAlign);
-        b.CreateAlignedStore(priorAllocCapacityPhi, priorCapacityPtr, intPtrTyAlign);
-        b.CreateAlignedStore(expandedBuffer, recentAddressPtr, voidPtrTyAlign);
+        b.CreateAlignedStore(priorAllocAddrPhi, priorBufferField, voidPtrTyAlign);
+        b.CreateAlignedStore(priorAllocCapacityPhi, priorCapacityField, intPtrTyAlign);
+        b.CreateAlignedStore(expandedAddr, recentlyCreatedAddrField, voidPtrTyAlign);
 
         b.CreateBr(exit);
 
         b.SetInsertPoint(exit);
-        PHINode * const retValPhi = b.CreatePHI(intPtrTy, 2);
-        retValPhi->addIncoming(sz_ZERO, entry);
-        retValPhi->addIncoming(b.getSize(1), afterExpandInternalBuffer);
-
         if (mLinear) {
-            PHINode * const currentAllocAddrPhi = b.CreatePHI(addrPtrTy, 2);
-            currentAllocAddrPhi->addIncoming(currentAddress, entry);
-            currentAllocAddrPhi->addIncoming(expandedBuffer, afterExpandInternalBuffer);
+            Value * const consumedOffset = b.CreateSub(b.CreateURem(consumedChunks, expandedCapacity), consumedChunks);
 
-            PHINode * const currentAllocCapacityPhi = b.CreatePHI(intPtrTy, 2);
-            currentAllocCapacityPhi->addIncoming(initialCapacity, entry);
-            currentAllocCapacityPhi->addIncoming(expandedCapacity, afterExpandInternalBuffer);
+            Value * const bytesPerChunk = b.CreateShl(blocksPerChunk, log2BytesPerBlock);
 
-            Value * consumedOffset = b.CreateSub(b.CreateURem(consumedChunks, currentAllocCapacityPhi), consumedChunks);
-            Value * const newVirtualAddress = b.CreateInBoundsGEP(mType, currentAllocAddrPhi, consumedOffset);
+            Value * const newVirtualAddress = b.CreateInBoundsGEP(b.getInt8Ty(), expandedAddr, b.CreateMul(consumedOffset, bytesPerChunk));
 
-            indices[1] = i32_ONE;
-            Value * const updatedAddressPtr = b.CreateInBoundsGEP(handleTy, handle, indices);
-            writeIntPtrStructVector(newVirtualAddress, requiredChunks, updatedAddressPtr);
+            indices[1] = b.getInt32(LinearBaseAddress);
+            Value * baseAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            b.CreateAlignedStore(b.CreatePointerCast(newVirtualAddress, addrPtrTy), baseAddrField, voidPtrTyAlign);
+
+
+            indices[1] = b.getInt32(LinearEffectiveCapacity);
+            Value * baseCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+            b.CreateAlignedStore(requiredChunks, baseCapacityField, intPtrTyAlign);
         }
-        b.CreateRet(retValPhi);
-
+        assert (mLinear ^ (expandedBufferRetVal == nullptr));
+        b.CreateRet(expandedBufferRetVal);
         b.restoreIP(ip);
 
     }
 
-    FixedArray<Value *, 5> args;
-    args[0] = mHandle;
-    args[1] = mThreadLocalHandle;
+    FixedArray<Value *, 6> args;
+    args[0] = b.CreatePointerCast(mHandle, voidPtrTy);
+    args[1] = b.CreatePointerCast(mThreadLocalHandle, voidPtrTy);
     args[2] = produced;
     args[3] = consumed;
     args[4] = required;
-    return b.CreateCall(f, args);
-
+    const auto typeSize = b.getTypeSize(DL, mType);
+    assert (typeSize > 0);
+    assert ((typeSize % (blockWidth / 8)) == 0);
+    args[5] = b.getSize((8 * typeSize) / blockWidth);
+    Value * const retVal = b.CreateCall(f, args);
+    if (mLinear) {
+        return retVal;
+    } else {
+        return sz_ONE;
+    }
 }
 
 

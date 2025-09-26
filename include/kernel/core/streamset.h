@@ -304,10 +304,15 @@ private:
 class ManagedDynamicBuffer final : public InternalBuffer {
 public:
 
-    enum { LinearMallocedAddress = 0,
-           LinearInternalCapacity = 1,
-           LinearBaseAddress = 0,
-           LinearEffectiveCapacity = 1 };
+    enum MDB_Field {
+           LinearSelector = 0,
+           LinearMallocedAddress = 1,
+           SecondLinearMallocedAddress = 2,
+           LinearInternalCapacity = 3,
+           SecondLinearInternalCapacity = 4,
+           LinearBaseAddress = 5,
+           LinearEffectiveCapacity = 6,
+    };
 
     enum ThreadLocalField { PriorAddress, PriorCapacity, NewAddress };
 
@@ -363,10 +368,6 @@ public:
     void setThreadLocalHandle(llvm::Value * const handle) const {
         mThreadLocalHandle = handle;
     }
-
-private:
-
-    llvm::Value * loadSharedValueFromStruct(kernel::KernelBuilder & b, const unsigned i, const unsigned j) const;
 
 private:
 

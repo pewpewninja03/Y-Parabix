@@ -34,6 +34,8 @@ using boost::intrusive::detail::floor_log2;
 
 // #define PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY
 
+// #define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateMultiBlockLogic
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -68,7 +70,31 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
 
     #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
     ConstantInt * const STDERR = b.getInt32(STDERR_FILENO);
-    b.CreateDprintfCall(STDERR, "  initial position = %" PRIu64 "\n", position);
+
+    Function * pthreadSelfFn = b.getModule()->getFunction("pthread_self");
+    if (pthreadSelfFn == nullptr) {
+        IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
+        FunctionType * funTy = FunctionType::get(pThreadTy, false);
+        pthreadSelfFn = b.LinkFunction("pthread_self", funTy, (void*)&pthread_self);
+    }
+
+    Value * const _pThreadNum = b.CreateCall(pthreadSelfFn);
+
+    auto debugPrint = [&](const StringRef label, auto &&... params) {
+        std::string tmp;
+        raw_string_ostream out(tmp);
+        #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+        out << "%016" PRIx64;
+        #endif
+        out << "  " << label << "\n";
+        #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+        b.CreateDprintfCall(STDERR, out.str(), _pThreadNum, params...);
+        #else
+        b.CreateDprintfCall(STDERR, out.str(), params...);
+        #endif
+    };
+
+    debugPrint("initial position = %" PRIu64, position);
     #endif
 
     // TODO: load the initial counts from a lookbehind
@@ -88,13 +114,13 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
             positiveArray = array;
             initialPositiveCount = count;
             #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
-            b.CreateDprintfCall(STDERR, "  initial count(pos) = %" PRIu64 "\n", count);
+            debugPrint("initial count(pos) = %" PRIu64, count);
             #endif
         } else { // if (mType == PopCountType::NEGATIVE) {
             negativeArray = array;
             initialNegativeCount = count;
             #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
-            b.CreateDprintfCall(STDERR, "  initial count(neg) = %" PRIu64 "\n", count);
+            debugPrint("initial count(neg) = %" PRIu64, count);
             #endif
         }
     } else { // if (mType == PopCountType::BOTH) {
@@ -108,8 +134,8 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         initialNegativeCount = b.getScalarField("negCount");
         #endif
         #if defined(PRINT_POP_COUNTS_TO_STDERR) || defined(PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY)
-        b.CreateDprintfCall(STDERR, "  initial count(pos) = %" PRIu64 "\n", initialPositiveCount);
-        b.CreateDprintfCall(STDERR, "  initial count(neg) = %" PRIu64 "\n", initialNegativeCount);
+        debugPrint("initial count(pos) = %" PRIu64, initialPositiveCount);
+        debugPrint("initial count(neg) = %" PRIu64, initialNegativeCount);
         #endif
     }
 
@@ -214,13 +240,9 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         Value * const ptr = b.CreateInBoundsGEP(sizeTy, positiveArray, index);
         b.CreateStore(positivePartialSum, ptr);
         #ifdef PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY
-        b.CreateDprintfCall(STDERR,
-                             "  > pos[%" PRIu64 "] = %" PRIu64 "\n",
-                             b.CreateAdd(position, index), positivePartialSum);
+        debugPrint("> pos[%" PRIu64 "] = %" PRIu64, b.CreateAdd(position, index), positivePartialSum);
         #elif defined(PRINT_POP_COUNTS_TO_STDERR)
-        b.CreateDprintfCall(STDERR,
-                             "  > pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
-                             b.CreateAdd(position, index), positivePartialSum, ptr);
+        debugPrint("> pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")", b.CreateAdd(position, index), positivePartialSum, ptr);
         #endif
     }
 
@@ -236,13 +258,9 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         Value * const ptr = b.CreateInBoundsGEP(sizeTy, negativeArray, index);
         b.CreateStore(negativePartialSum, ptr);
         #ifdef PRINT_POP_COUNTS_TO_STDERR_NO_ADDRESS_DISPLAY
-        b.CreateDprintfCall(STDERR,
-                             "  > neg[%" PRIu64 "] = %" PRIu64 "\n",
-                             b.CreateAdd(position, index), negativePartialSum);
+        debugPrint("> neg[%" PRIu64 "] = %" PRIu64, b.CreateAdd(position, index), negativePartialSum);
         #elif defined(PRINT_POP_COUNTS_TO_STDERR)
-        b.CreateDprintfCall(STDERR,
-                             "  > neg[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
-                             b.CreateAdd(position, index), negativePartialSum, ptr);
+        debugPrint("> neg[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")", b.CreateAdd(position, index), negativePartialSum, ptr);
         #endif
     }
 

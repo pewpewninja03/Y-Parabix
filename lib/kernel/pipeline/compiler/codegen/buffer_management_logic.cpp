@@ -197,8 +197,9 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
         }
     }
 
-//    auto & dl = b.getModule()->getDataLayout();
-//    const auto pageSize = getPageSize();
+    #ifdef PRINT_DEBUG_MESSAGES
+    auto & dl = b.getModule()->getDataLayout();
+    #endif
 
     // and allocate any output buffers
 
@@ -225,7 +226,7 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                 }
                 if (nonLocal) {
                     Value * maxStrides = allocScale;
-                    if (LLVM_UNLIKELY(bn.Overflow)) {
+                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
                         maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
                     }
                     const auto & R = bn.RelativeIORate;
@@ -252,8 +253,10 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                     const BufferPort & rd = mBufferGraph[pe];
                     const auto prefix = makeBufferName(producer, rd.Port);
                     Value * start = buffer->getMallocAddress(b);
-                    Constant * ts = b.getTypeSize(buffer->getType());
-                    Value * end = b.CreateGEP(buffer->getType(), start, buffer->getCapacity(b));
+                    const auto byteSize = b.getTypeSize(dl, buffer->getType());
+                    Value * length = b.CreateMulRational(buffer->getInternalCapacity(b), Rational{byteSize, b.getBitBlockWidth()});
+                    Constant * ts = b.getSize(byteSize);
+                    Value * end = b.CreateGEP(b.getInt8Ty(), b.CreatePointerCast(start, b.getInt8PtrTy()), length);
                     debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ") [typeSize=%" PRIu64 "]", start, end, ts);
                     #endif
 

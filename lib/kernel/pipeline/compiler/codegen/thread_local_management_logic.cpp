@@ -52,8 +52,8 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         const auto & bn = mBufferGraph[streamSet];
         assert (bn.isThreadLocal());
         Value * maxStrides = b.CreateCeilUMulRational(segmentSize, bn.RelativeIORate * scale);
-        if (LLVM_UNLIKELY(bn.Overflow)) {
-            maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.Overflow));
+        if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
+            maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.NumOfOverflowStrides));
         }
         Value * off = b.CreateCeilUMulRational(maxStrides, ThreadLocalPlacement[*begin]);
         if (max) {
@@ -157,8 +157,8 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 const auto streamSet = v + FirstStreamSet - PartitionCount;
                 const BufferNode & bn = mBufferGraph[streamSet];
                 assert (bn.isThreadLocal());
-                if (LLVM_UNLIKELY(bn.Overflow)) {
-                    maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.Overflow));
+                if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
+                    maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.NumOfOverflowStrides));
                 }
 
                 const auto & P = ThreadLocalPlacement[e];

@@ -452,11 +452,117 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
     if (LLVM_LIKELY(port.Type == PortType::Output)) {
         StreamSetBuffer * const buffer = COMPILER->getOutputStreamSetBuffer(port.Number);
         if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
-            auto & dl = getModule()->getDataLayout();
+
+            auto managedBuffer = cast<ManagedDynamicBuffer>(buffer);
+
+            Module * const m = getModule();
+            assert ("unspecified module" && m);
+            auto & DL = m->getDataLayout();
+            auto & C = getContext();
+            IntegerType * const intPtrTy = DL.getIntPtrType(C);
+            const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+
             Value * const producedItemPtr = COMPILER->getProducedOutputItemsPtr(port.Number);
-            Value * const producedItems = CreateAlignedLoad(getSizeTy(), producedItemPtr,  dl.getABITypeAlign(getSizeTy()).value());
+            Value * const producedItems = CreateAlignedLoad(intPtrTy, producedItemPtr,  intPtrTyAlign);
             Value * const consumedItems = COMPILER->getConsumedOutputItems(port.Number);
-            cast<ManagedDynamicBuffer>(buffer)->reserveCapacity(*this, producedItems, consumedItems, capacity);
+
+            SmallVector<char, 200> buf;
+            raw_svector_ostream name(buf);
+
+            name << "__KB_ManagedDynamicBuffer";
+            if (buffer->isLinear()) {
+                name << "Linear";
+            }
+            name << "_reserve_capacity" << buffer->getAddressSpace();
+
+            PointerType * const voidPtrTy = getVoidPtrTy();
+
+            Function * f = m->getFunction(name.str());
+
+            if (f == nullptr) {
+
+                StructType * const handleTy = buffer->getHandleType(*this);
+                PointerType * const handlePtrTy = handleTy->getPointerTo(buffer->getAddressSpace());
+
+                StructType * const threadLocalTy = managedBuffer->getThreadLocalHandleType(*this);
+                PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo(buffer->getAddressSpace());
+
+                PointerType * const addrPtrTy = buffer->getPointerType();
+
+                PointerType * const i8PtrTy = getInt8PtrTy();
+                Constant * const nullAddrPtr = ConstantPointerNull::get(i8PtrTy);
+                const auto voidPtrTyAlign = DL.getABITypeAlign(i8PtrTy).value();
+
+                FixedArray<Type *, 5> paramTypes;
+                paramTypes[0] = voidPtrTy; // shared struct ptr
+                paramTypes[1] = voidPtrTy; // thread local struct ptr
+                paramTypes[2] = intPtrTy;
+                paramTypes[3] = intPtrTy;
+                paramTypes[4] = intPtrTy;
+
+                FunctionType * funcTy = FunctionType::get(getVoidTy(), paramTypes, false);
+
+                const auto ip = saveIP();
+                auto currentSharedHandle = managedBuffer->getHandle();
+                auto currentThreadLocalHandle = managedBuffer->getThreadLocalHandle();
+                f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
+                f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
+
+                BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
+                BasicBlock * const expandInternalBuffer = BasicBlock::Create(C, "expandInternalBuffer", f);
+                BasicBlock * const exit = BasicBlock::Create(C, "exit", f);
+
+                SetInsertPoint(entry);
+
+                auto arg = f->arg_begin();
+                auto nextArg = [&]() {
+                    assert (arg != f->arg_end());
+                    Value * const v = &*arg;
+                    std::advance(arg, 1);
+                    return v;
+                };
+
+                Value * const handle = CreatePointerCast(nextArg(), handlePtrTy);
+                managedBuffer->setHandle(handle);
+                handle->setName("handle");
+                Value * const threadLocalHandle = CreatePointerCast(nextArg(), threadLocalPtrTy);
+                managedBuffer->setThreadLocalHandle(threadLocalHandle);
+                threadLocalHandle->setName("threadLocalHandle");
+                Value * const produced = nextArg();
+                produced->setName("produced");
+                Value * const consumed = nextArg();
+                consumed->setName("consumed");
+                Value * const required = nextArg();
+                required->setName("required");
+                assert (arg == f->arg_end());
+
+                ConstantInt * const BLOCK_WIDTH = getSize(getBitBlockWidth());
+
+                Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
+                Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
+                Value * const capacityChunks = CreateUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
+
+                CreateUnlikelyCondBr(CreateICmpUGT(CreateSub(requiredChunks, consumedChunks), capacityChunks), expandInternalBuffer, exit);
+
+                SetInsertPoint(expandInternalBuffer);
+                managedBuffer->reserveCapacity(*this, produced, consumed, required);
+                CreateBr(exit);
+
+                SetInsertPoint(exit);
+                CreateRetVoid();
+
+                restoreIP(ip);
+                managedBuffer->setHandle(currentSharedHandle);
+                managedBuffer->setThreadLocalHandle(currentThreadLocalHandle);
+            }
+
+            FixedArray<Value *, 5> args;
+            args[0] = CreatePointerCast(managedBuffer->getHandle(), voidPtrTy);
+            args[1] = CreatePointerCast(managedBuffer->getThreadLocalHandle(), voidPtrTy);
+            args[2] = producedItems;
+            args[3] = consumedItems;
+            args[4] = capacity;
+            CreateCall(f, args);
             return;
         }
     }

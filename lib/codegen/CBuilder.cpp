@@ -90,6 +90,8 @@ static constexpr auto ALIGNED_ALLOC_NAME = "std_aligned_alloc";
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
 
+#define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+
 using namespace llvm;
 
 static int accumulatedFreeCalls = 0;
@@ -455,11 +457,26 @@ CallInst * CBuilder::CallPrintInt(StringRef name, Value * const value, const STD
         name->setName("name");
         Value * value = &*arg;
         value->setName("value");
-        std::vector<Value *> args(4);
-        args[0] = fdInt;
-        args[1] = GetString("%-40s = %" PRIx64 "\n");
-        args[2] = name;
-        args[3] = value;
+        std::vector<Value *> args;
+        args.push_back(fdInt);
+        std::string tmp;
+        raw_string_ostream out(tmp);
+        #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+        out << "%016" PRIx64 "  ";
+        #endif
+        out << "%-40s = %" PRIx64 "\n";
+        args.push_back(GetString(out.str()));
+        #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+        Function * pthreadSelfFn = m->getFunction("pthread_self");
+        if (pthreadSelfFn == nullptr) {
+            IntegerType * const pThreadTy = IntegerType::getIntNTy(getContext(), sizeof(pthread_t) * CHAR_BIT);
+            FunctionType * funTy = FunctionType::get(pThreadTy, false);
+            pthreadSelfFn = LinkFunction("pthread_self", funTy, (void*)&pthread_self);
+        }
+        args.push_back(CreateCall(pthreadSelfFn));
+        #endif
+        args.push_back(name);
+        args.push_back(value);
         Function * DprintFn = GetDprintf();
         CreateCall(DprintFn->getFunctionType(), DprintFn, args);
         CreateFSync(fdInt);

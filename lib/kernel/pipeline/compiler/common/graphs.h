@@ -278,6 +278,7 @@ enum BufferType : unsigned {
     , HasIllustratedStreamset = 512
     , StartsNestedSynchronizationRegion = 1024
     , RequiresEmptyOverflow = 2048
+    , HasNonFixedRateConsumer = 4096
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -305,7 +306,7 @@ struct BufferNode {
     unsigned LookBehind = 0;
     unsigned MaxAdd = 0;
 
-    unsigned Overflow = 0;
+    unsigned NumOfOverflowStrides = 0;
 
     bool RequiresUnderflow = false;
 
@@ -370,6 +371,10 @@ struct BufferNode {
 
     bool requiresEmptyOverflow() const {
         return (Type & BufferType::RequiresEmptyOverflow) != 0;
+    }
+
+    bool hasNonFixedRateConsumer() const {
+        return (Type & BufferType::HasNonFixedRateConsumer) != 0;
     }
 
     bool isThreadLocal() const {

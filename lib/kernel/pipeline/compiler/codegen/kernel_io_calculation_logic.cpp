@@ -803,6 +803,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
 
     #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), beforeExpansion);
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), required);
     debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     #endif
@@ -844,13 +845,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     BasicBlock * const afterCopyBackOrExpand = b.CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
 
     Value * mustExpand = nullptr;
-
-    if (buffer->isLinear()) {
-        buffer->linearCopyBack(b, produced, consumed, required);
-    } else {
-        // TODO: have a delete immediately value when not multithreaded?
+    // TODO: have a delete immediately value when not multithreaded?
+    if (isa<ManagedDynamicBuffer>(buffer) || !buffer->isLinear()) {
         buffer->reserveCapacity(b, produced, consumed, required);
+    } else {
+        buffer->linearCopyBack(b, produced, consumed, required);
     }
+
     b.CreateBr(afterCopyBackOrExpand);
 
     b.SetInsertPoint(afterCopyBackOrExpand);
@@ -884,10 +885,16 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
                         required, afterExpansion);
     }
 
-    #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
+    #if defined(PRINT_DEBUG_MESSAGES)
     debugPrint(b, prefix + "_writable' = %" PRIu64, afterExpansion);
     debugPrint(b, prefix + "_capacity' = %" PRIu64, buffer->getCapacity(b));
     #endif
+
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+        const Binding & output = getOutputBinding(outputPort);
+        b.CreateAssert(b.CreateICmpUGT(afterExpansion, beforeExpansion),
+                       "%s.%s was not expanded correctly?", mCurrentKernelName, b.GetString(output.getName()));
+    }
 
     BasicBlock * const expandBufferExit = b.GetInsertBlock();
     b.CreateBr(expanded);
@@ -947,6 +954,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     const auto output = getOutput(mKernelId, outputPort);
     const auto streamSet = target(output, mBufferGraph);
     const BufferNode & bn = mBufferGraph[streamSet];
+    assert (bn.isNonThreadLocal());
     const StreamSetBuffer * const buffer = bn.Buffer;
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
@@ -981,17 +989,23 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
                             consumed, produced);
         }
 
-        writable = buffer->getLinearlyWritableItems(b, produced, consumed);
-
+        Value * p = produced;
         if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
-            writable = b.CreateSaturatingSub(writable, b.getSize(port.EmptyOverflow));
-            writable = b.CreateRoundDown(writable, b.getSize(port.EmptyOverflow - 1U));
+            p = b.CreateAdd(produced, b.getSize(port.EmptyOverflow));
         }
+        Value * c = consumed;
+        if (bn.hasNonFixedRateConsumer()) {
+            c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
+        }
+        writable = buffer->getLinearlyWritableItems(b, p, c);
+//        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
+//            #if defined(PRINT_DEBUG_MESSAGES)
+//            debugPrint(b, prefix + "_writable = %" PRIu64 " - %" PRIu64, writable, b.getSize(port.EmptyOverflow));
+//            #endif
+//            writable = b.CreateSaturatingSub(writable, b.getSize(port.EmptyOverflow));
+//            writable = b.CreateRoundDown(writable, b.getSize(port.EmptyOverflow - 1U));
+//        }
     }
-
-    #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
-    debugPrint(b, prefix + "_writable = (%" PRIu64 ") %" PRIu64, b.getSize(streamSet), writable);
-    #endif
 
     // cache the values for later use
     mInternalWritableOutputItems[outputPort] = writable;
@@ -1387,10 +1401,17 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
 //    }
 
     #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
+    #ifdef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
+    debugPrint(b, "%s.%s:  < pos[%" PRIu64 "] = %" PRIu64 "\n",
+               mCurrentKernelName,
+               b.GetString(partialSumPort.Binding.get().getName()),
+               position, current);
+    #else
     debugPrint(b, "%s.%s:  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
                mCurrentKernelName,
                b.GetString(partialSumPort.Binding.get().getName()),
                position, current, currentPtr);
+    #endif
     #endif
 
     if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
@@ -1591,12 +1612,19 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         // in the stream[produced] position. This is the only safe position to read as we may
         // have executed a final block with 0 input items.
         Value * const unchanged = b.CreateICmpEQ(produced, initial);
-        Value * index = b.CreateSelect(unchanged, produced, b.CreateSub(produced, sz_ONE));
+        Value * const index = b.CreateSelect(unchanged, produced, b.CreateSub(produced, sz_ONE));
         Value * const start = b.CreateRoundDown(index, sz_stepsPerBlock);
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
+
         Value * const vecAddr = b.CreatePointerCast(addr, vecPtrTy);
         Value * const baseValue = b.CreateBlockAlignedLoad(vecTy, vecAddr);
         Value * const offset = b.CreateURem(index, sz_stepsPerBlock);
+
+        #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
+        debugPrint(b, "  < splat values %" PRIu64 ", %" PRIu64 ", %" PRIu64 ", %" PRIu64 "\n",
+                   produced, index, start, offset);
+        #endif
+
         Value * const total = b.CreateExtractElement(baseValue, offset);
         Value * const splat = b.simd_fill(fw, total);
         Value * const mask = b.mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);

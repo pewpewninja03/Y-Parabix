@@ -21,7 +21,7 @@ void PipelineAnalysis::makeConsumerGraph() {
 
 
 
-        const BufferNode & bn = mBufferGraph[streamSet];
+        BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || in_degree(streamSet, InOutStreamSetReplacement) != 0) {
             continue;
         }
@@ -58,10 +58,17 @@ void PipelineAnalysis::makeConsumerGraph() {
 
         unsigned index = out_degree(id, mConsumerGraph);
 
+        bool allConsumersFixedRate = true;
+
         for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(ce, mBufferGraph);
             const BufferPort & input = mBufferGraph[ce];
+            allConsumersFixedRate &= input.isFixed();
             add_edge(id, consumer, ConsumerEdge{input.Port, ++index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+        }
+
+        if (!allConsumersFixedRate) {
+            bn.Type |= BufferType::HasNonFixedRateConsumer;
         }
 
         auto check = streamSet;

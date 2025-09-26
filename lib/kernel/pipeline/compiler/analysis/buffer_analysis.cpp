@@ -184,16 +184,17 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         // as the final buffer has one block padding.
                     case AttrId::EmptyWriteOverflow:
                         BEGIN_SCOPED_REGION
-                        auto width = b.getBitBlockWidth();
+                        auto width = kernelObj->getStride();
+                        assert (ub.denominator() == 1);
                         if (binding.getNumElements() == 1) {
                             const auto fw = binding.getFieldWidth();
                             assert ((width % fw) == 0);
                             width /= fw;
                         }
                         bp.EmptyOverflow = std::max(bp.EmptyOverflow, width);
-                        END_SCOPED_REGION
                         bn.Type |= BufferType::RequiresEmptyOverflow;
-                        bn.Overflow = std::max(bn.Overflow, bp.EmptyOverflow);
+                        bn.NumOfOverflowStrides = std::max(bn.NumOfOverflowStrides, 1U);
+                        END_SCOPED_REGION
                         break;
                     case AttrId::InOut:
                         if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
@@ -469,14 +470,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
         }
     }
 
-//    if (LLVM_LIKELY(FirstKernel != PipelineInput)) {
-//        for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
-//            StreamSetIORate[i - FirstStreamSet] /= lowestSourceStreamSetIORate;
-//        }
-//    }
-
-    const std::string & tlPermitted = codegen::ThreadLocalPermittedOptions;
-
     if (LLVM_UNLIKELY(!codegen::ThreadLocalPermittedOptions.empty())) {
 
         const auto permitted = parseCommaDelimitedList(codegen::ThreadLocalPermittedOptions);
@@ -484,7 +477,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
             const auto f = permitted.find(streamSet);
             if (f == permitted.end()) {
-                errs() << "disabling " << streamSet << "\n";
                 for (auto id = streamSet;;) {
                     if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
                         break;
@@ -824,7 +816,7 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
             currentNode.RequiresUnderflow = !currentNode.IsLinear;
         }
 
-        currentNode.Overflow = std::max(currentNode.Overflow, maxOverflow);
+        currentNode.NumOfOverflowStrides = std::max(currentNode.NumOfOverflowStrides, maxOverflow);
 
         END_SCOPED_REGION
 
@@ -875,10 +867,10 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
                 assert (!bn.isManagedOutput());
                 buffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
-            } else if (LLVM_UNLIKELY(bn.IsLinear)) {
-                buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, true, 0U);
+            } else if (LLVM_UNLIKELY(bn.isReturned())) {
+                buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, bn.IsLinear, 0U);
             } else { // is internal buffer
-                buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), false, 0U);
+                buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
             }
         }
 

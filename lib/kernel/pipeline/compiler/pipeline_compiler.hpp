@@ -136,6 +136,10 @@ const static std::string MANAGED_DYNAMIC_BUFFER_STRUCT = ".MDBS";
 
 const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
 
+
+const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
+const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
+
 using ArgVec = Vec<Value *, 64>;
 
 using ThreadLocalScalarAccumulationRule = Kernel::ThreadLocalScalarAccumulationRule;

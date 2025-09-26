@@ -1459,6 +1459,7 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
         if (!Use_BMI_PEXT) {
             input[j] = kb.simd_pext(mFW, input[j], extractionMask);
         }
+
         input[j] = kb.fwCast(mFW, input[j]);
     }
     Value * const newItemCounts = kb.simd_popcount(mFW, extractionMask);
@@ -1564,16 +1565,18 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
             Value * outputPtr = kb.getOutputStreamBlockPtr("filteredOutput", kb.getInt32(j), finalBlock);
             outputPtr = kb.CreatePointerCast(outputPtr, FieldPtrTy);
             outputPtr = kb.CreateGEP(fieldTy, outputPtr, finalField);
-            kb.CreateStore(kb.CreateLoad(mPendingType, pendingDataPtr[j]), outputPtr);
+            Value * pending = kb.CreateLoad(mPendingType, pendingDataPtr[j]);
+            kb.CreateStore(pending, outputPtr);
         }
     } else {
         for (unsigned j = 0; j < mPendingSetCount; j++) {
+            Value * pending = kb.CreateLoad(mPendingType, pendingDataPtr[j]);
             for (unsigned k = 0; k < mFieldsPerBlock; k++) {
                 unsigned strmIdx = j * mFieldsPerBlock + k;
                 Value * outputPtr = kb.getOutputStreamBlockPtr("filteredOutput", kb.getInt32(strmIdx), finalBlock);
                 outputPtr = kb.CreatePointerCast(outputPtr, FieldPtrTy);
                 outputPtr = kb.CreateGEP(fieldTy, outputPtr, finalField);
-                kb.CreateStore(kb.CreateExtractElement(kb.CreateLoad(mPendingType, pendingDataPtr[j]), kb.getInt32(k)), outputPtr);
+                kb.CreateStore(kb.CreateExtractElement(pending, kb.getInt32(k)), outputPtr);
             }
         }
     }

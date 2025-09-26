@@ -13,7 +13,7 @@
     typedef long long int        Z3_int64;
 #endif
 
-#define PRINT_Z3_OPTIMIZATION
+// #define PRINT_Z3_OPTIMIZATION
 
 using boost::icl::interval_set;
 
@@ -307,15 +307,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         const auto k = mapStreamSetToThreadLocal[src - FirstStreamSet];
                         assert (unitWeight[k] > 0);
                         mapStreamSetToThreadLocal[streamSet - FirstStreamSet] = k;
-                        size_t overflow = overflowWeight[k];
-                        if (LLVM_UNLIKELY(bn.Overflow != 0)) {
-                            Type * const type = bn.Buffer->getType();
-                            const size_t typeSize = b.getTypeSize(dl, type);
-                            const auto O = Rational{typeSize * bn.Overflow, bw * bw};
-                            assert (O.numerator() > 0);
-                            overflow = std::max<size_t>(overflowWeight[k], ceiling(O));
-                        }
-                        overflowWeight[k] = overflow;
                     } else {
                         mapStreamSetToThreadLocal[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
                         streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
@@ -327,13 +318,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         assert (W.numerator() > 0);
                         assert (W.denominator() == 1);
                         unitWeight[numOfThreadLocalStreamSets] = W.numerator();
-                        size_t overflow = 0;
-                        if (LLVM_UNLIKELY(bn.Overflow != 0)) {
-                            const auto O = Rational{typeSize * bn.Overflow, bw * bw};
-                            assert (O.numerator() > 0);
-                            overflow = ceiling(O);
-                        }
-                        overflowWeight[numOfThreadLocalStreamSets] = overflow;
+                        overflowWeight[numOfThreadLocalStreamSets] = bn.NumOfOverflowStrides;
                         ++numOfThreadLocalStreamSets;
                     }
 
@@ -493,17 +478,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             const auto partId = KernelPartitionId[producer];
             assert (partId < PartitionCount);
             const auto firstKernel = FirstKernelInPartition[partId];
-//            Rational sr{0};
-//            if (in_degree(firstKernel, mBufferGraph) == 0) {
-//                sr = Rational{1};
-//            } else {
-//                for (auto input : make_iterator_range(in_edges(firstKernel, mBufferGraph))) {
-//                    const auto streamSet = source(input, mBufferGraph);
-//                    const auto & bn = mBufferGraph[streamSet];
-//                    assert (bn.RelativeIORate.numerator() > 0);
-//                    sr = std::max(sr, bn.RelativeIORate);
-//                }
-//            }
 
             const auto denom = StrideRepetitionVector[firstKernel] * pageSize;
             // Rational percentOfPagePerStride{num * sr.numerator(),  denom * sr.denominator()};
@@ -616,7 +590,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         std::vector<Rational> totalPathSum(n, Rational{0});
         std::vector<unsigned> totalPathLength(n, 0);
 
-        flat_map<unsigned, Z3_ast> M;
+        flat_map<std::pair<unsigned, unsigned>, Z3_ast> M;
 
         // TODO: preprocess the io scaling vars to determine if two partition vars are equivalent?
 
@@ -667,7 +641,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         continue; // path_j was already pruned as being strictly less than some other path
                     }
 
-                    Z3_app vars[] = {(Z3_app)ioScalingVar};
                     Z3_solver_push(ctx, solver);
                     const auto JltIClause = Z3_mk_gt(ctx, result[i], result[j]);
                     hard_assert(JltIClause);
@@ -718,17 +691,23 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         for (unsigned i = 0; i < PartitionCount; ++i) {
             if (out_degree(i, T) > 0) {
 
-                auto CeilMulVar = [&](const Rational & R) {
+                auto CeilMulVar = [&](const Rational & R, const unsigned addToScalingVar) {
                     assert (R.denominator() == 1);
                     const auto V = R.numerator();
-                    auto f = M.find(V);
+                    auto f = M.find(std::make_pair(V, addToScalingVar));
                     if (f != M.end()) {
                         return f->second;
                     }
                     Z3_ast v = ioScalingVar;
+                    if (LLVM_UNLIKELY(addToScalingVar > 0)) {
+                        FixedArray<Z3_ast, 2> args;
+                        args[0] = v;
+                        args[1] = constant(addToScalingVar);
+                        v = Z3_mk_add(ctx, 2, args.data());
+                    }
                     if (LLVM_LIKELY(V > 1)) {
                         FixedArray<Z3_ast, 2> args;
-                        args[0] = ioScalingVar;
+                        args[0] = v;
                         args[1] = constant(V);
                         v = Z3_mk_mul(ctx, 2, args.data());
                         if (LLVM_LIKELY(V != lcmOfDenom)) {
@@ -742,7 +721,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                             v = Z3_mk_ite(ctx, Z3_mk_eq(ctx, r, z3_ZERO), a, b);
                         }
                     }
-                    M.emplace(V, v);
+                    M.emplace(std::make_pair(V, addToScalingVar), v);
                     return v;
                 };
 
@@ -759,7 +738,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     totalPathSum[k] = R;
                     assert (totalPathLength[k] == 0);
                     totalPathLength[k] = 1;
-                    totalCost[v] = CeilMulVar(R * lcmOfDenom);
+                    totalCost[v] = CeilMulVar(R * lcmOfDenom, overflowWeight[k]);
                     Q.push(v);
                 }
 
@@ -826,7 +805,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
                             FixedArray<Z3_ast, 2> args;
                             args[0] = priorOffset; assert (priorOffset);
-                            args[1] = CeilMulVar(cost * lcmOfDenom);
+                            args[1] = CeilMulVar(cost * lcmOfDenom, overflowWeight[k]);
                             totalCost[v] = Z3_mk_add(ctx, 2, args.data());
 
                             assert (totalPathSum[k] == Rational{0});

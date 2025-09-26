@@ -426,7 +426,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     };
 
 
-    args.reserve(mKernelDoSegmentFunctionType->getNumParams());
+  //  args.reserve(mKernelDoSegmentFunctionType->getNumParams());
     if (LLVM_LIKELY(mKernelSharedHandle)) {
         addNextArg(mKernelSharedHandle);
     }

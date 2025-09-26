@@ -149,6 +149,7 @@ void U8Spans::generatePabloMethod() {
         PabloAST * ix_or_next2 = pb.createOr(ix_or_next, pb.createLookahead(u8index, 2));
         PabloAST * back3InSpan = pb.createNot(ix_or_next2);
         for (unsigned i = 0; i < marks.size(); i++) {
+            pb.createIntrinsicCall(pablo::Intrinsic::PrintRegister, marks[i]);
             PabloAST * back1 = pb.createAnd(pb.createLookahead(marks[i], 1), back1InSpan);
             PabloAST * back2 = pb.createAnd(pb.createLookahead(marks[i], 2), back2InSpan);
             PabloAST * back3 = pb.createAnd(pb.createLookahead(marks[i], 3), back3InSpan);
@@ -156,6 +157,7 @@ void U8Spans::generatePabloMethod() {
         }
     } else {
         for (unsigned i = 0; i < marks.size(); i++) {
+            pb.createIntrinsicCall(pablo::Intrinsic::PrintRegister, marks[i]);
             spans[i] = pb.createMatchStar(marks[i], pb.createNot(u8index));
         }
     }
