@@ -29,7 +29,7 @@ using namespace kernel;
 
 static cl::opt<bool> ElemSpread("ElemSpread", cl::desc("Use ElemSpreadKernel in place of byte spread by mask"), cl::init(true), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> UnalignedLoads("UnalignedLoads", cl::desc("Use unaligned loads in ElemSpread"), cl::init(false), cl::cat(codegen::CodeGenOptions));
-static cl::opt<bool> UnitInsertionKernel("UnitInsertionKernel", cl::desc("Use UnitInsertionSpreadMaskKernel"), cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> InsertionMaskKernels("InsertionMaskKernels", cl::desc("Use Unit/InsertionSpreadMaskKernels"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 namespace kernel {
 
@@ -1089,7 +1089,7 @@ void UnitInsertionSpreadMask(PipelineBuilder & P,
                              StreamSet * spread_mask,
                              InsertPosition p,
                              ProcessingRateProbabilityDistribution insertionProbabilityDistribution) {
-    if (UnitInsertionKernel) {
+    if (InsertionMaskKernels) {
         P.CreateKernelCall<UnitInsertionSpreadMaskKernel>(insertion_mask, spread_mask, p);
     } else {
         auto stream01 = P.CreateStreamSet(1);
@@ -1228,21 +1228,121 @@ void InsertionSpreadMask(PipelineBuilder & P,
     if (steps == 1) {
         UnitInsertionSpreadMask(P, bixNumInsertCount, spread_mask, pos, expansionRate);
     } else {
-        /* Create a spread mask that adds one spread position for any position
-           at which there is at least one item to insert.  */
-        StreamSet * spread1_mask = P.CreateStreamSet(1);
-        UnitInsertionSpreadMask(P, bixNumInsertCount, spread1_mask, pos, expansionRate);
-        /* Spread out the counts so that there are two positions for each nonzero entry. */
-        StreamSet * spread_counts = P.CreateStreamSet(steps);
-        SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0); // , itemsPerOutputUnit);
-        /* Divide the count at each original position equally into the
-           two positions that were created by the unit spread process. */
-        StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
-        P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
-        StreamSet * submask = P.CreateStreamSet(1);
-        InsertionSpreadMask(P, reduced_counts, submask, pos, itemsPerOutputUnit, expansionRate);
-        SpreadByMask(P, submask, spread1_mask, spread_mask, false, 0); // , itemsPerOutputUnit);
+        if (InsertionMaskKernels) {
+            P.CreateKernelCall<InsertionSpreadMaskKernel>(bixNumInsertCount, spread_mask, pos);
+        } else {
+            /* Create a spread mask that adds one spread position for any position
+             at which there is at least one item to insert.  */
+            StreamSet * spread1_mask = P.CreateStreamSet(1);
+            UnitInsertionSpreadMask(P, bixNumInsertCount, spread1_mask, pos, expansionRate);
+            /* Spread out the counts so that there are two positions for each nonzero entry. */
+            StreamSet * spread_counts = P.CreateStreamSet(steps);
+            SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0); // , itemsPerOutputUnit);
+            /* Divide the count at each original position equally into the
+             two positions that were created by the unit spread process. */
+            StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
+            P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
+            StreamSet * submask = P.CreateStreamSet(1);
+            InsertionSpreadMask(P, reduced_counts, submask, pos, itemsPerOutputUnit, expansionRate);
+            SpreadByMask(P, submask, spread1_mask, spread_mask, false, 0);
+        }
     }
+}
+
+InsertionSpreadMaskKernel::InsertionSpreadMaskKernel(LLVMTypeSystemInterface & ts,
+                                                     StreamSet * bixNumInsertCount, StreamSet * spread_mask, InsertPosition p)
+    : BlockOrientedKernel(ts, "InsertionSpreadMaskKernel" + InsertString(bixNumInsertCount, p),
+        {Binding{"bixNumInsertCount", bixNumInsertCount}},
+        {},
+        {}, {},
+        {InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"}}),
+      mExpansionWidth(1U << (bixNumInsertCount->getNumElements())), mInsertPos(p) {
+        mOutputStreamSets.push_back({"spread_mask", spread_mask, BoundedRate(1, mExpansionWidth), EmptyWriteOverflow()});
+    }
+
+void InsertionSpreadMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
+    const unsigned block_width = b.getBitBlockWidth();
+    const unsigned packs_per_block = b.getBitBlockWidth()/pack_width;
+    const unsigned bix_bits = b.getInputStreamSet("bixNumInsertCount")->getNumElements();
+    const unsigned expansionPackWidth = block_width/mExpansionWidth;
+    Type * intBlockTy = b.getIntNTy(block_width);
+    Type * packTy = b.getIntNTy(pack_width);
+    Type * packPtrTy = packTy->getPointerTo();
+    Type * sizeTy = b.getSizeTy();
+    Constant * pONE = b.getIntN(pack_width, 1);
+    Constant * PACK_BITS = b.getSize(pack_width);
+    Value * fileExtentMask = b.fwCast(expansionPackWidth, b.CreateNot(b.getScalarField("EOFmask")));
+    //b.CallPrintRegister("fileExtentMask", fileExtentMask);
+    std::vector<Value *> insert_bix_num(bix_bits);
+    for (unsigned i = 0; i < bix_bits; i++) {
+        insert_bix_num[i] = b.loadInputStreamBlock("bixNumInsertCount", b.getSize(i), b.getSize(0));
+        insert_bix_num[i] = b.fwCast(expansionPackWidth, insert_bix_num[i]);
+    }
+    Value * produced = b.getProducedItemCount("spread_mask");
+    Value * offset = b.CreateURem(produced, PACK_BITS);
+    Value * produced_base = b.CreateSub(produced, offset);
+    Value * spread_mask_pack_ptr = b.getRawOutputPointer("spread_mask", produced_base);
+    spread_mask_pack_ptr = b.CreatePointerCast(spread_mask_pack_ptr, packPtrTy);
+    Value * initial_pending = b.CreateLoad(packTy, spread_mask_pack_ptr);
+    Value * pending_bit_mask = b.CreateSub(b.CreateShl(pONE, b.CreateZExtOrTrunc(offset, packTy)), pONE);
+    Value * pending = b.CreateAnd(initial_pending, pending_bit_mask);
+    unsigned insert_base = 0;  // for mInsertPos == InsertPosition::Before
+    if (mInsertPos == InsertPosition::After) {
+        insert_base = 1;
+    }
+    std::vector<Constant *> insertedBits(bix_bits);
+    for (unsigned i = 0; i < bix_bits; i++) {
+        unsigned to_insert = 1U << i;
+        unsigned insert_limit = insert_base + to_insert;
+        auto insertBitPattern = APInt::getBitsSet(mExpansionWidth, insert_base, insert_limit);
+        insertedBits[i] = Constant::getIntegerValue(intBlockTy, APInt::getSplat(block_width, insertBitPattern));
+        insert_base = insert_limit;
+    }
+    std::vector<Value *> extract_mask(mExpansionWidth);
+    std::vector<Value *> extracted(mExpansionWidth);
+    for (unsigned blk = 0; blk < mExpansionWidth; blk++) {
+        Value * databit_mask = b.esimd_bitspread(mExpansionWidth, b.CreateExtractElement(fileExtentMask, blk));
+        if (mInsertPos == InsertPosition::Before) {
+            databit_mask = b.simd_slli(mExpansionWidth, databit_mask, mExpansionWidth - 1);
+        }
+        //b.CallPrintRegister("databit_mask", databit_mask);
+        extract_mask[blk] = databit_mask;
+        for (unsigned j = 0; j < bix_bits; j++) {
+            Value * bixNumField = b.CreateExtractElement(insert_bix_num[j], blk);
+            Value * s = b.esimd_bitspread(mExpansionWidth, bixNumField);
+            Value * s_mask = b.simd_any(mExpansionWidth, s);
+            extract_mask[blk] = b.simd_or(extract_mask[blk], b.simd_and(s_mask, insertedBits[j]));
+            //b.CallPrintRegister("extract_mask" + std::to_string(j), extract_mask[blk]);
+        }
+        extracted[blk] = b.simd_pext(pack_width, databit_mask, extract_mask[blk]);
+        for (unsigned i = 0; i < packs_per_block; i++) {
+            Value * pack_mask = b.mvmd_extract(pack_width, extract_mask[blk], i);
+            Value * newbits = b.CreateZExt(b.CreatePopcount(pack_mask), sizeTy);
+            //b.CallPrintInt("newbits", newbits);
+            Value * spread_pack = b.CreateExtractElement(extracted[blk], i);
+            pending = b.CreateOr(pending, b.CreateShl(spread_pack, offset));
+            // We may have filled the pack; write it out in case we move on.
+            b.CreateStore(pending, spread_mask_pack_ptr);
+            Value * Rshift = b.CreateURem(b.CreateSub(PACK_BITS, offset), PACK_BITS);
+            Value * pack_overflow = b.CreateLShr(spread_pack, Rshift);
+            offset = b.CreateAdd(offset, newbits);
+            produced = b.CreateAdd(produced, newbits);
+            //b.CallPrintInt("produced", produced);
+            Value * pack_filled = b.CreateICmpUGE(offset, PACK_BITS);
+            pending = b.CreateSelect(pack_filled, pack_overflow, pending);
+            spread_mask_pack_ptr = b.CreateGEP(packPtrTy, spread_mask_pack_ptr, b.CreateZExt(pack_filled, sizeTy));
+            offset = b.CreateURem(produced, PACK_BITS);
+        }
+    }
+    b.CreateStore(pending, spread_mask_pack_ptr);
+    b.setProducedItemCount("spread_mask", produced);
+}
+
+void InsertionSpreadMaskKernel::generateFinalBlockMethod(KernelBuilder & b, Value * const remainingBytes) {
+    // Standard Pablo convention for final block processing: set a bit marking
+    // the position just past EOF, as well as a mask marking all positions past EOF.
+    b.setScalarField("EOFmask", b.bitblock_mask_from(remainingBytes));
+    RepeatDoBlockLogic(b);
 }
 
 ByteCombine::ByteCombine(LLVMTypeSystemInterface & ts,
