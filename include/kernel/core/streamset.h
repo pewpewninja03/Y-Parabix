@@ -237,70 +237,6 @@ protected:
 
 };
 
-class DynamicBuffer final : public InternalBuffer {
-protected:
-
-    enum { LinearMallocedAddress = 0,
-           LinearInternalCapacity = 1,
-           LinearBaseAddress = 2,
-           LinearEffectiveCapacity = 3,
-           LinearFields = 4,
-           // -------------------------------
-           CircularAddressSelector = 0,
-           CircularBaseAddress = 1,
-           CircularSecondaryBaseAddress = 2,
-           CircularInternalCapacity = 3,
-           CircularSecondaryInternalCapacity = 4,
-           CircularFields = 5 };
-
-public:
-
-    static inline bool classof(const StreamSetBuffer * b) {
-        return b->getBufferKind() == BufferKind::DynamicBuffer;
-    }
-
-    DynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * type,
-                  const bool hasUnderflow,
-                  const bool linear, const unsigned AddressSpace);
-
-    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
-
-    void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
-
-    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
-
-    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
-
-    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
-
-    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-//    Rational getInitialCapacity() const {
-//        return mInitialCapacity;
-//    }
-
-    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
-
-    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
-
-    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
-
-private:
-
-//    const Rational  mInitialCapacity;
-    const bool      mHasUnderflow;
-};
-
 class ManagedDynamicBuffer final : public InternalBuffer {
 public:
 
@@ -370,8 +306,6 @@ public:
     }
 
 private:
-
-//    const Rational mInitialCapacity;
 
     mutable llvm::Value * mThreadLocalHandle;
 

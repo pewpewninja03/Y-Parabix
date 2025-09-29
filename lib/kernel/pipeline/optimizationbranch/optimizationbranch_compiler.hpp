@@ -359,7 +359,7 @@ void OptimizationBranchCompiler::constructStreamSetBuffers(KernelBuilder & b) {
         const Binding & output = mOutputStreamSets[i];
         StreamSetBuffer * buffer = nullptr;
         if (Kernel::isLocalBuffer(output).any()) {
-            buffer = new DynamicBuffer(i + numOfInputStreams, b, output.getType(),  0, true, 0);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), true, 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
         }

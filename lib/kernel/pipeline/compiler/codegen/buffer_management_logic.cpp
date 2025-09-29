@@ -273,7 +273,7 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isDeallocatable() && !bn.isReturned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
-            if ((isa<DynamicBuffer>(buffer) || isa<ManagedDynamicBuffer>(buffer))) {
+            if (isa<ManagedDynamicBuffer>(buffer)) {
                 assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 buffer->releaseBuffer(b);
             }
@@ -290,17 +290,7 @@ void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
             const BufferNode & bn = mBufferGraph[streamSet];
             if (bn.isDeallocatable()) {
                 StreamSetBuffer * const buffer = bn.Buffer;
-                if (LLVM_LIKELY(isa<DynamicBuffer>(buffer))) {
-                    assert (false);
-//                    const auto pe = in_edge(streamSet, mBufferGraph);
-//                    const auto p = source(pe, mBufferGraph);
-//                    const BufferPort & rd = mBufferGraph[pe];
-//                    assert (rd.Port.Type == PortType::Output);
-//                    const auto prefix = makeBufferName(p, rd.Port);
-//                    Value * const addr = b.getScalarField(prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
-//                    Value * const capacity = b.getScalarField(prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
-//                    cast<DynamicBuffer>(buffer)->destroyBuffer(b, addr, capacity);
-                } else if (isa<ManagedDynamicBuffer>(buffer)) {
+                if (isa<ManagedDynamicBuffer>(buffer)) {
                     if (bn.isOwned()) {
                                             const auto pe = in_edge(streamSet, mBufferGraph);
                                             const auto p = source(pe, mBufferGraph);
