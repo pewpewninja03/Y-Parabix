@@ -1215,6 +1215,8 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     Function * f = m->getFunction(name.str());
 
+    Type * const voidPtrTy = b.getVoidPtrTy();
+
     if (f == nullptr) {
 
         StructType * handleTy = getHandleType(b);
@@ -1228,7 +1230,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
 
         FixedArray<Type *, 3> paramTypes;
-        paramTypes[0] = handlePtrTy;
+        paramTypes[0] = voidPtrTy;
         paramTypes[1] = intPtrTy;
         paramTypes[2] = intPtrTy;
 
@@ -1260,8 +1262,9 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
             return v;
         };
 
-        Value * const handle = nextArg();
+        Value * handle = nextArg();
         handle->setName("handle");
+        handle = b.CreatePointerCast(handle, handlePtrTy);
         Value * capacity = nextArg();
         capacity->setName("capacity");
         Value * typeSize = nextArg();
@@ -1365,7 +1368,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
     Rational stridesPerPage{getPageSize(), typeSize};
     Value * capacity = b.CreateRoundUpRational(capacityMultiplier, stridesPerPage.numerator());
     FixedArray<Value *, 3> args;
-    args[0] = getHandle();
+    args[0] = b.CreatePointerCast(getHandle(), voidPtrTy);
     args[1] = capacity;
     args[2] = b.getSize(typeSize);
     b.CreateCall(f, args);
@@ -2026,6 +2029,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
     FixedArray<Value *, 6> args;
     args[0] = b.CreatePointerCast(mHandle, voidPtrTy);
+    assert (mThreadLocalHandle);
     args[1] = b.CreatePointerCast(mThreadLocalHandle, voidPtrTy);
     args[2] = produced;
     args[3] = consumed;

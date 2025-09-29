@@ -1183,8 +1183,7 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder 
         const auto n = mOutputStreamSets.size();
         for (size_t i = 0; i < n; ++i) {
             const auto & buffer = mStreamSetOutputBuffers[i];
-            assert (isa<ManagedDynamicBuffer>(buffer) == Kernel::isManagedBuffer(mOutputStreamSets[i]));
-            if (LLVM_UNLIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            if (LLVM_UNLIKELY(Kernel::isManagedBuffer(mOutputStreamSets[i]))) {
                 StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
                 assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) == 
                         ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));

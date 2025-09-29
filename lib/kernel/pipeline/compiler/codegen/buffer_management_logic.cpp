@@ -8,7 +8,6 @@ namespace kernel {
 void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const unsigned kernelId, const unsigned groupId) {
 
     bool hasAnyInternalStreamSets = false;
-
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
 
@@ -55,9 +54,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
         // segment.
 
-
-
-        if (bn.isOwned() && isa<ManagedDynamicBuffer>(buffer)) {
+        if (isa<ManagedDynamicBuffer>(buffer)) {
             Type * const threadLocalStructTy = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
             if (LLVM_LIKELY(isMultithreaded())) {
                 mTarget->addThreadLocalScalar(threadLocalStructTy, prefix + MANAGED_DYNAMIC_BUFFER_STRUCT, groupId);
@@ -90,7 +87,6 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
  * @brief loadInternalStreamSetHandles
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal) {
-
     if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
         return;
     }
@@ -101,9 +97,8 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
         // external buffers already have a buffer handle
         StreamSetBuffer * const buffer = bn.Buffer;
         if (bn.isNonThreadLocal() == nonLocal) {
-            if (LLVM_UNLIKELY(bn.isExternal())) {
-                assert (isFromCurrentFunction(b, buffer->getHandle(), true));
-            } else if (LLVM_UNLIKELY(bn.isConstant())) {
+            if (LLVM_UNLIKELY(bn.isConstant())) {
+                assert (!isa<ManagedDynamicBuffer>(buffer));
                 assert (nonLocal);
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
                 buffer->setHandle(b.getScalarFieldPtr(handleName));
@@ -125,7 +120,9 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
                     auto tlHandle = b.getScalarFieldPtr(handleName + MANAGED_DYNAMIC_BUFFER_STRUCT);
                     cast<ManagedDynamicBuffer>(buffer)->setThreadLocalHandle(tlHandle.first);
                 }
-                buffer->setHandle(b.getScalarFieldPtr(handleName));
+                if (bn.isInternal()) {
+                    buffer->setHandle(b.getScalarFieldPtr(handleName));
+                }
             }
         }
     }
@@ -903,8 +900,6 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
         assert (!bufferNode.isTruncated());
         return baseAddress;
     }
-
-    assert (!(buffer->isLinear()  &&isa<ManagedDynamicBuffer>(buffer)));
 
     Value * const addr = buffer->getVirtualBasePtr(b, baseAddress, position);
     if (prefetch) {
