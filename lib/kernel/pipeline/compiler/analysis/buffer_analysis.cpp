@@ -867,9 +867,8 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
                 assert (!bn.isManagedOutput());
                 buffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
-            } else if (LLVM_UNLIKELY(bn.isReturned())) {
-                buffer = new DynamicBuffer(streamSet, b, output.getType(), bn.RequiresUnderflow, bn.IsLinear, 0U);
             } else { // is internal buffer
+                assert (bn.IsLinear || !bn.isReturned());
                 buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
             }
         }

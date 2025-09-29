@@ -226,9 +226,9 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                 }
                 if (nonLocal) {
                     Value * maxStrides = allocScale;
-                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
-                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
-                    }
+//                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
+//                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
+//                    }
                     const auto & R = bn.RelativeIORate;
                     assert (R.numerator() > 0);
                     Value * multiplier = b.CreateCeilUMulRational(maxStrides, R);

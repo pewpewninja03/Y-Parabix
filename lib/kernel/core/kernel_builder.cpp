@@ -169,7 +169,9 @@ Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const 
     Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
     const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(processed, getBitBlockWidth());
         Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(entry.Index);
@@ -195,7 +197,9 @@ Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const s
     Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
     const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(processed, getBitBlockWidth());
         Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(entry.Index);
@@ -251,7 +255,9 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
     Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
     const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
         Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
@@ -277,7 +283,9 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
     Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
     const auto dataWidth = (bw > 8) ? (bw >> 3) : 1U;
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
         Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
@@ -345,7 +353,9 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
     auto & dl = getModule()->getDataLayout();
     Value * ptr = buf->getRawItemPointer(*this, streamIndex, absolutePosition);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
@@ -417,7 +427,9 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const
     Type * const ty = value->getType();
     auto & dl = getModule()->getDataLayout();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-        Value * const sanityCheck = CreateICmpULE(streamIndex, buf->getStreamSetCount(*this));
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
@@ -483,15 +495,9 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 StructType * const handleTy = buffer->getHandleType(*this);
                 PointerType * const handlePtrTy = handleTy->getPointerTo(buffer->getAddressSpace());
-
                 StructType * const threadLocalTy = managedBuffer->getThreadLocalHandleType(*this);
                 PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo(buffer->getAddressSpace());
-
-                PointerType * const addrPtrTy = buffer->getPointerType();
-
                 PointerType * const i8PtrTy = getInt8PtrTy();
-                Constant * const nullAddrPtr = ConstantPointerNull::get(i8PtrTy);
-                const auto voidPtrTyAlign = DL.getABITypeAlign(i8PtrTy).value();
 
                 FixedArray<Type *, 5> paramTypes;
                 paramTypes[0] = voidPtrTy; // shared struct ptr

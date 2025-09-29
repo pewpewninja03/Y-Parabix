@@ -541,7 +541,7 @@ inline static IntervalSet parseCommaDelimitedList(const std::string & list)  {
         }
     }
     return parsedList;
-};
+}
 
 
 }

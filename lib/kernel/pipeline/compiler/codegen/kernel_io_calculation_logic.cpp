@@ -844,13 +844,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     BasicBlock * const afterCopyBackOrExpand = b.CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
 
-    Value * mustExpand = nullptr;
     // TODO: have a delete immediately value when not multithreaded?
-    if (isa<ManagedDynamicBuffer>(buffer) || !buffer->isLinear()) {
-        buffer->reserveCapacity(b, produced, consumed, required);
-    } else {
-        buffer->linearCopyBack(b, produced, consumed, required);
-    }
+    Value * const mustExpand = buffer->reserveCapacity(b, produced, consumed, required);
 
     b.CreateBr(afterCopyBackOrExpand);
 
