@@ -553,6 +553,8 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
     PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo();
 
+    bool hasManagedOutput = false;
+
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         const auto port = getOutput(mKernelId, StreamSetPort(PortType::Output, i));
         const BufferPort & rt = mBufferGraph[port];
@@ -588,6 +590,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             #endif
             addNextArg(b.CreatePointerCast(ptr, voidPtrPtrTy));
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
+            hasManagedOutput = true;
         } else {
 
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
@@ -635,6 +638,12 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             }
         }
     }
+
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers && hasManagedOutput)) {
+        addNextArg(mBufferExpansionFunction);
+        addNextArg(b.CreatePointerCast(getHandle(), voidPtrTy));
+    }
+
     assert (args.size() == mKernelDoSegmentFunctionType->getNumParams());
 }
 

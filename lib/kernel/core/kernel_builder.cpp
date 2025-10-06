@@ -481,11 +481,16 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
             SmallVector<char, 200> buf;
             raw_svector_ostream name(buf);
 
+            const auto traceDynamicBuffers = codegen::DebugOptionIsSet(codegen::DebugFlags::TraceDynamicBuffers);
+
             name << "__KB_ManagedDynamicBuffer";
             if (buffer->isLinear()) {
                 name << "Linear";
             }
             name << "_reserve_capacity" << buffer->getAddressSpace();
+            if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                name << 'T';
+            }
 
             PointerType * const voidPtrTy = getVoidPtrTy();
 
@@ -499,12 +504,18 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo(buffer->getAddressSpace());
                 PointerType * const i8PtrTy = getInt8PtrTy();
 
-                FixedArray<Type *, 5> paramTypes;
+                SmallVector<Type *, 8> paramTypes(traceDynamicBuffers ? 8 : 5);
                 paramTypes[0] = voidPtrTy; // shared struct ptr
                 paramTypes[1] = voidPtrTy; // thread local struct ptr
                 paramTypes[2] = intPtrTy;
                 paramTypes[3] = intPtrTy;
                 paramTypes[4] = intPtrTy;
+
+                if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                    paramTypes[5] = voidPtrTy;
+                    paramTypes[6] = voidPtrTy;
+                    paramTypes[7] = intPtrTy;
+                }
 
                 FunctionType * funcTy = FunctionType::get(getVoidTy(), paramTypes, false);
 
@@ -540,6 +551,17 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 consumed->setName("consumed");
                 Value * const required = nextArg();
                 required->setName("required");
+                Value * reportExpansionCallback = nullptr;
+                Value * pipelineHandle = nullptr;
+                Value * portNum = nullptr;
+                if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                    reportExpansionCallback = nextArg();
+                    reportExpansionCallback->setName("reportExpansionCallback");
+                    pipelineHandle = nextArg();
+                    pipelineHandle->setName("pipelineHandle");
+                    portNum = nextArg();
+                    portNum->setName("portNum");
+                }
                 assert (arg == f->arg_end());
 
                 ConstantInt * const BLOCK_WIDTH = getSize(getBitBlockWidth());
@@ -551,7 +573,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 CreateUnlikelyCondBr(CreateICmpUGT(CreateSub(requiredChunks, consumedChunks), capacityChunks), expandInternalBuffer, exit);
 
                 SetInsertPoint(expandInternalBuffer);
-                managedBuffer->reserveCapacity(*this, produced, consumed, required);
+                managedBuffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
                 CreateBr(exit);
 
                 SetInsertPoint(exit);
@@ -562,12 +584,17 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 managedBuffer->setThreadLocalHandle(currentThreadLocalHandle);
             }
 
-            FixedArray<Value *, 5> args;
+            SmallVector<Value *, 8> args(traceDynamicBuffers ? 8 : 5);
             args[0] = CreatePointerCast(managedBuffer->getHandle(), voidPtrTy);
             args[1] = CreatePointerCast(managedBuffer->getThreadLocalHandle(), voidPtrTy);
             args[2] = producedItems;
             args[3] = consumedItems;
             args[4] = capacity;
+            if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                args[5] = COMPILER->getReportExpansionCallback();
+                args[6] = COMPILER->getPipelineHandle();
+                args[7] = getSize(port.Number);
+            }
             CreateCall(f, args);
             return;
         }
@@ -1056,8 +1083,7 @@ bool isFromCurrentFunction(const KernelBuilder & b, const Value * const value, c
         assert (!"not from same context?");
         return false;
     }
-    BasicBlock * const ip = b.GetInsertBlock();
-    assert (ip);
+    BasicBlock * const ip = b.GetInsertBlock(); assert (ip);
     if (isa<Constant>(value)) {
         return true;
     }

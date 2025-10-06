@@ -212,6 +212,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     fieldIndex[1] = b.getInt32(CURRENT_THREAD_ID);
     b.CreateAlignedStore(ConstantInt::getNullValue(pThreadTy), b.CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex), pThreadAlign);
     // store where we'll resume compiling the DoSegment method
+
+    ScalarValueMap originalScalarFieldMap(mScalarFieldMap);
+    ScalarAliasMap originalScalarFieldMapScalarAliasMap(mScalarAliasMap);
+    BindingMap originalBindingMap(mBindingMap);
+
     const auto resumePoint = b.saveIP();
 
     const auto anyDebugOptionIsSet = codegen::AnyDebugOptionIsSet();
@@ -265,9 +270,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         assert (threadStruct->getType() == threadStructPtrTy);
         readThreadStructObject(b, threadStructTy, threadStruct);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
-
-//        Value * baseFunctionPtrInt = b.CreatePtrToInt(csFunc, intPtrTy);
-//        b.CallPrintInt(csFunc->getName().str() + "." + b.GetInsertBlock()->getName().str(), baseFunctionPtrInt);
 
         readDoSegmentState(b, threadStructTy, threadStruct);
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
@@ -823,7 +825,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     setHandle(initialSharedState);
     setThreadLocalHandle(initialThreadLocal);
-    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+
+    mScalarFieldMap = originalScalarFieldMap;
+    mScalarAliasMap = originalScalarFieldMapScalarAliasMap;
+    mBindingMap = originalBindingMap;
+
+    // initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
 
     Value * firstTerminationSignal = nullptr;
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {

@@ -396,7 +396,15 @@ protected:
 
     void captureStreamData(KernelBuilder & b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * streamData, llvm::Value * from, llvm::Value * to) const;
 
+protected:
 
+    llvm::Value * getReportExpansionCallback() const {
+        return mReportExpansionCallback;
+    }
+
+    llvm::Value * getPipelineHandle() const {
+        return mPipelineHandle;
+    }
 
 protected:
 
@@ -439,6 +447,9 @@ protected:
     #ifdef ENABLE_PAPI
     llvm::Value *                   mPAPIEventSetId = nullptr;
     #endif
+
+    llvm::Value *                   mReportExpansionCallback = nullptr;
+    llvm::Value *                   mPipelineHandle = nullptr;
 
     Vec<llvm::Value *>              mInputIsClosed;
 

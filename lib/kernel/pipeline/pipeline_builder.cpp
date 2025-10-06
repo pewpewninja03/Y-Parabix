@@ -489,14 +489,13 @@ Kernel * PipelineBuilder::makeKernel() {
     addKernelProperties(kernels, mTarget);
 
     if (LLVM_UNLIKELY(requiresIllustratorObj)) {
-        mTarget->mFlags = Kernel::KernelFlags::RequiresIllustratorObject;
+        mTarget->mFlags |= Kernel::KernelFlags::RequiresIllustratorObject;
     }
 
     signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
 
     mTarget->mKernelName =
-        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline, mTarget->mFlags,
-            PipelineKernel::makePipelineHashName(signature));
+        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline, mTarget->mFlags, PipelineKernel::makePipelineHashName(signature));
 
     mTarget->setCompilationStatus(Kernel::CompilationStatus::FullyInitialized);
 

@@ -845,8 +845,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     BasicBlock * const afterCopyBackOrExpand = b.CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
 
     // TODO: have a delete immediately value when not multithreaded?
-    Value * const mustExpand = buffer->reserveCapacity(b, produced, consumed, required);
-
+    Value * mustExpand = nullptr;
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+        Value * sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
+        mustExpand = buffer->reserveCapacity(b, produced, consumed, required, mBufferExpansionFunction, sharedHandle, b.getSize(outputPort.Number));
+    } else {
+        mustExpand = buffer->reserveCapacity(b, produced, consumed, required, nullptr, nullptr, nullptr);
+    }
     b.CreateBr(afterCopyBackOrExpand);
 
     b.SetInsertPoint(afterCopyBackOrExpand);

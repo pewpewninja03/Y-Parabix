@@ -442,11 +442,6 @@ public:
     StreamSetPort selectPrincipleCycleCountBinding(const unsigned kernel) const;
     void printOptionalBlockingIOStatistics(KernelBuilder & b);
 
-
-    void initializeBufferExpansionHistory(KernelBuilder & b) const;
-    void recordBufferExpansionHistory(KernelBuilder & b, const unsigned streamSet, const BufferNode & bn, const BufferPort & port, const StreamSetBuffer * const buffer) const;
-    void printOptionalBufferExpansionHistory(KernelBuilder & b);
-
     void initializeStridesPerSegment(KernelBuilder & b) const;
     void recordStridesPerSegment(KernelBuilder & b, unsigned kernelId, Value * const totalStrides) const;
     void concludeStridesPerSegmentRecording(KernelBuilder & b) const;
@@ -468,6 +463,12 @@ public:
     void printItemCountDeltas(KernelBuilder & b, const StringRef title, const StringRef suffix) const;
 
     Value * getMaxSegmentNumber(KernelBuilder & b) const;
+
+    // buffer expansion recording functions
+
+    Value * generateBufferExpansionFunctionForCurrentKernel(KernelBuilder & b, const size_t kernelId);
+    void initializeBufferExpansionHistory(KernelBuilder & b) const;
+    void printOptionalBufferExpansionHistory(KernelBuilder & b);
 
 // internal optimization passes
 
@@ -887,6 +888,8 @@ protected:
     // cycle counter state
     FixedVector<PHINode *>                      mPartitionStartTimePhi;
     FixedArray<Value *, TOTAL_NUM_OF_CYCLE_COUNTERS>  mCycleCounters;
+
+    Value *                                     mBufferExpansionFunction = nullptr;
 
     // dynamic multithreading cycle counter state
     Value *                                     mAccumulatedSynchronizationTimePtr = nullptr;

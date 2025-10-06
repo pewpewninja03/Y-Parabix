@@ -619,6 +619,11 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelB
             setHandle(nextArg());
         }
         Value * const expectedNumOfStrides = nextArg();
+        const auto imss = (mTarget->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet);
+        if (LLVM_UNLIKELY(imss && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+            mReportExpansionCallback = nextArg();
+            mPipelineHandle = nextArg();
+        }
         initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars, expectedNumOfStrides);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
@@ -930,6 +935,13 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         }
         mWritableOutputItems[i] = writable;
     }
+
+    const auto hasManagedOutput = (mTarget->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet);
+
+    if (LLVM_UNLIKELY(hasManagedOutput && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        mReportExpansionCallback = nextArg();
+        mPipelineHandle = nextArg();
+    }
     assert (arg == args.end());
 
     // initialize the termination signal if this kernel can set it
@@ -1073,6 +1085,12 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
                 props.push_back(mOutputItemCapacity[i]);
             }
         }
+    }
+    if (LLVM_UNLIKELY(mReportExpansionCallback != nullptr)) {
+        assert (codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers));
+        props.push_back(mReportExpansionCallback);
+        assert (mPipelineHandle);
+        props.push_back(mPipelineHandle);
     }
     return props;
 }
@@ -1268,7 +1286,7 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
 
-    DataLayout DL(b.getModule());
+    auto & DL = b.getModule()->getDataLayout();
 
     #ifndef NDEBUG
     auto verifyStateType = [](Value * const handle, StructType * const stateType) {
@@ -1295,7 +1313,11 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     }
     #endif
 
+    assert (isFromCurrentFunction(b, mSharedHandle, true));
+    assert (isFromCurrentFunction(b, mThreadLocalHandle, true));
+
     mScalarFieldMap.clear();
+    mScalarAliasMap.clear();
 
     auto addToScalarFieldMap = [&](StringRef bindingName, Value * const scalar, Type * const expectedType, Type * const actualType) {
         const auto i = mScalarFieldMap.insert(std::make_pair(bindingName, std::make_pair(scalar, expectedType)));
@@ -1393,6 +1415,7 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
             indices[2] = b.getInt32(k); k += 2;
             Value * const scalar = b.CreateGEP(sharedTy, mSharedHandle, indices);
             addToScalarFieldMap(binding.getName(), scalar, binding.getType(), actualType);
+
         }
     };
 
@@ -1626,7 +1649,7 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
                     R *= ub;
                 }
                 Value * const bufferScale = b.CreateCeilUMulRational(expectedNumOfStrides, R);
-                buffer->allocateBuffer(b, bufferScale);
+                buffer->allocateBuffer(b, bufferScale, mReportExpansionCallback, mPipelineHandle, b.getSize(i));
             }
         }
     }

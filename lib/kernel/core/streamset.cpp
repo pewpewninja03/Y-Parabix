@@ -270,7 +270,7 @@ Type * StreamSetBuffer::resolveType(KernelBuilder & b, Type * const streamSetTyp
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isItemAlignedAccessWithinStreamSetMemory
  ** ------------------------------------------------------------------------------------------------------------- */
-void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Constant * name, Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const {
+void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Constant * name, Value * ptr, const size_t size, Value * const start, Value * const end) const {
 
     assert (codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts));
 
@@ -315,7 +315,7 @@ StructType * ExternalBuffer::getHandleType(KernelBuilder & b) const {
     return mHandleType;
 }
 
-void ExternalBuffer::allocateBuffer(KernelBuilder & /* b */, Value * const /* capacityMultiplier */) {
+void ExternalBuffer::allocateBuffer(KernelBuilder & /* b */, Value * const /* capacityMultiplier */, Value * reportCallback, Value * pipelineHandle, Value * portNum) {
     unsupported("allocateBuffer", "External");
 }
 
@@ -386,15 +386,7 @@ inline void ExternalBuffer::assertValidBlockIndex(KernelBuilder & b, Value * blo
     }
 }
 
-Value * ExternalBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
-    unsupported("requiresExpansion", "External");
-}
-
-void ExternalBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
-    unsupported("linearCopyBack", "External");
-}
-
-Value * ExternalBuffer::reserveCapacity(KernelBuilder & /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */) const  {
+Value * ExternalBuffer::reserveCapacity(KernelBuilder & /* b */, Value * /* produced */, Value * /* consumed */, Value * const /* required */, Value * /* reportCallback */, Value * /* pipelineHandle */, Value * /* portNum */) const  {
     unsupported("expandBuffer", "External");
 }
 
@@ -508,7 +500,7 @@ Value * ManagedDynamicBuffer::getVirtualBasePtr(KernelBuilder & b, Value * const
     return b.CreatePointerCast(addr, getPointerType());
 }
 
-void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
+void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier, Value *reportCallback, Value *pipelineHandle, Value *portNum) {
     assert (mHandle && "has not been set prior to calling allocateBuffer");
 
     SmallVector<char, 200> buf;
@@ -516,11 +508,16 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     assert ("unspecified module" && b.getModule());
 
+    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+
     name << "__ManagedDynamicBuffer";
     if (mLinear) {
         name << "Linear";
     }
     name << "_initial_alloc" << mAddressSpace;
+    if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+        name << 'T';
+    }
 
     Module * const m = b.getModule();
 
@@ -532,6 +529,8 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     if (f == nullptr) {
 
+
+
         StructType * handleTy = getHandleType(b);
         PointerType * const handlePtrTy = handleTy->getPointerTo(mAddressSpace);
 
@@ -542,10 +541,15 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         const auto voidPtrTyAlign = DL.getABITypeAlign(addrPtrTy).value();
         const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
 
-        FixedArray<Type *, 3> paramTypes;
+        SmallVector<Type *, 6> paramTypes(traceDynamicBuffer ? 6 : 3);
         paramTypes[0] = voidPtrTy;
         paramTypes[1] = intPtrTy;
         paramTypes[2] = intPtrTy;
+        if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+            paramTypes[3] = voidPtrTy;
+            paramTypes[4] = voidPtrTy;
+            paramTypes[5] = intPtrTy;
+        }
 
         FunctionType * funcTy = FunctionType::get(b.getVoidTy(), paramTypes, false);
 
@@ -582,6 +586,17 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         capacity->setName("capacity");
         Value * typeSize = nextArg();
         typeSize->setName("typeSize");
+        Value * reportCallback = nullptr;
+        Value * pipelineHandle = nullptr;
+        Value * portNum = nullptr;
+        if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+            reportCallback = nextArg();
+            reportCallback->setName("reportCallback");
+            pipelineHandle = nextArg();
+            pipelineHandle->setName("pipelineHandle");
+            portNum = nextArg();
+            portNum->setName("portNum");
+        }
         assert (arg == f->arg_end());
 
 
@@ -664,6 +679,26 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
             b.CreateAlignedStore(sz_ZERO, linearSelectorField, intPtrTyAlign);
 
         }
+
+        if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+
+            FixedArray<Type *, 4> paramTypes;
+            paramTypes[0] = voidPtrTy; // pipeline handle
+            paramTypes[1] = intPtrTy; // port num
+            paramTypes[2] = intPtrTy; // produced
+            paramTypes[3] = intPtrTy; // capacity
+
+            FunctionType * funcTy = FunctionType::get(b.getVoidTy(), paramTypes, false);
+
+            FixedArray<Value *, 4> callbackArgs;
+            callbackArgs[0] = pipelineHandle;
+            callbackArgs[1] = portNum;
+            callbackArgs[2] = b.getSize(0);
+            callbackArgs[3] = b.CreateMul(capacity, b.getSize(b.getBitBlockWidth()));
+
+            b.CreateCall(funcTy, b.CreatePointerCast(reportCallback, funcTy->getPointerTo()), callbackArgs);
+        }
+
         b.CreateRetVoid();
 
         b.restoreIP(ip);
@@ -680,10 +715,15 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     Rational stridesPerPage{getPageSize(), typeSize};
     Value * capacity = b.CreateRoundUpRational(capacityMultiplier, stridesPerPage.numerator());
-    FixedArray<Value *, 3> args;
+    SmallVector<Value *, 6> args(traceDynamicBuffer ? 6 : 3);
     args[0] = b.CreatePointerCast(getHandle(), voidPtrTy);
     args[1] = capacity;
     args[2] = b.getSize(typeSize);
+    if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+        args[3] = reportCallback;
+        args[4] = pipelineHandle;
+        args[5] = portNum;
+    }
     b.CreateCall(f, args);
 }
 
@@ -916,14 +956,6 @@ Value * ManagedDynamicBuffer::modByCapacity(KernelBuilder & b, Value * const off
     }
 }
 
-Value * ManagedDynamicBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
-    unsupported("requiresExpansion", "ManagedDynamicBuffer");
-}
-
-void ManagedDynamicBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
-    unsupported("linearCopyBack", "ManagedDynamicBuffer");
-}
-
 StructType * ManagedDynamicBuffer::getInternalThreadLocalHandleType(KernelBuilder & b) {
     FixedArray<Type *, 3> fields;
     PointerType * const addrPtrTy = b.getInt8PtrTy();
@@ -950,7 +982,7 @@ void ManagedDynamicBuffer::freePendingDeletion(KernelBuilder & b, Value * thread
     destroyBuffer(b, addr, capacity);
 }
 
-Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
+Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produced, Value * consumed, Value * required, Value * reportCallback, Value * pipelineHandle, Value * portNum) const {
 
     // TODO: if we keep the buffer fd, manual indicates we can resize it by calling ftruncate again. How would this
     // affect users of the buffer prior to setting the new addr/capacity? The mmap'ed buffer pointing to the fds
@@ -958,6 +990,8 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
     Module * const m = b.getModule();
     auto & DL = m->getDataLayout();
+
+    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -969,6 +1003,9 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         name << "Linear";
     }
     name << "_reserve_capacity" << mAddressSpace;
+    if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+        name << 'T';
+    }
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
     const auto blockWidth = b.getBitBlockWidth();
@@ -999,13 +1036,18 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
         constexpr auto DUFF_STEPS = 8;
 
-        FixedArray<Type *, 6> paramTypes;
+        SmallVector<Type *, 8> paramTypes(traceDynamicBuffer ? 9 : 6);
         paramTypes[0] = voidPtrTy; // shared struct ptr
         paramTypes[1] = voidPtrTy; // thread local struct ptr
-        paramTypes[2] = intPtrTy;
-        paramTypes[3] = intPtrTy;
-        paramTypes[4] = intPtrTy;
-        paramTypes[5] = intPtrTy;
+        paramTypes[2] = intPtrTy; // produced
+        paramTypes[3] = intPtrTy; // consumed
+        paramTypes[4] = intPtrTy; // required
+        paramTypes[5] = intPtrTy; // blocksPerChunk
+        if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+            paramTypes[6] = voidPtrTy; // reportExpansionCallback
+            paramTypes[7] = voidPtrTy; // pipelineHandle
+            paramTypes[8] = intPtrTy; // portNum
+        }
 
         Type * const retValTy = mLinear ? (Type*)intPtrTy : b.getVoidTy();
 
@@ -1056,6 +1098,17 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         required->setName("required");
         Value * const blocksPerChunk = nextArg();
         blocksPerChunk->setName("blocksPerChunk");
+        Value * reportExpansionCallback = nullptr;
+        Value * pipelineHandle = nullptr;
+        Value * portNum = nullptr;
+        if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+            reportExpansionCallback = nextArg();
+            reportExpansionCallback->setName("reportExpansionCallback");
+            pipelineHandle = nextArg();
+            pipelineHandle->setName("pipelineHandle");
+            portNum = nextArg();
+            portNum->setName("portNum");
+        }
         assert (arg == f->arg_end());
 
         ConstantInt * const BLOCK_WIDTH = b.getSize(blockWidth);
@@ -1117,7 +1170,6 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         } else {
             b.CreateBr(expandInternalBuffer);
         }
-
 
         // Otherwise, allocate a buffer with at least twice the capacity and copy the unconsumed data back into it
         b.SetInsertPoint(expandInternalBuffer);
@@ -1315,6 +1367,25 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
             b.CreateAlignedStore(nextSelector, selectorField, intPtrTyAlign);
         }
 
+        if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+
+            FixedArray<Type *, 4> paramTypes;
+            paramTypes[0] = voidPtrTy; // pipeline handle
+            paramTypes[1] = intPtrTy; // port num
+            paramTypes[2] = intPtrTy; // produced
+            paramTypes[3] = intPtrTy; // capacity
+
+            FunctionType * funcTy = FunctionType::get(b.getVoidTy(), paramTypes, false);
+
+            FixedArray<Value *, 4> callbackArgs;
+            callbackArgs[0] = pipelineHandle;
+            callbackArgs[1] = portNum;
+            callbackArgs[2] = produced;
+            callbackArgs[3] = b.CreateMul(expandedCapacity, BLOCK_WIDTH);
+
+            b.CreateCall(funcTy, b.CreatePointerCast(reportExpansionCallback, funcTy->getPointerTo()), callbackArgs);
+        }
+
         b.CreateBr(exit);
 
         b.SetInsertPoint(exit);
@@ -1340,7 +1411,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
     }
 
-    FixedArray<Value *, 6> args;
+    SmallVector<Value *, 9> args(traceDynamicBuffer ? 9 : 6);
     args[0] = b.CreatePointerCast(mHandle, voidPtrTy);
     assert (mThreadLocalHandle);
     args[1] = b.CreatePointerCast(mThreadLocalHandle, voidPtrTy);
@@ -1351,6 +1422,11 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
     assert (typeSize > 0);
     assert ((typeSize % (blockWidth / 8)) == 0);
     args[5] = b.getSize((8 * typeSize) / blockWidth);
+    if (LLVM_UNLIKELY(traceDynamicBuffer)) {
+        args[6] = reportCallback; // reportExpansionCallback
+        args[7] = pipelineHandle; // pipelineHandle
+        args[8] = portNum; // portNum
+    }
     Value * const retVal = b.CreateCall(f, args);
     if (mLinear) {
         return retVal;
@@ -1372,7 +1448,7 @@ StructType * RepeatingBuffer::getHandleType(KernelBuilder & b) const {
     return mHandleType;
 }
 
-void RepeatingBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier) {
+void RepeatingBuffer::allocateBuffer(KernelBuilder & b, Value * const capacityMultiplier, Value * reportCallback, Value * pipelineHandle, Value * portNum) {
     unsupported("allocateBuffer", "Repeating");
 }
 
@@ -1457,15 +1533,7 @@ Value * RepeatingBuffer::getMallocAddress(KernelBuilder & b) const {
     return getBaseAddress(b);
 }
 
-Value * RepeatingBuffer::requiresExpansion(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
-    return b.getFalse();
-}
-
-void RepeatingBuffer::linearCopyBack(KernelBuilder & b, Value * produced, Value * consumed, Value * required) const {
-    unsupported("linearCopyBack", "Repeating");
-}
-
-Value * RepeatingBuffer::reserveCapacity(KernelBuilder & b, Value * produced, Value * consumed, Value * const required) const  {
+Value * RepeatingBuffer::reserveCapacity(KernelBuilder & /* b */, Value * /* produced */, Value * consumed, Value * const required, Value * /* reportCallback */, Value * /* pipelineHandle */, Value * /* portNum */) const  {
     unsupported("linearCopyBack", "Repeating");
 }
 
@@ -1478,7 +1546,7 @@ ExternalBuffer::ExternalBuffer(const unsigned id, KernelBuilder & b, Type * cons
 }
 
 ManagedDynamicBuffer::ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b,
-                                           llvm::Type * const type, const bool linear, const unsigned AddressSpace)
+                                           Type * const type, const bool linear, const unsigned AddressSpace)
 : InternalBuffer(id, BufferKind::ManagedDynamicBuffer, b, type, linear, AddressSpace) {
 
 }

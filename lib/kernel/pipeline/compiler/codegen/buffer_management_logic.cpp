@@ -172,7 +172,7 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
             if (nonLocal || kernelObj->hasThreadLocal()) {
                 setActiveKernel(b, i, !nonLocal);
                 assert (mKernel == kernelObj);
-                SmallVector<Value *, 3> params;
+                SmallVector<Value *, 5> params;
                 if (LLVM_LIKELY(mKernelSharedHandle)) {
                     params.push_back(mKernelSharedHandle);
                 }
@@ -188,7 +188,10 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                 const Rational factor {mTarget->getStride() * MaximumNumOfStrides[i], kernelObj->getStride()};
                 assert (factor.numerator() > 0);
                 params.push_back(b.CreateMulRational(allocScale, factor));
-
+                if (LLVM_UNLIKELY(mTraceDynamicBuffers && (kernelObj->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet) && nonLocal)) {
+                    params.push_back(generateBufferExpansionFunctionForCurrentKernel(b, i));
+                    params.push_back(b.CreatePointerCast(getHandle(), b.getVoidPtrTy()));
+                }
                 b.CreateCall(funcTy, func, params);
             }
         }
@@ -200,63 +203,75 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
 
     // and allocate any output buffers
 
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) {
-            continue;
-        }
-        assert (bn.isNonThreadLocal() || bn.isOwned());
-        if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
-            StreamSetBuffer * const buffer = bn.Buffer;
+    for (auto kernel = PipelineInput; kernel <= LastKernel; ++kernel) {
 
-            if (LLVM_UNLIKELY(bn.isConstant())) {
-                generateGlobalDataForRepeatingStreamSet(b, streamSet);
-            } else {
-                if (LLVM_LIKELY(bn.isInternal())) {
-                    const auto pe = in_edge(streamSet, mBufferGraph);
-                    const auto producer = source(pe, mBufferGraph);
-                    const BufferPort & rd = mBufferGraph[pe];
-                    const auto handleName = makeBufferName(producer, rd.Port);
-                    buffer->setHandle(b.getScalarFieldPtr(handleName));
+        Value * reportCallback = nullptr;
+        Value * sharedHandle = nullptr;
+
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            const auto streamSet = target(output, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) {
+                continue;
+            }
+            assert (bn.isNonThreadLocal() || bn.isOwned());
+            if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
+                StreamSetBuffer * const buffer = bn.Buffer;
+
+                if (LLVM_UNLIKELY(bn.isConstant())) {
+                    generateGlobalDataForRepeatingStreamSet(b, streamSet);
                 } else {
-                    assert (isFromCurrentFunction(b, buffer->getHandle(), false));
-                }
-                if (nonLocal) {
-                    Value * maxStrides = allocScale;
-//                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
-//                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
-//                    }
-                    const auto & R = bn.RelativeIORate;
-                    assert (R.numerator() > 0);
-                    Value * multiplier = b.CreateCeilUMulRational(maxStrides, R);
-
-
-
-                    if (LLVM_UNLIKELY(bn.isReturned())) {
-                        auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
-                        if (scaleFactor.numerator() == 0) {
-                            scaleFactor = R;
-                        }
-                        assert (expectedSourceOutputSize);
-                        Value * expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
-                        multiplier = b.CreateUMax(multiplier, expectedBufferSize);
+                    if (LLVM_LIKELY(bn.isInternal())) {
+                        const BufferPort & bp = mBufferGraph[output];
+                        const auto handleName = makeBufferName(kernel, bp.Port);
+                        buffer->setHandle(b.getScalarFieldPtr(handleName));
+                    } else {
+                        assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                     }
+                    if (nonLocal) {
+                        Value * maxStrides = allocScale;
+    //                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
+    //                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
+    //                    }
+                        const auto & R = bn.RelativeIORate;
+                        assert (R.numerator() > 0);
+                        Value * multiplier = b.CreateCeilUMulRational(maxStrides, R);
 
-                    buffer->allocateBuffer(b, multiplier);
+                        if (LLVM_UNLIKELY(bn.isReturned())) {
+                            auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
+                            if (scaleFactor.numerator() == 0) {
+                                scaleFactor = R;
+                            }
+                            assert (expectedSourceOutputSize);
+                            Value * expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
+                            multiplier = b.CreateUMax(multiplier, expectedBufferSize);
+                        }
 
-                    #ifdef PRINT_DEBUG_MESSAGES
-                    const auto pe = in_edge(streamSet, mBufferGraph);
-                    const auto producer = source(pe, mBufferGraph);
-                    const BufferPort & rd = mBufferGraph[pe];
-                    const auto prefix = makeBufferName(producer, rd.Port);
-                    Value * start = buffer->getMallocAddress(b);
-                    const auto byteSize = b.getTypeSize(dl, buffer->getType());
-                    Value * length = b.CreateMulRational(buffer->getInternalCapacity(b), Rational{byteSize, b.getBitBlockWidth()});
-                    Constant * ts = b.getSize(byteSize);
-                    Value * end = b.CreateGEP(b.getInt8Ty(), b.CreatePointerCast(start, b.getInt8PtrTy()), length);
-                    debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ") [typeSize=%" PRIu64 "]", start, end, ts);
-                    #endif
+                        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+                            if (reportCallback == nullptr) {
+                                reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel);
+                                sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
+                            }
+                            const BufferPort & bp = mBufferGraph[output];
+                            buffer->allocateBuffer(b, multiplier, reportCallback, sharedHandle, b.getSize(bp.Port.Number));
+                        } else {
+                            buffer->allocateBuffer(b, multiplier, nullptr, nullptr, nullptr);
+                        }
 
+                        #ifdef PRINT_DEBUG_MESSAGES
+                        const auto pe = in_edge(streamSet, mBufferGraph);
+                        const auto producer = source(pe, mBufferGraph);
+                        const BufferPort & rd = mBufferGraph[pe];
+                        const auto prefix = makeBufferName(producer, rd.Port);
+                        Value * start = buffer->getMallocAddress(b);
+                        const auto byteSize = b.getTypeSize(dl, buffer->getType());
+                        Value * length = b.CreateMulRational(buffer->getInternalCapacity(b), Rational{byteSize, b.getBitBlockWidth()});
+                        Constant * ts = b.getSize(byteSize);
+                        Value * end = b.CreateGEP(b.getInt8Ty(), b.CreatePointerCast(start, b.getInt8PtrTy()), length);
+                        debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ") [typeSize=%" PRIu64 "]", start, end, ts);
+                        #endif
+
+                    }
                 }
             }
         }

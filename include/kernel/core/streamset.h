@@ -87,7 +87,7 @@ public:
         assert (handle.second == mHandleType);
     }
 
-    virtual void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) = 0;
+    virtual void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) = 0;
 
     virtual void releaseBuffer(kernel::KernelBuilder & b) const = 0;
 
@@ -128,11 +128,7 @@ public:
 
     virtual llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const = 0;
 
-    virtual llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
-
-    virtual void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
-
-    virtual llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const = 0;
+    virtual llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const = 0;
 
     static llvm::Type * resolveType(kernel::KernelBuilder & b, llvm::Type * const streamSetType);
 
@@ -172,7 +168,7 @@ public:
 
     ExternalBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const unsigned AddressSpace);
 
-    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
 
@@ -198,11 +194,7 @@ public:
 
     llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
 
-    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
     void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
@@ -247,7 +239,11 @@ public:
            LinearInternalCapacity = 3,
            SecondLinearInternalCapacity = 4,
            LinearBaseAddress = 5,
-           LinearEffectiveCapacity = 6,
+           LinearEffectiveCapacity = 6
+    };
+
+    enum ExpansionLog_Field {
+
     };
 
     enum ThreadLocalField { PriorAddress, PriorCapacity, NewAddress };
@@ -268,7 +264,7 @@ public:
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
 
@@ -290,12 +286,7 @@ public:
 
     void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
-    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-
-    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
     llvm::Value * getThreadLocalHandle() const {
         return mThreadLocalHandle;
@@ -326,7 +317,7 @@ public:
 
     llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier) override;
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
 
@@ -346,11 +337,7 @@ public:
 
     llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
 
-    llvm::Value * requiresExpansion(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    void linearCopyBack(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
-
-    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required) const override;
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
     void setModulus(llvm::Value * const modulus) {
         mModulus = modulus;

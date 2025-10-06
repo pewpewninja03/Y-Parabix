@@ -423,7 +423,7 @@ void OptimizationBranchCompiler::generateAllocateSharedInternalStreamSetsMethod(
         if (LLVM_LIKELY(Kernel::isLocalBuffer(output).any())) {
             auto & buffer = mStreamSetOutputBuffers[i];
             assert (buffer->getHandle());
-            buffer->allocateBuffer(b, expectedNumOfStrides);
+            buffer->allocateBuffer(b, expectedNumOfStrides, nullptr, nullptr, nullptr);
         }
     }
 }

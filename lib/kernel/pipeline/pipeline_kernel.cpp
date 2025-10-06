@@ -766,12 +766,17 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         ConstantInt * const sz_BufferSize = b.getSize(segLength * codegen::BufferSegments);
 
         Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
-        SmallVector<Value *, 2> allocArgs;
+        SmallVector<Value *, 4> allocArgs;
         if (LLVM_LIKELY(isStateful())) {
             allocArgs.push_back(sharedHandle);
         }
         // pass in the desired number of segments
         allocArgs.push_back(sz_BufferSize);
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+            Constant * nil = ConstantPointerNull::get(b.getVoidPtrTy());
+            allocArgs.push_back(nil);
+            allocArgs.push_back(nil);
+        }
         b.CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);

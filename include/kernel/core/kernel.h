@@ -78,6 +78,8 @@ public:
 
     enum KernelFlags {
         RequiresIllustratorObject = 1
+        , HasInternallyManagedStreamSet = 2
+        , HasInOutStreamSet = 4
     };
 
     using InitArgs = llvm::SmallVector<llvm::Value *, 32>;

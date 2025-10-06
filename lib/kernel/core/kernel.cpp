@@ -859,11 +859,17 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
 
         if (LLVM_LIKELY(func == nullptr)) {
 
-            SmallVector<Type *, 2> params;
+            SmallVector<Type *, 6> params;
             if (LLVM_LIKELY(isStateful())) {
                 params.push_back(getSharedStateType()->getPointerTo());
             }
             params.push_back(b.getSizeTy());
+            const auto tdb = (getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet) && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+            if (LLVM_UNLIKELY(tdb)) {
+                PointerType * const voidPtrTy = b.getVoidPtrTy();
+                params.push_back(voidPtrTy);
+                params.push_back(voidPtrTy);
+            }
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
@@ -887,6 +893,10 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
                 setNextArgName("shared");
             }
             setNextArgName("expectedNumOfStrides");
+            if (LLVM_UNLIKELY(tdb)) {
+                setNextArgName("reportExpansion");
+                setNextArgName("pipelineHandle");
+            }
             assert (arg == func->arg_end());
         }
         assert (func);
@@ -1089,7 +1099,13 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
                 fields.push_back(sizeTy); // safe write limit
             }
         }
-    }    
+    }
+
+    if (LLVM_UNLIKELY((getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet) && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        fields.push_back(voidPtrTy); // reportExpansionCallback
+        fields.push_back(voidPtrTy); // pipelineHandle
+    }
+
     return fields;
 }
 
@@ -1193,6 +1209,13 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
                     setNextArgName(output.getName() + "_capacity");
                 }
             }
+        }
+
+        const auto hasManagedOutput = (getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet);
+
+        if (LLVM_UNLIKELY(hasManagedOutput && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+            setNextArgName("reportExpansionCallback");
+            setNextArgName("pipelineHandle");
         }
     }
     return doSegment;
@@ -1664,13 +1687,16 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs))) {
         buffer << "_DCacheAlign";
     }
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
-        buffer << "_NoIOAttr";
-    }
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";
     }
     if (LLVM_UNLIKELY(flags != 0)) {
+        if (LLVM_UNLIKELY(((flags & KernelFlags::HasInOutStreamSet) != 0) && codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+            buffer << "_NoIOAttr";
+        }
+        if (LLVM_UNLIKELY(((flags & KernelFlags::HasInternallyManagedStreamSet) != 0) && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+            buffer << "_TDB";
+        }
         if (flags & Kernel::KernelFlags::RequiresIllustratorObject) {
             buffer << "_Illustrated";
         }
@@ -1685,6 +1711,27 @@ std::string Kernel::getFamilyName() const {
     return name;
 }
 
+static inline unsigned collectOutputFlags(const Bindings & streamSets) {
+    unsigned flags = 0;
+    for (const auto & output : streamSets) {
+        if (LLVM_UNLIKELY(output.getRate().isUnknown())) {
+            flags |= Kernel::KernelFlags::HasInternallyManagedStreamSet;
+        }
+        for (const auto & attr : output.getAttributes()) {
+            switch (attr.getKind()) {
+                case AttrId::ManagedBuffer:
+                    flags |= Kernel::KernelFlags::HasInternallyManagedStreamSet;
+                    break;
+                case AttrId::InOut:
+                    flags |= Kernel::KernelFlags::HasInOutStreamSet;
+                    break;
+                default: break;
+            }
+        }
+    }
+    return flags;
+}
+
 // CONSTRUCTOR
 Kernel::Kernel(LLVMTypeSystemInterface & ts,
                const TypeId typeId,
@@ -1697,14 +1744,14 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
                CompilationStatus status, unsigned flags)
 : mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
-, mFlags(flags)
+, mFlags(flags | collectOutputFlags(stream_outputs))
 , mCompilationStatus(status)
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
 , mOutputScalars(std::move(scalar_outputs))
 , mInternalScalars( std::move(internal_scalars))
-, mKernelName(annotateKernelNameWithDebugFlags(typeId, flags, std::move(kernelName))) {
+, mKernelName(annotateKernelNameWithDebugFlags(typeId, mFlags, std::move(kernelName))) {
 
 }
 
@@ -1719,7 +1766,7 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
 : AttributeSet(std::move(attributes))
 , mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
-, mFlags(flags)
+, mFlags(flags | collectOutputFlags(stream_outputs))
 , mCompilationStatus(status)
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))

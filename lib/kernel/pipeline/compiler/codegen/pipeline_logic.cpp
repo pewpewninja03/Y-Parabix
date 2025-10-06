@@ -251,21 +251,21 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-            const auto bufferVertex = target(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[bufferVertex];
-            if (bn.Buffer->isDynamic()) {
-                const BufferPort & rd = mBufferGraph[e];
+        for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const BufferPort & bp = mBufferGraph[output];
+            const auto streamSet = target(output, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
+                const BufferPort & rd = mBufferGraph[output];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
                 LLVMContext & C = b.getContext();
-                const auto numOfConsumers = std::max(out_degree(bufferVertex, mConsumerGraph), 1UL);
+                const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
 
                 // segment num  0
                 // new capacity 1
                 // produced item count 2
                 // consumer processed item count [3,n)
                 Type * const traceStructTy = ArrayType::get(sizeTy, numOfConsumers + 3);
-
                 FixedArray<Type *, 2> traceStruct;
                 traceStruct[0] = traceStructTy->getPointerTo(); // pointer to trace log
                 traceStruct[1] = sizeTy; // length of trace log

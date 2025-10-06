@@ -14,6 +14,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     #ifndef NDEBUG
     Value * const initialSegNum = mSegNo;
     #endif
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+        mBufferExpansionFunction = generateBufferExpansionFunctionForCurrentKernel(b, mKernelId);
+    }
     assert (FirstKernel <= mKernelId && mKernelId <= LastKernel);
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);

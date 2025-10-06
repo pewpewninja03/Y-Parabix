@@ -61,6 +61,7 @@ SRC
     compiler/statistics/cycle_counter_logic.cpp
     compiler/statistics/histogram_generation_logic.cpp
     compiler/statistics/multithreading_report_logic.cpp
+    compiler/statistics/buffer_expansion_instrumentation_logic.cpp
     ${PAPI_CPP}
     optimizationbranch/optimizationbranch.cpp
     pipeline_builder.cpp
