@@ -205,7 +205,8 @@ ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(source, ztfRunsBasis);
     StreamSet * const ztfRunLengths = P.CreateStreamSet(3);
     P.CreateKernelCall<ZTF_Run_Length_Decoder>(ztfRunsBasis, ztfRunLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfRunLengths);
+    StreamSet * const ztfRunSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, ztfRunSpreadMask, ztfRunLengths);
     StreamSet * const ztfRuns_u8_Basis = P.CreateStreamSet(8);
     SpreadByMask(P, ztfRunSpreadMask, ztfRunsBasis, ztfRuns_u8_Basis);
     StreamSet * const ztfRunCodes = P.CreateStreamSet(1);

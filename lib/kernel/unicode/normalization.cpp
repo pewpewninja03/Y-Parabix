@@ -387,7 +387,8 @@ void ComputeWorkPlacement(PipelineBuilder & P,
     P.CreateKernelCall<CreateU8_FilterMask>(U8_Deletion_BixNum, U8_FilterMask);
     SHOW_STREAM(U8_FilterMask);
 
-    StreamSet * const U8_SpreadMask = InsertionSpreadMask(P, U8_Insertion_BixNum, kernel::InsertPosition::After);
+    StreamSet * const U8_SpreadMask =  P.CreateStreamSet(1, 1);
+    InsertionSpreadMask(P, U8_Insertion_BixNum, U8_SpreadMask, kernel::InsertPosition::After);
     SHOW_STREAM(U8_SpreadMask);
 
     StreamSet * const U8_PostSpreadFilterMask = P.CreateStreamSet(1, 1);

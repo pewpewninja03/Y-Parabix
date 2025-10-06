@@ -169,7 +169,8 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     P.CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
 
-    StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, kernel::InsertPosition::Before);
+    StreamSet * const BasisSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, InsertBixNum, BasisSpreadMask, kernel::InsertPosition::Before);
     SHOW_STREAM(BasisSpreadMask);
     
     std::vector<uint64_t> templateBytes;

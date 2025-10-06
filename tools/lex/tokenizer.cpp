@@ -116,7 +116,8 @@ TokenizerFunctionType tokenizerPipeline(CPUDriver & driver) {
     GraphemeClusterLogic(P, BasisBits, u8index, GCB);
     SHOW_STREAM(GCB);
 
-    StreamSet * tokenInsertMask = UnitInsertionSpreadMask(P, GCB, kernel::InsertPosition::After);
+    StreamSet * tokenInsertMask = P.CreateStreamSet(1, 1);
+    UnitInsertionSpreadMask(P, GCB, tokenInsertMask, kernel::InsertPosition::After);
     SHOW_STREAM(tokenInsertMask);
 
     StreamSet * spreadBasis = P.CreateStreamSet(8);

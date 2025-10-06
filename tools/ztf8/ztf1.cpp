@@ -103,7 +103,8 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
                Binding {"insert_marks", insertion_mask}
            }
         );
-    StreamSet * const ztf1_to_utf8_spread_mask = UnitInsertionSpreadMask(P, insertion_mask);
+    StreamSet * const ztf1_to_utf8_spread_mask = P.CreateStreamSet(1);
+    UnitInsertionSpreadMask(P, insertion_mask, ztf1_to_utf8_spread_mask);
     StreamSet * const ztf1_basis_utf8_indexed = P.CreateStreamSet(8);
     SpreadByMask(P, ztf1_to_utf8_spread_mask, ztf1basis, ztf1_basis_utf8_indexed);
     StreamSet * const u8basis = P.CreateStreamSet(8);

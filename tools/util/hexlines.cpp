@@ -216,7 +216,8 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     //  takes care of this using a mask of positions for insertion of one position.
     //  We insert one position for eacn nonLF character.    Given the
     //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
-    StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, kernel::InsertPosition::After);
+    StreamSet * hexInsertMask = P.CreateStreamSet(1);
+    UnitInsertionSpreadMask(P, nonLF, hexInsertMask, kernel::InsertPosition::After);
     SHOW_STREAM(hexInsertMask);
 
     // The parabix SpreadByMask function copies bits from an input stream
