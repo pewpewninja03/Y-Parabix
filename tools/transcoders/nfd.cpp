@@ -635,7 +635,8 @@ StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, Stream
     P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21_Basis, U21_Insertion_BixNum);
     SHOW_BIXNUM(U21_Insertion_BixNum);
 
-    StreamSet * const U21_SpreadMask = InsertionSpreadMask(P, U21_Insertion_BixNum, kernel::InsertPosition::After);
+    StreamSet * const U21_SpreadMask = P.CreateStreamSet(1, 1);
+    InsertionSpreadMask(P, U21_Insertion_BixNum, U21_SpreadMask, kernel::InsertPosition::After);
     SHOW_STREAM(U21_SpreadMask);
 
     StreamSet * const U21_ExpandedBasis = P.CreateStreamSet(21, 1);

@@ -137,7 +137,8 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(source, ztfHashBasis);
     StreamSet * const ztfInsertionLengths = P.CreateStreamSet(4);
     P.CreateKernelCall<ZTF_ExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfInsertionLengths);
+    StreamSet * const ztfRunSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, ztfRunSpreadMask, ztfInsertionLengths);
 
     StreamSet * const ztfHash_u8_Basis = P.CreateStreamSet(8);
     SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
