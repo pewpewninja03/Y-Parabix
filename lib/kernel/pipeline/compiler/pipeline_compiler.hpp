@@ -132,8 +132,6 @@ const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDM
 
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
-const static std::string MANAGED_DYNAMIC_BUFFER_STRUCT = ".MDBS";
-
 const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
 
 
@@ -396,7 +394,7 @@ public:
     void allocateOwnedBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
     void loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal);
     void releaseOwnedBuffers(KernelBuilder & b);
-    void freePendingFreeableDynamicBuffers(KernelBuilder & b);
+    void freePendingDeletions(KernelBuilder & b);
     bool initializeOutputStreamSetBuffersBeforeSegmentInvocation(KernelBuilder & b) const;
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;

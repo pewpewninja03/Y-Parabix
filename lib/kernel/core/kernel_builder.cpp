@@ -500,28 +500,23 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 StructType * const handleTy = buffer->getHandleType(*this);
                 PointerType * const handlePtrTy = handleTy->getPointerTo(buffer->getAddressSpace());
-                StructType * const threadLocalTy = managedBuffer->getThreadLocalHandleType(*this);
-                PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo(buffer->getAddressSpace());
-                PointerType * const i8PtrTy = getInt8PtrTy();
 
-                SmallVector<Type *, 8> paramTypes(traceDynamicBuffers ? 8 : 5);
+                SmallVector<Type *, 8> paramTypes(traceDynamicBuffers ? 7 : 4);
                 paramTypes[0] = voidPtrTy; // shared struct ptr
-                paramTypes[1] = voidPtrTy; // thread local struct ptr
+                paramTypes[1] = intPtrTy;
                 paramTypes[2] = intPtrTy;
                 paramTypes[3] = intPtrTy;
-                paramTypes[4] = intPtrTy;
 
                 if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                    paramTypes[4] = voidPtrTy;
                     paramTypes[5] = voidPtrTy;
-                    paramTypes[6] = voidPtrTy;
-                    paramTypes[7] = intPtrTy;
+                    paramTypes[6] = intPtrTy;
                 }
 
                 FunctionType * funcTy = FunctionType::get(getVoidTy(), paramTypes, false);
 
                 const auto ip = saveIP();
                 auto currentSharedHandle = managedBuffer->getHandle();
-                auto currentThreadLocalHandle = managedBuffer->getThreadLocalHandle();
                 f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
                 f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
 
@@ -542,9 +537,6 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 Value * const handle = CreatePointerCast(nextArg(), handlePtrTy);
                 managedBuffer->setHandle(handle);
                 handle->setName("handle");
-                Value * const threadLocalHandle = CreatePointerCast(nextArg(), threadLocalPtrTy);
-                managedBuffer->setThreadLocalHandle(threadLocalHandle);
-                threadLocalHandle->setName("threadLocalHandle");
                 Value * const produced = nextArg();
                 produced->setName("produced");
                 Value * const consumed = nextArg();
@@ -566,11 +558,17 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 ConstantInt * const BLOCK_WIDTH = getSize(getBitBlockWidth());
 
-                Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
-                Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
-                Value * const capacityChunks = CreateUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
-
-                CreateUnlikelyCondBr(CreateICmpUGT(CreateSub(requiredChunks, consumedChunks), capacityChunks), expandInternalBuffer, exit);
+                if (buffer->isLinear()) {
+                    Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
+                    Value * const capacityChunks = CreateUDiv(buffer->getCapacity(*this), BLOCK_WIDTH);
+                    Value * const needsExpansion = CreateICmpUGT(requiredChunks, capacityChunks);
+                    CreateUnlikelyCondBr(needsExpansion, expandInternalBuffer, exit);
+                } else {
+                    Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
+                    Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
+                    Value * const capacityChunks = CreateUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
+                    CreateUnlikelyCondBr(CreateICmpUGT(CreateSub(requiredChunks, consumedChunks), capacityChunks), expandInternalBuffer, exit);
+                }
 
                 SetInsertPoint(expandInternalBuffer);
                 managedBuffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
@@ -581,19 +579,17 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 restoreIP(ip);
                 managedBuffer->setHandle(currentSharedHandle);
-                managedBuffer->setThreadLocalHandle(currentThreadLocalHandle);
             }
 
-            SmallVector<Value *, 8> args(traceDynamicBuffers ? 8 : 5);
+            SmallVector<Value *, 7> args(traceDynamicBuffers ? 7 : 4);
             args[0] = CreatePointerCast(managedBuffer->getHandle(), voidPtrTy);
-            args[1] = CreatePointerCast(managedBuffer->getThreadLocalHandle(), voidPtrTy);
-            args[2] = producedItems;
-            args[3] = consumedItems;
-            args[4] = capacity;
+            args[1] = producedItems;
+            args[2] = consumedItems;
+            args[3] = capacity;
             if (LLVM_UNLIKELY(traceDynamicBuffers)) {
-                args[5] = COMPILER->getReportExpansionCallback();
-                args[6] = COMPILER->getPipelineHandle();
-                args[7] = getSize(port.Number);
+                args[4] = COMPILER->getReportExpansionCallback();
+                args[5] = COMPILER->getPipelineHandle();
+                args[6] = getSize(port.Number);
             }
             CreateCall(f, args);
             return;

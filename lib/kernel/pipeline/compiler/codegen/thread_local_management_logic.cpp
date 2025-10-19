@@ -333,9 +333,6 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
                 buffer->setCapacity(b, capacity);
             }
 
-//            Value * ptr = b.CreateGEP(b.getInt8Ty(), mThreadLocalStreamSetBaseAddress, startOffset);
-//            Value * length = b.CreateSub(mThreadLocalEndOffset[src], startOffset);
-//            b.CreateMemZero(ptr, length);
 
         }
     }

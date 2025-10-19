@@ -438,7 +438,7 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     if (out_degree(PipelineInput, mBufferGraph) == 0) {
         Z3_ast args[2];
         args[0] = VarList[PipelineInput];
-        SmallVector<Z3_ast, 2> fakeIOConstraint;
+        SmallVector<Z3_ast, 2> fakeIOVars;
 
         for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
             if (in_degree(i, mBufferGraph) == 0) {
@@ -447,18 +447,29 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
                 args[1] = fakeIOVar;
                 auto val = Z3_mk_mul(ctx, 2, args);
                 hard_assert(Z3_mk_eq(ctx, val, VarList[i]));
-                fakeIOConstraint.push_back(Z3_mk_eq(ctx, fakeIOVar, z3_ONE));
+                fakeIOVars.push_back(fakeIOVar);
             }
         }
 
-        const auto m = fakeIOConstraint.size(); assert (m > 0);
+        const auto m = fakeIOVars.size(); assert (m > 0);
+
+        SmallVector<Z3_ast, 2> fakeIOConstraint(m);
+        for (unsigned i = 0; i < m; ++i) {
+            fakeIOConstraint[i] = Z3_mk_eq(ctx, fakeIOVars[i], z3_ONE);
+        }
+
+        Z3_ast sum;
         Z3_ast constraint;
         if (m == 1) {
+            sum = fakeIOVars[0];
             constraint = fakeIOConstraint[0];
         } else {
+            sum = Z3_mk_add(ctx, m, fakeIOVars.data());
             constraint = Z3_mk_or(ctx, m, fakeIOConstraint.data());
         }
+        Z3_optimize_minimize(ctx, solver, sum);
         hard_assert(constraint);
+
 
     } else { // we cannot predict how much data will be passed to a pipeline
         for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
@@ -722,14 +733,14 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
         const auto partId = KernelPartitionId[kernel];
         assert (partId < PartitionCount);
-        const auto R = partitionRepVector[partId] * StrideRepetitionVector[kernel] * lcmOfDenom;
+        const auto R = StrideRepetitionVector[kernel]; // partitionRepVector[partId] * StrideRepetitionVector[kernel] * lcmOfDenom;
         const auto & X = T[partId];
         if (X.any()) {
             MinimumNumOfStrides[kernel] = 0;
-            MaximumNumOfStrides[kernel] = R.numerator() * 2;
+            MaximumNumOfStrides[kernel] = R * 2;
         } else {
-            MinimumNumOfStrides[kernel] = R.numerator();
-            MaximumNumOfStrides[kernel] = R.numerator();
+            MinimumNumOfStrides[kernel] = R;
+            MaximumNumOfStrides[kernel] = R;
         }
     }
 

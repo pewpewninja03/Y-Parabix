@@ -267,7 +267,6 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
     for (unsigned i = 0; i < mSelectedStreamCount; i++) {
         Constant * const streamIndex = ConstantInt::get(streamBase->getType(), i);
         Value * const streamOffset = b.CreateAdd(streamBase, streamIndex);
-        Value * ptr = b.getInputStreamBlockPtr("source", streamOffset, srcBlockNo);
         sourceData[i] = b.loadInputStreamBlock("source", streamOffset, srcBlockNo);
         Value * A = b.simd_srlv(mFieldWidth, b.mvmd_dsll(mFieldWidth, sourceData[i], pendingDataPhi[i], field_offset_lo), bit_offset);
         Value * B = b.simd_sllv(mFieldWidth, b.mvmd_dsll(mFieldWidth, sourceData[i], pendingDataPhi[i], field_offset_hi), shift_fwd);

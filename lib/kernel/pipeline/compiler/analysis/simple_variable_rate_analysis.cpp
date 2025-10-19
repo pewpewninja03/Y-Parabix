@@ -1,4 +1,4 @@
-#include "pipeline_analysis.hpp"
+﻿#include "pipeline_analysis.hpp"
 #include "lexographic_ordering.hpp"
 #include <z3.h>
 
@@ -47,11 +47,6 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
 
     auto constant_real = [&](const Rational & value) {
         return Z3_mk_real(ctx, value.numerator(), value.denominator());
-    };
-
-    auto multiply_vars =[&](Z3_ast X, Z3_ast Y) {
-        Z3_ast args[2] = { X, Y };
-        return Z3_mk_mul(ctx, 2, args);
     };
 
     auto multiply =[&](Z3_ast X, const Rational & value) {
@@ -321,8 +316,6 @@ void PipelineAnalysis::simpleEstimateInterPartitionDataflow(PartitionGraph & P, 
                     }
 
                     assert (denom > 0);
-
-                    // StreamSetIORateMap.emplace(streamSet, Rational{pipelineInputDenom * num, pipelineInputNum * denom});
                 }
             }
         }

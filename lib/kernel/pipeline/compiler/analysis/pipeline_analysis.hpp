@@ -38,14 +38,7 @@ public:
 
         P.computeIntraPartitionRepetitionVectors(initialGraph);
 
-        switch (codegen::PipelineCompilationMode) {
-            case codegen::PipelineCompilationModeOptions::DefaultFast:
-                P.simpleSchedulePartitionedProgram(initialGraph, rng);
-                break;
-            case codegen::PipelineCompilationModeOptions::Expensive:
-                P.schedulePartitionedProgram(initialGraph, rng);
-                break;
-        }
+        P.simpleSchedulePartitionedProgram(initialGraph, rng);
 
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(initialGraph, initialGraph);

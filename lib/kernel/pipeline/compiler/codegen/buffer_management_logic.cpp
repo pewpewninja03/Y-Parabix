@@ -49,19 +49,6 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
             mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
 
-        // Although we'll end up wasting memory, we can avoid memleaks and the issue of multiple threads
-        // successively expanding a buffer and wrongly free-ing one that's still in use by allowing each
-        // thread to independently retain a pointer to the "old" buffer and free'ing it on a subseqent
-        // segment.
-
-        if (isa<ManagedDynamicBuffer>(buffer)) {
-            Type * const threadLocalStructTy = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
-            if (LLVM_LIKELY(isMultithreaded())) {
-                mTarget->addThreadLocalScalar(threadLocalStructTy, prefix + MANAGED_DYNAMIC_BUFFER_STRUCT, groupId);
-            } else {
-                mTarget->addNonPersistentScalar(threadLocalStructTy, prefix + MANAGED_DYNAMIC_BUFFER_STRUCT);
-            }
-        }
     }
 
     if (LLVM_UNLIKELY(!mTarget->allocatesInternalStreamSets())) {
@@ -111,18 +98,12 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
                 } else {
                     assert(isa<Constant>(cast<RepeatingBuffer>(buffer)->getModulus()));
                 }
-            } else {
+            } else if (bn.isInternal()) {
                 const auto pe = in_edge(streamSet, mBufferGraph);
                 const auto producer = source(pe, mBufferGraph);
                 const BufferPort & rd = mBufferGraph[pe];
                 const auto handleName = makeBufferName(producer, rd.Port);
-                if (nonLocal && bn.isOwned() && isa<ManagedDynamicBuffer>(buffer)) {
-                    auto tlHandle = b.getScalarFieldPtr(handleName + MANAGED_DYNAMIC_BUFFER_STRUCT);
-                    cast<ManagedDynamicBuffer>(buffer)->setThreadLocalHandle(tlHandle.first);
-                }
-                if (bn.isInternal()) {
-                    buffer->setHandle(b.getScalarFieldPtr(handleName));
-                }
+                buffer->setHandle(b.getScalarFieldPtr(handleName));
             }
         }
     }
@@ -297,29 +278,22 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief freePendingFreeableDynamicBuffers
+ * @brief freePendingDeletions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
-    if (LLVM_LIKELY(isMultithreaded())) {
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.isDeallocatable()) {
-                StreamSetBuffer * const buffer = bn.Buffer;
-                if (isa<ManagedDynamicBuffer>(buffer)) {
-                    if (bn.isOwned()) {
-                                            const auto pe = in_edge(streamSet, mBufferGraph);
-                                            const auto p = source(pe, mBufferGraph);
-                                            const BufferPort & rd = mBufferGraph[pe];
-                                            assert (rd.Port.Type == PortType::Output);
-                                            const auto prefix = makeBufferName(p, rd.Port);
-                        auto tlHandle = b.getScalarFieldPtr(prefix + MANAGED_DYNAMIC_BUFFER_STRUCT);
-                        cast<ManagedDynamicBuffer>(buffer)->setThreadLocalHandle(tlHandle.first);
-                    }
-                    Value * const tlh = cast<ManagedDynamicBuffer>(buffer)->getThreadLocalHandle();
-                    assert (isFromCurrentFunction(b, tlh, false));
-                    cast<ManagedDynamicBuffer>(buffer)->freePendingDeletion(b, tlh);
-                }
+void PipelineCompiler::freePendingDeletions(KernelBuilder & b) {
+    for (auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = target(output, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        StreamSetBuffer * const buffer = bn.Buffer;
+        if (bn.isDeallocatable() && isa<ManagedDynamicBuffer>(buffer)) {
+
+            Value * const consumed = mInitialConsumedItemCount[streamSet];
+            if (consumed == nullptr) {
+                errs() << "NO CONSUMED!  " << streamSet << "\n";
             }
+
+            assert (consumed);
+            cast<ManagedDynamicBuffer>(buffer)->freePendingDeletions(b, consumed);
         }
     }
 }
@@ -369,10 +343,7 @@ bool PipelineCompiler::initializeOutputStreamSetBuffersBeforeSegmentInvocation(K
         return false;
     }
 
-    Constant * const nullPtr = ConstantPointerNull::get(b.getVoidPtrTy());
-
     bool outputModifiesSegmentLength = false;
-    size_t numOfManagedBuffers = 0;
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
         if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
@@ -382,32 +353,7 @@ bool PipelineCompiler::initializeOutputStreamSetBuffersBeforeSegmentInvocation(K
         if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
             continue;
         }
-        if (LLVM_UNLIKELY(port.isManaged())) {
-            assert (!mAllowDataParallelExecution);
-            assert (mKernelThreadLocalHandle);
-            StructType * const threadLocalTy = mKernel->getThreadLocalStateType();
-            assert (threadLocalTy->getStructElementType(0)->getStructElementType(numOfManagedBuffers) ==
-                    ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
-            FixedArray<Value *, 4> indices;
-            indices[0] = b.getInt32(0);
-            indices[1] = b.getInt32(0);
-            indices[2] = b.getInt32(numOfManagedBuffers++);
-            indices[3] = b.getInt32(ManagedDynamicBuffer::NewAddress);
-            Value * const newAddrPtr = b.CreateGEP(threadLocalTy, mKernelThreadLocalHandle, indices);
-            b.CreateAlignedStore(nullPtr, newAddrPtr, PtrTyABIAlignment);
-        } else {
-            if (bn.isOwned() && isa<ManagedDynamicBuffer>(bn.Buffer)) {
-                assert (isa<ManagedDynamicBuffer>(bn.Buffer));
-                const auto handleName = makeBufferName(mKernelId, port.Port);
-                auto tlHandle = b.getScalarFieldPtr(handleName + MANAGED_DYNAMIC_BUFFER_STRUCT);
-                assert (tlHandle.second == ManagedDynamicBuffer::getInternalThreadLocalHandleType(b));
-                FixedArray<Value *, 2> indices;
-                indices[0] = b.getInt32(0);
-                indices[1] = b.getInt32(ManagedDynamicBuffer::NewAddress);
-                Value * const newAddrPtr = b.CreateInBoundsGEP(tlHandle.second, tlHandle.first, indices);
-                b.CreateAlignedStore(nullPtr, newAddrPtr, PtrTyABIAlignment);
-            }
-        }
+
     }
 
     return outputModifiesSegmentLength;

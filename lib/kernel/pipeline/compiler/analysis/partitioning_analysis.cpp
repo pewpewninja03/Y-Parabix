@@ -735,6 +735,8 @@ start_of_loop:
         }
     }
 
+    assert (ordering[componentCount - 1] == componentCount - 1);
+
     // to maximize our ability to move a kernel to the deepest partition, we move according
     // to the ordering position.
     std::vector<unsigned> ordinal(m, -1U);
@@ -742,36 +744,6 @@ start_of_loop:
         ordinal[ordering[i]] = i;
     }
 
-//    for (unsigned groupId = 0; groupId < synchronousPartitionCount; ++groupId) {
-//        const auto n = partitionComponentCount[groupId];
-//        if (n > 1) {
-
-//            SmallVector<unsigned, 4> comps;
-//            comps.reserve(n);
-
-//            for (unsigned i = 0; i < componentCount; ++i) {
-//                const auto & pd = P[i];
-//                if (pd.PartitionId == groupId) {
-//                    comps.push_back(i);
-//                }
-//            }
-
-//            assert (comps.size() == n);
-
-//            for (unsigned i = 1; i < n; ++i) {
-//                const auto & I = P[comps[i]];
-//                for (unsigned j = 0; j < i; ++j) {
-//                    const auto & J = P[comps[j]];
-//                    for (auto & t : I.Transferable) {
-//                        add_edge(comps[i], comps[j], BindingInfo{t.first, PipelineInput}, P);
-//                    }
-//                    for (auto & t : J.Transferable) {
-//                        add_edge(comps[j], comps[i], BindingInfo{t.first, PipelineInput}, P);
-//                    }
-//                }
-//            }
-//        }
-//    }
 
 
 #ifndef DISABLE_KERNEL_PARTITION_MOVEMENT
@@ -987,6 +959,8 @@ start_of_transfer_loop:
         return transferCount;
     };
 
+    assert (P[componentCount - 1].AllKernels.size() == 1);
+
     bool hasMultipleRootsInSinglePartition = false;
 
     for (unsigned i = 0; i < componentCount; ++i) {
@@ -1086,9 +1060,9 @@ start_of_transfer_loop:
         forcedPartitionRoot.push_back(root);
     }
 
-    #ifndef NDEBUG
     assert (allKernels.size() == totalSize);
-    #endif
+    assert (ordering[componentCount - 1] == componentCount - 1);
+    assert (P[componentCount - 1].AllKernels.size() == 1);
 
     const auto finalComponentCount = forcedPartitionRoot.size();
     assert (finalComponentCount > 1);
@@ -1370,6 +1344,11 @@ start_of_partition_sort_loop:
             PartitionIds.emplace(k, i);
         }
     }
+
+    assert (partGraph[0].Kernels.size() == 1);
+    assert (partGraph[0].Kernels[0] == PipelineInput);
+    assert (partGraph[finalComponentCount - 1].Kernels.size() == 1);
+    assert (partGraph[finalComponentCount - 1].Kernels[0] == PipelineOutput);
 
     assert (componentCount > 0);
 

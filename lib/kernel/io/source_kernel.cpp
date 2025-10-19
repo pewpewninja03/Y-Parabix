@@ -202,7 +202,6 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
 
     // Can we append to our existing buffer without impacting any subsequent kernel?
     b.reserveCapacity("sourceBuffer", segmentItems);
-
     Value * const segmentBytes = b.CreateMul(segmentItems, codeUnitBytes);
     Value * const fd = b.getScalarField("fileDescriptor");
     Value * const produced = b.getProducedItemCount("sourceBuffer");
@@ -216,9 +215,7 @@ void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned
     bytesToRead->addIncoming(segmentBytes, entryBlock);
     PHINode * const producedSoFar = b.CreatePHI(sizeTy, 2);
     producedSoFar->addIncoming(produced, entryBlock);
-
     Value * const sourceBuffer = b.CreatePointerCast(b.getRawOutputPointer("sourceBuffer", producedSoFar), b.getInt8PtrTy());
-
     Function *  const preadFunc = b.getModule()->getFunction("read");
     FixedArray<Value *, 3> args;
     args[0] = fd;

@@ -609,7 +609,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
         b.CreateFree(b.getScalarField(ZERO_EXTENDED_BUFFER));
     }
-    freePendingFreeableDynamicBuffers(b);
+//    freePendingFreeableDynamicBuffers(b);
     freeZeroedInputBuffers(b);
 }
 

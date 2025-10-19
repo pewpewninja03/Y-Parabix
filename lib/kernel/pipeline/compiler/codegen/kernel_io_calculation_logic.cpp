@@ -998,13 +998,6 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
             c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
         }
         writable = buffer->getLinearlyWritableItems(b, p, c);
-//        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
-//            #if defined(PRINT_DEBUG_MESSAGES)
-//            debugPrint(b, prefix + "_writable = %" PRIu64 " - %" PRIu64, writable, b.getSize(port.EmptyOverflow));
-//            #endif
-//            writable = b.CreateSaturatingSub(writable, b.getSize(port.EmptyOverflow));
-//            writable = b.CreateRoundDown(writable, b.getSize(port.EmptyOverflow - 1U));
-//        }
     }
 
     // cache the values for later use

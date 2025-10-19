@@ -367,18 +367,6 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             flat_set<unsigned> sharedGroups;
             flat_set<unsigned> threadLocalGroups;
 
-            size_t numOfManagedBuffers = 0;
-
-            for (const Binding & output : mOutputStreamSets) {
-                if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
-                    ++numOfManagedBuffers;
-                }
-            }
-
-            if (numOfManagedBuffers) {
-                threadLocalGroups.insert(0);
-            }
-
             for (const auto & scalar : mInternalScalars) {
                 assert (scalar.getValueType());
                 switch (scalar.getScalarType()) {
@@ -408,16 +396,6 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 V.push_back(emptyTy);
             };
 
-            // Kernel managed buffers require both the struct for the buffer itself and a thread local pointer
-            // for the last "deallocated" memory chunk. A thread can only be confident that there are no other
-            // users of a buffer until after it fully executes the pipeline and reacquires the kernel sync lock.
-            if (numOfManagedBuffers) {
-                StructType * const ty = ManagedDynamicBuffer::getInternalThreadLocalHandleType(b);
-                for (unsigned i = 0; i < numOfManagedBuffers; ++i) {
-                    addScalar(threadLocal, 0, ty);
-                }
-            }
-
             for (const auto & scalar : mInputScalars) {
                 addScalar(shared, 0, scalar.getType());
             }
@@ -428,7 +406,9 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
                     const auto f = groups.find(scalar.getGroup());
                     assert (f != groups.end());
-                    return std::distance(groups.begin(), f);
+                    const auto idx = std::distance(groups.begin(), f);
+                    assert (idx < sharedGroupCount);
+                    return idx;
                 };
 
                 switch (scalar.getScalarType()) {
@@ -451,7 +431,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             const size_t cacheAlignment = b.getCacheAlignment();
 
-            DataLayout dl(m);
+            auto & dl = m->getDataLayout();
 
             auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec,
                                       StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
@@ -475,7 +455,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
     found_non_empty_type:
                 std::vector<Type *> structTypes(n);
 
-                auto getAlignOf = [&](Type * ty) {
+                auto getAlignOf = [&](Type * ty) { assert (ty);
                     return dl.getABITypeAlign(ty).value();
                 };
 
@@ -508,11 +488,12 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                         };
 
                         for (unsigned j = 0; j < (m - 2); j += 2) {
-                            const auto align = getAlignOf(S[j + 2]);
+                            Type * const ty = S[j + 2];
+                            const auto align = getAlignOf(ty);
                             setPaddingForNextElement(j + 1, align);
                             // add in the typesize of the next type (that we offset the prior entry
                             // for to ensure it's correctly aligned.)
-                            byteOffset += CBuilder::getTypeSize(dl, S[j + 2]);
+                            byteOffset += CBuilder::getTypeSize(dl, ty);
                         }
 
                         uint64_t nextReqAlign = addGroupCacheLinePadding ? cacheAlignment : 1UL;
@@ -521,6 +502,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                         for (unsigned k = i + 1; k < n; ++k) {
                             const auto & N = structTypeVec[k];
                             if (N.size() > 0) {
+                                assert (N[0]);
                                 const auto nextFirstAlign = getAlignOf(N[0]);
                                 nextReqAlign = std::max(nextReqAlign, nextFirstAlign);
                                 break;
@@ -566,6 +548,11 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             // NOTE: StructType::create always creates a new type even if an identical one exists.
             const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
             if (mSharedStateType == nullptr || mSharedStateType->isOpaque()) {
+
+                for (const auto & X : shared) {
+
+                }
+
                 mSharedStateType = makeStructType(mSharedStateType, shared, strShared, allowStructPadding);
                 assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
             }
@@ -1072,7 +1059,6 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         } else {
             fields.push_back(voidPtrTy);
         }
-        assert (!isLocal.isManaged() || hasThreadLocal());
 
         //TODO: if an I/O rate is deferred and this is internally synchronized, we need both item counts
 
