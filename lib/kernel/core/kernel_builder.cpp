@@ -591,6 +591,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 args[5] = COMPILER->getPipelineHandle();
                 args[6] = getSize(port.Number);
             }
+            
             CreateCall(f, args);
             return;
         }

@@ -418,7 +418,8 @@ void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
-            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), true, 0);
+            const auto isLinear = output.hasAttribute(AttrId::Linear);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), false, 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
         }

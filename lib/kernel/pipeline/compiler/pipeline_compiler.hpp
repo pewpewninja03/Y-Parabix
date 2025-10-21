@@ -383,7 +383,7 @@ public:
     void writeTransitoryConsumedItemCount(KernelBuilder & b, const unsigned streamSet, Value * const produced);
     void readExternalConsumerItemCounts(KernelBuilder & b);
     void readConsumedItemCounts(KernelBuilder & b);
-    Value * readConsumedItemCount(KernelBuilder & b, const size_t streamSet);
+    Value * readConsumedItemCount(KernelBuilder & b, const size_t streamSet, const bool alwaysReturnConsumedCount = false);
     void setConsumedItemCount(KernelBuilder & b, const size_t streamSet, Value * consumed, const unsigned slot) const;
     void updateExternalConsumedItemCounts(KernelBuilder & b);
     void zeroAnySkippedTransitoryConsumedItemCountsUntil(KernelBuilder & b, const unsigned targetKernelId);
@@ -465,7 +465,6 @@ public:
     // buffer expansion recording functions
 
     Value * generateBufferExpansionFunctionForCurrentKernel(KernelBuilder & b, const size_t kernelId);
-    void initializeBufferExpansionHistory(KernelBuilder & b) const;
     void printOptionalBufferExpansionHistory(KernelBuilder & b);
 
 // internal optimization passes

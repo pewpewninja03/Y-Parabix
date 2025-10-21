@@ -114,7 +114,7 @@ void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
+Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet, const bool alwaysReturnConsumedCount) {
 #ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
     return b.getSize(0);
 #else
@@ -123,7 +123,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
         return mInitialConsumedItemCount[streamSet];
     }
 
-    if (preserveAllStreamSetData(streamSet)) {
+    if (!alwaysReturnConsumedCount && preserveAllStreamSetData(streamSet)) {
         return b.getSize(0);
     }
 

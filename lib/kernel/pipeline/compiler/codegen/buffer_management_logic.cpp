@@ -284,15 +284,12 @@ void PipelineCompiler::freePendingDeletions(KernelBuilder & b) {
     for (auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isThreadLocal() || bn.isUnowned() || bn.isInOutRedirect() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth()) {
+            continue;
+        }
         StreamSetBuffer * const buffer = bn.Buffer;
-        if (bn.isDeallocatable() && isa<ManagedDynamicBuffer>(buffer)) {
-
-            Value * const consumed = mInitialConsumedItemCount[streamSet];
-            if (consumed == nullptr) {
-                errs() << "NO CONSUMED!  " << streamSet << "\n";
-            }
-
-            assert (consumed);
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            Value * const consumed = readConsumedItemCount(b, streamSet, true); assert (consumed);
             cast<ManagedDynamicBuffer>(buffer)->freePendingDeletions(b, consumed);
         }
     }

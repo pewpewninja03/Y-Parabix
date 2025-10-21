@@ -451,7 +451,6 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         allocScale = b.CreateMul(allocScale, b.getScalarField(MAXIMUM_NUM_OF_THREADS));
     }
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
-    initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
 }
 

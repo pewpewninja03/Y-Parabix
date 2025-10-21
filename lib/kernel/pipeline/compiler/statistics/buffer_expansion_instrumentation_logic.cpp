@@ -274,76 +274,6 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
     return b.CreatePointerCast(f, voidPtrTy);
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeBufferExpansionHistory
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializeBufferExpansionHistory(KernelBuilder & b) const {
-
-    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-
-//        const auto firstBuffer = PipelineOutput + 1;
-//        const auto lastBuffer = num_vertices(mBufferGraph);
-
-//        Constant * const ZERO = b.getInt32(0);
-//        Constant * const ONE = b.getInt32(1);
-//        Constant * const TWO = b.getInt32(2);
-//        Constant * const SZ_ZERO = b.getSize(0);
-//        Constant * const SZ_ONE = b.getSize(1);
-
-//        FixedArray<Value *, 2> indices;
-
-//        indices[0] = ZERO;
-
-
-//        for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
-//            for (auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-//                const BufferPort & bp = mBufferGraph[output];
-//                const auto streamSet = target(output, mBufferGraph);
-//                const BufferNode & bn = mBufferGraph[streamSet];
-//                if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
-//                    const auto prefix = makeBufferName(kernelId, bp.Port);
-
-//                    Value * traceData; Type * traceTy;
-//                    std::tie(traceData, traceTy) = b.getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
-
-//                    const auto numOfConsumers = std::max(out_degree(kernelId, mConsumerGraph), 1UL);
-//                    Type * const entryTy = ArrayType::get(b.getSizeTy(), numOfConsumers + 3);
-
-//                    Value * const entryData = b.CreatePageAlignedMalloc(entryTy, SZ_ONE);
-//                    // fill in the struct
-
-//                    indices[1] = ZERO;
-
-//                    b.CreateAlignedStore(entryData, b.CreateGEP(traceTy, traceData, indices), PtrTyABIAlignment);
-
-//                    indices[1] = ONE;
-
-//                    b.CreateAlignedStore(SZ_ONE, b.CreateGEP(traceTy, traceData, indices), SizeTyABIAlignment);
-//                    // then the initial record
-
-//                    indices[1] = ZERO;
-
-//                    b.CreateAlignedStore(SZ_ZERO, b.CreateGEP(entryTy, entryData, indices), SizeTyABIAlignment);
-
-//                    indices[1] = ONE;
-
-//                    b.CreateAlignedStore(bn.Buffer->getInternalCapacity(b), b.CreateGEP(entryTy, entryData, indices), SizeTyABIAlignment);
-
-//                    unsigned sizeTyWidth = b.getSizeTy()->getIntegerBitWidth() / 8;
-//                    Constant * const length = b.getSize(sizeTyWidth * (numOfConsumers + 1));
-
-//                    indices[1] = TWO;
-
-//                    b.CreateMemZero(b.CreateGEP(entryTy, entryData, indices), length, sizeTyWidth);
-
-//                }
-//            }
-//        }
-
-    }
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printOptionalBufferExpansionHistory
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -473,7 +403,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                 const BufferPort & br = mBufferGraph[output];
                 const auto buffer = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[buffer];
-                if (bn.Buffer->isDynamic()) {
+                if (br.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
 
                     //  # KERNEL                      PORT                      BUFFER         SEG #      ITEM CAPACITY
 
