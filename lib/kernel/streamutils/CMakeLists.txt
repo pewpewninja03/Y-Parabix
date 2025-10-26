@@ -26,4 +26,5 @@ DEPS
     kernel.pipeline
     kernel.basis
     kernel.bitwise
+    kernel.scan
 )
