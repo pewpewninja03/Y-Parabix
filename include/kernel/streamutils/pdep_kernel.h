@@ -9,6 +9,7 @@
 #include <string>
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/scan/base.h>
 
 namespace kernel {
 
@@ -64,8 +65,7 @@ enum class InsertPosition {Before, After};
 void UnitInsertionSpreadMask(PipelineBuilder & P,
                              StreamSet * insertion_mask,
                              StreamSet * spread_mask,
-                             InsertPosition p = InsertPosition::Before,
-                             ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
+                             InsertPosition p = InsertPosition::Before);
 
 /*   Prepare a spread mask for inserting data into bit streams.
      At each stream position, a bixnum encodes the number of items
@@ -82,9 +82,7 @@ void UnitInsertionSpreadMask(PipelineBuilder & P,
 void InsertionSpreadMask(PipelineBuilder & P,
                          StreamSet * bixNumInsertCount,
                          StreamSet * spread_mask,
-                         InsertPosition p = InsertPosition::Before,
-                         ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
-                         ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
+                         InsertPosition p = InsertPosition::Before);
 
 class UnitInsertionSpreadMaskKernel final : public BlockOrientedKernel {
 public:
@@ -98,17 +96,31 @@ private:
     const InsertPosition mInsertPos;
 };
 
-class InsertionSpreadMaskKernel final : public BlockOrientedKernel {
+class InsertionSpreadMaskKernel final : public TwoLevelScanKernel {
 public:
     InsertionSpreadMaskKernel(LLVMTypeSystemInterface & ts,
-                              StreamSet * insertion_counts, StreamSet * spread_mask, InsertPosition p = InsertPosition::Before);
+                              StreamSet * insertion_counts, StreamSet * spread_mask,
+                              InsertPosition p = InsertPosition::Before);
 protected:
-    const unsigned pack_width = 64;
-    void generateDoBlockMethod(KernelBuilder & b) override;
-    void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * const remainingBytes) override;
+    static const unsigned ScanWordWidth = 64;
+    void initialize(KernelBuilder & b) override;
+    void wordPrologueLogic(KernelBuilder & b,
+                           llvm::Value * absWordPos,
+                           std::vector<llvm::Value *> indexWord,
+                           std::vector<llvm::Value *> & loopVars) override;
+    void generateProcessingLogic(KernelBuilder & b,
+                                 llvm::Value * absItemPos,
+                                 std::vector<llvm::Value *> & loopVars) override;
+    void finalize(KernelBuilder & b, std::vector<llvm::Value *> & loopVarFinalValues) override;
+
 private:
+    const unsigned mBixBits;
     const unsigned mExpansionWidth;
     const InsertPosition mInsertPos;
+    enum LoopVars {bn_processed = 0, sm_produced = 1, sm_pending = 2};
+    // Values initialized in scan word prologue for use
+    // throughout item processing logic.
+    std::vector<llvm::Value *> mMasks;
 };
 
 class ByteCombine final : public MultiBlockKernel {
@@ -142,7 +154,6 @@ private:
     const StreamExpandOptimization mOptimization;
 };
 
-/**********************************/
 class StreamMergeKernel final : public MultiBlockKernel {
 public:
     StreamMergeKernel(LLVMTypeSystemInterface & ts,
@@ -159,7 +170,6 @@ private:
     const unsigned mSelectedStreamCount;
 };
 
-/*******************************************************/
 class FieldDepositKernel final : public MultiBlockKernel {
 public:
     FieldDepositKernel(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
@@ -181,33 +191,6 @@ private:
     const unsigned mStreamCount;
 };
 
-/*
- Swizzled PDEP kernel - now deprecated.
-
- Conceptually, given an unbounded input stream set of k streams and a marker stream, this kernel uses the
- Parallel Bits Deposit (PDEP) instruction to copy the input items from the i-th input stream to the i-th
- output stream the positions indicated by the marker bits. All other output items are set to zero. E.g.,
-
- SOURCE >  abcdefgh i0000000 00000000 00000000
- MARKER >  ...1.1.1 .....11. ..1...1. ...1.1..
- OUTPUT >  ...a.b.c .....de. ..f...g. ...h.i..
-
- The complicating factor of this Kernel is that it assumes the input streams are *swizzled*. I.e., it
- "divides" each block of the marker stream into k elements, M_1 ... M_k, and applies the PDEP operation
- using M_i to the each of the k elements in the i-th input (swizzled) stream.
-
- CONCEPTUAL VIEW OF INPUT STREAM SET                    ACTUAL LAYOUT OF INPUT STREAM SET
-
- STREAM 0  abcde...  fg......  hijklm..  nopqrst.     SWIZZLE 0  abcde...  uvwxy...  OPQRS...  89abc...
- STREAM 1  uvwxy...  zA......  BCDEFG..  HIJKLMN.     SWIZZLE 1  fg......  zA......  TU......  de......
- STREAM 2  OPQRS...  TU......  VWXYZ0..  1234567.     SWIZZLE 2  hijklm..  BCDEFG..  VWXYZ0..  fghijk..
- STREAM 3  89abc...  de......  fghijk..  lmnopqr.     SWIZZLE 3  nopqrst.  HIJKLMN.  1234567.  lmnopqr.
-
-
- NOTE: this kernel does *NOT* unswizzle the output. This will eventually be the responsibility of the
- pipeline to ensure it is done when needed.
-
- */
 class PDEPkernel final : public MultiBlockKernel {
 public:
     PDEPkernel(LLVMTypeSystemInterface & ts, const unsigned swizzleFactor = 4, std::string name = "PDEP");
