@@ -999,8 +999,6 @@ void PipelineCompiler::start(KernelBuilder & b) {
     mAddressableItemCountPtr.clear();
     mVirtualBaseAddressPtr.clear();
     mPipelineProgress = b.getFalse();
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

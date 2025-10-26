@@ -25,8 +25,6 @@ public:
     enum class BufferKind : unsigned {
         ExternalBuffer
         , RepeatingBuffer
-        , StaticBuffer
-        , DynamicBuffer
         , ManagedDynamicBuffer
     };
 
@@ -69,7 +67,7 @@ public:
     bool isSingleElementStreamSet() const;
 
     bool isDynamic() const {
-        return (mBufferKind == BufferKind::DynamicBuffer) || (mBufferKind == BufferKind::ManagedDynamicBuffer);
+        return (mBufferKind == BufferKind::ManagedDynamicBuffer);
     }
 
     virtual ~StreamSetBuffer() = 0;
@@ -90,8 +88,6 @@ public:
     virtual void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) = 0;
 
     virtual void releaseBuffer(kernel::KernelBuilder & b) const = 0;
-
-    virtual void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const = 0;
 
     // The number of items that cam be linearly accessed from a given logical stream position.
     virtual llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems) const = 0;
@@ -128,7 +124,7 @@ public:
 
     virtual llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const = 0;
 
-    virtual void freePendingDeletions(kernel::KernelBuilder & b, llvm::Value * consumed) const { }
+    virtual void freePendingDeletions(kernel::KernelBuilder & b, llvm::Value * consumed) const;
 
     virtual llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const = 0;
 
@@ -173,8 +169,6 @@ public:
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
@@ -235,15 +229,12 @@ class ManagedDynamicBuffer final : public InternalBuffer {
 public:
 
     enum MDB_Field {
-        LinearSelector = 0,
-        LinearMallocedAddress = 1,
-        SecondLinearMallocedAddress = 2,
-        LinearInternalCapacity = 3,
-        SecondLinearInternalCapacity = 4,
-        LinearBaseAddress = 5,
-        LinearEffectiveCapacity = 6,
-        PendingDeletionStruct = 7,
-        PendingDeletionAdditionalStructPointer = 8
+        LinearMallocedAddress = 0,
+        LinearInternalCapacity = 1,
+        LinearBaseAddress = 2,
+        LinearEffectiveCapacity = 3,
+        PendingDeletionStruct = 4,
+        PendingDeletionAdditionalStructPointer = 5
     };
 
     enum PendingDeletionField {
@@ -261,11 +252,13 @@ public:
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
+    static llvm::StructType * getLocalHandleType(kernel::KernelBuilder & b);
+
+    void setLocalHandle(llvm::Value * handle) const { mLocalHandle = handle; }
+
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
@@ -287,6 +280,13 @@ public:
 
     llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
+    void updateLocalHandleValues(kernel::KernelBuilder & b, llvm::Value * localHandle) const;
+
+private:
+
+    static llvm::StructType * mLocalHandleType;
+
+    mutable llvm::Value * mLocalHandle = nullptr;
 };
 
 class RepeatingBuffer final : public InternalBuffer {
@@ -306,8 +306,6 @@ public:
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 

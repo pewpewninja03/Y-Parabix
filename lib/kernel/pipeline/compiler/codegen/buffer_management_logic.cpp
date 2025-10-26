@@ -39,6 +39,9 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
             } else if (LLVM_LIKELY(bn.isOwned() || bn.hasZeroElementsOrWidth())) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
+                if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+                    mTarget->addNonPersistentScalar(ManagedDynamicBuffer::getLocalHandleType(b), MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
+                }
             } else {
                 mTarget->addNonPersistentScalar(handleType, prefix);
                 requiresLGVBA = true;
@@ -48,6 +51,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         if (requiresLGVBA) {
             mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
+
 
     }
 
@@ -280,18 +284,16 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief freePendingDeletions
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::freePendingDeletions(KernelBuilder & b) {
-    for (auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(output, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal() || bn.isUnowned() || bn.isInOutRedirect() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth()) {
-            continue;
-        }
-        StreamSetBuffer * const buffer = bn.Buffer;
-        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
-            Value * const consumed = readConsumedItemCount(b, streamSet, true); assert (consumed);
-            cast<ManagedDynamicBuffer>(buffer)->freePendingDeletions(b, consumed);
-        }
+void PipelineCompiler::freePendingDeletions(KernelBuilder & b, const size_t streamSet, Value * const consumed) {
+    const BufferNode & bn = mBufferGraph[streamSet];
+    if (bn.isThreadLocal() || bn.isUnowned() || bn.isInOutRedirect() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth()) {
+        return;
+    }
+    StreamSetBuffer * const buffer = bn.Buffer;
+    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+        assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
+        assert (out_degree(streamSet, mConsumerGraph) > 0);
+        buffer->freePendingDeletions(b, consumed);
     }
 }
 
@@ -543,6 +545,7 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto inputPort = br.Port;
+        const auto prefix = makeBufferName(mKernelId, inputPort);
 
         if (LLVM_UNLIKELY(br.isRelative())) {
 
@@ -559,7 +562,6 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
 
         } else {
 
-            const auto prefix = makeBufferName(mKernelId, inputPort);
             const auto & suffix = (mCurrentKernelIsStateFree) ?
                 STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
@@ -573,9 +575,15 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
                 itemCount = b.CreateAlignedLoad(defRef.second, defRef.first, SizeTyABIAlignment);
                 mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
             }
+
         }
 
-
+        const auto streamSet = source(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (isa<ManagedDynamicBuffer>(bn.Buffer)) { assert (bn.isOwned());
+            auto scalarRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
+            cast<ManagedDynamicBuffer>(bn.Buffer)->setLocalHandle(scalarRef.first);
+        }
 
     }
 }
@@ -589,6 +597,7 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
         const BufferPort & br = mBufferGraph[e];
         const auto outputPort = br.Port;
         const auto streamSet = target(e, mBufferGraph);
+        const auto prefix = makeBufferName(mKernelId, outputPort);
 
         if (LLVM_UNLIKELY(br.isRelative())) {
 
@@ -617,7 +626,6 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
 
         } else {
 
-            const auto prefix = makeBufferName(mKernelId, outputPort);
             const auto & suffix = (mCurrentKernelIsStateFree) ?
                 STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
@@ -635,10 +643,12 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
                 mProducedDeferredItemCountPtr[outputPort] = itemCountPtr;
                 mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
             }
-
         }
 
-
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+            cast<ManagedDynamicBuffer>(bn.Buffer)->setLocalHandle(nullptr);
+        }
 
     }
 }

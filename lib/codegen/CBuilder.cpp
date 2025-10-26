@@ -103,57 +103,6 @@ extern "C" void free_debug_wrapper(void * ptr) {
     }
 }
 
-static IntervalSet __unreadMemory{};
-
-static size_t __insertIntoUnreadMemorySet(const uintptr_t start, const uintptr_t length) {
-    auto range = Interval::right_open(start, start + length);
-    IntervalItr f = __unreadMemory.find(range);
-    if (f != __unreadMemory.end()) {
-        if (f->lower() >= range.upper() && f->upper() >= range.lower()) {
-            return 0;
-        }
-    }
-    __unreadMemory += range;
-    return 1;
-}
-
-void CBuilder::InsertIntoUnreadMemory(Value * const start, Value * const length, const Twine failureMessage) const {
-//    Function * f = getModule()->getFunction("__insertIntoUnreadMemorySet");
-//    if (f == nullptr) {
-//        f = LinkFunction("__insertIntoUnreadMemorySet", __insertIntoUnreadMemorySet);
-//    }
-//    FixedArray<Value *, 2> args;
-//    args[0] = start;
-//    args[1] = length;
-//    Value * r = CreateCall(f->getFunctionType(), f, args);
-//    CreateAssert(CreateIsNotNull(f), failureMessage);
-}
-
-static size_t __removeFromUnreadMemorySet(const uintptr_t start, const uintptr_t length) {
-    auto range = Interval::right_open(start, start + length);
-    IntervalItr f = __unreadMemory.find(range);
-    if (f == __unreadMemory.end()) {
-        return 0;
-    }
-    if (f->lower() < range.upper() || f->upper() < range.lower()) {
-        return 0;
-    }
-    __unreadMemory -= range;
-    return 1;
-}
-
-void CBuilder::RemoveFromUnreadMemory(Value * const start, Value * const length, const Twine failureMessage) const {
-//    Function * f = getModule()->getFunction("__removeFromUnreadMemorySet");
-//    if (f == nullptr) {
-//        f = LinkFunction("__removeFromUnreadMemorySet", __removeFromUnreadMemorySet);
-//    }
-//    FixedArray<Value *, 2> args;
-//    args[0] = start;
-//    args[1] = length;
-//    Value * r = CreateCall(f->getFunctionType(), f, args);
-//    CreateAssert(CreateIsNotNull(f), failureMessage);
-}
-
 Value * CBuilder::CreateURem(Value * const number, Value * const divisor, const Twine Name) {
     if (ConstantInt * const c = dyn_cast<ConstantInt>(divisor)) {
         const auto d = c->getZExtValue();

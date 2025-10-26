@@ -67,6 +67,12 @@ void PipelineCompiler::readConsumedItemCounts(KernelBuilder & b) {
         const auto streamSet = target(e, mConsumerGraph);
         assert (mInitialConsumedItemCount[streamSet] == nullptr);
         Value * consumed = readConsumedItemCount(b, streamSet);
+        freePendingDeletions(b, streamSet, consumed);
+        // A returned buffer never releases data.
+        const auto & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.preserveEntireStreamSet())) {
+            consumed = b.getSize(0);
+        }
         mInitialConsumedItemCount[streamSet] = consumed; assert (consumed);
         #ifdef PRINT_DEBUG_MESSAGES
         const ConsumerEdge & c = mConsumerGraph[e];
@@ -114,7 +120,7 @@ void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet, const bool alwaysReturnConsumedCount) {
+Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
 #ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
     return b.getSize(0);
 #else
@@ -123,23 +129,13 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
         return mInitialConsumedItemCount[streamSet];
     }
 
-    if (!alwaysReturnConsumedCount && preserveAllStreamSetData(streamSet)) {
-        return b.getSize(0);
-    }
-
     assert (in_degree(streamSet, mBufferGraph) > 0);
-    const auto & bn = mBufferGraph[streamSet];
-    // A returned buffer never releases data.
-    if (bn.isReturned()) {
-        return b.getSize(0);
-    }
 
     Value * itemCount = nullptr;
     if (out_degree(streamSet, mConsumerGraph) == 0) {
-
-
         // This stream either has no consumers or we've proven that
-        // its consumption rate is identical to its production rate.
+        // its consumption rate is identical to its production rate
+        assert (!isa<ManagedDynamicBuffer>(mBufferGraph[streamSet].Buffer));
         Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
         assert (isFromCurrentFunction(b, produced, false));
         const auto e = in_edge(streamSet, mBufferGraph);
@@ -256,6 +252,11 @@ void PipelineCompiler::writeConsumedItemCounts(KernelBuilder & b) {
             debugPrint(b, " * writing " + prefix + "_consumed = %" PRIu64, consumed);
             #endif
             setConsumedItemCount(b, streamSet, consumed, 0);
+//            const BufferNode & bn = mBufferGraph[streamSet];
+//            if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(bn.Buffer))) {
+//                Value * const initialConsumed = b.getScalarField(PRIOR_CONSUMED_ITEM_COUNT + std::to_string(streamSet));
+//                bn.Buffer->freePendingDeletions(b, initialConsumed);
+//            }
         }
     }
     #endif

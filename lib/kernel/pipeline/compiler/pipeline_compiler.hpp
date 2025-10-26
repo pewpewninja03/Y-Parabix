@@ -130,13 +130,12 @@ const static std::string STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TDC
 const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA = "@SDMSD";
 const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDMSC";
 
+
+const static std::string MANAGED_STREAMSET_LOCAL_HANDLE = "@MSLH";
+
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
 const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
-
-
-const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
-const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
 
 using ArgVec = Vec<Value *, 64>;
 
@@ -383,7 +382,7 @@ public:
     void writeTransitoryConsumedItemCount(KernelBuilder & b, const unsigned streamSet, Value * const produced);
     void readExternalConsumerItemCounts(KernelBuilder & b);
     void readConsumedItemCounts(KernelBuilder & b);
-    Value * readConsumedItemCount(KernelBuilder & b, const size_t streamSet, const bool alwaysReturnConsumedCount = false);
+    Value * readConsumedItemCount(KernelBuilder & b, const size_t streamSet);
     void setConsumedItemCount(KernelBuilder & b, const size_t streamSet, Value * consumed, const unsigned slot) const;
     void updateExternalConsumedItemCounts(KernelBuilder & b);
     void zeroAnySkippedTransitoryConsumedItemCountsUntil(KernelBuilder & b, const unsigned targetKernelId);
@@ -394,7 +393,7 @@ public:
     void allocateOwnedBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
     void loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal);
     void releaseOwnedBuffers(KernelBuilder & b);
-    void freePendingDeletions(KernelBuilder & b);
+    void freePendingDeletions(KernelBuilder & b, const size_t streamSet, Value * const consumed);
     bool initializeOutputStreamSetBuffersBeforeSegmentInvocation(KernelBuilder & b) const;
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
@@ -604,11 +603,6 @@ public:
 
     void getABIAlignments(KernelBuilder & b);
 
-    inline bool preserveAllStreamSetData(const size_t streamSet) const {
-        const auto f = PreserveAllStreamSetData.find(streamSet);
-        return f != PreserveAllStreamSetData.end();
-    }
-
 protected:
 
     CompilerAllocator                           mAllocator;
@@ -685,7 +679,6 @@ protected:
     const InOutGraph                            InOutStreamSetReplacement;
     const ThreadLocalPlacementGraph             ThreadLocalPlacement;
     const ThreadLocalConflictGraphType          ThreadLocalConflictGraph;
-    const IntervalSet                           PreserveAllStreamSetData;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -1006,7 +999,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , ThreadLocalPlacement(std::move(P.ThreadLocalPlacement))
 
 , ThreadLocalConflictGraph(std::move(P.ThreadLocalConflictGraph))
-, PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)

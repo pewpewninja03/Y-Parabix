@@ -583,7 +583,8 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             }
             Value * ptr = mVirtualBaseAddressPtr[numOfVirtualBaseAddresses++];
             ptr = b.CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
-            b.CreateAlignedStore(buffer->getBaseAddress(b), ptr, PtrTyABIAlignment);
+            Value * addr = buffer->getBaseAddress(b);
+            b.CreateAlignedStore(addr, ptr, PtrTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b));

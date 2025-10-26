@@ -548,11 +548,6 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             // NOTE: StructType::create always creates a new type even if an identical one exists.
             const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
             if (mSharedStateType == nullptr || mSharedStateType->isOpaque()) {
-
-                for (const auto & X : shared) {
-
-                }
-
                 mSharedStateType = makeStructType(mSharedStateType, shared, strShared, allowStructPadding);
                 assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
             }

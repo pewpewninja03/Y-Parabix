@@ -274,6 +274,7 @@ enum BufferType : unsigned {
     , CrossThreaded = 32
     , InOutRedirect = 64
     , ManagedOutput = 128
+    , PreserveEntireStreamSet = 256
     // ------------------
     , HasIllustratedStreamset = 512
     , StartsNestedSynchronizationRegion = 1024
@@ -347,6 +348,10 @@ struct BufferNode {
 
     bool isReturned() const {
         return (Type & BufferType::Returned) != 0;
+    }
+
+    bool preserveEntireStreamSet() const {
+        return (Type & BufferType::PreserveEntireStreamSet) != 0;
     }
 
     bool isTruncated() const {

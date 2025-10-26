@@ -41,7 +41,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
 
-
 //    Rational lowestSourceStreamSetIORate{std::numeric_limits<unsigned>::max()};
 
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
@@ -176,7 +175,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ReturnedBuffer:
-                        bn.Type |= BufferType::Returned;
+                        bn.Type |= BufferType::Returned | BufferType::PreserveEntireStreamSet;
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::EmptyReadOverflow:
@@ -269,6 +268,13 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             }
             return bp;
         };
+
+        for (const auto & I : parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions)) {
+            for (auto i = I.lower(); i <= I.upper(); ++i) {
+                BufferNode & bn = mBufferGraph[i];
+                bn.Type |= BufferType::PreserveEntireStreamSet;
+            }
+        }
 
         // TODO: replace this with abstracted function
 

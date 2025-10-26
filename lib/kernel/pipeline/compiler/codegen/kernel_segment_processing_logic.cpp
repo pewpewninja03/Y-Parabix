@@ -119,7 +119,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     readProducedItemCounts(b);
     readAvailableItemCounts(b);
     readConsumedItemCounts(b);
-    freePendingDeletions(b);
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
     remapThreadLocalBufferMemory(b);

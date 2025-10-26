@@ -904,6 +904,11 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     phi->addIncoming(beforeExpansion, noExpansionExit);
     phi->addIncoming(afterExpansion, expandBufferExit);
     mInternalWritableOutputItems[outputPort] = phi;
+    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
+        auto scalarRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
+        cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b, scalarRef.first);
+        cast<ManagedDynamicBuffer>(buffer)->setLocalHandle(scalarRef.first);
+    }
 
 }
 

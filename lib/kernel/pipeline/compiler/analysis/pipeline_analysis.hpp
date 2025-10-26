@@ -118,7 +118,8 @@ private:
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
     , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
-    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized)) {
+    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
+    , PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions)) {
 
     }
 
@@ -332,6 +333,8 @@ public:
 
     FamilyScalarGraph               mFamilyScalarGraph;
     ZeroInputGraph                  mZeroInputGraph;
+
+    IntervalSet                     PreserveAllStreamSetData;
 
     IllustratedStreamSetMap         mIllustratedStreamSetBindings;
 
