@@ -256,6 +256,8 @@ public:
 
     void setLocalHandle(llvm::Value * handle) const { mLocalHandle = handle; }
 
+    llvm::Value * getLocalHandle() const { return mLocalHandle; }
+
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
@@ -280,13 +282,17 @@ public:
 
     llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
-    void updateLocalHandleValues(kernel::KernelBuilder & b, llvm::Value * localHandle) const;
+    void updateLocalHandleValues(kernel::KernelBuilder & b) const;
+
+    void setSegNum(llvm::Value * segNum) const { mSegNum = segNum; }
 
 private:
 
     static llvm::StructType * mLocalHandleType;
 
     mutable llvm::Value * mLocalHandle = nullptr;
+
+    mutable llvm::Value * mSegNum = nullptr;
 };
 
 class RepeatingBuffer final : public InternalBuffer {

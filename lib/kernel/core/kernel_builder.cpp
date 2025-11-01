@@ -567,7 +567,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                     Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
                     Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
                     Value * const capacityChunks = CreateUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
-                    CreateUnlikelyCondBr(CreateICmpUGT(CreateSub(requiredChunks, consumedChunks), capacityChunks), expandInternalBuffer, exit);
+                    CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, CreateAdd(capacityChunks, consumedChunks)), expandInternalBuffer, exit);
                 }
 
                 SetInsertPoint(expandInternalBuffer);

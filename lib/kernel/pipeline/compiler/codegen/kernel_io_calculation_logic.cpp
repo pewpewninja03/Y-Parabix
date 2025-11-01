@@ -696,6 +696,7 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
 
+
     Value * const alreadyComputed = mInternalAccessibleInputItems[inputPort];
     if (alreadyComputed) {
         return alreadyComputed;
@@ -800,7 +801,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
     Value * const beforeExpansion = getWritableOutputItems(b, port);
 
-    Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
+    Value * hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
+    if (streamSet == 10) {
+        hasEnoughSpace = b.CreateAnd(hasEnoughSpace, b.CreateICmpNE(mSegNo, b.getSize(0)));
+    }
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), beforeExpansion);
@@ -846,11 +850,17 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     // TODO: have a delete immediately value when not multithreaded?
     Value * mustExpand = nullptr;
+    if (isa<ManagedDynamicBuffer>(buffer)) {
+        cast<ManagedDynamicBuffer>(buffer)->setSegNum(mSegNo);
+    }
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
         Value * sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
         mustExpand = buffer->reserveCapacity(b, produced, consumed, required, mBufferExpansionFunction, sharedHandle, b.getSize(outputPort.Number));
     } else {
         mustExpand = buffer->reserveCapacity(b, produced, consumed, required, nullptr, nullptr, nullptr);
+    }
+    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
+        cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
     }
     b.CreateBr(afterCopyBackOrExpand);
 
@@ -904,11 +914,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     phi->addIncoming(beforeExpansion, noExpansionExit);
     phi->addIncoming(afterExpansion, expandBufferExit);
     mInternalWritableOutputItems[outputPort] = phi;
-    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
-        auto scalarRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
-        cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b, scalarRef.first);
-        cast<ManagedDynamicBuffer>(buffer)->setLocalHandle(scalarRef.first);
-    }
 
 }
 

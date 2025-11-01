@@ -1,4 +1,4 @@
-#include "../pipeline_compiler.hpp"
+﻿#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -51,6 +51,8 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         if (requiresLGVBA) {
             mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
+
+        mTarget->addNonPersistentScalar(b.getSizeTy(), AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
 
 
     }
@@ -293,6 +295,7 @@ void PipelineCompiler::freePendingDeletions(KernelBuilder & b, const size_t stre
     if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
         assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
         assert (out_degree(streamSet, mConsumerGraph) > 0);
+        cast<ManagedDynamicBuffer>(buffer)->setSegNum(mSegNo);
         buffer->freePendingDeletions(b, consumed);
     }
 }
@@ -516,20 +519,23 @@ Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t
     } else {
         const auto f = in_edge(streamSet, mBufferGraph);
         const auto producer = source(f, mBufferGraph);
-        const BufferPort & outputPort = mBufferGraph[f];
-        assert (outputPort.Port.Type == PortType::Output);
         if (LLVM_UNLIKELY(producer == PipelineInput)) {
+            const BufferPort & outputPort = mBufferGraph[f];
+            assert (outputPort.Port.Type == PortType::Output);
             assert (bn.isExternal());
             // the output port of the pipeline input is an input streamset of the pipeline kernel.
             produced = getAvailableInputItems(outputPort.Port.Number);
             writeTransitoryConsumedItemCount(b, streamSet, produced);
         } else {
-            const auto prefix = makeBufferName(producer, outputPort.Port);
-            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            } else {
-                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
-            }
+            produced = b.getScalarField(AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
+
+
+//            const auto prefix = makeBufferName(producer, outputPort.Port);
+//            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
+//                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+//            } else {
+//                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
+//            }
         }
     }
     assert (produced);
@@ -577,14 +583,6 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
             }
 
         }
-
-        const auto streamSet = source(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.Buffer)) { assert (bn.isOwned());
-            auto scalarRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
-            cast<ManagedDynamicBuffer>(bn.Buffer)->setLocalHandle(scalarRef.first);
-        }
-
     }
 }
 
@@ -646,8 +644,11 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
         }
 
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
-            cast<ManagedDynamicBuffer>(bn.Buffer)->setLocalHandle(nullptr);
+        if (isa<ManagedDynamicBuffer>(bn.Buffer)) { assert (bn.isOwned());
+            auto id = getTruncatedStreamSetSourceId(streamSet);
+            auto scalarRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(id));
+            cast<ManagedDynamicBuffer>(bn.Buffer)->setLocalHandle(scalarRef.first);
+            cast<ManagedDynamicBuffer>(bn.Buffer)->updateLocalHandleValues(b);
         }
 
     }
@@ -751,7 +752,12 @@ void PipelineCompiler::recordFinalProducedItemCounts(KernelBuilder & b) {
         debugPrint(b, out.str(), fullyProduced);
         #endif
 
+
+
         const auto streamSet = target(e, mBufferGraph);
+        auto availRef = b.getScalarFieldPtr(AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
+        b.CreateAlignedStore(fullyProduced, availRef.first, SizeTyABIAlignment);
+
         mLocallyAvailableItems[streamSet] = fullyProduced;
 
         writeTransitoryConsumedItemCount(b, streamSet, fullyProduced);
@@ -763,7 +769,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(KernelBuilder & b) {
             for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const BufferPort & external = mBufferGraph[f];
                 Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
-                b.CreateAlignedStore(mLocallyAvailableItems[streamSet], ptr, SizeTyABIAlignment);
+                b.CreateAlignedStore(fullyProduced, ptr, SizeTyABIAlignment);
             }
         }
 
@@ -789,12 +795,9 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(KernelBuilder & b)
             assert (bn.isNonThreadLocal());
             Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
             StreamSetBuffer * const buffer = bn.Buffer;
+            assert (isa<ExternalBuffer>(buffer));
             Value * vba = b.CreateAlignedLoad(buffer->getPointerType(), ptr, PtrTyABIAlignment);
             buffer->setBaseAddress(b, vba);
-//            if (CheckAssertions) {
-//                b.CreateAssert(vba, "%s.%s returned virtual base addresss cannot be null",
-//                                mCurrentKernelName, b.GetString(rd.Binding.get().getName()));
-//            }
             buffer->setCapacity(b, mProducedItemCount[port]);
             const auto handleName = makeBufferName(mKernelId, port);
             #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
@@ -850,6 +853,8 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
     assert ("buffer cannot be null!" && buffer);
     assert (isFromCurrentFunction(b, buffer->getHandle(), false));
     assert (position);
+
+    assert (isa<ManagedDynamicBuffer>(buffer) ? cast<ManagedDynamicBuffer>(buffer)->getLocalHandle() != nullptr : true);
 
     Value * const baseAddress = buffer->getBaseAddress(b); assert (baseAddress);
     if (bufferNode.isUnowned() || bufferNode.hasZeroElementsOrWidth()) {

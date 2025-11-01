@@ -67,19 +67,6 @@ void PipelineCompiler::readConsumedItemCounts(KernelBuilder & b) {
         const auto streamSet = target(e, mConsumerGraph);
         assert (mInitialConsumedItemCount[streamSet] == nullptr);
         Value * consumed = readConsumedItemCount(b, streamSet);
-        freePendingDeletions(b, streamSet, consumed);
-        // A returned buffer never releases data.
-        const auto & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.preserveEntireStreamSet())) {
-            consumed = b.getSize(0);
-        }
-        mInitialConsumedItemCount[streamSet] = consumed; assert (consumed);
-        #ifdef PRINT_DEBUG_MESSAGES
-        const ConsumerEdge & c = mConsumerGraph[e];
-        const StreamSetPort port{PortType::Output, c.Port};
-        const auto prefix = makeBufferName(mKernelId, port);
-        debugPrint(b, prefix + "_consumed = %" PRIu64, consumed);
-        #endif
         if (LLVM_UNLIKELY(CheckAssertions)) {
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             Value * valid = b.CreateICmpULE(consumed, produced);
@@ -94,6 +81,23 @@ void PipelineCompiler::readConsumedItemCounts(KernelBuilder & b) {
             b.CreateAssert(valid, msg,
                 consumed, mCurrentKernelName, bindingName, produced);
         }
+        freePendingDeletions(b, streamSet, consumed);
+        // A returned buffer never releases data.
+        #ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
+        consumed = b.getSize(0);
+        #else
+        const auto & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.preserveEntireStreamSet())) {
+            consumed = b.getSize(0);
+        }
+        #endif
+        mInitialConsumedItemCount[streamSet] = consumed; assert (consumed);
+        #ifdef PRINT_DEBUG_MESSAGES
+        const ConsumerEdge & c = mConsumerGraph[e];
+        const StreamSetPort port{PortType::Output, c.Port};
+        const auto prefix = makeBufferName(mKernelId, port);
+        debugPrint(b, prefix + "_consumed = %" PRIu64, consumed);
+        #endif
     }
 }
 
@@ -121,10 +125,6 @@ void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
-#ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
-    return b.getSize(0);
-#else
-
     if (mInitialConsumedItemCount[streamSet]) {
         return mInitialConsumedItemCount[streamSet];
     }
@@ -171,7 +171,6 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     }
     assert (itemCount);
     return itemCount;
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -252,11 +251,6 @@ void PipelineCompiler::writeConsumedItemCounts(KernelBuilder & b) {
             debugPrint(b, " * writing " + prefix + "_consumed = %" PRIu64, consumed);
             #endif
             setConsumedItemCount(b, streamSet, consumed, 0);
-//            const BufferNode & bn = mBufferGraph[streamSet];
-//            if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(bn.Buffer))) {
-//                Value * const initialConsumed = b.getScalarField(PRIOR_CONSUMED_ITEM_COUNT + std::to_string(streamSet));
-//                bn.Buffer->freePendingDeletions(b, initialConsumed);
-//            }
         }
     }
     #endif
@@ -301,8 +295,7 @@ void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t stre
                         prior, consumed, mCurrentKernelName);
 
     }
-
-    b.CreateAlignedStore(consumed, ptr, SizeTyABIAlignment);
+    b.CreateAlignedStore(consumed, ptr, SizeTyABIAlignment, true);
     #endif
 }
 

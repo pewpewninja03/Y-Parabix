@@ -98,6 +98,7 @@ const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
 const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".ISIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
+const static std::string AVAILABLE_ITEM_COUNT_PREFIX = "@AC";
 const static std::string CONSUMED_ITEM_COUNT_PREFIX = "@CON";
 const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@TCN";
 
@@ -155,6 +156,9 @@ class PipelineCompiler final : public KernelCompiler, public PipelineCommonGraph
 
     enum { WITH_OVERFLOW = 0, WITHOUT_OVERFLOW = 1};
     using OverflowItemCounts = Vec<std::array<Value *, 2>, 8>;
+
+// TODO: make a dyn buffer info graph that minimizes stack allocation
+
 
 public:
 

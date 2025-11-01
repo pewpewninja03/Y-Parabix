@@ -909,6 +909,9 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
             mConsumedOutputItems[i] = consumed;
+            if (isa<ManagedDynamicBuffer>(buffer)) {
+                cast<ManagedDynamicBuffer>(buffer)->setSegNum(b.getSize(-1ULL));
+            }
             buffer->freePendingDeletions(b, consumed);
             writable = buffer->getLinearlyWritableItems(b, produced, consumed);
             assert (writable && writable->getType() == sizeTy);
@@ -1155,6 +1158,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
             }
             assert (isFromCurrentFunction(b, produced, true));
             Value * vba = buffer->getVirtualBasePtr(b, baseAddress, produced);
+            b.CallPrintInt("managedBuffer:vba", vba);
             vba = b.CreatePointerCast(vba, b.getVoidPtrTy());
 
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));

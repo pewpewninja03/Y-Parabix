@@ -115,6 +115,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         minimumNumOfThreads = maximumNumOfThreads;
     }
 
+    b.CallPrintInt("init:maxThreads", maximumNumOfThreads);
+
     Value * const threadStateArray = b.CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b.getCacheAlignment());
     assert (threadStateArray->getType() == threadStructTy->getPointerTo());
     IntegerType * const intPtrTy = b.getIntPtrTy(DL);

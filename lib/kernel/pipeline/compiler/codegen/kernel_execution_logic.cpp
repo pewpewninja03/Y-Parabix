@@ -265,14 +265,12 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "* " + prefix + "_executed = %" PRIu64, mNumOfLinearStrides);
     #endif
-
     if (mKernelCanTerminateEarly) {
         mTerminatedExplicitly = doSegmentRetVal;
         assert (doSegmentRetVal->getType()->isIntegerTy());
     } else {
         mTerminatedExplicitly = nullptr;
     }
-
     if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {
         updateProcessedAndProducedItemCounts(b);
         readReturnedOutputVirtualBaseAddresses(b);
@@ -601,6 +599,9 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
             #endif
             #endif
+            if (mKernelId == 2) {
+                b.CallPrintInt("vba", vba);
+            }
             addNextArg(b.CreatePointerCast(vba, voidPtrTy));
         }
 
