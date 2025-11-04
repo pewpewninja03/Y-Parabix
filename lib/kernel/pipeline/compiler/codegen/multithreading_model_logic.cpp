@@ -115,8 +115,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         minimumNumOfThreads = maximumNumOfThreads;
     }
 
-    b.CallPrintInt("init:maxThreads", maximumNumOfThreads);
-
     Value * const threadStateArray = b.CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b.getCacheAlignment());
     assert (threadStateArray->getType() == threadStructTy->getPointerTo());
     IntegerType * const intPtrTy = b.getIntPtrTy(DL);
@@ -295,7 +293,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
         // generate the pipeline logic for this thread
         start(b);
-
+        assignLocalDynamicBufferStructs(b);
         branchToInitialPartition(b);
         const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
         assert (AllowIOProcessThread || firstComputeKernel == FirstKernel);
@@ -367,7 +365,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         if (LLVM_UNLIKELY(CheckAssertions)) {
             retVal.push_back(mPipelineProgress);
         }
-
+        resetLocalDynamicBufferStructs(b);
 //        Constant * ba = BlockAddress::get(csFunc, b.GetInsertBlock());
 //        Value * ptr = b.CreateAdd(baseFunctionPtrInt, ConstantExpr::getPtrToInt(ba, intPtrTy));
 //        b.CallPrintInt(csFunc->getName().str() + "." + b.GetInsertBlock()->getName().str(), ptr);
@@ -988,7 +986,6 @@ void PipelineCompiler::start(KernelBuilder & b) {
     Value * const ns = b.CreateUMax(getNumOfStrides(), b.getSize(1));
 
     mExpectedNumOfStridesMultiplier = ns; // b.CreateCeilUMulRational(ns, mTarget->getStride());
-   // b.CallPrintInt("mExpectedNumOfStridesMultiplier", mExpectedNumOfStridesMultiplier);
 
     initializeFlowControl(b);
     readExternalConsumerItemCounts(b);
@@ -1211,7 +1208,6 @@ Value * PipelineCompiler::isProcessThread(KernelBuilder & b, StructType * const 
     auto & DL = b.getModule()->getDataLayout();
     const auto pThreadAlign = DL.getABITypeAlign(pThreadTy).value();
     Value * const threadId = b.CreateAlignedLoad(pThreadTy, ptr, pThreadAlign);
-//    b.CallPrintInt("exiting thread", threadId);
     return b.CreateIsNull(threadId);
 }
 
@@ -1298,13 +1294,12 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     mMadeProgressInLastSegment = b.CreatePHI(b.getInt1Ty(), 2, "madeProgressInLastSegment");
     mMadeProgressInLastSegment->addIncoming(b.getTrue(), entryBlock);
     obtainCurrentSegmentNumber(b, entryBlock);
-
+    assignLocalDynamicBufferStructs(b);
     branchToInitialPartition(b);
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, true);
         executeKernel(b);
     }
-
     Value * terminated = nullptr;
     if (mIsNestedPipeline || mUseDynamicMultithreading) {
         if (PipelineHasTerminationSignal) {
@@ -1346,6 +1341,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
 
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);
+    resetLocalDynamicBufferStructs(b);
 
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         // TODO: this isn't fully correct when this is a nested pipeline

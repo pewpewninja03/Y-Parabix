@@ -1,4 +1,4 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -39,9 +39,6 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
             } else if (LLVM_LIKELY(bn.isOwned() || bn.hasZeroElementsOrWidth())) {
                 hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
-                if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
-                    mTarget->addNonPersistentScalar(ManagedDynamicBuffer::getLocalHandleType(b), MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
-                }
             } else {
                 mTarget->addNonPersistentScalar(handleType, prefix);
                 requiresLGVBA = true;
@@ -51,9 +48,6 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         if (requiresLGVBA) {
             mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
-
-        mTarget->addNonPersistentScalar(b.getSizeTy(), AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
-
 
     }
 
@@ -332,6 +326,83 @@ void PipelineCompiler::updateExternalProducedItemCounts(KernelBuilder & b) {
     }
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addLocalDynamicBufferStructs
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::addLocalDynamicBufferStructs(KernelBuilder & b) {
+    Type * mgbTy = nullptr;
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        const BufferNode & bn = mBufferGraph[streamSet];
+        mTarget->addNonPersistentScalar(b.getSizeTy(), AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
+            continue;
+        }
+        StreamSetBuffer * const buffer = bn.Buffer;
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            if (mgbTy == nullptr) {
+                mgbTy = cast<ManagedDynamicBuffer>(buffer)->getLocalHandleType(b);
+            }
+            mTarget->addNonPersistentScalar(mgbTy, MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
+        }
+    }
+}
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief assignLocalDynamicBufferStructs
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::assignLocalDynamicBufferStructs(KernelBuilder & b) const {
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
+            continue;
+        }
+        StreamSetBuffer * const buffer = bn.Buffer;
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            auto mgRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(streamSet));
+            cast<ManagedDynamicBuffer>(buffer)->setLocalHandle(mgRef.first);
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief resetLocalDynamicBufferStructs
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::resetLocalDynamicBufferStructs(KernelBuilder & b) const {
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
+            continue;
+        }
+        StreamSetBuffer * const buffer = bn.Buffer;
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            cast<ManagedDynamicBuffer>(buffer)->setLocalHandle(nullptr);
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateExternalProducedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId) const {
+    for (auto kernelId = mKernelId; kernelId < targetKernelId; ++kernelId) {
+        for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = target(output, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            StreamSetBuffer * const buffer = bn.Buffer;
+            if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                    const auto consumer = target(input, mBufferGraph);
+                    assert (mKernelId < consumer && consumer <= PipelineOutput);
+                    if (consumer >= targetKernelId) {
+                        cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeOutputStreamSetBuffersBeforeSegmentInvocation
@@ -355,7 +426,6 @@ bool PipelineCompiler::initializeOutputStreamSetBuffersBeforeSegmentInvocation(K
         if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
             continue;
         }
-
     }
 
     return outputModifiesSegmentLength;
@@ -643,12 +713,10 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
             }
         }
 
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.Buffer)) { assert (bn.isOwned());
-            auto id = getTruncatedStreamSetSourceId(streamSet);
-            auto scalarRef = b.getScalarFieldPtr(MANAGED_STREAMSET_LOCAL_HANDLE + std::to_string(id));
-            cast<ManagedDynamicBuffer>(bn.Buffer)->setLocalHandle(scalarRef.first);
-            cast<ManagedDynamicBuffer>(bn.Buffer)->updateLocalHandleValues(b);
+        const auto & bn = mBufferGraph[target(e, mBufferGraph)];
+        StreamSetBuffer * const buffer = bn.Buffer;
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
+            cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
         }
 
     }
@@ -826,6 +894,9 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBu
         const auto handleName = makeBufferName(kernelId, rd.Port);
         Value * const vba = b.getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
         StreamSetBuffer * const buffer = bn.Buffer;
+        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
+            cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
+        }
         buffer->setBaseAddress(b, vba);
 //        if (CheckAssertions) {
 //            b.CreateAssert(vba, "%s.%s last good virtual base addresss cannot be null",

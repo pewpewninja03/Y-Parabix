@@ -252,7 +252,7 @@ public:
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    static llvm::StructType * getLocalHandleType(kernel::KernelBuilder & b);
+    llvm::StructType * getLocalHandleType(kernel::KernelBuilder & b) const;
 
     void setLocalHandle(llvm::Value * handle) const { mLocalHandle = handle; }
 
@@ -288,7 +288,7 @@ public:
 
 private:
 
-    static llvm::StructType * mLocalHandleType;
+    mutable llvm::StructType * mLocalHandleType = nullptr;
 
     mutable llvm::Value * mLocalHandle = nullptr;
 

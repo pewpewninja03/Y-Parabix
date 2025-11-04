@@ -268,9 +268,10 @@ void ReadSourceKernel::linkExternalMethods(KernelBuilder & b) {
 /// Hybrid MMap/Read source kernel
 
 void FDSourceKernel::generateInitializeMethod(KernelBuilder & b) {
-    BasicBlock * initializeRead = b.CreateBasicBlock("initializeRead");
+
     BasicBlock * checkFileSize = b.CreateBasicBlock("checkFileSize");
     BasicBlock * initializeMMap = b.CreateBasicBlock("initializeMMap");
+    BasicBlock * initializeRead = b.CreateBasicBlock("initializeRead");
     BasicBlock * initializeDone = b.CreateBasicBlock("initializeDone");
 
     // The source will use MMapSource or readSoure kernel logic depending on the useMMap
@@ -359,6 +360,7 @@ void FDSourceKernel::linkExternalMethods(KernelBuilder & b) {
 void MemorySourceKernel::generateInitializeMethod(KernelBuilder & b) {
     Value * const fileSource = b.getScalarField("fileSource");
     b.setBaseAddress("sourceBuffer", fileSource);
+
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         b.CreateAssert(fileSource, getName() + " fileSource cannot be null");
     }
@@ -414,7 +416,7 @@ MMapSourceKernel::MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
 // input streams
 ,{}
 // output streams
-,{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer(), Linear() }}}
+,{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer() }}}
 // input scalars
 ,{Binding{"fileDescriptor", fd}}
 // output scalars
@@ -434,7 +436,7 @@ ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
 // input streams
 ,{}
 // output streams
-,{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer(), Linear() }}}
+,{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer() }}}
 // input scalars
 ,{Binding{"fileDescriptor", fd}}
 // output scalars
@@ -454,7 +456,7 @@ FDSourceKernel::FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useM
 // input streams
 ,{}
 // output stream
-,{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer(), Linear() }}}
+,{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer() }}}
 // input scalar
 ,{Binding{"useMMap", useMMap}
 , Binding{"fileDescriptor", fd}}
@@ -475,7 +477,7 @@ MemorySourceKernel::MemorySourceKernel(LLVMTypeSystemInterface & ts, Scalar * fi
 // input streams
 {},
 // output stream
-{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer(), Linear() }}},
+{Binding{"sourceBuffer", outputStream, FixedRate(), { ManagedBuffer() }}},
 // input scalar
 {Binding{"fileSource", fileSource}, Binding{"fileItems", fileItems}},
 {},

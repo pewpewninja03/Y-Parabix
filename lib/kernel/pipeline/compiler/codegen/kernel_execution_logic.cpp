@@ -580,12 +580,8 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 mVirtualBaseAddressPtr.push_back(vba);
             }
             Value * ptr = mVirtualBaseAddressPtr[numOfVirtualBaseAddresses++];
-            ptr = b.CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
-            Value * addr = buffer->getBaseAddress(b);
-            b.CreateAlignedStore(addr, ptr, PtrTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
-            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b));
             #endif
             addNextArg(b.CreatePointerCast(ptr, voidPtrPtrTy));
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
@@ -599,9 +595,6 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
             #endif
             #endif
-            if (mKernelId == 2) {
-                b.CallPrintInt("vba", vba);
-            }
             addNextArg(b.CreatePointerCast(vba, voidPtrTy));
         }
 

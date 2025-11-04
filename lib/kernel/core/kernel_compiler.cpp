@@ -418,8 +418,8 @@ void KernelCompiler::constructStreamSetBuffers(KernelBuilder & b) {
 
         StreamSetBuffer * buffer = nullptr;
         if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
-            const auto isLinear = output.hasAttribute(AttrId::Linear);
-            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), false, 0);
+            const auto isReturnedBuffer = output.hasAttribute(AttrId::ReturnedBuffer);
+            buffer = new ManagedDynamicBuffer(i + numOfInputStreams, b, output.getType(), isReturnedBuffer, 0);
         } else {
             buffer = new ExternalBuffer(i + numOfInputStreams, b, output.getType(), 0);
         }
@@ -1148,17 +1148,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
                                     "computed from a null base address.";
                 b.CreateAssert(baseAddress, out.str(), b.GetString(output.getName()));
             }
-            Value * produced = mInitiallyProducedOutputItems[i];
-            assert (isFromCurrentFunction(b, produced, false));
-            // TODO: will LLVM optimizations replace the following with the already loaded value?
-            // If not, re-loading it here may reduce register pressure / compilation time.
-            if (mProducedOutputItemPtr[i]) {
-                assert (isFromCurrentFunction(b, mProducedOutputItemPtr[i], false));
-                produced = b.CreateAlignedLoad(sizeTy, mProducedOutputItemPtr[i], sizeof(size_t));
-            }
-            assert (isFromCurrentFunction(b, produced, true));
-            Value * vba = buffer->getVirtualBasePtr(b, baseAddress, produced);
-            b.CallPrintInt("managedBuffer:vba", vba);
+            Value * vba = buffer->getVirtualBasePtr(b, baseAddress, mConsumedOutputItems[i]);
             vba = b.CreatePointerCast(vba, b.getVoidPtrTy());
 
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));
@@ -1545,7 +1535,9 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
                 END_SCOPED_REGION
                 break;
             case ScalarType::NonPersistent:
-                scalarType = binding.getValueType(); assert (scalarType);
+                scalarType = binding.getValueType();
+                assert (scalarType);
+                assert (&scalarType->getContext() == &b.getContext());
                 scalar = b.CreateAllocaAtEntryPoint(scalarType);
                 b.CreateStore(Constant::getNullValue(scalarType), scalar);
                 break;
@@ -1615,6 +1607,7 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
             assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
+            assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
             if (LLVM_UNLIKELY(isLocal.isManaged() && expectedNumOfStrides)) {
                 assert (isa<ManagedDynamicBuffer>(buffer));
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};

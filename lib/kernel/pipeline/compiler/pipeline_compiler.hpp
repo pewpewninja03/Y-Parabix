@@ -401,6 +401,10 @@ public:
     bool initializeOutputStreamSetBuffersBeforeSegmentInvocation(KernelBuilder & b) const;
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
+    void addLocalDynamicBufferStructs(KernelBuilder & b);
+    void assignLocalDynamicBufferStructs(KernelBuilder & b) const;
+    void resetLocalDynamicBufferStructs(KernelBuilder & b) const;
+    void updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId) const;
 
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 

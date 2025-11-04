@@ -679,6 +679,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
         }
 
         acquirePartitionSynchronizationLock(b, targetKernelId, nextSegNo);
+        updateLocalDynamicBufferStructsUntil(b, targetKernelId);
         phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, nextPartitionId, true);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
 
@@ -757,6 +758,7 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
 
     if (!mUsesNestedSynchronizationVariable || targetKernelId != PipelineOutput) {
         acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);
+        updateLocalDynamicBufferStructsUntil(b, targetKernelId);
         phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, jumpPartitionId, false);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
     } else {

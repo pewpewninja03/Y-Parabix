@@ -1698,14 +1698,15 @@ CallInst * CBuilder::CreateMemCmp(Value * Ptr1, Value * Ptr2, Value * Num) {
 }
 
 AllocaInst * CBuilder::CreateAllocaAtEntryPoint(Type * Ty, Value * ArraySize, const Twine Name) {
-
-    auto BB = GetInsertBlock();
-    auto F = BB->getParent();
+    assert (Ty && "no type given to allocate?");
+    auto BB = GetInsertBlock(); assert (BB);
+    auto F = BB->getParent(); assert (F);
     auto entryBlock = F->begin();
     if (LLVM_UNLIKELY(entryBlock == F->end())) {
         report_fatal_error("CreateAllocaAtEntryPoint cannot create a value in an empty function");
     }
-    const auto & DL = F->getParent()->getDataLayout();
+    auto m = F->getParent(); assert (m);
+    const auto & DL = m->getDataLayout();
     const auto addrSize = DL.getAllocaAddrSpace();
     auto const first = entryBlock->getFirstNonPHIOrDbgOrLifetime();
     AllocaInst * alloca = nullptr;

@@ -97,6 +97,8 @@ public:
 
         P.setStreamSetLockIds();
 
+        P.identifyManagedBufferStructIds();
+
         P.gatherInfo();
 
         if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
@@ -198,6 +200,8 @@ private:
     void addFlowControlAnnotations();
 
     void setStreamSetLockIds();
+
+    void identifyManagedBufferStructIds();
 
     // thread local analysis
 

@@ -122,7 +122,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     }
 
     assert (numOfLinearStrides);
-
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
@@ -1068,7 +1067,6 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                                                 Value *& finalStrideRemainder) {
 
     Value * principalFixedRateFactor = nullptr;
-
     for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
         assert (port.Port.Type == PortType::Input);

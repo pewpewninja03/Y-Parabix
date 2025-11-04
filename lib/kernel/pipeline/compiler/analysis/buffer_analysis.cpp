@@ -1069,4 +1069,13 @@ void PipelineAnalysis::setStreamSetLockIds() {
     }
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief identifyManagedBufferStructIds
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::identifyManagedBufferStructIds() {
+
+
+
+}
+
 }

@@ -142,7 +142,7 @@ void PipelineAnalysis::makeConsumerGraph() {
         }
     }
 
-#if 1
+#if 0
     BEGIN_SCOPED_REGION
     auto & out = errs();
     out << "digraph \"ConsumerGraph\" {\n";

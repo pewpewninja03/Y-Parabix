@@ -105,6 +105,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
     }
     addZeroInputStructProperties(b);
+    addLocalDynamicBufferStructs(b);
 
     const auto first = FirstKernelInPartition[FirstComputePartitionId];
     const auto last = FirstKernelInPartition[LastComputePartitionId + 1];

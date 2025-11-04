@@ -156,7 +156,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     checkPropagatedTerminationSignals(b);
     determineNumOfLinearStrides(b);
     mIsFinalInvocation = mIsFinalInvocationPhi;
-
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
     if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
