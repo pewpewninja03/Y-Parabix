@@ -210,15 +210,32 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
             return compile(defn, marker);
         }
     }
-    auto externalMarker = f->second.marker();
-    if (marker.stream() == mMain.mIndexStream) {
-        return externalMarker;
+    auto ext = f->second;
+    auto externalLength = ext.minLength();
+    auto extMarker = ext.marker();
+    if (ext.fromFirst() && (externalLength == ext.maxLength())) {
+        // We have an external marker whose offset is from the
+        // start of the external matched string; adjust to final position.
+        auto adv = externalLength - 1 - extMarker.offset() + marker.offset();
+        PabloAST * extFinal = extMarker.stream();
+        if (adv > 0) {
+            extFinal = mPB.createIndexedAdvance(extFinal, mMain.mIndexStream, adv);
+        }
+        return Marker(mPB.createAnd(extFinal, marker.stream(), nameString), marker.offset());
     }
-    auto externalLength = f->second.minLength();
-    if (externalLength != f->second.maxLength()) {
+    if (marker.stream() == mMain.mIndexStream) {
+        // We are at the beginning of a regular expression;
+        // the external marker should become the new marker,
+        // if it is at a matchable position.
+        if (extMarker.offset() > 0) {
+            return extMarker;
+        }
+        return Marker(mPB.createAnd(mMain.mMatchable, extMarker.stream()), extMarker.offset());
+    }
+    if (externalLength != ext.maxLength()) {
         llvm::report_fatal_error(llvm::StringRef("Variable length external not in initial position:  ")  + nameString);
     }
-    auto external_adv = externalLength + externalMarker.offset();
+    auto external_adv = externalLength + extMarker.offset();
     if (external_adv < marker.offset()) {
         llvm::report_fatal_error(llvm::StringRef("Negative advance amount in processing ")  + nameString);
     }
@@ -227,8 +244,11 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (adv > 0) {
         nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, adv);
     }
-    //mPB.createIntrinsicCall(pablo::Intrinsic::PrintRegister, {nextPos});
-    return Marker(mPB.createAnd(nextPos, externalMarker.stream(), nameString), externalMarker.offset());
+    PabloAST * extStream = extMarker.stream();
+    if (extMarker.offset() == 0) {
+        extStream = mPB.createAnd(mMain.mMatchable, extStream);
+    }
+    return Marker(mPB.createAnd(nextPos, extStream, nameString), extMarker.offset());
 }
 
 Marker RE_Block_Compiler::compileSeq(Seq * const seq, Marker marker) {
@@ -311,6 +331,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
     }
     // Lookahead assertions.
     auto lengths = lengthRange(asserted);
+    // Zero-width assertions
     if (lengths.second == 0) {
         Marker lookahead = compile(asserted);
         AlignMarkers(marker, lookahead);
@@ -324,6 +345,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
     if (LLVM_LIKELY((lengths.second == 1) && (lookahead.offset() == 0))) {
         Marker lookahead = compile(asserted);
         PabloAST * la = lookahead.stream();
+        //PabloAST * la = mPB.createAnd(lookahead.stream(), mMain.mMatchable);
         if (a->getSense() == Assertion::Sense::Negative) {
             la = mPB.createNot(la);
             if (mMain.mIndexStream) {
@@ -332,6 +354,41 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         }
         Marker following = AdvanceMarker(marker, 1);
         return Marker(mPB.createAnd(following.stream(), la, "lookahead"), 1);
+    }
+    // If the lookahead expression is an externally defined Name, we
+    // may be able to use lookahead operations.
+    if (Name * n = dyn_cast<Name>(asserted)) {
+        const auto & nameString = n->getFullName();
+        auto f = mMain.mExternalNameMap.find(nameString);
+        if (f != mMain.mExternalNameMap.end()) {
+            auto ext = f->second;
+            auto extMarker = ext.marker();
+            auto extStream = extMarker.stream();
+            if (ext.fromFirst()) {
+                // We have an external marker whose offset is from the
+                // start of the external matched string, enabling lookahead.
+                if ((marker.offset() == 1) && (extMarker.offset() == 0)) {
+                    // The current marker is already aligned with the
+                    // external marker.
+                    return Marker(mPB.createAnd(marker.stream(), extStream), marker.offset());
+                }
+                auto ahead = extMarker.offset() - marker.offset() + 1;
+                PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
+                return Marker(mPB.createAnd(marker.stream(), extLookahead), marker.offset());
+            } else {
+                auto extLength = ext.minLength();
+                if (extLength == ext.maxLength()) {
+                    if ((extLength == 1) && (marker.offset() == 1) && (extMarker.offset() == 0)) {
+                        // The current marker is already aligned with the
+                        // external marker.
+                        return Marker(mPB.createAnd(marker.stream(), extStream), marker.offset());
+                    }
+                    auto ahead = extMarker.offset() - marker.offset() + extLength;
+                    PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
+                    return Marker(mPB.createAnd(marker.stream(), extLookahead), marker.offset());
+                }
+            }
+        }
     }
     llvm::errs() << "lengths.second = " << lengths.second << "\n";
     UnsupportedRE("Unsupported lookahead assertion:" + Printer_RE::PrintRE(a));
@@ -769,6 +826,7 @@ void RE_Compiler::setIndexing(const cc::Alphabet * indexingAlphabet, PabloAST * 
 }
     
 void RE_Compiler::addPrecompiled(std::string precompiledName, ExternalStream precompiled) {
+    /*
     PabloBuilder pb(mEntryScope);
     auto rg = precompiled.lengthRange();
     auto strm = precompiled.marker().stream();
@@ -777,8 +835,10 @@ void RE_Compiler::addPrecompiled(std::string precompiledName, ExternalStream pre
         mExternalNameMap.emplace(precompiledName, precompiled);
     } else {
         Marker a = Marker(pb.createAnd(strm, mMatchable), offs);
-        mExternalNameMap.emplace(precompiledName, ExternalStream(a, rg));
+        mExternalNameMap.emplace(precompiledName, ExternalStream(a, rg, precompiled.fromFirst()));
     }
+     */
+    mExternalNameMap.emplace(precompiledName, precompiled);
 }
 
 Marker RE_Compiler::compileRE(RE * const re) {

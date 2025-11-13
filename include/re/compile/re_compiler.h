@@ -98,19 +98,24 @@ class RE_Compiler {
     // normally zero, indicating that the marker is placed on the last
     // matched character of the named object.   An offset of 1 is used
     // when the length is zero or potentially zero (e.g., zero-width assertions).
+    // When the from_first parameter is true, offsets are counted from
+    // the first matched character; these are intended for externals
+    // used for lookahead assertions.
     //
     class ExternalStream {
     public:
-        ExternalStream(Marker m, std::pair<int, int> lgthRange) :
-            mMarker(m), mLengthRange(lgthRange) {}
+        ExternalStream(Marker m, std::pair<int, int> lgthRange, bool from_first = false) :
+            mMarker(m), mLengthRange(lgthRange), mFromFirst(from_first) {}
         ExternalStream & operator = (const ExternalStream &) = default;
         std::pair<int, int> lengthRange() {return mLengthRange;}
         unsigned minLength() {return mLengthRange.first;}
         unsigned maxLength() {return mLengthRange.second;}
+        bool fromFirst() {return mFromFirst;}
         Marker & marker() {return mMarker;}
     private:
         Marker mMarker;
         std::pair<int, int> mLengthRange;
+        bool mFromFirst;
     };
 
     void addPrecompiled(std::string externalName, ExternalStream s);
