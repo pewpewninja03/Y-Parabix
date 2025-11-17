@@ -67,7 +67,7 @@ void PipelineCompiler::readConsumedItemCounts(KernelBuilder & b) {
         const auto streamSet = target(e, mConsumerGraph);
         assert (mInitialConsumedItemCount[streamSet] == nullptr);
         Value * consumed = readConsumedItemCount(b, streamSet);
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             Value * valid = b.CreateICmpULE(consumed, produced);
             if (mInitiallyTerminated) {
@@ -282,7 +282,7 @@ void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t stre
     Value * const skipped = b.CreateIsNull(consumed);
     consumed = b.CreateSelect(skipped, prior, consumed);
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & output = outputPort.Binding;
         // TODO: cross reference which slot the traced count is for?
 

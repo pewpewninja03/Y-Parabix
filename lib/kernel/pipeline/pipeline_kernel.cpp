@@ -889,7 +889,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
     }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableCycleCounter))) {
             out << "+CYC";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {

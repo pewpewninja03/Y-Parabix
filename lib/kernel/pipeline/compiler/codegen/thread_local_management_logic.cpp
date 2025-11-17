@@ -231,14 +231,14 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
         b.CreateBr(rebuildOffsets);
 
         b.SetInsertPoint(afterExpansion);
-    } else if (LLVM_UNLIKELY(CheckAssertions)) {
+    } else if (LLVM_UNLIKELY(CheckAssertions())) {
         Value * currentMem = b.CreateAlignedLoad(b.getSizeTy(), mThreadLocalMemorySizePtr, SizeTyABIAlignment);
         Value * const noExpansion = b.CreateICmpULE(memoryForSegment, currentMem);
         b.CreateAssert(noExpansion, "%s requires more thread-local memory (%" PRIu64 ") than maximum (%" PRIu64 ")?",
                        mCurrentKernelName, memoryForSegment, currentMem);
     }
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         for (auto e : make_iterator_range(edges(ThreadLocalConflictGraph))) {
             const auto x = source(e, ThreadLocalConflictGraph) + FirstStreamSet;
             assert (FirstStreamSet <= x && x <= LastStreamSet);

@@ -98,7 +98,6 @@ const static std::string ITEM_COUNT_SUFFIX = ".IN";
 const static std::string STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX = ".SIN";
 const static std::string INTERNALLY_SYNCHRONIZED_INTERNAL_ITEM_COUNT_SUFFIX = ".ISIN";
 const static std::string DEFERRED_ITEM_COUNT_SUFFIX = ".DC";
-const static std::string AVAILABLE_ITEM_COUNT_PREFIX = "@AC";
 const static std::string CONSUMED_ITEM_COUNT_PREFIX = "@CON";
 const static std::string TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX = "@TCN";
 
@@ -107,8 +106,7 @@ const static std::string REPEATING_STREAMSET_LENGTH_PREFIX = "@RSSL.";
 const static std::string REPEATING_STREAMSET_MALLOCED_DATA_PREFIX = "@RSSD.";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
-const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
-const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "T" + STATISTICS_CYCLE_COUNT_SUFFIX;
+const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "!SCT";
 
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
@@ -432,7 +430,7 @@ public:
 
 // cycle counter functions
 
-    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot);
+    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot, const unsigned groupId);
     void startCycleCounter(KernelBuilder & b, const CycleCounter type);
     void startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types);
     void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type);
@@ -611,11 +609,19 @@ public:
 
     void getABIAlignments(KernelBuilder & b);
 
+    bool CheckAssertions() const {
+        #ifdef FORCE_PIPELINE_ASSERTIONS
+        return true;
+        #else
+        return mCheckAssertions;
+        #endif
+    }
+
 protected:
 
     CompilerAllocator                           mAllocator;
 
-    const bool                                  CheckAssertions;
+    const bool                                  mCheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
     const bool                                  mTraceDynamicBuffers;
     const bool                                  mTraceIndividualConsumedItemCounts;
@@ -938,11 +944,7 @@ inline PipelineCompiler::PipelineCompiler(KernelBuilder & b, PipelineKernel * co
 inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P)
 : KernelCompiler(pipelineKernel)
 , PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
-#ifdef FORCE_PIPELINE_ASSERTIONS
-, CheckAssertions(true)
-#else
-, CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts) || codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))
-#endif
+, mCheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts) || codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(P.mTraceDynamicBuffers)
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)

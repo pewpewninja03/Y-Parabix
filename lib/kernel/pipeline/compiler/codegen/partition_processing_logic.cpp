@@ -403,13 +403,15 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
                     port = br.Port;
                 }
                 const auto prefix = makeBufferName(kernel, port);
+                Type * ty = nullptr;
                 Value * ptr = nullptr;
                 if (LLVM_UNLIKELY(br.isDeferred() && !fromKernelEntryBlock)) {
-                    ptr = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX).first;
+                    std::tie(ptr, ty) = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 } else {
-                    ptr = b.getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
+                    std::tie(ptr, ty) = b.getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX);
                 }
-                produced = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
+                assert (ty == b.getSizeTy());
+                produced = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment, true);
                 if (br.isRelative()) {
                     produced = b.CreateMulRational(produced, br.getRate().getRate());
                 }

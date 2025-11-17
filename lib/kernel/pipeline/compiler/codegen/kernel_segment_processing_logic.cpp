@@ -315,7 +315,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
     }
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         verifyPostInvocationTerminationSignal(b);
     }
     assert ("segment number should not have been modified prior to kernel exit" && initialSegNum == mSegNo);
@@ -664,7 +664,7 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
 
     b.SetInsertPoint(mKernelInsufficientInput);
 
-    if (LLVM_UNLIKELY(CheckAssertions && mAllowDataParallelExecution)) {
+    if (LLVM_UNLIKELY(CheckAssertions() && mAllowDataParallelExecution)) {
         b.CreateAssert(b.CreateNot(mExecutedAtLeastOnceAtLoopEntryPhi),
                         "%s: is a data-parallel kernel with an invalid loop again check",
                         mCurrentKernelName);

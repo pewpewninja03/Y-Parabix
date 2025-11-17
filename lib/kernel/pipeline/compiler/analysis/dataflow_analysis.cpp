@@ -369,6 +369,7 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     const auto cfg = Z3_mk_config();
     Z3_set_param_value(cfg, "model", "true");
     Z3_set_param_value(cfg, "proof", "false");
+//    Z3_set_param_value(cfg, "timeout", "2000");
     const auto ctx = Z3_mk_context(cfg);
     Z3_del_config(cfg);
     const auto solver = Z3_mk_optimize(ctx);
@@ -435,10 +436,12 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     }
     VarList[PipelineOutput] = z3_ONE;
 
+    SmallVector<Z3_ast, 2> fakeIOVars;
+
+
     if (out_degree(PipelineInput, mBufferGraph) == 0) {
         Z3_ast args[2];
         args[0] = VarList[PipelineInput];
-        SmallVector<Z3_ast, 2> fakeIOVars;
 
         for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
             if (in_degree(i, mBufferGraph) == 0) {
@@ -451,29 +454,10 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
             }
         }
 
-        const auto m = fakeIOVars.size(); assert (m > 0);
-
-        SmallVector<Z3_ast, 2> fakeIOConstraint(m);
-        for (unsigned i = 0; i < m; ++i) {
-            fakeIOConstraint[i] = Z3_mk_eq(ctx, fakeIOVars[i], z3_ONE);
-        }
-
-        Z3_ast sum;
-        Z3_ast constraint;
-        if (m == 1) {
-            sum = fakeIOVars[0];
-            constraint = fakeIOConstraint[0];
-        } else {
-            sum = Z3_mk_add(ctx, m, fakeIOVars.data());
-            constraint = Z3_mk_or(ctx, m, fakeIOConstraint.data());
-        }
-        Z3_optimize_minimize(ctx, solver, sum);
-        hard_assert(constraint);
-
-
     } else { // we cannot predict how much data will be passed to a pipeline
         for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
             Z3_ast expOutRate = Z3_mk_fresh_const(ctx, nullptr, varType);
+            fakeIOVars.push_back(expOutRate);
             hard_assert(Z3_mk_gt(ctx, expOutRate, z3_ZERO));
             const auto streamSet = target(input, mBufferGraph);
             VarList[streamSet] = expOutRate;
@@ -483,6 +467,21 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
         assert (KernelPartitionId[PipelineInput] == 0);
         T[0].set(0);
     }
+
+    const auto m = fakeIOVars.size(); assert (m > 0);
+
+    SmallVector<Z3_ast, 2> fakeIOConstraint(m);
+    for (unsigned i = 0; i < m; ++i) {
+        fakeIOConstraint[i] = Z3_mk_eq(ctx, fakeIOVars[i], z3_ONE);
+    }
+
+    Z3_ast constraint;
+    if (m == 1) {
+        constraint = fakeIOConstraint[0];
+    } else {
+        constraint = Z3_mk_or(ctx, m, fakeIOConstraint.data());
+    }
+    hard_assert(constraint);
 
     for (auto kernel = FirstKernel; kernel <= PipelineOutput; ++kernel) {
 

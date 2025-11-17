@@ -283,6 +283,8 @@ public:
 
     static uintptr_t LLVM_READNONE getTypeSize(const llvm::DataLayout & DL, llvm::Type * type);
 
+    static uintptr_t LLVM_READNONE getAlignOf(const llvm::DataLayout & DL, llvm::Type * type);
+
     inline unsigned getCacheAlignment() const {
         return mCacheLineAlignment;
     }

@@ -117,7 +117,7 @@ void PipelineCompiler::acquireSynchronizationLock(KernelBuilder & b, const unsig
 
         b.SetInsertPoint(acquire);
         Value * const currentSegNo = b.CreateAtomicLoadAcquire(b.getSizeTy(), waitingOnPtr);
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             Value * const pendingOrReady = b.CreateICmpULE(currentSegNo, segNo);
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
@@ -169,7 +169,7 @@ void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsig
     if (isMultithreaded() || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         Value * const nextSegNo = b.CreateAdd(segNo, b.getSize(1));
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             DataLayout DL(b.getModule());
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
             llvm::MaybeAlign align = Align(DL.getTypeStoreSize(nextSegNo->getType()));
@@ -260,7 +260,7 @@ Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b) {
     debugPrint(b, prefix + ": obtained %" PRIu64 "-th next segment number %" PRIu64,
                b.getSize(mKernelId), nextSegNo);
     #endif
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         SmallVector<char, 256> tmp;
         raw_svector_ostream out(tmp);
         out << "%s: nested-segment number is %" PRIu64

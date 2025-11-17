@@ -57,14 +57,14 @@ void PipelineCompiler::bindFamilyInitializationArguments(KernelBuilder & b, ArgI
             if ((D.CaptureFlags & flags) == flags) {
                 v = &*arg;
                 assert (v->getType() == b.getVoidPtrTy());
-                if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (LLVM_UNLIKELY(CheckAssertions())) {
                     // TODO: make these assertions more informative
                     b.CreateAssert(v, "invalid family param %" PRIu64, b.getSize(arg->getArgNo()));
                 }
             } else {
                 v = &*arg;
                 assert (v->getType() == b.getVoidPtrTy());
-                if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (LLVM_UNLIKELY(CheckAssertions())) {
                     b.CreateAssertZero(v, "invalid non-zero family param %" PRIu64, b.getSize(arg->getArgNo()));
                 }
                 v = voidPtr;
@@ -97,7 +97,7 @@ void PipelineCompiler::bindFamilyInitializationArguments(KernelBuilder & b, ArgI
 
             auto storeNextScalar = [&](const StringRef name, Value * value) {
                 auto ptr = getScalarFieldPtr(b, name);
-                if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (LLVM_UNLIKELY(CheckAssertions())) {
                     b.CreateAssert(value, "family parameter (%s) was given a null value", b.GetString(name));
                 }
                 const auto align = b.getModule()->getDataLayout().getABITypeAlign(ptr.second).value();
@@ -278,7 +278,7 @@ Value * PipelineCompiler::getFamilyFunctionFromKernelState(KernelBuilder & b, Ty
     const auto prefix = makeKernelName(mKernelId);
     Value * const funcPtr = b.getScalarField(prefix + suffix);
     assert (funcPtr->getType() == b.getVoidPtrTy());
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         b.CreateAssert(funcPtr, prefix + suffix + " is null");
     }
     return b.CreatePointerCast(funcPtr, type);

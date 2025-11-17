@@ -291,7 +291,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
             FunctionType * const funcTy = FunctionType::get(int8PtrTy, params, false);
             maskInput = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
-            if (LLVM_UNLIKELY(CheckAssertions)) {
+            if (LLVM_UNLIKELY(CheckAssertions())) {
                 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
                 maskInput->setHasUWTable();
                 #else

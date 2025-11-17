@@ -232,6 +232,8 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     debugPrint(b, "* " + prefix + "_executing = %" PRIu64, mNumOfLinearStrides);
     #endif
 
+
+
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
         startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
@@ -253,6 +255,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     } else {
         doSegmentRetVal = b.CreateCall(doSegFuncType, doSegment, args);
     }
+
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
     }
@@ -512,7 +515,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 addNextArg(inputItems);
             }
 
-            if (LLVM_UNLIKELY(CheckAssertions && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
+            if (LLVM_UNLIKELY(CheckAssertions() && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
                 const Binding & input = rt.Binding;
                 const auto streamSet = source(port, mBufferGraph);
                 Value * required = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mLinearInputItemsPhi[inputPort]);
@@ -710,7 +713,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
                 const auto prefix = makeBufferName(mKernelId, inputPort);
                 debugPrint(b, prefix + "_processed_deferred' = %" PRIu64, mProcessedDeferredItemCount[inputPort]);
                 #endif
-                if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (LLVM_UNLIKELY(CheckAssertions())) {
                     Value * const deferred = mProcessedDeferredItemCount[inputPort];
                     Value * const isDeferred = b.CreateICmpULE(deferred, processed);
                     Value * const isFinal = mIsFinalInvocationPhi;
@@ -761,7 +764,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
                 const auto prefix = makeBufferName(mKernelId, outputPort);
                 debugPrint(b, prefix + "_produced_deferred' = %" PRIu64, mProducedDeferredItemCount[outputPort]);
                 #endif
-                if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (LLVM_UNLIKELY(CheckAssertions())) {
                     Value * const deferred = mProducedDeferredItemCount[outputPort];
                     Value * const isDeferred = b.CreateICmpULE(deferred, produced);
                     Value * const isFinal = mIsFinalInvocationPhi;
@@ -814,7 +817,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
         debugPrint(b, prefix + "_produced' = %" PRIu64, produced);
         #endif
 
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             if (mReturnedProducedItemCountPtr[outputPort]) {
                 const auto port = getOutput(mKernelId, outputPort);
                 const auto streamSet = target(port, mBufferGraph);

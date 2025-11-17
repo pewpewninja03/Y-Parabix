@@ -135,7 +135,7 @@ Rational PipelineCompiler::getReturnedBufferScaleFactor(const size_t streamSet) 
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const allocScale, Value * const expectedSourceOutputSize, const bool nonLocal) {
     assert (allocScale);
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         Value * const valid = b.CreateIsNotNull(allocScale);
         b.CreateAssert(valid,
            "%s: expected number of strides for internally allocated buffers is 0",
@@ -333,7 +333,6 @@ void PipelineCompiler::addLocalDynamicBufferStructs(KernelBuilder & b) {
     Type * mgbTy = nullptr;
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        mTarget->addNonPersistentScalar(b.getSizeTy(), AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
         if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
             continue;
         }
@@ -580,9 +579,9 @@ void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
 Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t streamSet) {
     const BufferNode & bn = mBufferGraph[streamSet];
 //    auto id = streamSet;
-//    if (LLVM_UNLIKELY(bn.isTruncated())) {
-//        return readAvailableItemCount(b, getTruncatedStreamSetSourceId(streamSet));
-//    }
+    if (LLVM_UNLIKELY(bn.isTruncated())) {
+        return readAvailableItemCount(b, getTruncatedStreamSetSourceId(streamSet));
+    }
     Value * produced = nullptr;
     if (LLVM_UNLIKELY(bn.isConstant())) {
         produced = ConstantInt::getAllOnesValue(b.getSizeTy());
@@ -597,8 +596,7 @@ Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t
             produced = getAvailableInputItems(outputPort.Port.Number);
             writeTransitoryConsumedItemCount(b, streamSet, produced);
         } else {
-            produced = b.getScalarField(AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
-
+            produced = mLocallyAvailableItems[streamSet];
 
 //            const auto prefix = makeBufferName(producer, outputPort.Port);
 //            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
@@ -820,12 +818,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(KernelBuilder & b) {
         debugPrint(b, out.str(), fullyProduced);
         #endif
 
-
-
         const auto streamSet = target(e, mBufferGraph);
-        auto availRef = b.getScalarFieldPtr(AVAILABLE_ITEM_COUNT_PREFIX + std::to_string(streamSet));
-        b.CreateAlignedStore(fullyProduced, availRef.first, SizeTyABIAlignment);
-
         mLocallyAvailableItems[streamSet] = fullyProduced;
 
         writeTransitoryConsumedItemCount(b, streamSet, fullyProduced);
@@ -898,7 +891,7 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBu
             cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
         }
         buffer->setBaseAddress(b, vba);
-//        if (CheckAssertions) {
+//        if (CheckAssertions()) {
 //            b.CreateAssert(vba, "%s.%s last good virtual base addresss cannot be null",
 //                            mCurrentKernelName, b.GetString(rd.Binding.get().getName()));
 //        }
