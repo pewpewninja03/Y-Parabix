@@ -7,19 +7,10 @@
 
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/ErrorHandling.h>
-#include <re/adt/adt.h>
-#include <re/transforms/re_transformer.h>
 
 using namespace llvm;
 
 namespace re {
-
-class LookAheadNamer final : public RE_Transformer {
-public:
-    LookAheadNamer() : RE_Transformer("LookAheadNamer") {}
-    RE * transformAssertion (Assertion * a) override;
-private:
-};
 
 RE * LookAheadNamer::transformAssertion (Assertion * a) {
     RE * x0 = a->getAsserted();

@@ -220,7 +220,8 @@ void source_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * Basis
 }
 
 
-void focus_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis) {
+void focus_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * BasisBits, 
+    StreamSet * WorkSelectionMask, StreamSet * FocusedWorkBasis, StreamSet * NonModifiedBytes) {
 
     DetermineNFC_WorkSpans(P, BasisBits, WorkSelectionMask);
 
@@ -229,9 +230,15 @@ void focus_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * 
     } else {
         FilterByMask(P, WorkSelectionMask, BasisBits, FocusedWorkBasis);
     }
+
+    StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
+    Invert(P, WorkSelectionMask, NonModifiedMask);
+    SHOW_STREAM(NonModifiedMask);
+
+    FilterByMask(P, NonModifiedMask, ByteStream, NonModifiedBytes);
 }
 
-typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, const char * buffer, const size_t length);
+typedef void (*FocusStageFunctionType)(StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, StreamSetPtr &, const char * buffer, const size_t length);
 
 FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
     const unsigned selected_work_elems = ByteFiltering ? 1 : 8;
@@ -241,6 +248,7 @@ FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
                             Output<streamset_t>("ByteStream", 1, 8, ReturnedBuffer(1)),
                             Output<streamset_t>("WorkSelectionMask", 1, 1, ReturnedBuffer(1)),
                             Output<streamset_t>("FocusedWorkBasis", selected_work_elems, selected_work_width, ReturnedBuffer(1)),
+                            Output<streamset_t>("NonModifiedBytes", 1, 8, ReturnedBuffer(1)),
                             Input<const char*>{"buffer"}, Input<size_t>{"length"}
                             );
 
@@ -250,7 +258,8 @@ FocusStageFunctionType focus_stage_pipeline(CPUDriver & driver) {
 
     StreamSet * const WorkSelectionMask = P.getOutputStreamSet("WorkSelectionMask");
     StreamSet * const FocusedWorkBasis = P.getOutputStreamSet("FocusedWorkBasis");
-    focus_stage_logic(P, ByteStream, BasisBits, WorkSelectionMask, FocusedWorkBasis);
+    StreamSet * const NonModifiedBytes = P.getOutputStreamSet("NonModifiedBytes");
+    focus_stage_logic(P, ByteStream, BasisBits, WorkSelectionMask, FocusedWorkBasis, NonModifiedBytes);
     return P.compile();
 }
 
@@ -311,7 +320,9 @@ NFCFunctionType NFC_pipeline(CPUDriver & driver) {
     return P.compile();
 }
 
-void final_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * ValidWorkMask, StreamSet * TransformedBytes) {
+void final_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * BasisBits, 
+    StreamSet * WorkSelectionMask, StreamSet * ValidWorkMask, StreamSet * NonModifiedBytes,
+    StreamSet * TransformedBytes) {
 
     if (BasisBits == nullptr) {
         BasisBits = P.CreateStreamSet(8, 1);
@@ -337,20 +348,13 @@ void final_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * 
     StreamSet * const FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
     FilterByMask(P, FinalWorkSelectionMask, ExpandedWorkMask, FinalWorkPlacementMask);
 
-    StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
-    Invert(P, WorkSelectionMask, NonModifiedMask);
-    SHOW_STREAM(NonModifiedMask);
-
-    StreamSet * const NonModifiedBytes = P.CreateStreamSet(1, 8);
-    FilterByMask(P, NonModifiedMask, ByteStream, NonModifiedBytes);
-
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
     MergeByMask(P, FinalWorkPlacementMask, TransformedBytes, NonModifiedBytes, OutputBytes);
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 }
 
 
-typedef void (*FinalStageFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
+typedef void (*FinalStageFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &);
 //typedef void (*FinalStageFunctionType)(const StreamSetPtr &, const StreamSetPtr &, const StreamSetPtr &, const char * buffer, const size_t length);
 
 FinalStageFunctionType final_stage_pipeline(CPUDriver & driver) {
@@ -358,6 +362,7 @@ FinalStageFunctionType final_stage_pipeline(CPUDriver & driver) {
                             Input<streamset_t>("ByteStream", 1, 8),
                             Input<streamset_t>("WorkSelectionMask", 1, 1),
                             Input<streamset_t>("ValidWorkMask", 1, 1),
+                            Input<streamset_t>("NonModifiedBytes", 1, 8),
                             Input<streamset_t>("TransformedBytes", 1, 8)
                             //Input<const char*>{"buffer"}, Input<size_t>{"length"}
                             );
@@ -366,8 +371,9 @@ FinalStageFunctionType final_stage_pipeline(CPUDriver & driver) {
     StreamSet * const ByteStream = P.getInputStreamSet("ByteStream");
     StreamSet * const WorkSelectionMask = P.getInputStreamSet("WorkSelectionMask");
     StreamSet * const ValidWorkMask = P.getInputStreamSet("ValidWorkMask");
+    StreamSet * const NonModifiedBytes = P.getInputStreamSet("NonModifiedBytes");
     StreamSet * const TransformedBytes = P.getInputStreamSet("TransformedBytes");
-    final_stage_logic(P, ByteStream, nullptr, WorkSelectionMask, ValidWorkMask, TransformedBytes);
+    final_stage_logic(P, ByteStream, nullptr, WorkSelectionMask, ValidWorkMask, NonModifiedBytes, TransformedBytes);
     return P.compile();
 }
 
@@ -383,10 +389,10 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     source_logic(P, ByteStream, BasisBits);
 
-    StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
-    DetermineNFC_WorkSpans(P, BasisBits, WorkSelectionMask);
-
     if (NoFocus) {
+        StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+        DetermineNFC_WorkSpans(P, BasisBits, WorkSelectionMask);
+
         StreamSet * WorkingInsertionBixNum = P.CreateStreamSet(4, 1);
         P.CreateKernelCall<NFC_Initial_Insertion>(BasisBits, WorkingInsertionBixNum, WorkSelectionMask);
         SHOW_BIXNUM(WorkingInsertionBixNum);
@@ -404,14 +410,15 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         P.CreateKernelCall<StdOutKernel>(OutputBytes);
 
     } else {
+        StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
+        StreamSet * NonModifiedBytes = P.CreateStreamSet(1, 8);
         StreamSet * SelectedWorkBasis = nullptr;
         if (ByteFiltering) {
             SelectedWorkBasis = P.CreateStreamSet(1, 8);
-            FilterByMask(P, WorkSelectionMask, ByteStream, SelectedWorkBasis);
         } else {
             SelectedWorkBasis = P.CreateStreamSet(8, 1);
-            FilterByMask(P, WorkSelectionMask, BasisBits, SelectedWorkBasis);
         }
+        focus_stage_logic(P, ByteStream, BasisBits, WorkSelectionMask, SelectedWorkBasis, NonModifiedBytes);
 
         StreamSet * WorkingExpansionMask = P.CreateStreamSet(1, 1);
         StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
@@ -422,7 +429,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
         NFC_U8_logic(P, WorkingExpansionMask, WorkingBasis, ValidWorkMask, TransformedBytes);
         SHOW_STREAM(ValidWorkMask);
 
-        final_stage_logic(P, ByteStream, BasisBits, WorkSelectionMask, ValidWorkMask, TransformedBytes);
+        final_stage_logic(P, ByteStream, BasisBits, WorkSelectionMask, ValidWorkMask, NonModifiedBytes, TransformedBytes);
     }
 
     return P.compile();
@@ -452,14 +459,15 @@ int main(int argc, char *argv[]) {
         kernel::StreamSetPtr ByteStream;
         kernel::StreamSetPtr WorkSelectionMask;
         kernel::StreamSetPtr SelectedWorkBasis;
+        kernel::StreamSetPtr NonModifiedBytes;
         kernel::StreamSetPtr WorkingExpansionMask;
         kernel::StreamSetPtr WorkingBasis;
         kernel::StreamSetPtr ValidWork;
         kernel::StreamSetPtr TransformedBytes;
-        focus_stage(ByteStream, WorkSelectionMask, SelectedWorkBasis, buf.getBuf(), buf.getBufSize());
+        focus_stage(ByteStream, WorkSelectionMask, SelectedWorkBasis, NonModifiedBytes, buf.getBuf(), buf.getBufSize());
         working_space_stage(SelectedWorkBasis, WorkingExpansionMask, WorkingBasis);
         NFC_stage(WorkingExpansionMask, WorkingBasis, ValidWork, TransformedBytes);
-        final_stage(ByteStream, WorkSelectionMask, ValidWork, TransformedBytes);
+        final_stage(ByteStream, WorkSelectionMask, ValidWork, NonModifiedBytes, TransformedBytes);
     } else {
         XfrmFunctionType fn;
         fn = generate_pipeline(driver);
