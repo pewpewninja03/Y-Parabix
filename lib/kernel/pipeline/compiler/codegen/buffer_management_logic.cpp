@@ -330,13 +330,16 @@ void PipelineCompiler::updateExternalProducedItemCounts(KernelBuilder & b) {
  * @brief addLocalDynamicBufferStructs
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addLocalDynamicBufferStructs(KernelBuilder & b) {
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
     Type * mgbTy = nullptr;
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
             continue;
         }
-        StreamSetBuffer * const buffer = bn.Buffer;
+        StreamSetBuffer * const buffer = bn.Buffer; assert (buffer);
         if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
             if (mgbTy == nullptr) {
                 mgbTy = cast<ManagedDynamicBuffer>(buffer)->getLocalHandleType(b);

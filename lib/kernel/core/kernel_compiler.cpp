@@ -1872,19 +1872,18 @@ KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(KernelBui
     StructType * const threadLocalTy = mTarget->getThreadLocalStateType(); assert (threadLocalTy);
 
     const auto f = threadLocalGroups.find(groupIndex);
-    const auto groupPos = std::distance(threadLocalGroups.begin(), f);
+    const auto groupPos = std::distance(threadLocalGroups.begin(), f) * 2U;
 
     assert (groupPos < threadLocalTy->getStructNumElements());
-    assert ((scalarIndex * 2) < threadLocalTy->getStructElementType(groupPos)->getStructNumElements());
-
+    assert (scalarIndex < threadLocalTy->getStructElementType(groupPos)->getStructNumElements());
 
     FixedArray<Value *, 3> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(groupPos);
-    indices[2] = b.getInt32(scalarIndex * 2);
+    indices[2] = b.getInt32(scalarIndex);
 
     Value * ptr = b.CreateGEP(threadLocalTy, handle, indices); assert (ptr);
-    Type * ty = threadLocalTy->getStructElementType(groupPos)->getStructElementType(scalarIndex * 2);
+    Type * ty = threadLocalTy->getStructElementType(groupPos)->getStructElementType(scalarIndex);
     return ScalarRef{ptr, ty};
 
 }

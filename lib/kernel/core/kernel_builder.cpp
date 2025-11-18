@@ -295,7 +295,7 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
         Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
     }
-    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     size_t blockAlign = 1;
     if (LLVM_LIKELY(!unaligned)) {
         blockAlign = DL.getABITypeAlign(blockTy).value();
@@ -330,7 +330,7 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
         Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
     }
-    const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
+    const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
     size_t blockAlign = 1;
     if (LLVM_LIKELY(!unaligned)) {
         blockAlign = DL.getABITypeAlign(blockTy).value();
@@ -420,7 +420,9 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
         return CreateTrunc(val, ty);
     } else {
         ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-        return CreateAlignedLoad(ty, ptr, dl.getABITypeAlign(ty).value());
+        const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+        const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+        return CreateAlignedLoad(ty, ptr, alignment);
     }
 
 
@@ -455,7 +457,10 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * absol
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-    return CreateAlignedStore(value, ptr, dl.getABITypeAlign(ty).value());
+    const auto fw = buf->getFieldWidth();
+    const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+    const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+    return CreateAlignedStore(value, ptr, alignment);
 }
 
 Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const streamIndex, Value * absolutePosition, Value * value) {
@@ -475,7 +480,10 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
-    return CreateAlignedStore(value, ptr, dl.getABITypeAlign(ty).value());
+    const auto fw = buf->getFieldWidth();
+    const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+    const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+    return CreateAlignedStore(value, ptr, alignment);
 }
 
 Value * KernelBuilder::getBaseAddress(const StringRef name) {

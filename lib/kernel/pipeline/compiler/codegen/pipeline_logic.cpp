@@ -346,9 +346,7 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
         if (LLVM_LIKELY(!isKernelFamilyCall(i))) {
             ArgVec args;
 
-            if (LLVM_UNLIKELY(CheckAssertions())) {
-
-
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
 
                 Constant * sharedStateTySize = nullptr;
                 if (mKernel->isStateful()) {

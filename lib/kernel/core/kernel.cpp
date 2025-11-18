@@ -408,9 +408,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 auto getGroupIndex = [&](const flat_set<unsigned> & groups) {
                     const auto f = groups.find(scalar.getGroup());
                     assert (f != groups.end());
-                    const auto idx = (unsigned)std::distance(groups.begin(), f);
-                    assert (idx < sharedGroupCount);
-                    return idx;
+                    return (unsigned)std::distance(groups.begin(), f);
                 };
 
                 switch (scalar.getScalarType()) {
