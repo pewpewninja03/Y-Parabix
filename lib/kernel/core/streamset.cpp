@@ -848,7 +848,6 @@ void ManagedDynamicBuffer::releaseBuffer(KernelBuilder & b) const {
         b.CreateAlignedStore(ConstantPointerNull::get(addrPtrTy), addrField, voidPtrTyAlign);
         b.CreateAlignedStore(sz_ZERO, capacityField, intPtrTyAlign);
     }
-    mSegNum = ConstantInt::getAllOnesValue(intPtrTy);
     freePendingDeletions(b, ConstantInt::getAllOnesValue(intPtrTy));
 }
 
@@ -1267,12 +1266,7 @@ void ManagedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value *
 
         END_SCOPED_REGION
 
-        FixedArray<Type *, 4> paramTypes2;
-        paramTypes2[0] = handlePtrTy;
-        paramTypes2[1] = intPtrTy;
-        paramTypes2[2] = intPtrTy;
-        paramTypes2[3] = intPtrTy;
-        FunctionType * const funcTy2 = FunctionType::get(b.getVoidTy(), paramTypes2, false);
+        FunctionType * const funcTy2 = FunctionType::get(b.getVoidTy(), paramTypes, false);
 
         f = Function::Create(funcTy2, Function::InternalLinkage, name.str(), m);
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -1302,10 +1296,6 @@ void ManagedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value *
         handle->setName("handle");
         Value * const currentlyConsumed = nextArg();
         currentlyConsumed->setName("currentlyConsumed");
-        Value * const Id = nextArg();
-        Id->setName("Id");
-        Value * const SegNum = nextArg();
-        SegNum->setName("SegNum");
 
         FixedArray<Value *, 4> indices4;
         indices4[0] = i32_ZERO;
@@ -1331,11 +1321,9 @@ void ManagedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value *
 
         b.restoreIP(ip);
     }
-    FixedArray<Value *, 4> args;
+    FixedArray<Value *, 2> args;
     args[0] = getHandle();
     args[1] = consumed;
-    args[2] = b.getSize(mId);
-    args[3] = mSegNum; assert (mSegNum);
     b.CreateCall(f->getFunctionType(), f, args);
 }
 
@@ -1405,18 +1393,16 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
         constexpr auto DUFF_STEPS = 8;
 
-        SmallVector<Type *, 8> paramTypes(traceDynamicBuffer ? 10 : 7);
+        SmallVector<Type *, 8> paramTypes(traceDynamicBuffer ? 8 : 5);
         paramTypes[0] = voidPtrTy; // shared struct ptr
         paramTypes[1] = intPtrTy; // produced
         paramTypes[2] = intPtrTy; // consumed
         paramTypes[3] = intPtrTy; // required
         paramTypes[4] = intPtrTy; // blocksPerChunk
-        paramTypes[5] = intPtrTy; // blocksPerChunk
-        paramTypes[6] = intPtrTy; // blocksPerChunk
         if (LLVM_UNLIKELY(traceDynamicBuffer)) {
-            paramTypes[7] = voidPtrTy; // reportExpansionCallback
-            paramTypes[8] = voidPtrTy; // pipelineHandle
-            paramTypes[9] = intPtrTy; // portNum
+            paramTypes[5] = voidPtrTy; // reportExpansionCallback
+            paramTypes[6] = voidPtrTy; // pipelineHandle
+            paramTypes[7] = intPtrTy; // portNum
         }
 
         Type * const retValTy = mLinear ? (Type*)intPtrTy : b.getVoidTy();
@@ -1463,10 +1449,6 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         required->setName("required");
         Value * const bytesPerChunk = nextArg();
         bytesPerChunk->setName("bytesPerChunk");
-        Value * const Id = nextArg();
-        Id->setName("Id");
-        Value * const SegNum = nextArg();
-        SegNum->setName("SegNum");
         Value * reportExpansionCallback = nullptr;
         Value * pipelineHandle = nullptr;
         Value * portNum = nullptr;
@@ -1809,18 +1791,16 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
     }
 
-    SmallVector<Value *, 10> args(traceDynamicBuffer ? 10 : 7);
+    SmallVector<Value *, 8> args(traceDynamicBuffer ? 8 : 5);
     args[0] = b.CreatePointerCast(mHandle, voidPtrTy);
     args[1] = produced;
     args[2] = consumed;
     args[3] = required;
     args[4] = b.getSize(b.getTypeSize(DL, mType));
-    args[5] = b.getSize(mId);
-    args[6] = mSegNum; assert (mSegNum);
     if (LLVM_UNLIKELY(traceDynamicBuffer)) {
-        args[7] = reportCallback; // reportExpansionCallback
-        args[8] = pipelineHandle; // pipelineHandle
-        args[9] = portNum; // portNum
+        args[5] = reportCallback; // reportExpansionCallback
+        args[6] = pipelineHandle; // pipelineHandle
+        args[7] = portNum; // portNum
     }
     Value * const retVal = b.CreateCall(f, args);
     if (mLinear) {

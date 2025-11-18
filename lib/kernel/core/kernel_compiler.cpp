@@ -1001,9 +1001,6 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
             mConsumedOutputItems[i] = consumed;
-            if (isa<ManagedDynamicBuffer>(buffer)) {
-                cast<ManagedDynamicBuffer>(buffer)->setSegNum(b.getSize(-1ULL));
-            }
             buffer->freePendingDeletions(b, consumed);
             writable = buffer->getLinearlyWritableItems(b, produced, consumed);
             assert (writable && writable->getType() == sizeTy);

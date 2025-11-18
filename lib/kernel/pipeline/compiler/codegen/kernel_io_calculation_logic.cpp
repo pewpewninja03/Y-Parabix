@@ -848,9 +848,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     // TODO: have a delete immediately value when not multithreaded?
     Value * mustExpand = nullptr;
-    if (isa<ManagedDynamicBuffer>(buffer)) {
-        cast<ManagedDynamicBuffer>(buffer)->setSegNum(mSegNo);
-    }
     if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
         Value * sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
         mustExpand = buffer->reserveCapacity(b, produced, consumed, required, mBufferExpansionFunction, sharedHandle, b.getSize(outputPort.Number));

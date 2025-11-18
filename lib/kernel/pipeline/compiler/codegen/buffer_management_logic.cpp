@@ -289,7 +289,6 @@ void PipelineCompiler::freePendingDeletions(KernelBuilder & b, const size_t stre
     if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
         assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
         assert (out_degree(streamSet, mConsumerGraph) > 0);
-        cast<ManagedDynamicBuffer>(buffer)->setSegNum(mSegNo);
         buffer->freePendingDeletions(b, consumed);
     }
 }

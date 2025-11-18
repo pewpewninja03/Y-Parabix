@@ -284,15 +284,11 @@ public:
 
     void updateLocalHandleValues(kernel::KernelBuilder & b) const;
 
-    void setSegNum(llvm::Value * segNum) const { mSegNum = segNum; }
-
 private:
 
     mutable llvm::StructType * mLocalHandleType = nullptr;
 
     mutable llvm::Value * mLocalHandle = nullptr;
-
-    mutable llvm::Value * mSegNum = nullptr;
 };
 
 class RepeatingBuffer final : public InternalBuffer {
