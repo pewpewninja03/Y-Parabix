@@ -122,13 +122,11 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     }
 
     assert (numOfLinearStrides);
-
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
 
     mNumOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
-
     mUpdatedNumOfStrides = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mNumOfLinearStrides);
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -648,7 +646,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                         avail = b.CreateAdd(avail, added);
                     }
 
-                    if (LLVM_UNLIKELY(CheckAssertions)) {
+                    if (LLVM_UNLIKELY(CheckAssertions())) {
                         const Binding & inputBinding = port.Binding;
                         Value * valid = b.CreateOr(b.CreateICmpULE(processed, avail), closed);
                         b.CreateAssert(valid,
@@ -695,6 +693,7 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
 
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
+
 
     Value * const alreadyComputed = mInternalAccessibleInputItems[inputPort];
     if (alreadyComputed) {
@@ -758,7 +757,7 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     }
     #endif
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & inputBinding = port.Binding;
         Value * valid = b.CreateOr(b.CreateICmpULE(processed, available), isClosed(b, streamSet));
         Value * const zeroExtended = mIsInputZeroExtended[inputPort];
@@ -800,7 +799,10 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
     Value * const beforeExpansion = getWritableOutputItems(b, port);
 
-    Value * const hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
+    Value * hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
+    if (streamSet == 10) {
+        hasEnoughSpace = b.CreateAnd(hasEnoughSpace, b.CreateICmpNE(mSegNo, b.getSize(0)));
+    }
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), beforeExpansion);
@@ -852,12 +854,14 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     } else {
         mustExpand = buffer->reserveCapacity(b, produced, consumed, required, nullptr, nullptr, nullptr);
     }
+    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
+        cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
+    }
     b.CreateBr(afterCopyBackOrExpand);
 
     b.SetInsertPoint(afterCopyBackOrExpand);
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        if (buffer->isLinear()) {
-            // TODO: fix this; only linear could need to expand or copy
+        if (mustExpand) {
             updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
         } else {
             updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
@@ -874,8 +878,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     #endif
 
     Value * const afterExpansion = getWritableOutputItems(b, port, true);
-
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & output = getOutputBinding(outputPort);
         Value * const sanityCheck = b.CreateICmpULE(consumed, produced);
         b.CreateAssert(sanityCheck,
@@ -890,7 +893,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     debugPrint(b, prefix + "_capacity' = %" PRIu64, buffer->getCapacity(b));
     #endif
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & output = getOutputBinding(outputPort);
         b.CreateAssert(b.CreateICmpUGT(afterExpansion, beforeExpansion),
                        "%s.%s was not expanded correctly?", mCurrentKernelName, b.GetString(output.getName()));
@@ -979,7 +982,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
 
         Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
 
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             const Binding & output = getOutputBinding(outputPort);
             Value * const sanityCheck = b.CreateICmpULE(consumed, produced);
             b.CreateAssert(sanityCheck,
@@ -998,13 +1001,6 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
             c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
         }
         writable = buffer->getLinearlyWritableItems(b, p, c);
-//        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
-//            #if defined(PRINT_DEBUG_MESSAGES)
-//            debugPrint(b, prefix + "_writable = %" PRIu64 " - %" PRIu64, writable, b.getSize(port.EmptyOverflow));
-//            #endif
-//            writable = b.CreateSaturatingSub(writable, b.getSize(port.EmptyOverflow));
-//            writable = b.CreateRoundDown(writable, b.getSize(port.EmptyOverflow - 1U));
-//        }
     }
 
     // cache the values for later use
@@ -1065,7 +1061,6 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                                                 Value *& finalStrideRemainder) {
 
     Value * principalFixedRateFactor = nullptr;
-
     for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
         assert (port.Port.Type == PortType::Input);
@@ -1336,7 +1331,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     Value * position = mCurrentProcessedItemCountPhi[ref];
 
     if (offset) {
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             const Binding & binding = partialSumPort.Binding;
             b.CreateAssert(b.CreateICmpNE(offset, sz_ZERO),
                             "%s.%s: partial sum offset must be non-zero",
@@ -1351,7 +1346,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
         if (step > 1) {
             ConstantInt * const sz_STEP = b.getSize(step);
 
-            if (LLVM_UNLIKELY(CheckAssertions)) {
+            if (LLVM_UNLIKELY(CheckAssertions())) {
                 const Binding & binding = partialSumPort.Binding;
                 b.CreateAssert(b.CreateICmpEQ(b.CreateURem(position, sz_STEP), sz_ZERO),
                                 "%s.%s: partial sum reference processed count must be a multiple of %" PRIu64,
@@ -1366,7 +1361,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
         offset = b.CreateSub(offset, sz_ONE);
         position = b.CreateAdd(position, offset);
 
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
 
             const auto streamSet = getInputBufferVertex(mKernelId, ref);
             Value * const total = mLocallyAvailableItems[streamSet];
@@ -1417,7 +1412,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
         current = b.CreateSelect(mBranchToLoopExit, previouslyTransferred, current);
     }
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
 
         const Binding & binding = partialSumPort.Binding;
         b.CreateAssert(b.CreateICmpULE(previouslyTransferred, current),
@@ -1497,7 +1492,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     Value * const strideIndex = b.CreateSub(numOfStrides, sz_ONE);
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
 
         const Binding & binding = partialSumPort.Binding;
         Constant * bindingName = b.GetString(binding.getName());
@@ -1527,7 +1522,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     Value * const notDone = b.CreateICmpNE(strideIndex, sz_ZERO);
     Value * const repeat = b.CreateAnd(notDone, notEnough);
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & input = getInputBinding(ref);
         Value * const inputName = b.GetString(input.getName());
         b.CreateAssert(b.CreateICmpULE(requiredItems, nextRequiredItems),
@@ -1553,7 +1548,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     nextRequiredItemsPhi->addIncoming(nextRequiredItems, popCountLoop);
 
     Value * finalNumOfStrides = numOfStridesPhi;
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & binding = getInputBinding(ref);
         b.CreateAssert(b.CreateICmpNE(finalNumOfStrides, MAX_INT),
                         "%s.%s: attempting to use sentinal popcount entry",

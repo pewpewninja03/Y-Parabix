@@ -106,8 +106,7 @@ const static std::string REPEATING_STREAMSET_LENGTH_PREFIX = "@RSSL.";
 const static std::string REPEATING_STREAMSET_MALLOCED_DATA_PREFIX = "@RSSD.";
 
 const static std::string STATISTICS_CYCLE_COUNT_SUFFIX = ".SCy";
-const static std::string STATISTICS_CYCLE_COUNT_SQUARE_SUM_SUFFIX = ".SCY";
-const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "T" + STATISTICS_CYCLE_COUNT_SUFFIX;
+const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "!SCT";
 
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
@@ -130,15 +129,12 @@ const static std::string STATISTICS_DEFERRED_ITEM_COUNT_HISTOGRAM_SUFFIX = ".TDC
 const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA = "@SDMSD";
 const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDMSC";
 
+
+const static std::string MANAGED_STREAMSET_LOCAL_HANDLE = "@MSLH";
+
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
-const static std::string MANAGED_DYNAMIC_BUFFER_STRUCT = ".MDBS";
-
 const static std::string ZERO_INPUT_BUFFER_STRUCT = "@ZIB";
-
-
-const static std::string PENDING_FREEABLE_BUFFER_ADDRESS = ".PFA";
-const static std::string PENDING_FREEABLE_BUFFER_CAPACITY = ".PFC";
 
 using ArgVec = Vec<Value *, 64>;
 
@@ -158,6 +154,9 @@ class PipelineCompiler final : public KernelCompiler, public PipelineCommonGraph
 
     enum { WITH_OVERFLOW = 0, WITHOUT_OVERFLOW = 1};
     using OverflowItemCounts = Vec<std::array<Value *, 2>, 8>;
+
+// TODO: make a dyn buffer info graph that minimizes stack allocation
+
 
 public:
 
@@ -396,10 +395,14 @@ public:
     void allocateOwnedBuffers(KernelBuilder & b, Value * const expectedNumOfStrides, Value * const expectedSourceOutputSize, const bool nonLocal);
     void loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal);
     void releaseOwnedBuffers(KernelBuilder & b);
-    void freePendingFreeableDynamicBuffers(KernelBuilder & b);
+    void freePendingDeletions(KernelBuilder & b, const size_t streamSet, Value * const consumed);
     bool initializeOutputStreamSetBuffersBeforeSegmentInvocation(KernelBuilder & b) const;
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
+    void addLocalDynamicBufferStructs(KernelBuilder & b);
+    void assignLocalDynamicBufferStructs(KernelBuilder & b) const;
+    void resetLocalDynamicBufferStructs(KernelBuilder & b) const;
+    void updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId) const;
 
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 
@@ -427,7 +430,7 @@ public:
 
 // cycle counter functions
 
-    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot);
+    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot, const unsigned groupId);
     void startCycleCounter(KernelBuilder & b, const CycleCounter type);
     void startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types);
     void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type);
@@ -467,7 +470,6 @@ public:
     // buffer expansion recording functions
 
     Value * generateBufferExpansionFunctionForCurrentKernel(KernelBuilder & b, const size_t kernelId);
-    void initializeBufferExpansionHistory(KernelBuilder & b) const;
     void printOptionalBufferExpansionHistory(KernelBuilder & b);
 
 // internal optimization passes
@@ -607,16 +609,19 @@ public:
 
     void getABIAlignments(KernelBuilder & b);
 
-    inline bool preserveAllStreamSetData(const size_t streamSet) const {
-        const auto f = PreserveAllStreamSetData.find(streamSet);
-        return f != PreserveAllStreamSetData.end();
+    bool CheckAssertions() const {
+        #ifdef FORCE_PIPELINE_ASSERTIONS
+        return true;
+        #else
+        return mCheckAssertions;
+        #endif
     }
 
 protected:
 
     CompilerAllocator                           mAllocator;
 
-    const bool                                  CheckAssertions;
+    const bool                                  mCheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
     const bool                                  mTraceDynamicBuffers;
     const bool                                  mTraceIndividualConsumedItemCounts;
@@ -688,7 +693,6 @@ protected:
     const InOutGraph                            InOutStreamSetReplacement;
     const ThreadLocalPlacementGraph             ThreadLocalPlacement;
     const ThreadLocalConflictGraphType          ThreadLocalConflictGraph;
-    const IntervalSet                           PreserveAllStreamSetData;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -940,11 +944,7 @@ inline PipelineCompiler::PipelineCompiler(KernelBuilder & b, PipelineKernel * co
 inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel, PipelineAnalysis && P)
 : KernelCompiler(pipelineKernel)
 , PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
-#ifdef FORCE_PIPELINE_ASSERTIONS
-, CheckAssertions(true)
-#else
-, CheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts) || codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))
-#endif
+, mCheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnablePipelineAsserts))
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(P.mTraceDynamicBuffers)
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
@@ -1009,7 +1009,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , ThreadLocalPlacement(std::move(P.ThreadLocalPlacement))
 
 , ThreadLocalConflictGraph(std::move(P.ThreadLocalConflictGraph))
-, PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)

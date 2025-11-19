@@ -9,31 +9,40 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelCycleCountProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsigned kernelId, const bool isRoot) {
-
-    const auto groupId = getCacheLineGroupId(kernelId);
+void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsigned kernelId, const bool isRoot, const unsigned groupId) {
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         // TODO: make these thread local to prevent false sharing and enable
         // analysis of thread distributions?
+
+        auto & C = b.getContext();
+
         Type * const int64Ty = b.getInt64Ty();
-        Type * const emptyTy = StructType::get(b.getContext());
+        Type * const emptyTy = StructType::get(C);
         Type * const jumpPropertyIntTy = isRoot ? int64Ty : emptyTy;
         Type * const otherPropertyTy = (kernelId == PipelineOutput) ? emptyTy : int64Ty;
         Type * const numInvokePropertyTy = isRoot ? otherPropertyTy : emptyTy;
-
+        Type * copyPropertyTy = emptyTy;
+        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = target(e, mBufferGraph);
+            const auto & bn = mBufferGraph[streamSet];
+            if (bn.Buffer->isLinear()) {
+                copyPropertyTy = otherPropertyTy;
+                break;
+            }
+        }
 
         FixedArray<Type *, NUM_OF_KERNEL_CYCLE_COUNTERS> fields;
         fields[KERNEL_SYNCHRONIZATION] = otherPropertyTy;
         fields[PARTITION_JUMP_SYNCHRONIZATION] = jumpPropertyIntTy;
         fields[BUFFER_EXPANSION] = otherPropertyTy;
-        fields[BUFFER_COPY] = otherPropertyTy;
+        fields[BUFFER_COPY] = copyPropertyTy;
         fields[KERNEL_EXECUTION] = otherPropertyTy;
         fields[TOTAL_TIME] = otherPropertyTy;
         fields[SQ_SUM_TOTAL_TIME] = otherPropertyTy;
         fields[NUM_OF_INVOCATIONS] = numInvokePropertyTy;
 
-        StructType * const cycleCounterTy = StructType::get(b.getContext(), fields);
+        StructType * const cycleCounterTy = StructType::get(C, fields);
         const auto name = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
         mTarget->addInternalScalar(cycleCounterTy, name, groupId);
     }
@@ -46,12 +55,12 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         // # of blocked I/O channel attempts in which no strides
         // were possible (i.e., blocked on first iteration)
 
-        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const auto port = mBufferGraph[e].Port;
             const auto prefix = makeBufferName(kernelId, port);
             mTarget->addInternalScalar(int64Ty, prefix + STATISTICS_BLOCKING_IO_SUFFIX, groupId);
         }
-        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             // TODO: ignore dynamic buffers
             const auto port = mBufferGraph[e].Port;
             const auto prefix = makeBufferName(kernelId, port);
@@ -70,14 +79,14 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
 
         // # of blocked I/O channel attempts in which no strides
         // were possible (i.e., blocked on first iteration)
-        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
             const auto & bp = mBufferGraph[e];
             if (bp.canModifySegmentLength()) {
                 const auto prefix = makeBufferName(kernelId, bp.Port);
                 mTarget->addInternalScalar(historyTy, prefix + STATISTICS_BLOCKING_IO_HISTORY_SUFFIX, groupId);
             }
         }
-        for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto & bp = mBufferGraph[e];
             if (bp.canModifySegmentLength()) {
                 const auto prefix = makeBufferName(kernelId, bp.Port);
@@ -85,6 +94,7 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
             }
         }
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -98,21 +108,32 @@ inline bool isSynchronizationCounter(const CycleCounter type) {
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
+#if 1
     assert (EnableCycleCounter || isSynchronizationCounter(type));
     Value * const counter = b.CreateReadCycleCounter();
     mCycleCounters[(unsigned)type] = counter;
+#else
+    mCycleCounters[(unsigned)type] = b.getSize(0);
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types) {
+#if 1
     Value * counter = b.CreateReadCycleCounter();
     assert (types.size() > 0);
     for (auto type : types) {
         assert (EnableCycleCounter || isSynchronizationCounter(type));
         mCycleCounters[(unsigned)type] = counter;
     }
+#else
+    for (auto type : types) {
+        assert (EnableCycleCounter || isSynchronizationCounter(type));
+        mCycleCounters[(unsigned)type] = b.getSize(0);
+    }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -121,12 +142,12 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializ
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) {
     assert (FirstKernel <= kernelId && kernelId <= PipelineOutput);
     assert (EnableCycleCounter || isSynchronizationCounter(type));
-
+#if 1
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)type]; assert (start);
     Value * const duration = b.CreateSub(end, start);
 
-    IntegerType * sizeTy = b.getSizeTy();
+    IntegerType * sizeTy = b.getInt64Ty();
     if (mUseDynamicMultithreading && isSynchronizationCounter(type)) {
         Value * const cur = b.CreateAlignedLoad(sizeTy, mAccumulatedSynchronizationTimePtr, SizeTyABIAlignment);
         Value * const accum = b.CreateAdd(cur, duration);
@@ -139,6 +160,7 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
         std::tie(ptr, ty) = b.getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
         FixedArray<Value *, 2> index;
         index[0] = b.getInt32(0);
+        assert (ty->getStructElementType(type)->isIntegerTy());
         index[1] = b.getInt32(type);
         Value * const sumCounterPtr = b.CreateGEP(ty, ptr, index);
         Value * const sumRunningCount = b.CreateAlignedLoad(sizeTy, sumCounterPtr, SizeTyABIAlignment);
@@ -147,6 +169,7 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
 
         if (type == CycleCounter::TOTAL_TIME) {
             index[1] = b.getInt32(SQ_SUM_TOTAL_TIME);
+            assert (ty->getStructElementType(SQ_SUM_TOTAL_TIME)->isIntegerTy());
             Value * const sqSumCounterPtr = b.CreateGEP(ty, ptr, index);
             Value * const sqSumRunningCount = b.CreateAlignedLoad(sizeTy, sqSumCounterPtr, SizeTyABIAlignment);
             Value * sqDuration = b.CreateZExt(duration, sqSumRunningCount->getType());
@@ -155,6 +178,7 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
             b.CreateAlignedStore(sqSumUpdatedCount, sqSumCounterPtr, SizeTyABIAlignment);
             if (mIsPartitionRoot) {
                 index[1] = b.getInt32(NUM_OF_INVOCATIONS);
+                assert (ty->getStructElementType(NUM_OF_INVOCATIONS)->isIntegerTy());
                 Value * const invokePtr = b.CreateGEP(ty, ptr, index);
                 Value * const invoked = b.CreateAlignedLoad(sizeTy, invokePtr, SizeTyABIAlignment);
                 Value * const invoked2 = b.CreateAdd(invoked, b.getSize(1));
@@ -162,13 +186,14 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
             }
         }
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) {
-
+#if 1
     assert (EnableCycleCounter || mUseDynamicMultithreading);
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)ifTrue];
@@ -189,12 +214,14 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
     Value * const sumRunningCount = b.CreateAlignedLoad(b.getSizeTy(), sumCounterPtr, SizeTyABIAlignment);
     Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
     b.CreateAlignedStore(sumUpdatedCount, sumCounterPtr, SizeTyABIAlignment);
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateTotalCycleCounterTime(KernelBuilder & b) const {
+#if 1
     assert (EnableCycleCounter);
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)FULL_PIPELINE_TIME];
@@ -204,6 +231,7 @@ void PipelineCompiler::updateTotalCycleCounterTime(KernelBuilder & b) const {
     Value * const ptr = getScalarFieldPtr(b, STATISTICS_CYCLE_COUNT_TOTAL).first;
     Value * const updated = b.CreateAdd(b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment), duration);
     b.CreateAlignedStore(updated, ptr, SizeTyABIAlignment);
+#endif
 }
 
 
@@ -439,8 +467,8 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
  * @brief printOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
+#if 1
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-
         ConstantInt * const ZERO = b.getInt32(0);
 
         auto toGlobal = [&](ArrayRef<Constant *> array, Type * const type, size_t size) {
@@ -519,14 +547,13 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
 
             std::tie(cycleCountPtr, cycleCountTy) = b.getScalarFieldPtr(prefix + STATISTICS_CYCLE_COUNT_SUFFIX);
 
+            assert (cycleCountTy->getStructNumElements() == NUM_OF_KERNEL_CYCLE_COUNTERS);
+
             for (unsigned j = 0; j < NUM_OF_INVOCATIONS; ++j) {
                 Value * sumCycles = INT64_ZERO;
-                if (isRoot || j != PARTITION_JUMP_SYNCHRONIZATION) {
-                    assert (cycleCountTy->getStructElementType(j)->isIntegerTy());
+                if (cycleCountTy->getStructElementType(j)->isIntegerTy()) {
                     index[1] = b.getInt32(j);
                     sumCycles = b.CreateAlignedLoad(int64Ty, b.CreateGEP(cycleCountTy, cycleCountPtr, index), Int64TyABIAlignment);
-                } else {
-                    assert (cycleCountTy->getStructElementType(j)->isEmptyTy());
                 }
                 assert (k < REQ_INTEGERS);
                 b.CreateAlignedStore(sumCycles, b.CreateGEP(int64Ty, values, b.getInt32(k++)), Int64TyABIAlignment);
@@ -589,6 +616,7 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
 
         b.CreateFree(values);
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

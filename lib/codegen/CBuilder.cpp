@@ -103,57 +103,6 @@ extern "C" void free_debug_wrapper(void * ptr) {
     }
 }
 
-static IntervalSet __unreadMemory{};
-
-static size_t __insertIntoUnreadMemorySet(const uintptr_t start, const uintptr_t length) {
-    auto range = Interval::right_open(start, start + length);
-    IntervalItr f = __unreadMemory.find(range);
-    if (f != __unreadMemory.end()) {
-        if (f->lower() >= range.upper() && f->upper() >= range.lower()) {
-            return 0;
-        }
-    }
-    __unreadMemory += range;
-    return 1;
-}
-
-void CBuilder::InsertIntoUnreadMemory(Value * const start, Value * const length, const Twine failureMessage) const {
-//    Function * f = getModule()->getFunction("__insertIntoUnreadMemorySet");
-//    if (f == nullptr) {
-//        f = LinkFunction("__insertIntoUnreadMemorySet", __insertIntoUnreadMemorySet);
-//    }
-//    FixedArray<Value *, 2> args;
-//    args[0] = start;
-//    args[1] = length;
-//    Value * r = CreateCall(f->getFunctionType(), f, args);
-//    CreateAssert(CreateIsNotNull(f), failureMessage);
-}
-
-static size_t __removeFromUnreadMemorySet(const uintptr_t start, const uintptr_t length) {
-    auto range = Interval::right_open(start, start + length);
-    IntervalItr f = __unreadMemory.find(range);
-    if (f == __unreadMemory.end()) {
-        return 0;
-    }
-    if (f->lower() < range.upper() || f->upper() < range.lower()) {
-        return 0;
-    }
-    __unreadMemory -= range;
-    return 1;
-}
-
-void CBuilder::RemoveFromUnreadMemory(Value * const start, Value * const length, const Twine failureMessage) const {
-//    Function * f = getModule()->getFunction("__removeFromUnreadMemorySet");
-//    if (f == nullptr) {
-//        f = LinkFunction("__removeFromUnreadMemorySet", __removeFromUnreadMemorySet);
-//    }
-//    FixedArray<Value *, 2> args;
-//    args[0] = start;
-//    args[1] = length;
-//    Value * r = CreateCall(f->getFunctionType(), f, args);
-//    CreateAssert(CreateIsNotNull(f), failureMessage);
-}
-
 Value * CBuilder::CreateURem(Value * const number, Value * const divisor, const Twine Name) {
     if (ConstantInt * const c = dyn_cast<ConstantInt>(divisor)) {
         const auto d = c->getZExtValue();
@@ -1530,7 +1479,8 @@ LoadInst * CBuilder::CreateLoad(Type * type, Value * Ptr, const char * Name) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    CreateAssert(Ptr, "Ptr null");
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
@@ -1544,7 +1494,8 @@ LoadInst * CBuilder::CreateLoad(Type * type, Value *Ptr, const Twine Name) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    CreateAssert(Ptr, "Ptr null");
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
@@ -1558,7 +1509,8 @@ LoadInst * CBuilder::CreateLoad(Type * type, Value * Ptr, bool isVolatile, const
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    CreateAssert(Ptr, "Ptr null");
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
@@ -1574,7 +1526,7 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (Val->getType()->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         CheckAddress(Ptr, getTypeSize(Val->getType()), "CreateStore");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
@@ -1589,7 +1541,7 @@ inline bool CBuilder::hasAddressSanitizer() const {
 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, const char * Name) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress") )) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1603,7 +1555,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, const Twine Name) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1617,7 +1569,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, bool isVolatile, const Twine Name) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts)|| GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1631,7 +1583,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 
 StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigned Align, bool isVolatile) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts)|| GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1749,14 +1701,15 @@ CallInst * CBuilder::CreateMemCmp(Value * Ptr1, Value * Ptr2, Value * Num) {
 }
 
 AllocaInst * CBuilder::CreateAllocaAtEntryPoint(Type * Ty, Value * ArraySize, const Twine Name) {
-
-    auto BB = GetInsertBlock();
-    auto F = BB->getParent();
+    assert (Ty && "no type given to allocate?");
+    auto BB = GetInsertBlock(); assert (BB);
+    auto F = BB->getParent(); assert (F);
     auto entryBlock = F->begin();
     if (LLVM_UNLIKELY(entryBlock == F->end())) {
         report_fatal_error("CreateAllocaAtEntryPoint cannot create a value in an empty function");
     }
-    const auto & DL = F->getParent()->getDataLayout();
+    auto m = F->getParent(); assert (m);
+    const auto & DL = m->getDataLayout();
     const auto addrSize = DL.getAllocaAddrSpace();
     auto const first = entryBlock->getFirstNonPHIOrDbgOrLifetime();
     AllocaInst * alloca = nullptr;
@@ -1791,7 +1744,8 @@ AllocaInst * CBuilder::CreateAlignedAllocaAtEntryPoint(llvm::Type * const Ty, co
     } else {
         alloca = new AllocaInst(Ty, addrSize, ArraySize, "", first);
     }
-    alloca->setAlignment(AlignType{alignment});
+    AlignType align{alignment};
+    alloca->setAlignment(align);
     return alloca;
 }
 
@@ -2411,6 +2365,25 @@ uintptr_t LLVM_READNONE CBuilder::getTypeSize(const llvm::DataLayout & DL, llvm:
         #endif
     }
     return size;
+}
+
+uintptr_t LLVM_READNONE CBuilder::getAlignOf(const llvm::DataLayout & DL, llvm::Type * type) {
+    assert (type);
+//    if (isa<StructType>(type)) {
+//        const auto l = cast<StructType>(type)->getStructNumElements();
+//        auto align = DL.getABITypeAlign(type).value();
+//        for (unsigned j = 0; j != l; ++j) {
+//            align = boost::lcm(align, getAlignOf(DL, type->getStructElementType(j)));
+//        }
+//        assert (align > 0);
+//        return align;
+//    } else if (isa<ArrayType>(type)) {
+//        return getAlignOf(DL, type->getArrayElementType());
+//    } else {
+        const auto align = DL.getABITypeAlign(type).value();
+        assert (align > 0);
+        return align;
+//    }
 }
 
 void CBuilder::linkAllNecessaryExternalFunctions() const {

@@ -104,7 +104,7 @@ void PipelineCompiler::readPAPIMeasurement(KernelBuilder & b, Value * const meas
     // went wrong?
 
     Value * const retVal = b.CreateCall(PAPIReadFn->getFunctionType(), PAPIReadFn, args);
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         Value * valid = b.CreateICmpEQ(retVal, ConstantInt::get(retVal->getType(), PAPI_OK));
         b.CreateAssert (valid, "PAPI_read failed");
     }

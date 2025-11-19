@@ -255,10 +255,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << '?';
         } else {
             switch (buffer->getBufferKind()) {
-                case BufferId::StaticBuffer:
-                    out << 'S'; break;
-                case BufferId::DynamicBuffer:
-                    out << 'D'; break;
                 case BufferId::ManagedDynamicBuffer:
                     out << 'M'; break;
                 case BufferId::ExternalBuffer:

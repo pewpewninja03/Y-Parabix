@@ -77,7 +77,6 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         const bool isRoot = (partitionId != currentPartitionId);
         currentPartitionId = partitionId;        
         addInternalKernelProperties(b, i, isRoot);
-        addCycleCounterProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
         addPAPIEventCounterKernelProperties(b, i, isRoot);
         #endif
@@ -91,11 +90,21 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
                 NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
         }
     }
+
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        auto currentPartitionId = -1U;
+        constexpr auto L = 0U;
+        for (auto i = FirstKernel; i <= LastKernel; ++i) {
+            const auto partitionId = KernelPartitionId[i];
+            const bool isRoot = (partitionId != currentPartitionId);
+            currentPartitionId = partitionId;
+            addCycleCounterProperties(b, i, isRoot, L + i);
+        }
+        addCycleCounterProperties(b, PipelineOutput, true, L + PipelineOutput);
         mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }
-    addCycleCounterProperties(b, PipelineOutput, true);
+
     addRepeatingStreamSetBufferProperties(b);
     generateMetaDataForRepeatingStreamSets(b);
     #ifdef ENABLE_PAPI
@@ -105,6 +114,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
     }
     addZeroInputStructProperties(b);
+    addLocalDynamicBufferStructs(b);
 
     const auto first = FirstKernelInPartition[FirstComputePartitionId];
     const auto last = FirstKernelInPartition[LastComputePartitionId + 1];
@@ -335,6 +345,25 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 
         if (LLVM_LIKELY(!isKernelFamilyCall(i))) {
             ArgVec args;
+
+            if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+
+                Constant * sharedStateTySize = nullptr;
+                if (mKernel->isStateful()) {
+                    sharedStateTySize = b.getTypeSize(mKernel->getSharedStateType());
+                } else {
+                    sharedStateTySize = ConstantInt::getAllOnesValue(b.getSizeTy());
+                }
+                args.push_back(sharedStateTySize);
+
+                Constant * threadLocalTySize = nullptr;
+                if (mKernel->hasThreadLocal()) {
+                    threadLocalTySize = b.getTypeSize(mKernel->getThreadLocalStateType());
+                } else {
+                    threadLocalTySize = ConstantInt::getAllOnesValue(b.getSizeTy());
+                }
+                args.push_back(threadLocalTySize);
+            }
             if (LLVM_LIKELY(mKernel->isStateful())) {
                 args.push_back(mKernelSharedHandle);
             }
@@ -451,7 +480,6 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         allocScale = b.CreateMul(allocScale, b.getScalarField(MAXIMUM_NUM_OF_THREADS));
     }
     allocateOwnedBuffers(b, allocScale, expectedSourceOutputSize, true);
-    initializeBufferExpansionHistory(b);
     resetInternalBufferHandles();
 }
 
@@ -609,7 +637,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
         b.CreateFree(b.getScalarField(ZERO_EXTENDED_BUFFER));
     }
-    freePendingFreeableDynamicBuffers(b);
+//    freePendingFreeableDynamicBuffers(b);
     freeZeroedInputBuffers(b);
 }
 

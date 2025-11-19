@@ -25,8 +25,6 @@ public:
     enum class BufferKind : unsigned {
         ExternalBuffer
         , RepeatingBuffer
-        , StaticBuffer
-        , DynamicBuffer
         , ManagedDynamicBuffer
     };
 
@@ -69,7 +67,7 @@ public:
     bool isSingleElementStreamSet() const;
 
     bool isDynamic() const {
-        return (mBufferKind == BufferKind::DynamicBuffer) || (mBufferKind == BufferKind::ManagedDynamicBuffer);
+        return (mBufferKind == BufferKind::ManagedDynamicBuffer);
     }
 
     virtual ~StreamSetBuffer() = 0;
@@ -90,8 +88,6 @@ public:
     virtual void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) = 0;
 
     virtual void releaseBuffer(kernel::KernelBuilder & b) const = 0;
-
-    virtual void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const = 0;
 
     // The number of items that cam be linearly accessed from a given logical stream position.
     virtual llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems) const = 0;
@@ -127,6 +123,8 @@ public:
     virtual llvm::Value * getRawItemPointer(kernel::KernelBuilder & b, llvm::Value * streamIndex, llvm::Value * absolutePosition) const;
 
     virtual llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const = 0;
+
+    virtual void freePendingDeletions(kernel::KernelBuilder & b, llvm::Value * consumed) const;
 
     virtual llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const = 0;
 
@@ -171,8 +169,6 @@ public:
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
@@ -233,20 +229,20 @@ class ManagedDynamicBuffer final : public InternalBuffer {
 public:
 
     enum MDB_Field {
-           LinearSelector = 0,
-           LinearMallocedAddress = 1,
-           SecondLinearMallocedAddress = 2,
-           LinearInternalCapacity = 3,
-           SecondLinearInternalCapacity = 4,
-           LinearBaseAddress = 5,
-           LinearEffectiveCapacity = 6
+        LinearMallocedAddress = 0,
+        LinearInternalCapacity = 1,
+        LinearBaseAddress = 2,
+        LinearEffectiveCapacity = 3,
+        PendingDeletionStruct = 4,
+        PendingDeletionAdditionalStructPointer = 5
     };
 
-    enum ExpansionLog_Field {
-
+    enum PendingDeletionField {
+        PendingDeletionAddress = 0,
+        PendingDeletionCapacity = 1,
+        PendingDeletionConsumed = 2,
+        PendingDeletionNextLink = 3,
     };
-
-    enum ThreadLocalField { PriorAddress, PriorCapacity, NewAddress };
 
     static inline bool classof(const StreamSetBuffer * b) {
         return b->getBufferKind() == BufferKind::ManagedDynamicBuffer;
@@ -254,21 +250,17 @@ public:
 
     ManagedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const bool linear, const unsigned AddressSpace);
 
-    static llvm::StructType * getInternalThreadLocalHandleType(kernel::KernelBuilder & b);
-
-    void freePendingDeletion(kernel::KernelBuilder & b, llvm::Value * threadLocalHandle) const;
-
-    llvm::StructType * getThreadLocalHandleType(kernel::KernelBuilder & b) const {
-        return getInternalThreadLocalHandleType(b);
-    }
-
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
+
+    llvm::StructType * getLocalHandleType(kernel::KernelBuilder & b) const;
+
+    void setLocalHandle(llvm::Value * handle) const { mLocalHandle = handle; }
+
+    llvm::Value * getLocalHandle() const { return mLocalHandle; }
 
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
 
@@ -286,21 +278,17 @@ public:
 
     void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
 
+    void freePendingDeletions(kernel::KernelBuilder & b, llvm::Value * consumed) const override;
+
     llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
-    llvm::Value * getThreadLocalHandle() const {
-        return mThreadLocalHandle;
-    }
-
-    void setThreadLocalHandle(llvm::Value * const handle) const {
-        mThreadLocalHandle = handle;
-    }
+    void updateLocalHandleValues(kernel::KernelBuilder & b) const;
 
 private:
 
-    mutable llvm::Value * mThreadLocalHandle;
+    mutable llvm::StructType * mLocalHandleType = nullptr;
 
-
+    mutable llvm::Value * mLocalHandle = nullptr;
 };
 
 class RepeatingBuffer final : public InternalBuffer {
@@ -320,8 +308,6 @@ public:
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
-
-    void destroyBuffer(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value *capacity) const override;
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 

@@ -283,6 +283,8 @@ public:
 
     static uintptr_t LLVM_READNONE getTypeSize(const llvm::DataLayout & DL, llvm::Type * type);
 
+    static uintptr_t LLVM_READNONE getAlignOf(const llvm::DataLayout & DL, llvm::Type * type);
+
     inline unsigned getCacheAlignment() const {
         return mCacheLineAlignment;
     }
@@ -504,10 +506,6 @@ protected:
     void __CreateAssert(llvm::Value * assertion, const llvm::Twine failureMessage, std::initializer_list<llvm::Value *> args);
 
     virtual void linkAllNecessaryExternalFunctions() const;
-
-    void InsertIntoUnreadMemory(llvm::Value * const start, llvm::Value * const length, const llvm::Twine failureMessage) const;
-
-    void RemoveFromUnreadMemory(llvm::Value * const start, llvm::Value * const length, const llvm::Twine failureMessage) const;
 
 protected:
 

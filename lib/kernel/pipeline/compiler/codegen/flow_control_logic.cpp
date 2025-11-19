@@ -57,7 +57,7 @@ Rational PipelineCompiler::calculateBufferScalingFactor(const unsigned kernelId)
  * @brief initializeInitialSlidingWindowSegmentLengths
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor) {
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         b.CreateAssert(segmentLengthScalingFactor, "segmentLengthScalingFactor cannot be zero %s", mCurrentKernelName);
     }
 
@@ -80,7 +80,7 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilde
  * @brief initializeFlowControl
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeFlowControl(KernelBuilder & b) {
-    if (num_edges(ThreadLocalPlacement) > 0 > 0 && !mIsIOProcessThread) {
+    if (num_edges(ThreadLocalPlacement) > 0 && !mIsIOProcessThread) {
         mThreadLocalMemorySizePtr = b.getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES).first;
     } else {
         mThreadLocalMemorySizePtr = nullptr;

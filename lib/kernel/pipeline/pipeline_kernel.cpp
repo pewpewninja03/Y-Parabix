@@ -538,6 +538,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     PointerType * streamSetPtrTy = nullptr;
     PointerType * voidPtrTy = b.getVoidPtrTy();
     IntegerType * int64Ty = b.getInt64Ty();
+    IntegerType * sizeTy = b.getSizeTy();
     if (numOfStreamSets) {
         // must match streamsetptr.h
         FixedArray<Type *, 2> fields;
@@ -624,6 +625,8 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         FixedArray<Value *, 2> fields;
         fields[0] = i32_ZERO;
 
+        const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
+
         for (auto i = mInputStreamSets.size(); i--; ) {
             Value * const streamSetArg = nextArg();
             assert (streamSetArg->getType() == streamSetPtrTy);
@@ -637,7 +640,11 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             b.CreateStore(sz_ZERO, processedPtr);
             segmentArgs[segmentArgCount++] = processedPtr; // updatable
             // accessible input items
-            segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
+            Value * accessible = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
+            segmentArgs[segmentArgCount++] = accessible;
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                segmentArgs[segmentArgCount++] = accessible;
+            }
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
@@ -652,7 +659,11 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             fields[1] = i32_ONE;
             Value * const itemPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
             segmentArgs[segmentArgCount++] = itemPtr;
-            segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, itemPtr);
+            Value * produced = b.CreateLoad(int64Ty, itemPtr);
+            segmentArgs[segmentArgCount++] = produced;
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                segmentArgs[segmentArgCount++] = ConstantInt::getAllOnesValue(sizeTy);
+            }
         }
     }
     assert (segmentArgCount == doSegment->arg_size());
@@ -889,7 +900,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
     }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableCycleCounter))) {
             out << "+CYC";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {

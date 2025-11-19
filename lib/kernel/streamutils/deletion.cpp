@@ -1652,7 +1652,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
         assert (fieldWidth <= b.getBitBlockWidth());
         const auto popCountSize = b.getBitBlockWidth() / fieldWidth;
 
-        Value * const baseFilterPtr = b.getInputStreamPackPtr("filter", sz_ZERO, sz_ZERO); ;
+        Value * const baseFilterPtr = b.getInputStreamPackPtr("filter", sz_ZERO, sz_ZERO);
 
         b.CreateBr(packLoop);
 
@@ -1681,9 +1681,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
         Value * const data = b.CreateAlignedLoad(dataVecTy, b.CreateGEP(dataVecTy, baseDataPtr, blockOffsetPhi), b.getBitBlockWidth() / 8);
         Value * const compressed = b.mvmd_compress(fieldWidth, data, filter);
-
         b.writeRawOutputPointer("output", toWritePosPhi, compressed);
-
         Value * const elementPopCount = b.CreatePopcount(filter);
         Value * toWritePos = b.CreateAdd(toWritePosPhi, b.CreateZExt(elementPopCount, b.getSizeTy()));
 

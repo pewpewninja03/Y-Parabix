@@ -139,9 +139,12 @@ struct BufferLayoutOptimizerWorker final : public PermutationBasedEvolutionaryAl
 
         std::sort(MaxMemorySize.begin(), MaxMemorySize.end());
 
-        auto median = MaxMemorySize[partitionCount / 2];
-        if ((partitionCount & 2) == 0) {
-            median = (median + MaxMemorySize[(partitionCount / 2) + 1] + 1) / 2;
+        const auto idx = (partitionCount / 2);
+        auto median = MaxMemorySize[idx];
+        if ((partitionCount % 2) == 0) {
+            const auto idx2 = ((partitionCount - 1) / 2);
+            assert (idx != idx2);
+            median = (median + MaxMemorySize[idx2] + 1) / 2;
         }
         const auto max = MaxMemorySize[partitionCount - 1];
         return median + (max * max);

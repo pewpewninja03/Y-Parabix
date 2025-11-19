@@ -22,7 +22,7 @@ void PipelineAnalysis::makeConsumerGraph() {
 
 
         BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || in_degree(streamSet, InOutStreamSetReplacement) != 0) {
+        if (bn.isThreadLocal() || bn.isConstant() || in_degree(streamSet, InOutStreamSetReplacement) != 0) {
             continue;
         }
 
@@ -41,7 +41,7 @@ void PipelineAnalysis::makeConsumerGraph() {
             }
             assert (id != streamSet);
             const BufferNode & sn = mBufferGraph[id];
-            if (sn.isThreadLocal() || sn.isConstant() || sn.isReturned()) {
+            if (LLVM_UNLIKELY(sn.isThreadLocal() || sn.isConstant())) {
                 continue;
             }
 
@@ -98,7 +98,7 @@ void PipelineAnalysis::makeConsumerGraph() {
 
         #ifndef NDEBUG
         const BufferNode & bn = mBufferGraph[streamSet];
-        assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isReturned() || bn.isTruncated()));
+        assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isTruncated()));
         assert (in_degree(streamSet, mConsumerGraph) == 1);
         #endif
 
@@ -165,6 +165,9 @@ void PipelineAnalysis::makeConsumerGraph() {
         out << "v" << s << " -> v" << t <<
                " [label=\"";
         const ConsumerEdge & c = mConsumerGraph[e];
+        if ((c.Flags & ConsumerEdge::UpdateConsumedCount) == 0) {
+            out << 'N';
+        }
         if (c.Flags & ConsumerEdge::WriteConsumedCount) {
             out << 'W';
         }

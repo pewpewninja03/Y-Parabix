@@ -291,7 +291,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
             FunctionType * const funcTy = FunctionType::get(int8PtrTy, params, false);
             maskInput = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
-            if (LLVM_UNLIKELY(CheckAssertions)) {
+            if (LLVM_UNLIKELY(CheckAssertions())) {
                 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
                 maskInput->setHasUWTable();
                 #else
@@ -311,7 +311,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             };
 
 
-            DataLayout DL(b.getModule());
+            auto & DL = m->getDataLayout();
             Type * const intPtrTy = DL.getIntPtrType(int8PtrTy);
 
             Value * const inputBuffer = nextArg();
@@ -337,17 +337,14 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             Value * const initial = b.CreateMul(b.CreateLShr(start, LOG_2_BLOCK_WIDTH), numOfStreams);
             Value * const initialPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, initial);
             Value * const initialPtrInt = b.CreatePtrToInt(initialPtr, intPtrTy);
-
-
             Value * const requiredItemsPerStream = b.CreateAdd(end, itemsPerSegment);
             Value * const requiredBlocksPerStream = b.CreateCeilUDivRational(requiredItemsPerStream, blockWidth);
             Value * const requiredBlocks = b.CreateMul(requiredBlocksPerStream, numOfStreams);
             Value * const requiredPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, requiredBlocks);
             Value * const requiredPtrInt = b.CreatePtrToInt(requiredPtr, intPtrTy);
-
             Value * const mallocBytes = b.CreateSub(requiredPtrInt, initialPtrInt);
+
             const auto blockSize = b.getBitBlockWidth() / 8;
-            const auto alignment = unaligned ? 1 : blockSize;
 
             BasicBlock * const allocateNewBuffer = b.CreateBasicBlock("allocateNewBuffer");
             BasicBlock * const allocateNewBufferExit = b.CreateBasicBlock("allocateNewBufferExit");
@@ -395,6 +392,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             Value * const fullCopyEndPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, fullCopyEnd);
             Value * const fullCopyEndPtrInt = b.CreatePtrToInt(fullCopyEndPtr, intPtrTy);
             Value * const fullBytesToCopy = b.CreateSub(fullCopyEndPtrInt, initialPtrInt);
+
+            const auto alignment = unaligned ? 1 : blockSize;
             b.CreateMemCpy(mallocedAddress, initialPtr, fullBytesToCopy, alignment);
 
             Value * packIndex = nullptr;

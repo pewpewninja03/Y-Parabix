@@ -4,12 +4,18 @@
  */
 
 #pragma once
+#include <re/adt/adt.h>
+#include <re/transforms/re_transformer.h>
+#include <re/transforms/name_intro.h>
 
 namespace re {
-class RE;
 
 /* Transform a regular expression r so that all names are
    created for all lookahead assertions. */
-RE * name_lookaheads(RE * r);
+class LookAheadNamer final : public NameIntroduction {
+public:
+    LookAheadNamer() : NameIntroduction("LookAheadNamer") {}
+    RE * transformAssertion (Assertion * a) override;
+};
 }
 

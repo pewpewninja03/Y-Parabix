@@ -38,14 +38,7 @@ public:
 
         P.computeIntraPartitionRepetitionVectors(initialGraph);
 
-        switch (codegen::PipelineCompilationMode) {
-            case codegen::PipelineCompilationModeOptions::DefaultFast:
-                P.simpleSchedulePartitionedProgram(initialGraph, rng);
-                break;
-            case codegen::PipelineCompilationModeOptions::Expensive:
-                P.schedulePartitionedProgram(initialGraph, rng);
-                break;
-        }
+        P.simpleSchedulePartitionedProgram(initialGraph, rng);
 
         // Construct the Stream and Scalar graphs
         P.transcribeRelationshipGraph(initialGraph, initialGraph);
@@ -104,6 +97,8 @@ public:
 
         P.setStreamSetLockIds();
 
+        P.identifyManagedBufferStructIds();
+
         P.gatherInfo();
 
         if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
@@ -125,7 +120,8 @@ private:
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
     , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
-    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized)) {
+    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
+    , PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions)) {
 
     }
 
@@ -204,6 +200,8 @@ private:
     void addFlowControlAnnotations();
 
     void setStreamSetLockIds();
+
+    void identifyManagedBufferStructIds();
 
     // thread local analysis
 
@@ -339,6 +337,8 @@ public:
 
     FamilyScalarGraph               mFamilyScalarGraph;
     ZeroInputGraph                  mZeroInputGraph;
+
+    IntervalSet                     PreserveAllStreamSetData;
 
     IllustratedStreamSetMap         mIllustratedStreamSetBindings;
 

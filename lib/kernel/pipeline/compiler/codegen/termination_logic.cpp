@@ -320,7 +320,7 @@ void PipelineCompiler::readCountableItemCountsAfterAbnormalTermination(KernelBui
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::propagateTerminationSignal(KernelBuilder & b) {
 
-    if (CheckAssertions) {
+    if (CheckAssertions()) {
 
         bool hasPrincipal = false;
         Value * atLeastOneExhausted = nullptr;

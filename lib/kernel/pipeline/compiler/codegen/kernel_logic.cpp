@@ -62,7 +62,7 @@ void PipelineCompiler::computeFullyProcessedItemCounts(KernelBuilder & b, Value 
         Value * const fullyProcessed = b.CreateSelect(terminated, avail, processed);
 
         mFullyProcessedItemCount[port] = fullyProcessed;
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             if (bn.isThreadLocal()) {
@@ -159,7 +159,7 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(KernelBuilder & b, const unsig
     }
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             b.CreateAssert(handle, "null handle load");
         }
         handle = b.CreateAlignedLoad(localStateTy->getPointerTo(), handle, PtrTyABIAlignment);
