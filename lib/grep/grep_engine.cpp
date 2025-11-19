@@ -66,6 +66,7 @@
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/expand_permutes.h>
 #include <re/transforms/name_intro.h>
+#include <re/transforms/name_lookaheads.h>
 #include <re/transforms/reference_transform.h>
 #include <re/transforms/variable_alt_promotion.h>
 #include <re/unicode/casing.h>
@@ -393,6 +394,11 @@ void GrepEngine::initRE(re::RE * re) {
     if (mIndexAlphabet == &cc::UTF8) {
         bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
         mRE = toUTF8(mRE, useInternalNaming);
+    }
+    re::LookAheadNamer LA;
+    mRE = LA.transformRE(mRE);
+    for (auto m : LA.mNameMap) {
+        mExternalTable.declareExternal(indexCode, m.first, new RE_External(this, m.second, mLengthAlphabet));
     }
     re::VariableLengthCCNamer CCnamer;
     mRE = CCnamer.transformRE(mRE);

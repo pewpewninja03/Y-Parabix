@@ -376,16 +376,12 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
                 PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
                 return Marker(mPB.createAnd(marker.stream(), extLookahead), marker.offset());
             } else {
+                Marker following = AdvanceMarker(marker, 1);
                 auto extLength = ext.minLength();
                 if (extLength == ext.maxLength()) {
-                    if ((extLength == 1) && (marker.offset() == 1) && (extMarker.offset() == 0)) {
-                        // The current marker is already aligned with the
-                        // external marker.
-                        return Marker(mPB.createAnd(marker.stream(), extStream), marker.offset());
-                    }
-                    auto ahead = extMarker.offset() - marker.offset() + extLength;
+                    auto ahead = extLength + extMarker.offset() - 1;
                     PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
-                    return Marker(mPB.createAnd(marker.stream(), extLookahead), marker.offset());
+                    return Marker(mPB.createAnd(following.stream(), extLookahead), 1);
                 }
             }
         }

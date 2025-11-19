@@ -17,7 +17,7 @@ RE * LookAheadNamer::transformAssertion (Assertion * a) {
     RE * x = transform(x0);
     if ((a->getKind() == Assertion::Kind::LookAhead) && !isa<Name>(x)) {
         std::string name = Printer_RE::PrintRE(x);
-        return makeAssertion(makeName(name, x), Assertion::Kind::LookAhead, a->getSense());
+        return makeAssertion(createName(name, x), Assertion::Kind::LookAhead, a->getSense());
     } else if (x == x0) {
         return a;
     } else {

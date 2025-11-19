@@ -450,17 +450,17 @@ void GrepKernelOptions::addAlphabet(const cc::Alphabet * a, StreamSet * basis) {
     mAlphabets.emplace_back(a, basis);
 }
 
-unsigned round_up_to_blocksize(unsigned offset) {
-    unsigned lookahead_blocks = (codegen::BlockSize - 1 + offset)/codegen::BlockSize;
+unsigned round_up_to_blocksize(int lgth) {
+    unsigned lookahead_blocks = (codegen::BlockSize - 1 + lgth)/codegen::BlockSize;
     return lookahead_blocks * codegen::BlockSize;
 }
 
 void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned offset, std::pair<int, int> lengthRange) {
-    if (offset == 0) {
-        mExternalBindings.emplace_back(name, strm);
-    } else {
-        unsigned ahead = round_up_to_blocksize(offset);
+    unsigned ahead = round_up_to_blocksize(lengthRange.first);
+    if (ahead > 0) {
         mExternalBindings.emplace_back(name, strm, FixedRate(), LookAhead(ahead));
+    } else {
+        mExternalBindings.emplace_back(name, strm);
     }
     mExternalOffsets.push_back(offset);
     mExternalLengths.push_back(lengthRange);
