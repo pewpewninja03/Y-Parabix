@@ -456,11 +456,11 @@ unsigned round_up_to_blocksize(unsigned offset) {
 }
 
 void GrepKernelOptions::addExternal(std::string name, StreamSet * strm, unsigned offset, std::pair<int, int> lengthRange) {
-    if (offset == 0) {
-        mExternalBindings.emplace_back(name, strm);
-    } else {
-        unsigned ahead = round_up_to_blocksize(offset);
+    unsigned ahead = round_up_to_blocksize(lengthRange.second);
+    if (ahead > 0) {
         mExternalBindings.emplace_back(name, strm, FixedRate(), LookAhead(ahead));
+    } else {
+        mExternalBindings.emplace_back(name, strm);
     }
     mExternalOffsets.push_back(offset);
     mExternalLengths.push_back(lengthRange);
