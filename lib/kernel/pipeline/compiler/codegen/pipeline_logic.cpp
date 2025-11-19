@@ -148,6 +148,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
     const auto onAfterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
 
+    #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
         if (LLVM_LIKELY(firstComputeKernelId <= kernelId && kernelId < onAfterLastComputeKernelId)) {
             if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
@@ -156,15 +157,14 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
             }
         }
     }
+    #endif
 
     const auto isInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     if (LLVM_UNLIKELY(isInternallySynchronized)) {
         mIsInternallySynchronized.set(kernelId);
     }
 
-    #if defined(DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION)
-    const auto allowDataParallelExecution = false;
-    #elif defined(ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL)
+    #if defined(ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL)
     const auto allowDataParallelExecution = isStateless || isInternallySynchronized;
     #else
     const auto allowDataParallelExecution = isStateless;

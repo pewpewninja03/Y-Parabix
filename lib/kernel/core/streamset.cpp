@@ -78,8 +78,6 @@ return fd;
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
 
-// #define FORCE_LINEAR_BUFFERS
-
 uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow) {
 
     assert (size > 0);
@@ -1201,15 +1199,15 @@ void ManagedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value *
         // -----------------------------------------------------
 
         b.SetInsertPoint(copyLinkToFixedSlots);
-        PHINode * const nextLinkPhi = b.CreatePHI(pendingDeletionPtrTy, 3);
+        PHINode * const nextLinkPhi = b.CreatePHI(voidPtrTy, 3);
         nextLinkPhi->addIncoming(additionalLink, copySecondToFirst);
-        nextLinkPhi->addIncoming(currentLink, checkLinkedList);
+        nextLinkPhi->addIncoming(currentLinkPhi, checkLinkedList);
         PHINode * const fixedIndexPhi = b.CreatePHI(b.getInt32Ty(), 3);
         fixedIndexPhi->addIncoming(i32_ONE, copySecondToFirst);
         fixedIndexPhi->addIncoming(i32_ZERO, checkLinkedList);
-
+        Value * const nextPendingDeletionLink = b.CreatePointerCast(nextLinkPhi, pendingDeletionPtrTy);
         indices2[1] = i32_PendingAddress;
-        Value * const linkAddrField = b.CreateGEP(pendingDeletionTy, nextLinkPhi, indices2);
+        Value * const linkAddrField = b.CreateGEP(pendingDeletionTy, nextPendingDeletionLink, indices2);
         Value * const linkAddr = b.CreateAlignedLoad(voidPtrTy, linkAddrField, voidPtrTyAlign);
         indices4[2] = fixedIndexPhi;
         indices4[3] = i32_PendingAddress;
@@ -1218,7 +1216,7 @@ void ManagedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value *
 
         if (!mLinear) {
             indices2[1] = i32_PendingCapacity;
-            Value * const linkCapacityField = b.CreateGEP(pendingDeletionTy, nextLinkPhi, indices2);
+            Value * const linkCapacityField = b.CreateGEP(pendingDeletionTy, nextPendingDeletionLink, indices2);
             Value * const linkCapacity = b.CreateAlignedLoad(intPtrTy, linkCapacityField, intPtrTyAlign);
             indices4[3] = i32_PendingCapacity;
             Value * const pendingCapacity3Field = b.CreateGEP(handleTy, handle, indices4);
@@ -1226,17 +1224,17 @@ void ManagedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value *
         }
 
         indices2[1] = i32_PendingConsumed;
-        Value * const linkConsumedField = b.CreateGEP(pendingDeletionTy, nextLinkPhi, indices2);
+        Value * const linkConsumedField = b.CreateGEP(pendingDeletionTy, nextPendingDeletionLink, indices2);
         Value * const linkConsumed = b.CreateAlignedLoad(intPtrTy, linkConsumedField, intPtrTyAlign);
         indices4[3] = i32_PendingConsumed;
         Value * const pendingConsumed3Field = b.CreateGEP(handleTy, handle, indices4);
         b.CreateAlignedStore(linkConsumed, pendingConsumed3Field, intPtrTyAlign);
 
         indices2[1] = i32_PendingNextLink;
-        Value * const subsequentLinkField = b.CreateGEP(pendingDeletionTy, nextLinkPhi, indices2);
+        Value * const subsequentLinkField = b.CreateGEP(pendingDeletionTy, nextPendingDeletionLink, indices2);
         Value * const subsequentLink = b.CreateAlignedLoad(voidPtrTy, subsequentLinkField, voidPtrTyAlign);
         b.CreateAlignedStore(subsequentLink, additionalLinkField, voidPtrTyAlign);
-        b.CreateFree(nextLinkPhi);
+        b.CreateFree(nextPendingDeletionLink);
         Value * const doneLinkCopy = b.CreateICmpEQ(fixedIndexPhi, i32_ONE);
         b.CreateCondBr(doneLinkCopy, exit, checkNextLinkToPropagateToFixedSlot);
 
@@ -1384,6 +1382,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
         Constant * const nilVoidPtr = ConstantPointerNull::get(voidPtrTy);
 
+        PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo(mAddressSpace);
 
         ConstantInt * const BLOCK_WIDTH = b.getSize(blockWidth);
         ConstantInt * const sz_ZERO = b.getSize(0);
@@ -1721,14 +1720,16 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         indices[0] = i32_ZERO;
         indices[1] = b.getInt32(PendingDeletionAdditionalStructPointer);
         Value * const initialAdditionalStructPtrField = b.CreateGEP(handleTy, handle, indices);
+        Value * const voidPtrStructPtr = b.CreatePointerCast(initialAdditionalStructPtrField, voidPtrPtrTy);
         Value * const firstLinkAddr = b.CreateAlignedLoad(voidPtrTy, initialAdditionalStructPtrField, voidPtrTyAlign);
         Value * const emptyFirstLink = b.CreateICmpEQ(firstLinkAddr, nilVoidPtr);
         b.CreateLikelyCondBr(emptyFirstLink, appendLinkedList, scanLinkedList);
 
         b.SetInsertPoint(scanLinkedList);
-        PointerType * const voidPtrPtrTy = voidPtrTy->getPointerTo(mAddressSpace);
-        PHINode * const linkPtrPhi = b.CreatePHI(voidPtrPtrTy, 2);
+        PHINode * const linkPtrPhi = b.CreatePHI(voidPtrTy, 2);
         linkPtrPhi->addIncoming(firstLinkAddr, entry1Used);
+
+
 
         FixedArray<Type *, 4> pendingDeletionFields;
         pendingDeletionFields[PendingDeletionAddress] = voidPtrTy;
@@ -1736,10 +1737,15 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         pendingDeletionFields[PendingDeletionConsumed] = intPtrTy;
         pendingDeletionFields[PendingDeletionNextLink] = voidPtrTy;
         StructType * const pendingDeletionTy = StructType::get(C, pendingDeletionFields);
+        PointerType * const pendingDeletionPtrTy = pendingDeletionTy->getPointerTo(mAddressSpace);
+
 
         indices[0] = i32_ZERO;
         indices[1] = i32_PendingDeletionNextLink;
-        Value * const nextLinkField = b.CreateGEP(pendingDeletionTy, linkPtrPhi, indices);
+
+        Value * const linkPtr = b.CreatePointerCast(linkPtrPhi, pendingDeletionPtrTy);
+        Value * const nextLinkField = b.CreateGEP(pendingDeletionTy, linkPtr, indices);
+        Value * const voidPtrNextLinkField = b.CreatePointerCast(nextLinkField, voidPtrPtrTy);
         Value * const currentLinkAddr = b.CreateAlignedLoad(voidPtrTy, nextLinkField, voidPtrTyAlign);
 
         linkPtrPhi->addIncoming(currentLinkAddr, scanLinkedList);
@@ -1751,16 +1757,15 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
         b.SetInsertPoint(appendLinkedList);
         PHINode * const storeLinkPtrPhi = b.CreatePHI(voidPtrPtrTy, 2);
-        storeLinkPtrPhi->addIncoming(initialAdditionalStructPtrField, entry1Used);
-        storeLinkPtrPhi->addIncoming(nextLinkField, scanLinkedList);
+        storeLinkPtrPhi->addIncoming(voidPtrStructPtr, entry1Used);
+        storeLinkPtrPhi->addIncoming(voidPtrNextLinkField, scanLinkedList);
 
-        const auto cl = b.getCacheAlignment();
         const auto linkNodeSize = b.getTypeSize(DL, pendingDeletionTy);
         const auto linkNodeAlign = b.getAlignOf(DL, pendingDeletionTy);
         Value * const newLink = b.CreateAlignedMalloc(b.getSize(linkNodeSize), linkNodeAlign);
-        Value * const link = b.CreatePointerCast(newLink, pendingDeletionTy->getPointerTo(mAddressSpace));
         indices[0] = i32_ZERO;
         indices[1] = i32_PendingDeletionAddress;
+        Value * const link = b.CreatePointerCast(newLink, pendingDeletionPtrTy);
         Value * const newAddrField = b.CreateGEP(pendingDeletionTy, link, indices);
         b.CreateAlignedStore(initialAddr, newAddrField, voidPtrTyAlign);
         if (!mLinear) {
@@ -1776,7 +1781,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         Value * const newNextLink = b.CreateGEP(pendingDeletionTy, link, indices);        
         b.CreateAlignedStore(nilVoidPtr, newNextLink, voidPtrTyAlign);
 
-        b.CreateAlignedStore(newLink, storeLinkPtrPhi, voidPtrTyAlign);
+        b.CreateAlignedStore(b.CreatePointerCast(newLink, voidPtrTy), storeLinkPtrPhi, voidPtrTyAlign);
         b.CreateBr(exit);
 
         b.SetInsertPoint(exit);
@@ -1916,15 +1921,9 @@ ExternalBuffer::ExternalBuffer(const unsigned id, KernelBuilder & b, Type * cons
 
 }
 
-#ifdef FORCE_LINEAR_BUFFERS
-#define LINEAR true
-#else
-#define LINEAR linear
-#endif
-
 ManagedDynamicBuffer::ManagedDynamicBuffer(const unsigned id, KernelBuilder & b,
                                            Type * const type, const bool linear, const unsigned AddressSpace)
-: InternalBuffer(id, BufferKind::ManagedDynamicBuffer, b, type, LINEAR, AddressSpace) {
+: InternalBuffer(id, BufferKind::ManagedDynamicBuffer, b, type, linear, AddressSpace) {
 
 }
 

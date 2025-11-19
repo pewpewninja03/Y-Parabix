@@ -1163,7 +1163,7 @@ void UnitInsertionSpreadMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
             produced = b.CreateAdd(produced, newbits);
             Value * pack_filled = b.CreateICmpUGE(offset, PACK_BITS);
             pending = b.CreateSelect(pack_filled, pack_overflow, pending);
-            spread_mask_pack_ptr = b.CreateGEP(packPtrTy, spread_mask_pack_ptr, b.CreateZExt(pack_filled, sizeTy));
+            spread_mask_pack_ptr = b.CreateGEP(packTy, spread_mask_pack_ptr, b.CreateZExt(pack_filled, sizeTy));
             offset = b.CreateURem(produced, PACK_BITS);
         }
     }

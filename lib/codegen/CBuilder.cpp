@@ -1479,8 +1479,7 @@ LoadInst * CBuilder::CreateLoad(Type * type, Value * Ptr, const char * Name) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    CreateAssert(Ptr, "Ptr null");
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
@@ -1494,8 +1493,7 @@ LoadInst * CBuilder::CreateLoad(Type * type, Value *Ptr, const Twine Name) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    CreateAssert(Ptr, "Ptr null");
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
@@ -1509,8 +1507,7 @@ LoadInst * CBuilder::CreateLoad(Type * type, Value * Ptr, bool isVolatile, const
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (type->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    CreateAssert(Ptr, "Ptr null");
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(type), "CreateLoad");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(14, 0, 0)
@@ -1526,7 +1523,7 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     assert (Val->getType()->canLosslesslyBitCastTo(Ptr->getType()->getPointerElementType()));
     #endif
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, getTypeSize(Val->getType()), "CreateStore");
     }
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
@@ -1541,7 +1538,7 @@ inline bool CBuilder::hasAddressSanitizer() const {
 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, const char * Name) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress") )) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1555,7 +1552,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, const Twine Name) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts) || GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1569,7 +1566,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, bool isVolatile, const Twine Name) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts)|| GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
@@ -1583,7 +1580,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 
 StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigned Align, bool isVolatile) {
     assert (Align > 0);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts)|| GetInsertBlock()->getParent()->getParent()->getName().startswith("streamCompress"))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);

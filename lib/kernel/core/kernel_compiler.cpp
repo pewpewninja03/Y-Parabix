@@ -532,7 +532,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
         setHandle(nextArg());
 
 
-        if (LLVM_UNLIKELY(ea || true)) {
+        if (LLVM_UNLIKELY(ea)) {
             auto & dl = b.getModule()->getDataLayout();
             const auto align = CBuilder::getAlignOf(dl, mTarget->getSharedStateType());
             if (LLVM_LIKELY(align > 1U)) {
@@ -652,7 +652,7 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilde
         threadLocal->addIncoming(allocedState, allocThreadLocal);
 
         const auto ea = codegen::DebugOptionIsSet(codegen::EnableAsserts);
-        if (LLVM_UNLIKELY(ea || true)) {
+        if (LLVM_UNLIKELY(ea)) {
             auto & dl = b.getModule()->getDataLayout();
             const auto align = CBuilder::getAlignOf(dl, threadLocalTy);
             if (LLVM_LIKELY(align > 1U)) {
@@ -780,7 +780,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         if (LLVM_UNLIKELY(enableAsserts)) {
             b.CreateAssert(getHandle(), "%s: shared handle cannot be null", b.GetString(getName()));
         }
-        if (LLVM_UNLIKELY(enableAsserts || true)) {
+        if (LLVM_UNLIKELY(enableAsserts)) {
             auto & dl = b.getModule()->getDataLayout();
             const auto align = CBuilder::getAlignOf(dl, mTarget->getSharedStateType());
             if (LLVM_LIKELY(align > 1U)) {
@@ -796,7 +796,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         if (LLVM_UNLIKELY(enableAsserts)) {
             b.CreateAssert(getThreadLocalHandle(), "%s: thread local handle cannot be null", b.GetString(getName()));
         }
-        if (LLVM_UNLIKELY(enableAsserts || true)) {
+        if (LLVM_UNLIKELY(enableAsserts)) {
             auto & dl = b.getModule()->getDataLayout();
             const auto align = CBuilder::getAlignOf(dl, mTarget->getThreadLocalStateType());
             if (LLVM_LIKELY(align > 1U)) {
