@@ -332,13 +332,13 @@ void GraphemeClusterBreak::resolveStreamSet(PipelineBuilder & b, std::vector<Str
     installStreamSet(GCBstream);
 }
 
-const std::vector<std::string> WordBoundaryExternal::getParameters() {
+const std::vector<std::string> SimpleWordBoundaryExternal::getParameters() {
     return std::vector<std::string>{"basis", "u8index"};
 }
 
-void WordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+void SimpleWordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * wb = b.CreateStreamSet(1);
-    WordBoundaryLogic(b, inputs[0], inputs[1], wb);
+    SimpleWordBoundaryLogic(b, inputs[0], inputs[1], wb);
     installStreamSet(wb);
 }
 
@@ -966,7 +966,7 @@ void kernel::GraphemeClusterLogic(PipelineBuilder & P, StreamSet * Source, Strea
     P.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
 }
 
-void kernel::WordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
+void kernel::SimpleWordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
     re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
     wordProp = UCD::linkAndResolve(wordProp);
     re::Name * word = re::makeName("word");
@@ -974,6 +974,21 @@ void kernel::WordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSe
     StreamSet * WordStream = P.CreateStreamSet(1);
     P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
     P.CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
+}
+
+void kernel::Level2WordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * WB_stream) {
+    re::RE * WB = re::generateWordBoundaryRule();
+    const auto WB_Sets = re::collectCCs(WB, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
+    auto WB_mpx = cc::makeMultiplexedAlphabet("WB_mpx", WB_Sets);
+    WB = transformCCs(WB_mpx, WB, re::NameTransformationMode::TransformDefinition);
+    auto WB_basis = WB_mpx->getMultiplexedCCs();
+    StreamSet * const WB_Classes = P.CreateStreamSet(WB_basis.size());
+    P.CreateKernelFamilyCall<CharClassesKernel>(WB_basis, Source, WB_Classes);
+    auto options = std::make_unique<GrepKernelOptions>();
+    options->setRE(WB);
+    options->addAlphabet(WB_mpx, WB_Classes);
+    options->setResults(WB_stream);
+    P.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
 }
 
 LongestMatchMarks::LongestMatchMarks(LLVMTypeSystemInterface & ts, StreamSet * start_ends, StreamSet * marks)

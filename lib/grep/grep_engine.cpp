@@ -406,7 +406,7 @@ void GrepEngine::initRE(re::RE * re) {
         mExternalTable.declareExternal(indexCode, m.first, new CC_External(cast<re::CC>(m.second)));
     }
     if (hasWordBoundary(mRE)) {
-        mExternalTable.declareExternal(indexCode, "\\b", new WordBoundaryExternal());
+        mExternalTable.declareExternal(indexCode, "\\b", new SimpleWordBoundaryExternal());
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
         setComponent(mExternalComponents, Component::MatchSpans);

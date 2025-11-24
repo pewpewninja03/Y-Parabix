@@ -236,7 +236,7 @@ private:
     const cc::Alphabet * const mIndexAlphabet;
 };
 
-class WordBoundaryExternal final : public ExternalStreamObject {
+class SimpleWordBoundaryExternal final : public ExternalStreamObject {
 public:
     static inline bool classof(const ExternalStreamObject * ext) {
         return ext->getKind() == Kind::WordBoundaryExternal;
@@ -245,7 +245,7 @@ public:
         return false;
     }
     const std::vector<std::string> getParameters() override;
-    WordBoundaryExternal() :
+    SimpleWordBoundaryExternal() :
         ExternalStreamObject(Kind::WordBoundaryExternal, std::make_pair(0, 0), 1) {}
     void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
 };
@@ -554,8 +554,11 @@ private:
 void GraphemeClusterLogic(PipelineBuilder & P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream);
 
-void WordBoundaryLogic(PipelineBuilder & P,
+void SimpleWordBoundaryLogic(PipelineBuilder & P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream);
+
+void Level2WordBoundaryLogic(PipelineBuilder & P,
+                          StreamSet * Source, StreamSet * wordBoundary_stream);
 
 //  The LongestMatchMarks kernel computes longest-match spans in start-end space.
 //  Logically, the input is a set of 2 streams marking, respectively, matches
