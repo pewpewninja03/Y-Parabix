@@ -11,7 +11,9 @@ class EnumeratedPropertyObject;
 
 bool hasGraphemeClusterBoundary(const RE * re);
 
-bool hasWordBoundary(const RE * re);
+bool hasSimpleWordBoundary(const RE * re);
+
+bool hasLevel2WordBoundary(const RE * re);
 
 bool hasUnicodeLookahead(const RE * re);
 

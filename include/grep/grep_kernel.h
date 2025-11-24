@@ -61,7 +61,7 @@ public:
     enum class Kind : unsigned {
         U21, PreDefined, LineStarts, CC_External, RE_External,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
-        WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
+        SimpleWordBoundaryExternal, Level2WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
         FilterByMask, FixedSpan, MarkedSpanExternal,
         CCmask, CCselfTransitionMask, MaskedFixedSpan
     };
@@ -239,14 +239,28 @@ private:
 class SimpleWordBoundaryExternal final : public ExternalStreamObject {
 public:
     static inline bool classof(const ExternalStreamObject * ext) {
-        return ext->getKind() == Kind::WordBoundaryExternal;
+        return ext->getKind() == Kind::SimpleWordBoundaryExternal;
     }
     static inline bool classof(const void *) {
         return false;
     }
     const std::vector<std::string> getParameters() override;
     SimpleWordBoundaryExternal() :
-        ExternalStreamObject(Kind::WordBoundaryExternal, std::make_pair(0, 0), 1) {}
+        ExternalStreamObject(Kind::SimpleWordBoundaryExternal, std::make_pair(0, 0), 1) {}
+    void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
+};
+
+class Level2WordBoundaryExternal final : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::Level2WordBoundaryExternal;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    const std::vector<std::string> getParameters() override;
+    Level2WordBoundaryExternal() :
+        ExternalStreamObject(Kind::Level2WordBoundaryExternal, std::make_pair(0, 0), 1) {}
     void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
 };
 

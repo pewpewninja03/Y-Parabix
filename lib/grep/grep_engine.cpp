@@ -405,8 +405,11 @@ void GrepEngine::initRE(re::RE * re) {
     for (auto m : CCnamer.mNameMap) {
         mExternalTable.declareExternal(indexCode, m.first, new CC_External(cast<re::CC>(m.second)));
     }
-    if (hasWordBoundary(mRE)) {
+    if (hasSimpleWordBoundary(mRE)) {
         mExternalTable.declareExternal(indexCode, "\\b", new SimpleWordBoundaryExternal());
+    }
+    if (hasLevel2WordBoundary(mRE)) {
+        mExternalTable.declareExternal(indexCode, "\\b{w}", new Level2WordBoundaryExternal());
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
         setComponent(mExternalComponents, Component::MatchSpans);

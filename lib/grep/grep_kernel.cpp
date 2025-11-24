@@ -342,6 +342,16 @@ void SimpleWordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vect
     installStreamSet(wb);
 }
 
+const std::vector<std::string> Level2WordBoundaryExternal::getParameters() {
+    return std::vector<std::string>{"basis"};
+}
+
+void Level2WordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * wb = b.CreateStreamSet(1);
+    Level2WordBoundaryLogic(b, inputs[0], wb);
+    installStreamSet(wb);
+}
+
 void FilterByMaskExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * mask = inputs[0];
     StreamSet * toFilter = inputs[1];

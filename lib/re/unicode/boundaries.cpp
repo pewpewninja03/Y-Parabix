@@ -50,9 +50,9 @@ bool hasGraphemeClusterBoundary(const RE * re) {
 }
 
     
-struct WordBoundaryAbsentValidator final : public RE_Validator {
+struct SimpleWordBoundaryAbsentValidator final : public RE_Validator {
     
-    WordBoundaryAbsentValidator()
+    SimpleWordBoundaryAbsentValidator()
     : RE_Validator() {}
     
     bool validateName(const Name * n) override {
@@ -60,8 +60,23 @@ struct WordBoundaryAbsentValidator final : public RE_Validator {
     }
 };
 
-bool hasWordBoundary(const RE * re) {
-    WordBoundaryAbsentValidator v;
+bool hasSimpleWordBoundary(const RE * re) {
+    SimpleWordBoundaryAbsentValidator v;
+    return !(v.validateRE(re));
+}
+
+struct Level2WordBoundaryAbsentValidator final : public RE_Validator {
+    
+    Level2WordBoundaryAbsentValidator()
+    : RE_Validator() {}
+    
+    bool validateName(const Name * n) override {
+        return n->getName() != "\\b{w}";
+    }
+};
+
+bool hasLevel2WordBoundary(const RE * re) {
+    SimpleWordBoundaryAbsentValidator v;
     return !(v.validateRE(re));
 }
 
