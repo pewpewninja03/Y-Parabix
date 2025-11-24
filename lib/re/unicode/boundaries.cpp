@@ -415,7 +415,7 @@ RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj) {
 
 class BoundaryPropertyResolver : public RE_Transformer {
 public:
-    BoundaryPropertyResolver() : RE_Transformer("ResolveBoundaryProperties") {}
+    BoundaryPropertyResolver() : RE_Transformer("ResolveBoundaryProperties"), mGCB(nullptr), mWB(nullptr) {}
     
     RE * transformPropertyExpression(PropertyExpression * propExpr) {
         if (propExpr->getKind() == PropertyExpression::Kind::Codepoint) {
@@ -424,12 +424,18 @@ public:
         int prop_code = propExpr->getPropertyCode();
         if (propExpr->getPropertyIdentifier() == "g") {
             Name * gcb_name = makeZeroWidth("\\b{g}");
-            gcb_name->setDefinition(generateGraphemeClusterBoundaryRule());
+            if (mGCB == nullptr) {
+                mGCB = generateGraphemeClusterBoundaryRule();
+            }
+            gcb_name->setDefinition(mGCB);
             return gcb_name;
         }
         if (propExpr->getPropertyIdentifier() == "w") {
             Name * wb_name = makeZeroWidth("\\b{w}");
-            wb_name->setDefinition(generateWordBoundaryRule());
+            if (mWB == nullptr) {
+                mWB = generateWordBoundaryRule();
+            }
+            wb_name->setDefinition(mWB);
             return wb_name;
         }
         if (prop_code >= 0) {
@@ -452,7 +458,9 @@ public:
         }
         re::UnsupportedRE(Printer_RE::PrintRE(propExpr));
     }
-
+private:
+    RE * mGCB;
+    RE * mWB;
 };
 
 RE * resolveBoundaryProperties(RE * r) {
