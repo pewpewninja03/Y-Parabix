@@ -76,7 +76,7 @@ struct Level2WordBoundaryAbsentValidator final : public RE_Validator {
 };
 
 bool hasLevel2WordBoundary(const RE * re) {
-    SimpleWordBoundaryAbsentValidator v;
+    Level2WordBoundaryAbsentValidator v;
     return !(v.validateRE(re));
 }
 
