@@ -347,9 +347,12 @@ const std::vector<std::string> Level2WordBoundaryExternal::getParameters() {
 }
 
 void Level2WordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
-    StreamSet * wb = b.CreateStreamSet(1);
-    Level2WordBoundaryLogic(b, inputs[0], wb);
-    installStreamSet(wb);
+    StreamSet * WBstream = b.CreateStreamSet(1);
+    re::RE * WB_RE = re::generateWordBoundaryRule();
+    WB_RE = UCD::enumeratedPropertiesToCCs(std::set<UCD::property_t>{UCD::WB}, WB_RE);
+    WB_RE = UCD::externalizeProperties(WB_RE);
+    mGrepEngine->RunGrep(b, mIndexAlphabet, WB_RE, WBstream);
+    installStreamSet(WBstream);
 }
 
 void FilterByMaskExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {

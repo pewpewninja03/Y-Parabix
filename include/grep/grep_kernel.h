@@ -259,9 +259,12 @@ public:
         return false;
     }
     const std::vector<std::string> getParameters() override;
-    Level2WordBoundaryExternal() :
-        ExternalStreamObject(Kind::Level2WordBoundaryExternal, std::make_pair(0, 0), 1) {}
+    Level2WordBoundaryExternal(grep::GrepEngine * engine, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::Level2WordBoundaryExternal, std::make_pair(0, 0), 1), mGrepEngine(engine), mIndexAlphabet(a)  {}
     void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
+private:
+    grep::GrepEngine * const  mGrepEngine;
+    const cc::Alphabet * const mIndexAlphabet;
 };
 
 class PropertyBasisExternal final : public ExternalStreamObject {
@@ -311,6 +314,8 @@ public:
     FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, ExternalStreamObject * e) :
         ExternalStreamObject(Kind::FilterByMask, e->getLengthRange(), e->getOffset()),
             mBase(base), mParamNames(paramNames) {} // , mBaseExternal(e)
+    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames) :
+        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames) {}
     void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
 private:
     const StreamIndexCode mBase;

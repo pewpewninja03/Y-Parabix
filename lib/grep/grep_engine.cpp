@@ -348,6 +348,9 @@ void GrepEngine::initRE(re::RE * re) {
         mExternalTable.declareExternal(u8, "LineStarts", new LineStartsExternal());
         UnicodeIndexing = true;
     }
+    if (hasLevel2WordBoundary(mRE)) {
+        UnicodeIndexing = true;
+    }
     if (UnicodeIndexing) {
         mIndexAlphabet = &cc::Unicode;
         setComponent(mExternalComponents, Component::S2P);
@@ -373,6 +376,14 @@ void GrepEngine::initRE(re::RE * re) {
         if (indexCode == Unicode) {
             mExternalTable.declareExternal(Unicode, "\\b{g}", new FilterByMaskExternal(u8, {"u8index","\\b{g}"}, u8_GCB));
         }
+    }
+    if (hasLevel2WordBoundary(mRE)) {
+        auto WB_basis = new PropertyBasisExternal(UCD::WB);
+        std::string WB_basis_name = "UCD:" + getPropertyFullName(UCD::WB) + "_basis";
+        mExternalTable.declareExternal(u8, WB_basis_name, WB_basis);
+        mExternalTable.declareExternal(Unicode, WB_basis_name, new FilterByMaskExternal(u8, {"u8index", WB_basis_name}));
+        auto WB = new Level2WordBoundaryExternal(this, &cc::Unicode);
+        mExternalTable.declareExternal(Unicode, "\\b{w}", WB);
     }
     for (auto m : PE.mNameMap) {
         if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
@@ -407,9 +418,6 @@ void GrepEngine::initRE(re::RE * re) {
     }
     if (hasSimpleWordBoundary(mRE)) {
         mExternalTable.declareExternal(indexCode, "\\b", new SimpleWordBoundaryExternal());
-    }
-    if (hasLevel2WordBoundary(mRE)) {
-        mExternalTable.declareExternal(indexCode, "\\b{w}", new Level2WordBoundaryExternal());
     }
     if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
         setComponent(mExternalComponents, Component::MatchSpans);
