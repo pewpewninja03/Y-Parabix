@@ -873,7 +873,6 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
             Value * const closed = nextArg();
-            b.CallPrintInt(std::to_string(i) + "_pipe_closed", closed);
             mInputIsClosed[i] = b.CreateIsNotNull(closed);
         } else {
             mInputIsClosed[i] = mIsFinal;

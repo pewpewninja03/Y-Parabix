@@ -124,9 +124,7 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
 
     Value * strideBlockIndex = b.CreateAdd(strideBlockOffset, blockNo);
     Value * matchBitBlock = b.loadInputStreamBlock("matchResult", sz_ZERO, strideBlockIndex);
-    b.CallPrintRegister("matchBitBlock", matchBitBlock);
     Value * breakBitBlock = b.loadInputStreamBlock("lineBreak", sz_ZERO, strideBlockIndex);
-    b.CallPrintRegister("breakBitBlock", breakBitBlock);
     Value * const anyMatch = b.simd_any(sw.width, matchBitBlock);
     Value * const anyBreak = b.simd_any(sw.width, breakBitBlock);
     if (mLineNumbering) {
@@ -148,8 +146,6 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     b.CreateCondBr(b.CreateICmpNE(nextBlockNo, sz_BLOCKS_PER_STRIDE), stridePrecomputation, strideMasksReady);
 
     b.SetInsertPoint(strideMasksReady);
-    b.CallPrintInt("matchWordMask", matchWordMask);
-    b.CallPrintInt("breakWordMask", breakWordMask);
     // If there are no breaks in the stride, there are no matches.   We can move on to
     // the next stride immediately.
     b.CreateUnlikelyCondBr(b.CreateICmpEQ(breakMask, sz_ZERO), matchesDone, updateLineInfo);
@@ -219,9 +215,6 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * lineStartPos = b.CreateAdd(lineStartBase, lineStartInWord);
     // The break position is the line start for cases (a), (b); otherwise use the pending value.
     Value * const matchStart = b.CreateSelect(b.CreateOr(inWordCond, inStrideCond), lineStartPos, pendingLineStart, "matchStart");
-
-    b.CallPrintInt("matchStart", matchStart);
-
     Value * matchRecordNum = nullptr;
     if (mLineNumbering) {
         Value * lineCountInStride = b.CreateZExtOrTrunc(b.CreateLoad(sw.Ty, b.CreateGEP(sw.Ty, lineCountArrayWordPtr, matchWordIdx)), sizeTy);
@@ -233,14 +226,8 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
 
     // It is possible that the matchRecordEnd position is one past EOF.  Make sure not
     // to access past EOF.
-
-    b.CallPrintInt("matchEndPos", matchEndPos);
-
     Value * const bufLimit = b.CreateSub(avail, sz_ONE);
     matchEndPos = b.CreateUMin(matchEndPos, bufLimit);
-
-    b.CallPrintInt("matchEndPos'", matchEndPos);
-
     // matchStart should never be past EOF, but in case it is....
     //b.CreateAssert(b.CreateICmpULT(matchStart, avail), "match position past EOF");
     b.CreateCondBr(b.CreateICmpULT(matchStart, avail), dispatch, callFinalizeScan);
