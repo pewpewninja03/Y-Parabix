@@ -447,7 +447,6 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * absol
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(binding.Index);
     Value * ptr = buf->getRawItemPointer(*this, getSize(0), absolutePosition);
     Type * const ty = value->getType();
-    assert (ptr->getType() == ty->getPointerTo(buf->getAddressSpace()));
     auto & dl = getModule()->getDataLayout();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));

@@ -14,8 +14,6 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         return;
     }
 
-    ConstantInt * const sz_ZERO = b.getSize(0);
-
     using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
 
     const auto n = (LastStreamSet - FirstStreamSet) + 1;
