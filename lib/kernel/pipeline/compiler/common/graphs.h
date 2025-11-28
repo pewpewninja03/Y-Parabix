@@ -413,7 +413,8 @@ enum BufferPortType : unsigned {
     IsManaged = 64,
     CanModifySegmentLength = 128,
     IsCrossThreaded = 256,
-    Illustrated = 512
+    Illustrated = 512,
+    InputMayBeTruncated = 1024
 };
 
 struct BufferPort {
@@ -477,6 +478,10 @@ struct BufferPort {
 
     bool isIllustrated() const {
         return (Flags & BufferPortType::Illustrated) != 0;
+    }
+
+    bool inputMayBeTruncated() const {
+        return (Flags & BufferPortType::InputMayBeTruncated) != 0;
     }
 
     bool operator < (const BufferPort & rn) const {

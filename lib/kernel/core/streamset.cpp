@@ -307,9 +307,14 @@ void StreamSetBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Con
 
     assert (codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts));
 
-    Value * startPtr = getRawItemPointer(b, b.getSize(0), start);
-    Value * const streamCount = b.CreateSub(getStreamSetCount(b), b.getSize(1));
-    Value * endPtr = getRawItemPointer(b, streamCount, b.CreateRoundUpRational(end, b.getBitBlockWidth()));
+    ConstantInt * sz_ZERO = b.getSize(0);
+    ConstantInt * sz_LOG_2_BW = b.getSize(floor_log2(b.getBitBlockWidth()));
+
+    Value * const ba = getBaseAddress(b);
+
+    Value * startPtr = getStreamBlockPtr(b, ba, sz_ZERO, b.CreateLShr(start, sz_LOG_2_BW));
+    Value * endPtr = getStreamBlockPtr(b, ba, sz_ZERO, b.CreateLShr(end, sz_LOG_2_BW));
+
     auto & dl = b.getModule()->getDataLayout();
     IntegerType * const intPtrTy = dl.getIntPtrType(b.getContext());
     startPtr = b.CreatePtrToInt(startPtr, intPtrTy);

@@ -577,9 +577,26 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         }
         // out << " {G" << pd.GlobalPortId << ",L" << pd.LocalPortId << '}';
 
+        size_t lookAhead = 0;
+        bool isZeroExtended = false;
+        for (auto & attr : binding.getAttributes()) {
+            switch (attr.getKind()) {
+                case AttrId::LookAhead:
+                    lookAhead = std::max(lookAhead, attr.amount());
+                    break;
+                case AttrId::ZeroExtended:
+                    isZeroExtended = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+
         #ifndef USE_SIMPLE_BUFFER_GRAPH
 
         out << " {" << port.SymbolicRateId << '}';
+
+
 
         if (port.isPrincipal()) {
             out << " [P]";
@@ -590,7 +607,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         if (port.TransitiveAdd) {
             out << " +" << port.TransitiveAdd;
         }
-        if (binding.hasAttribute(AttrId::ZeroExtended)) {
+        if (isZeroExtended) {
             if (port.isZeroExtended()) {
                 out << " [Z]";
             } else {
@@ -623,11 +640,19 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                 break;
         }
 
+
         if (port.LookBehind) {
             out << " [LB:" << port.LookBehind << ']';
         }
-        if (port.LookAhead) {
-            out << " [LA:" << port.LookAhead << ']';
+
+        if (lookAhead || port.LookAhead) {
+            out << " [LA:";
+            if (lookAhead == port.LookAhead) {
+                out << lookAhead;
+            } else {
+                out << lookAhead << "&#x336;" << ' ' << port.LookAhead;
+            }
+            out << ']';
         }
         if (port.Delay) {
             out << " [Delay:" << port.Delay << ']';

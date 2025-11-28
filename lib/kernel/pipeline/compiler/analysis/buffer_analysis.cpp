@@ -502,6 +502,47 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
         }
     }
 
+    // If a kernel within this pipeline consumes an input and the consuming port has a lookahead,
+    // this is only safe if the pipeline input port has a lookahead or is a non-countable or
+    // deferrable rate. However, if we know the outer pipeline is already applying the lookahead
+    // constraint, we can ignore it for the inner kernel call.
+    for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+        const auto & inPort = mBufferGraph[input];
+        const auto streamSet = target(input, mBufferGraph);
+
+        for (const auto cons : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            auto & consPort = mBufferGraph[cons];
+            if (LLVM_UNLIKELY(consPort.LookAhead > inPort.LookAhead)) {
+                const Binding & binding = consPort.Binding;
+                if (LLVM_LIKELY(isAddressable(binding) || !IsNestedPipeline)) {
+                    consPort.LookAhead -= inPort.LookAhead;
+                } else {
+                    const auto consumer = target(cons, mBufferGraph);
+
+                    SmallVector<char, 1024> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << getKernel(consumer)->getName() << '.' << binding.getName()
+                        << " has LookAhead(" << consPort.LookAhead << ") of Pipeline input \""
+                        << mPipelineKernel->getName() << '.' << inPort.Binding.get().getName()
+                        << "\", which is a non-deferred countable rate with";
+                    if (inPort.LookAhead == 0) {
+                        msg << "out no LookAhead attribute";
+                    } else {
+                        msg << " LookAhead(" << inPort.LookAhead << ")";
+                    }
+
+                    report_fatal_error(msg.str());
+                }
+
+            } else {
+                consPort.LookAhead = 0;
+            }
+        }
+
+
+
+    }
+
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         if (LLVM_UNLIKELY(mBufferGraph[output].isManaged())) {
             mBufferGraph[source(output, mBufferGraph)].Type |= BufferType::ManagedOutput;
@@ -964,7 +1005,7 @@ ignore_duplicate_entry:
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::buildZeroInputGraph() {
 
-    SmallVector<std::pair<size_t, unsigned>, 8> entries;
+    SmallVector<unsigned, 8> entries;
 
     const auto n = LastKernel - FirstKernel + 1;
 
@@ -984,6 +1025,7 @@ void PipelineAnalysis::buildZeroInputGraph() {
                 continue;
             }
 
+
             if (LLVM_UNLIKELY(!(bn.isTruncated() || bn.isConstant()))) {
                 const auto producer = parent(streamSet, mBufferGraph);
                 if (KernelPartitionId[producer] == KernelPartitionId[kernel]) {
@@ -991,11 +1033,14 @@ void PipelineAnalysis::buildZeroInputGraph() {
                 }
             }
 
-
-            const BufferPort & port = mBufferGraph[e];
+            BufferPort & port = mBufferGraph[e];
             assert (port.Port.Type == PortType::Input);
             const Binding & input = port.Binding;
             const ProcessingRate & rate = input.getRate();
+
+            if (LLVM_UNLIKELY(port.Port.Reason != ReasonType::Explicit)) {
+                continue;
+            }
 
             // TODO: have an "unsafe" override attribute for unowned ones? this isn't needed for
             // nested pipelines but could replace the source output.
@@ -1004,17 +1049,9 @@ void PipelineAnalysis::buildZeroInputGraph() {
                 continue;
             }
 
-            size_t w = 0;
-            if (port.isDeferred()) {
-                // we won't know how big a deferred entry; we still allocate based on need at run-time
-                // but this will at least minimize the potential reallocs.
-                w = std::numeric_limits<size_t>::max();
-            } else {
-                assert (port.Maximum.denominator() == 1);
-                w = port.Maximum.denominator();
-            }
+            port.Flags |= BufferPortType::InputMayBeTruncated;
 
-            entries.emplace_back(w, port.Port.Number);
+            entries.emplace_back(port.Port.Number);
         }
 
         if (entries.empty()) {
@@ -1033,7 +1070,7 @@ void PipelineAnalysis::buildZeroInputGraph() {
         }
 
         for (size_t k = 0U; k < l; ++k) {
-            const auto portNum = entries[k].second;
+            const auto portNum = entries[k];
             add_edge(kernel - FirstKernel, n + k, portNum, G);
         }
 

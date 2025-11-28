@@ -303,7 +303,7 @@ public:
 
     Value * revertTransitiveAddCalculation(KernelBuilder & b, const ProcessingRate &rate, Value * expectedItemCount, Value * rejectedTerminationSignal);
 
-    void zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses);
+    void zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputCapacity, Vec<Value *> & inputBaseAddresses);
     void freeZeroedInputBuffers(KernelBuilder & b);
 
     Value * allocateLocalZeroExtensionSpace(KernelBuilder & b, BasicBlock * const insertBefore) const;
@@ -841,12 +841,17 @@ protected:
 
     InputPortVector<Value *>                    mInternalAccessibleInputItems;
     InputPortVector<PHINode *>                  mLinearInputItemsPhi;
+    InputPortVector<PHINode *>                  mLinearInputItemCapacityPhi;
+
+
     InputPortVector<Value *>                    mReturnedProcessedItemCountPtr; // written by the kernel
     InputPortVector<Value *>                    mProcessedItemCountPtr; // exiting the segment loop
     InputPortVector<Value *>                    mProcessedItemCount;
     InputPortVector<PHINode *>                  mProcessedItemCountAtTerminationPhi;
     InputPortVector<Value *>                    mProcessedDeferredItemCountPtr;
     InputPortVector<Value *>                    mProcessedDeferredItemCount;
+
+
 
     InputPortVector<Value *>                    mExhaustedInputPort;
     InputPortVector<PHINode *>                  mExhaustedInputPortPhi;
@@ -1039,6 +1044,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mFirstInputStrideLength(P.MaxNumOfInputPorts, mAllocator)
 , mInternalAccessibleInputItems(P.MaxNumOfInputPorts, mAllocator)
 , mLinearInputItemsPhi(P.MaxNumOfInputPorts, mAllocator)
+, mLinearInputItemCapacityPhi(P.MaxNumOfInputPorts, mAllocator)
 , mReturnedProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)

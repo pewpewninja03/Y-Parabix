@@ -48,6 +48,13 @@ public:
         return mSignature;
     }
 private:
+    StringReplaceKernel(LLVMTypeSystemInterface & ts, std::string && signature,
+                        const std::vector<std::string> & insertStrs,
+                        StreamSet * basis, StreamSet * spreadMask,
+                        StreamSet * insertMarks, StreamSet * runIndex,
+                        StreamSet * output,
+                        int offset = 0);
+private:
     const std::vector<std::string>  mInsertStrings;
     const bool                      mMultiplexing;
     const int                       mMarkOffset;

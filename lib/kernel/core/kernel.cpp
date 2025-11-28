@@ -983,9 +983,8 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         const Binding & input = mInputStreamSets[i];
         // virtual base input address
         fields.push_back(voidPtrTy);
-        // is closed
         if (LLVM_UNLIKELY(internallySynchronized)) {
-            fields.push_back(b.getInt1Ty());
+            fields.push_back(sizeTy); // is closed
         }
         // processed input items
         if (isMainPipeline || isAddressable(input)) {

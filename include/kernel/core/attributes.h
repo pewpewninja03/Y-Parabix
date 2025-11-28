@@ -364,6 +364,8 @@ struct Attribute {
 
     Attribute(const KindId kind, const size_t a = 0, const size_t b = 1) : mKind(kind), mAmount(a, b) { }
 
+    Attribute(const KindId kind, const Rational r) : mKind(kind), mAmount(r) { }
+
     Attribute(const KindId kind, llvm::StringRef string) : mKind(kind), mString(string) { }
 
 private:
@@ -388,6 +390,15 @@ struct AttributeSet : public std::vector<Attribute> {
             return *attr;
         } else {
             return addAttribute(Attribute(id, 0));
+        }
+    }
+
+    Attribute & findOrAddAttribute(const AttributeId id, Attribute::Rational amount) {
+        if (Attribute * const attr = __findAttribute(id)) {
+            attr->mAmount = amount;
+            return *attr;
+        } else {
+            return addAttribute(Attribute(id, amount));
         }
     }
 

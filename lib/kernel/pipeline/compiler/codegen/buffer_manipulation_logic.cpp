@@ -159,13 +159,17 @@ void PipelineCompiler::addZeroInputStructProperties(KernelBuilder & b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief zeroInputAfterFinalItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBaseAddresses) {
+void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems,
+                                                    Vec<Value *> & inputCapacity, Vec<Value *> & inputBaseAddresses) {
+
     #ifndef DISABLE_INPUT_ZEROING
     const auto n = out_degree(mKernelId - FirstKernel, mZeroInputGraph);
     if (n == 0) {
         return;
     }
     assert (num_vertices(mZeroInputGraph) > LastKernel);
+
+    IntegerType * const sizeTy = b.getSizeTy();
 
     Constant * const sz_ZERO = b.getSize(0);
     Constant * const sz_ONE = b.getSize(1);
@@ -191,15 +195,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         const auto e = getInput(mKernelId, StreamSetPort{PortType::Input, portNum});
 
         const BufferPort & port = mBufferGraph[e];
-        if (LLVM_UNLIKELY(port.Port.Reason != ReasonType::Explicit)) {
-            continue;
-        }
 
         const auto streamSet = source(e, mBufferGraph);
 
         const BufferNode & bn = mBufferGraph[streamSet];
         const StreamSetBuffer * const buffer = bn.Buffer;
-
 
         const auto inputPort = port.Port;
         assert (inputPort.Type == PortType::Input);
@@ -230,6 +230,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
 
+        // inputCapacity[inputPort.Number] = buffer->getCapacity(b);
+
+        inputCapacity[inputPort.Number] = totalNumOfItems;
 
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
@@ -268,9 +271,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         Function * maskInput = m->getFunction(name.str());
 
         if (maskInput == nullptr) {
-
-
-            IntegerType * const sizeTy = b.getSizeTy();
 
             const auto blockWidth = b.getBitBlockWidth();
             const auto log2BlockWidth = floor_log2(blockWidth);
@@ -443,8 +443,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             b.restoreIP(ip);
         }
 
-
-
         FixedArray<Value *, 6> args;
 
         args[0] = b.CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
@@ -452,7 +450,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         const auto ic = port.Maximum * StrideStepLength[mKernelId];
         assert (ic.denominator() == 1);
         assert (ic.numerator() > 0);
-        args[1] = b.getSize(ic.numerator());
+        ConstantInt * const itemsPerSegment = b.getSize(ic.numerator());
+
+        args[1] = itemsPerSegment;
         Value * processed = nullptr;
         Value * max = mCurrentProcessedItemCountPhi[inputPort];
         if (port.isDeferred()) {
@@ -471,17 +471,27 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         args[4] = buffer->getStreamSetCount(b);
         args[5] = b.CreateGEP(traceArTy, base, indices);
 
+        Value * const capacity = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], itemsPerSegment);
+
         Value * const maskedAddress = b.CreatePointerCast(b.CreateCall(maskInput->getFunctionType(), maskInput, args), bufferType);
         BasicBlock * const maskedInputLoopExit = b.GetInsertBlock();
         b.CreateBr(selectedInput);
 
         b.SetInsertPoint(selectedInput);
-        PHINode * const phi = b.CreatePHI(bufferType, 2);
+        PHINode * const inputCapacityPhi = b.CreatePHI(sizeTy, 2);
         if (!alwaysTruncate) {
-            phi->addIncoming(inputBaseAddresses[inputPort.Number], entryBlock);
+            inputCapacityPhi->addIncoming(inputCapacity[inputPort.Number], entryBlock);
         }
-        phi->addIncoming(maskedAddress, maskedInputLoopExit);
-        inputBaseAddresses[inputPort.Number] = phi;
+        inputCapacityPhi->addIncoming(capacity, maskedInputLoopExit);
+
+        PHINode * const baseAddrPhi = b.CreatePHI(bufferType, 2);
+        if (!alwaysTruncate) {
+            baseAddrPhi->addIncoming(inputBaseAddresses[inputPort.Number], entryBlock);
+        }
+        baseAddrPhi->addIncoming(maskedAddress, maskedInputLoopExit);
+
+        inputCapacity[inputPort.Number] = inputCapacityPhi;
+        inputBaseAddresses[inputPort.Number] = baseAddrPhi;
     }
     #endif
 }

@@ -501,11 +501,11 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
         } else {
             sharedStateTySize = ConstantInt::getAllOnesValue(b.getSizeTy());
         }
-        Value * const correctSharedTySize = b.CreateICmpEQ(providedSharedStateTySize, sharedStateTySize);
+        Value * const correctSharedTySize = b.CreateICmpUGE(providedSharedStateTySize, sharedStateTySize);
 
         b.CreateAssert(correctSharedTySize,
                        "%s expected state type object of size %" PRIu64 " but received one of size %" PRIu64,
-                       sharedStateTySize, providedSharedStateTySize);
+                       b.GetString(getName()), sharedStateTySize, providedSharedStateTySize);
 
         Value * const providedThreadLocalTySize = nextArg();
 
@@ -516,11 +516,11 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
             threadLocalTySize = ConstantInt::getAllOnesValue(b.getSizeTy());
         }
 
-        Value * const correctThreadLocalTySize = b.CreateICmpEQ(providedThreadLocalTySize, threadLocalTySize);
+        Value * const correctThreadLocalTySize = b.CreateICmpUGE(providedThreadLocalTySize, threadLocalTySize);
 
         b.CreateAssert(correctThreadLocalTySize,
                        "%s expected state type object of size %" PRIu64 " but received one of size %" PRIu64,
-                       threadLocalTySize, providedThreadLocalTySize);
+                       b.GetString(getName()), threadLocalTySize, providedThreadLocalTySize);
 
 
 
@@ -872,8 +872,9 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         buffer->setBaseAddress(b, virtualBaseAddress);
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
-            mInputIsClosed[i] = nextArg();
-            assert (mInputIsClosed[i]->getType() == b.getInt1Ty());
+            Value * const closed = nextArg();
+            b.CallPrintInt(std::to_string(i) + "_pipe_closed", closed);
+            mInputIsClosed[i] = b.CreateIsNotNull(closed);
         } else {
             mInputIsClosed[i] = mIsFinal;
         }

@@ -163,18 +163,24 @@ Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
         return b.getFalse();
-    }
-    const auto e = in_edge(streamSet, mBufferGraph);
-    const auto producer = source(e, mBufferGraph);
-    if (LLVM_UNLIKELY(producer == PipelineInput)) {
-        if (mIsNestedPipeline) {
-            const BufferPort & bp = mBufferGraph[e];
-            return mInputIsClosed[bp.Port.Number];
-        } else {
-            return mIsFinal;
+    } else {
+        const auto e = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(e, mBufferGraph);
+        if (LLVM_UNLIKELY(producer == PipelineInput)) {
+            if (mIsNestedPipeline) {
+                const BufferPort & bp = mBufferGraph[e];
+                Value * const closed = mInputIsClosed[bp.Port.Number];
+                assert (closed->getType() == b.getInt1Ty());
+                return closed;
+            } else {
+                assert (mIsFinal->getType() == b.getInt1Ty());
+                return mIsFinal;
+            }
         }
+        Value * const closed = hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
+        assert (closed->getType() == b.getInt1Ty());
+        return closed;
     }
-    return hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

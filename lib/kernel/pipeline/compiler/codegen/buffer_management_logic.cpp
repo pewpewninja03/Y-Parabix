@@ -544,18 +544,6 @@ void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
     // The impact we have here is subtle. If we have an output kernel
 
     if (LLVM_UNLIKELY(crossThreadedInputs)) {
-//        Function * const pthreadSelfFn = b.getModule()->getFunction("pthread_self");
-//        Value * threadId = b.CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
-
-//        FixedArray<Value *, 6> argVals;
-//        argVals[0] = b.getInt32(STDERR_FILENO);
-//        argVals[1] = b.GetString("%016" PRIx64 " %s  maxClosedSegNum=%" PRIu64 "  minOpenSegNum=%" PRIu64 "\n" );
-//        argVals[2] = threadId;
-//        argVals[3] = b.GetString(mKernel->getName());
-//        argVals[4] = maxClosedSegNum;
-//        argVals[5] = minOpenSegNum;
-//        Function * Dprintf = b.GetDprintf();
-//        b.CreateCall(Dprintf->getFunctionType(), Dprintf, argVals);
 
         // max closed will be the segnum of the termination, but min open will be after the segment has finished.
         Value * acceptClosedSignal = b.CreateICmpULT(maxClosedSegNum, minOpenSegNum);

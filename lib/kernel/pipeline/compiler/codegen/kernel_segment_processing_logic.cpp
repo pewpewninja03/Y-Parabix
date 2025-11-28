@@ -529,10 +529,17 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(KernelBuilder & b) {
     const auto makeExhaustedInputPhi =
         mKernelIsInternallySynchronized && StrideStepLength[mKernelId] > 1 && mIsPartitionRoot;
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto inputPort = mBufferGraph[e].Port;
+        const auto & bp = mBufferGraph[e];
+        const auto inputPort = bp.Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
-        PHINode * const phi = b.CreatePHI(sizeTy, 2, prefix + "_linearlyAccessible");
+        PHINode * const phi = b.CreatePHI(sizeTy, 2, prefix + "_linearlyAccessiblePhi");
         mLinearInputItemsPhi[inputPort] = phi;
+        if (bp.inputMayBeTruncated()) {
+            PHINode * const capacityPhi = b.CreatePHI(sizeTy, 2, prefix + "_inputCapacityPhi");
+            mLinearInputItemCapacityPhi[inputPort] = capacityPhi;
+        } else {
+            mLinearInputItemCapacityPhi[inputPort] = nullptr;
+        }
         mCurrentLinearInputItems[inputPort] = phi;
         Type * const bufferTy = getInputBuffer(inputPort)->getPointerType();
         mInputVirtualBaseAddressPhi[inputPort] = b.CreatePHI(bufferTy, 2, prefix + "_baseAddress");

@@ -232,8 +232,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     debugPrint(b, "* " + prefix + "_executing = %" PRIu64, mNumOfLinearStrides);
     #endif
 
-
-
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
         startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
@@ -460,6 +458,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
+    IntegerType * const sizeTy = b.getSizeTy();
 
     for (unsigned i = 0; i < numOfInputs; ++i) {
         const StreamSetPort inputPort{PortType::Input, i};
@@ -499,6 +498,10 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 } else {
                     isExhausted = mExhaustedInputPort[inputPort]; assert (isExhausted);
                 }
+                isExhausted = b.CreateZExt(isExhausted, sizeTy);
+                #ifdef PRINT_DEBUG_MESSAGES
+                debugPrint(b, makeBufferName(mKernelId, inputPort) + "_isExhausted = %" PRIu64, isExhausted);
+                #endif
                 addNextArg(isExhausted);
             }
 
@@ -532,19 +535,20 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             if (LLVM_UNLIKELY(checkStreamSet)) {
                 const auto streamSet = source(port, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
-                mInitiallyProducedItemCount[streamSet] = mLocallyAvailableItems[streamSet];
                 Value * max = nullptr;
                 if (bn.isConstant()) {
                     max = getGuaranteedRepeatingStreamSetLength(b, streamSet);
+//                } else if (bn.isThreadLocal()) {
+//                    max = b.CreateAdd(processed, bn.Buffer->getCapacity(b));
+                } else if (rt.inputMayBeTruncated()) {
+                    max = mLinearInputItemCapacityPhi[inputPort]; assert (max);
                 } else {
-                    Value * base = nullptr;
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
-                        base = mCurrentProcessedItemCountPhi[inputPort];
-                    } else {
-                        base = readConsumedItemCount(b, streamSet); assert (base);
-                    }
-                    max = b.CreateAdd(base, bn.Buffer->getInternalCapacity(b));
+                    max = mLocallyAvailableItems[streamSet]; assert (max);
+                }
+                max = b.CreateRoundUpRational(max, rt.Maximum);
+                if (rt.LookAhead) {
+                    const auto la = round_up_to(rt.LookAhead, b.getBitBlockWidth());
+                    max = b.CreateAdd(max, b.getSize(la));
                 }
                 addNextArg(max);
             }
@@ -621,18 +625,19 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 addNextArg(mLinearOutputItemsPhi[rt.Port]);
             }
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                Value * base = nullptr;
+                Value * max = nullptr;
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (bn.isThreadLocal()) {
-                    base = mCurrentProducedItemCountPhi[rt.Port];
+                    max = b.CreateAdd(produced, bn.Buffer->getCapacity(b));
                 } else {
-                    base = readConsumedItemCount(b, streamSet); assert (base);
+                    Value * base = readConsumedItemCount(b, streamSet); assert (base);
+                    max = b.CreateAdd(base, buffer->getInternalCapacity(b));
                 }
-                Value * cap = b.CreateAdd(base, buffer->getInternalCapacity(b));
-                #ifdef PRINT_DEBUG_MESSAGES
-                debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_capacity = %" PRIu64, cap);
-                #endif
-                addNextArg(cap);
+                if (rt.Add) {
+                    max = b.CreateAdd(max, b.getSize(rt.Add));
+                }
+                max = b.CreateRoundUpRational(max, rt.Maximum);
+                addNextArg(max);
             }
         }
     }
