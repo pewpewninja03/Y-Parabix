@@ -61,7 +61,7 @@ public:
     enum class Kind : unsigned {
         U21, PreDefined, LineStarts, CC_External, RE_External,
         PropertyExternal, PropertyBasis, PropertyDistance, PropertyBoundary,
-        WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
+        SimpleWordBoundaryExternal, Level2WordBoundaryExternal, GraphemeClusterBreak, Multiplexed,
         FilterByMask, FixedSpan, MarkedSpanExternal,
         CCmask, CCselfTransitionMask, MaskedFixedSpan
     };
@@ -236,18 +236,35 @@ private:
     const cc::Alphabet * const mIndexAlphabet;
 };
 
-class WordBoundaryExternal final : public ExternalStreamObject {
+class SimpleWordBoundaryExternal final : public ExternalStreamObject {
 public:
     static inline bool classof(const ExternalStreamObject * ext) {
-        return ext->getKind() == Kind::WordBoundaryExternal;
+        return ext->getKind() == Kind::SimpleWordBoundaryExternal;
     }
     static inline bool classof(const void *) {
         return false;
     }
     const std::vector<std::string> getParameters() override;
-    WordBoundaryExternal() :
-        ExternalStreamObject(Kind::WordBoundaryExternal, std::make_pair(0, 0), 1) {}
+    SimpleWordBoundaryExternal() :
+        ExternalStreamObject(Kind::SimpleWordBoundaryExternal, std::make_pair(0, 0), 1) {}
     void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
+};
+
+class Level2WordBoundaryExternal final : public ExternalStreamObject {
+public:
+    static inline bool classof(const ExternalStreamObject * ext) {
+        return ext->getKind() == Kind::Level2WordBoundaryExternal;
+    }
+    static inline bool classof(const void *) {
+        return false;
+    }
+    const std::vector<std::string> getParameters() override;
+    Level2WordBoundaryExternal(grep::GrepEngine * engine, const cc::Alphabet * a) :
+        ExternalStreamObject(Kind::Level2WordBoundaryExternal, std::make_pair(0, 0), 1), mGrepEngine(engine), mIndexAlphabet(a)  {}
+    void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
+private:
+    grep::GrepEngine * const  mGrepEngine;
+    const cc::Alphabet * const mIndexAlphabet;
 };
 
 class PropertyBasisExternal final : public ExternalStreamObject {
@@ -297,6 +314,8 @@ public:
     FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames, ExternalStreamObject * e) :
         ExternalStreamObject(Kind::FilterByMask, e->getLengthRange(), e->getOffset()),
             mBase(base), mParamNames(paramNames) {} // , mBaseExternal(e)
+    FilterByMaskExternal(StreamIndexCode base, std::vector<std::string> paramNames) :
+        ExternalStreamObject(Kind::FilterByMask), mBase(base), mParamNames(paramNames) {}
     void resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) override;
 private:
     const StreamIndexCode mBase;
@@ -554,8 +573,11 @@ private:
 void GraphemeClusterLogic(PipelineBuilder & P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream);
 
-void WordBoundaryLogic(PipelineBuilder & P,
+void SimpleWordBoundaryLogic(PipelineBuilder & P,
                           StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream);
+
+void Level2WordBoundaryLogic(PipelineBuilder & P,
+                          StreamSet * Source, StreamSet * wordBoundary_stream);
 
 //  The LongestMatchMarks kernel computes longest-match spans in start-end space.
 //  Logically, the input is a set of 2 streams marking, respectively, matches

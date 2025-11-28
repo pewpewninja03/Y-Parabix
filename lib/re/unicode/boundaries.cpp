@@ -50,9 +50,9 @@ bool hasGraphemeClusterBoundary(const RE * re) {
 }
 
     
-struct WordBoundaryAbsentValidator final : public RE_Validator {
+struct SimpleWordBoundaryAbsentValidator final : public RE_Validator {
     
-    WordBoundaryAbsentValidator()
+    SimpleWordBoundaryAbsentValidator()
     : RE_Validator() {}
     
     bool validateName(const Name * n) override {
@@ -60,8 +60,23 @@ struct WordBoundaryAbsentValidator final : public RE_Validator {
     }
 };
 
-bool hasWordBoundary(const RE * re) {
-    WordBoundaryAbsentValidator v;
+bool hasSimpleWordBoundary(const RE * re) {
+    SimpleWordBoundaryAbsentValidator v;
+    return !(v.validateRE(re));
+}
+
+struct Level2WordBoundaryAbsentValidator final : public RE_Validator {
+    
+    Level2WordBoundaryAbsentValidator()
+    : RE_Validator() {}
+    
+    bool validateName(const Name * n) override {
+        return n->getName() != "\\b{w}";
+    }
+};
+
+bool hasLevel2WordBoundary(const RE * re) {
+    Level2WordBoundaryAbsentValidator v;
     return !(v.validateRE(re));
 }
 
@@ -256,6 +271,147 @@ RE * generateGraphemeClusterBoundaryRule(bool extendedGraphemeClusters) {
     return gcb;
 }
 
+// Unicode word boundary rules
+RE * generateWordBoundaryRule() {
+    // Unicode Word Boundary Rules (UAX #29) - Basic Implementation
+    
+    // WB1: Break at the start of text, sot ÷ Any
+    RE * WB_1 = makeSOT();
+    
+    // WB2: Break at the end of text, Any ÷ eot
+    RE * WB_2 = makeEOT();
+
+    // WB3: Do not break within CRLF.
+    // CR × LF
+    RE * WB_CR = makePropertyExpression("wb", "cr");
+    RE * WB_LF = makePropertyExpression("wb", "lf");
+    RE * WB_Newline = makePropertyExpression("wb", "newline");
+    
+    // Combine CR, LF, and Newline for breaking rules
+    RE * WB_CRLFNewline = makeAlt({WB_CR, WB_LF, WB_Newline});
+    
+    // Do not break between a CR and LF.
+    RE * WBX_3 = makeSeq({Behind(WB_CR), Ahead(WB_LF)});
+    
+    // break
+    // WB3a: Break before Newlines (including CR and LF)
+    RE * WB_3a = Behind(WB_CRLFNewline);
+    
+    // WB3b: Break after Newlines (including CR and LF)
+    RE * WB_3b = Ahead(WB_CRLFNewline);
+    
+    // WB3c: Do not break within emoji zwj sequences.
+    RE * WBX_ZWJ = makePropertyExpression("wb", "zwj");
+    RE * ExtendedPictographic = makePropertyExpression("Extended_Pictographic");
+    RE * WBX_3c = makeSeq({Behind(WBX_ZWJ), Ahead(ExtendedPictographic)});
+    
+    // WB3d: Keep horizontal whitespace together.
+    // WSegSpace × WSegSpace
+    RE * WB_WSegSpace = makePropertyExpression("wb", "wsegspace");
+    RE * WBX_3d = makeSeq({Behind(WB_WSegSpace), Ahead(WB_WSegSpace)});
+    
+    // WB4: Ignore Format and Extend characters
+    RE * WB_Extend = makePropertyExpression("wb", "extend");
+    RE * WB_Format = makePropertyExpression("wb", "format");
+    
+    RE * WB_4 = makeAlt({Behind(WB_Extend), Ahead(WB_Format)});
+    
+    // WB5: Do not break between most letters
+    // AHLetter × AHLetter
+    RE * WB_ALetter = makePropertyExpression("wb", "aletter");
+    RE * WB_HebrewLetter = makePropertyExpression("wb", "hebrew_letter");
+
+    // Underscore as part of AHLetter
+    // RE * WB_Underscore = makeByte('_');
+
+    RE * WB_AHLetter = makeAlt({WB_ALetter, WB_HebrewLetter});
+    RE * WBX_5 = makeSeq({Behind(WB_AHLetter), Ahead(WB_AHLetter)});
+    
+    // WB6: Do not break letters across certain punctuation
+    // AHLetter × (MidLetter | MidNumLetQ) × AHLetter
+    //  punctuation inside words
+    RE * WB_MidLetter = makePropertyExpression("wb", "midletter");
+    RE * WB_MidNumLet = makePropertyExpression("wb", "midnumlet");
+    RE * WB_SingleQuote = makePropertyExpression("wb", "single_quote");
+    RE * WB_MidNumLetQ = makeAlt({WB_MidNumLet, WB_SingleQuote});
+    RE * MidLetter_MidNumLetQ = makeAlt({WB_MidLetter, WB_MidNumLetQ});
+    RE * WBX_6 = makeSeq({Behind(WB_AHLetter), Ahead(makeSeq({MidLetter_MidNumLetQ, WB_AHLetter}))});
+    
+    // WB7: AHLetter (MidLetter | MidNumLetQ) × AHLetter
+    RE * WBX_7 = makeSeq({
+        Behind(makeSeq({WB_AHLetter, MidLetter_MidNumLetQ})),
+           Ahead(WB_AHLetter)
+       });
+    // WB7a: Hebrew_Letter    ×    Single_Quote
+    RE * WB_7a = makeSeq({Behind(WB_HebrewLetter), Ahead(WB_SingleQuote)});
+    
+    // WB7b: Hebrew_Letter    ×    Double_Quote Hebrew_Letter
+    RE * WB_DoubleQuote = makePropertyExpression("wb", "double_quote");
+    RE * WB_7b = makeSeq({Behind(WB_HebrewLetter), Ahead(makeSeq({WB_DoubleQuote, WB_HebrewLetter}))});
+    
+    // WB7c: Hebrew_Letter Double_Quote    ×    Hebrew_Letter
+    RE * WB_7c = makeSeq({Behind(makeSeq({WB_HebrewLetter, WB_DoubleQuote})), Ahead(WB_HebrewLetter)});
+
+    
+    // WB8: Do not break within sequences of digits, or digits adjacent to letters
+    // Numeric × Numeric
+    RE * WB_Numeric = makePropertyExpression("wb", "numeric");
+    RE * WBX_8 = makeSeq({Behind(WB_Numeric), Ahead(WB_Numeric)});
+    
+    // WB9: AHLetter × Numeric
+    RE * WBX_9 = makeSeq({Behind(WB_AHLetter), Ahead(WB_Numeric)});
+    
+    // WB10: Numeric × AHLetter
+    RE * WBX_10 = makeSeq({Behind(WB_Numeric), Ahead(WB_AHLetter)});
+    
+    // am not using WB_midNumLetQ ?
+    // WB11: Do not break within NUMERIC sequences
+    // Numeric (MidNum | MidNumLetQ)    ×    Numeric
+    RE * WB_MidNum = makePropertyExpression("wb", "midnum");
+    RE * MidNum_MidNumLetQ = makeAlt({WB_MidNum, WB_MidNumLetQ});
+    RE * WBX_11 = makeSeq({Behind(makeSeq({WB_Numeric, MidNum_MidNumLetQ})), Ahead(WB_Numeric)});
+    
+    // WB12: Numeric    ×    (MidNum | MidNumLetQ) Numeric --?
+    RE * WBX_12 = makeSeq({Behind(WB_Numeric), Ahead(makeSeq({MidNum_MidNumLetQ, WB_Numeric}))});
+
+    // WB13:Do not break between Katakana
+    RE * WB_Katakana = makePropertyExpression("wb", "katakana");
+    RE * WBX_13 = makeSeq({Behind(WB_Katakana), Ahead(WB_Katakana)});
+    
+    // WB13a: (AHLetter | Numeric | Katakana | ExtendNumLet) × ExtendNumLet , Do not break from extenders.
+    RE * WB_ExtendNumLet = makePropertyExpression("wb", "extendnumlet");
+    RE * WB_ALetNumKat = makeAlt({WB_AHLetter, WB_Numeric, WB_Katakana, WB_ExtendNumLet});
+    RE * WBX_13a = makeSeq({Behind(WB_ALetNumKat), Ahead(WB_ExtendNumLet)});
+    
+    // WB13b:Do not break from extenders.
+    RE * WB_ALetNumKat_1 = makeAlt({WB_AHLetter, WB_Numeric, WB_Katakana});
+    RE * WBX_13b = makeSeq({Behind(WB_ExtendNumLet), Ahead(WB_ALetNumKat_1)});
+    
+    // WB15/16: Do not break within emoji flag sequences, do not break between regional indicator (RI)
+    RE * WB_RI = makePropertyExpression("wb", "ri");
+    // Note: notBehind(RI) == sot | [^RI]
+    RE * odd_RI_seq = makeSeq({notBehind(WB_RI), makeRep(makeSeq({WB_RI, WB_RI}), 0, Rep::UNBOUNDED_REP), WB_RI});
+    RE * WBX_15_16 = makeSeq({Behind(odd_RI_seq), Ahead(WB_RI)});
+    
+    
+    // Combine breaking rules (except WB_3 which prevents CR×LF break)
+    RE * WB_all = makeAlt({WB_1, WB_2, WBX_3, WB_3a, WB_3b, WB_4});
+    
+    // Combine the "do not break" rules (just WB_3 for now)
+    RE * WBX_all = makeAlt({WBX_3, WBX_3c, WBX_3d, WBX_5, WBX_6, WBX_7, WB_7a, WB_7b, WB_7c, WBX_8, WBX_9, WBX_10, WBX_11, WBX_12, WBX_13, WBX_13a, WBX_13b, WBX_15_16});
+    
+    // WB999: Break everywhere else.
+    RE * WB_999 = makeSeq({Behind(makeAny()), Ahead(makeAny())});
+    
+    // Final word boundary rule: break at start/end of text, or break everywhere except where WBX rules apply
+    RE * wb = makeAlt({WB_all, makeDiff(WB_999, WBX_all)});
+    
+    wb = UCD::linkAndResolve(wb);
+    
+    return wb;
+}
+
+
 RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj) {
     unsigned enum_count = enumObj->GetEnumCount();
     std::vector<RE *> assertions;
@@ -274,7 +430,7 @@ RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj) {
 
 class BoundaryPropertyResolver : public RE_Transformer {
 public:
-    BoundaryPropertyResolver() : RE_Transformer("ResolveBoundaryProperties") {}
+    BoundaryPropertyResolver() : RE_Transformer("ResolveBoundaryProperties"), mGCB(nullptr), mWB(nullptr) {}
     
     RE * transformPropertyExpression(PropertyExpression * propExpr) {
         if (propExpr->getKind() == PropertyExpression::Kind::Codepoint) {
@@ -283,13 +439,18 @@ public:
         int prop_code = propExpr->getPropertyCode();
         if (propExpr->getPropertyIdentifier() == "g") {
             Name * gcb_name = makeZeroWidth("\\b{g}");
-            gcb_name->setDefinition(generateGraphemeClusterBoundaryRule());
+            if (mGCB == nullptr) {
+                mGCB = generateGraphemeClusterBoundaryRule();
+            }
+            gcb_name->setDefinition(mGCB);
             return gcb_name;
         }
         if (propExpr->getPropertyIdentifier() == "w") {
             Name * wb_name = makeZeroWidth("\\b{w}");
-            wb_name->setDefinition(nullptr);
-            re::UnsupportedRE("\\b{w} not yet supported.");
+            if (mWB == nullptr) {
+                mWB = generateWordBoundaryRule();
+            }
+            wb_name->setDefinition(mWB);
             return wb_name;
         }
         if (prop_code >= 0) {
@@ -312,7 +473,9 @@ public:
         }
         re::UnsupportedRE(Printer_RE::PrintRE(propExpr));
     }
-
+private:
+    RE * mGCB;
+    RE * mWB;
 };
 
 RE * resolveBoundaryProperties(RE * r) {
