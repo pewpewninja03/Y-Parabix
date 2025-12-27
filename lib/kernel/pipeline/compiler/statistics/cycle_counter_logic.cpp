@@ -26,7 +26,7 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const auto & bn = mBufferGraph[streamSet];
-            if (bn.Buffer->isLinear()) {
+            if (bn.OutputBuffer->isLinear()) {
                 copyPropertyTy = otherPropertyTy;
                 break;
             }

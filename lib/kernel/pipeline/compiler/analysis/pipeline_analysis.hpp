@@ -97,7 +97,7 @@ public:
 
         P.setStreamSetLockIds();
 
-        P.identifyManagedBufferStructIds();
+        P.identifyManagedBufferStructIds(rng);
 
         P.gatherInfo();
 
@@ -201,7 +201,7 @@ private:
 
     void setStreamSetLockIds();
 
-    void identifyManagedBufferStructIds();
+    void identifyManagedBufferStructIds(pipeline_random_engine & rng);
 
     // thread local analysis
 
@@ -294,6 +294,7 @@ public:
     unsigned                        PartitionCount = 0;
     unsigned                        FirstComputePartitionId = 0;
     unsigned                        LastComputePartitionId = 0;
+    unsigned                        ManagedBufferStructCount = 0;
     bool                            AllowIOProcessThread = false;
 
     bool                            HasZeroExtendedStream = false;
@@ -310,8 +311,7 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
-//    flat_map<unsigned, Rational>    StreamSetIORateMap;
-//    std::vector<Rational>           StreamSetIORate;
+
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;

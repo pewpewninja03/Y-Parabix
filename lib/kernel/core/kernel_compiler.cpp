@@ -806,7 +806,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
                                b.GetString("DoSegment"), handleInt, b.getSize(align));
             }
         }
-    }    
+    }
     const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
     // TODO: the simplest way of ensuring we can allow external I/O to be passed though the main pipeline
     // even if there are multiple consumers of the input with differing processing rates is to special
@@ -962,6 +962,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setHandle(localHandle);
             buffer->setBaseAddress(b, virtualBaseAddress);
         }
+
 
         /// ----------------------------------------------------
         /// produced item count
@@ -2282,6 +2283,5 @@ PreservedAnalyses TracePass::run(Function &F, FunctionAnalysisManager & AM) {
     return PreservedAnalyses::all();
 
 }
-
 
 }

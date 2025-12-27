@@ -176,6 +176,8 @@ public:
 
     llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
 
+    static llvm::StructType * getExternalHandleType(kernel::KernelBuilder & b);
+
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
     llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
@@ -252,12 +254,6 @@ public:
 
     llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
 
-    llvm::StructType * getLocalHandleType(kernel::KernelBuilder & b) const;
-
-    void setLocalHandle(llvm::Value * handle) const { mLocalHandle = handle; }
-
-    llvm::Value * getLocalHandle() const { return mLocalHandle; }
-
     void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
 
     void releaseBuffer(kernel::KernelBuilder & b) const override;
@@ -282,13 +278,8 @@ public:
 
     llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
-    void updateLocalHandleValues(kernel::KernelBuilder & b) const;
+    void updateLocalHandleValues(kernel::KernelBuilder & b, llvm::Value * localHandle) const;
 
-private:
-
-    mutable llvm::StructType * mLocalHandleType = nullptr;
-
-    mutable llvm::Value * mLocalHandle = nullptr;
 };
 
 class RepeatingBuffer final : public InternalBuffer {

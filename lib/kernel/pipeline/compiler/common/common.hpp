@@ -456,7 +456,7 @@ inline unsigned PipelineCommonGraphFunctions::getInputBufferVertex(const size_t 
  * @brief getInputBuffer
  ** ------------------------------------------------------------------------------------------------------------- */
 inline StreamSetBuffer * PipelineCommonGraphFunctions::getInputBuffer(const size_t kernel, const StreamSetPort inputPort) const {
-    return mBufferGraphRef[getInputBufferVertex(kernel, inputPort)].Buffer;
+    return mBufferGraphRef[getInputBufferVertex(kernel, inputPort)].OutputBuffer;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

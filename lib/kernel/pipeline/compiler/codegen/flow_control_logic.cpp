@@ -46,7 +46,7 @@ Rational PipelineCompiler::calculateBufferScalingFactor(const unsigned kernelId)
             assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
             const auto & bn = mBufferGraph[streamSet];
             scale = std::max(scale, bn.RelativeIORate);
-        } 
+        }
         assert (scale.numerator() > 0);
     }
 

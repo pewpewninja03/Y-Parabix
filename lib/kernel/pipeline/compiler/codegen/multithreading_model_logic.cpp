@@ -386,7 +386,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         assert (!mIsNestedPipeline);
         const auto outerFuncName = concat(mTarget->getName(), "_ProcessThread", tmp);
         doSegmentProcessThreadFunc = Function::Create(csDoSegmentProcessFuncType, Function::InternalLinkage, outerFuncName, m);
-        makeDoSegmentLogicFunction(doSegmentProcessThreadFunc, true); 
+        makeDoSegmentLogicFunction(doSegmentProcessThreadFunc, true);
         doSegmentProcessThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
         doSegmentComputeThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
     } else {

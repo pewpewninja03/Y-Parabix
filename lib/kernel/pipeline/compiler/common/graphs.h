@@ -298,7 +298,9 @@ enum KernelFlags {
 };
 
 struct BufferNode {
-    StreamSetBuffer * Buffer = nullptr;
+
+    StreamSetBuffer * OutputBuffer = nullptr;
+
     unsigned Type = 0;
     bool IsLinear = false;
 
@@ -315,6 +317,7 @@ struct BufferNode {
 
     unsigned OutputItemCountId = 0;
     unsigned LockId = 0;
+    unsigned ManagedStructId = 0;
 
     Rational RelativeIORate{0};
 
@@ -531,7 +534,7 @@ struct ConsumerEdge {
     : Port(port.Number), Index(index), Flags(flags) { }
 };
 
-using ConsumerGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, ConsumerEdge>;
+using ConsumerGraph = adjacency_list<vecS, vecS, bidirectionalS, size_t, ConsumerEdge>;
 
 using PartialSumStepFactorGraph = adjacency_list<vecS, vecS, bidirectionalS, no_property, unsigned>;
 

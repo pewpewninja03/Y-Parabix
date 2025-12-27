@@ -234,7 +234,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << "color=blue,";
         }
 
-        const StreamSetBuffer * const buffer = bn.Buffer;
+        const StreamSetBuffer * const buffer = bn.OutputBuffer;
 
         out << "label=\"" << streamSet;
         out << " |{";
@@ -401,7 +401,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                 currentPartition = partitionId;
                 firstKernelOfPartition[partitionId] = kernel;
             }
-        }        
+        }
     };
 
 
@@ -595,7 +595,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         #ifndef USE_SIMPLE_BUFFER_GRAPH
 
         out << " {" << port.SymbolicRateId << '}';
-
 
 
         if (port.isPrincipal()) {

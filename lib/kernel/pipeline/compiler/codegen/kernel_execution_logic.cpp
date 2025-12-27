@@ -481,8 +481,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_processed = %" PRIu64, processed);
             #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
-
-            StreamSetBuffer * bf = mBufferGraph[source(port, mBufferGraph)].Buffer;
+            StreamSetBuffer * bf = mBufferGraph[source(port, mBufferGraph)].OutputBuffer;
             if (isa<ManagedDynamicBuffer>(bf)) {
             Value * start = b.CreatePointerCast(bf->getMallocAddress(b), b.getInt8PtrTy());
             Value * end = b.CreateGEP(b.getInt8Ty(), start, bf->getInternalCapacity(b));
@@ -539,7 +538,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 if (bn.isConstant()) {
                     max = getGuaranteedRepeatingStreamSetLength(b, streamSet);
 //                } else if (bn.isThreadLocal()) {
-//                    max = b.CreateAdd(processed, bn.Buffer->getCapacity(b));
+//                    max = b.CreateAdd(processed, bn.OutputBuffer->getCapacity(b));
                 } else if (rt.inputMayBeTruncated()) {
                     max = mLinearInputItemCapacityPhi[inputPort]; assert (max);
                 } else {
@@ -569,7 +568,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
         const auto streamSet = target(port, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        const StreamSetBuffer * const buffer = bn.Buffer;
+        const StreamSetBuffer * const buffer = bn.OutputBuffer;
 
         Value * produced = nullptr;
         if (rt.isDeferred()) {
@@ -607,7 +606,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
         #ifdef PRINT_DEBUG_MESSAGES
         #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
-        StreamSetBuffer * bf = mBufferGraph[target(port, mBufferGraph)].Buffer;
+        StreamSetBuffer * bf = mBufferGraph[target(port, mBufferGraph)].OutputBuffer;
         if (isa<ManagedDynamicBuffer>(bf)) {
         Value * start = b.CreatePointerCast(bf->getMallocAddress(b), b.getInt8PtrTy());
         Value * end = b.CreateGEP(b.getInt8Ty(), start, bf->getInternalCapacity(b));
@@ -628,7 +627,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 Value * max = nullptr;
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (bn.isThreadLocal()) {
-                    max = b.CreateAdd(produced, bn.Buffer->getCapacity(b));
+                    max = b.CreateAdd(produced, buffer->getCapacity(b));
                 } else {
                     Value * base = readConsumedItemCount(b, streamSet); assert (base);
                     max = b.CreateAdd(base, buffer->getInternalCapacity(b));

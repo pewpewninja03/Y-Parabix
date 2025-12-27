@@ -75,7 +75,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
-        currentPartitionId = partitionId;        
+        currentPartitionId = partitionId;
         addInternalKernelProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
         addPAPIEventCounterKernelProperties(b, i, isRoot);
@@ -265,7 +265,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
             const BufferPort & bp = mBufferGraph[output];
             const auto streamSet = target(output, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
+            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
                 const BufferPort & rd = mBufferGraph[output];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
                 LLVMContext & C = b.getContext();

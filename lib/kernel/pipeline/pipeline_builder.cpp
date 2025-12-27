@@ -692,7 +692,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
 Bindings replaceManagedWithSharedManagedBuffers(const Bindings & bindings) {
     Bindings replaced;
     replaced.reserve(bindings.size());
-    for (const Binding & binding : bindings) {        
+    for (const Binding & binding : bindings) {
         Binding newBinding(binding.getName(), binding.getRelationship(), binding.getRate());
         for (const Attribute & attr : binding.getAttributes()) {
             if (attr.getKind() == Attribute::KindId::ManagedBuffer) {

@@ -130,7 +130,7 @@ const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_DATA = "@SDMSD"
 const static std::string STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT = "@SDMSC";
 
 
-const static std::string MANAGED_STREAMSET_LOCAL_HANDLE = "@MSLH";
+const static std::string MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS = "@MSLH";
 
 const static std::string LAST_GOOD_VIRTUAL_BASE_ADDRESS = ".LGA";
 
@@ -402,7 +402,7 @@ public:
     void addLocalDynamicBufferStructs(KernelBuilder & b);
     void assignLocalDynamicBufferStructs(KernelBuilder & b) const;
     void resetLocalDynamicBufferStructs(KernelBuilder & b) const;
-    void updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId) const;
+    void updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId);
 
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
 
@@ -652,7 +652,7 @@ protected:
     const unsigned                              FirstScalar;
     const unsigned                              LastScalar;
     const unsigned                              PartitionCount;
-
+    const unsigned                              ManagedBufferStructCount;
     const unsigned                              FirstComputePartitionId;
     const unsigned                              LastComputePartitionId;
 
@@ -971,6 +971,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , FirstScalar(P.FirstScalar)
 , LastScalar(P.LastScalar)
 , PartitionCount(P.PartitionCount)
+, ManagedBufferStructCount(P.ManagedBufferStructCount)
 , FirstComputePartitionId(P.FirstComputePartitionId)
 , LastComputePartitionId(P.LastComputePartitionId)
 #ifdef ENABLE_PAPI

@@ -125,6 +125,57 @@ void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
+    assert (in_degree(streamSet, mBufferGraph) > 0);
+    const auto id = mConsumerGraph[streamSet];
+    if (mInitialConsumedItemCount[id]) {
+        return mInitialConsumedItemCount[id];
+    }
+
+    Value * itemCount = nullptr;
+    if (out_degree(id, mConsumerGraph) == 0) {
+        // This stream either has no consumers or we've proven that
+        // its consumption rate is identical to its production rate
+        Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
+        assert (isFromCurrentFunction(b, produced, false));
+        const auto e = in_edge(streamSet, mBufferGraph);
+        const BufferPort & port = mBufferGraph[e];
+        if (LLVM_UNLIKELY(produced == nullptr)) {
+            const auto producer = source(e, mBufferGraph);
+            const auto prefix = makeBufferName(producer, port.Port);
+            if (LLVM_UNLIKELY(port.isDeferred())) {
+                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            } else {
+                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
+            }
+        }
+        auto delayOrLookBehind = std::max(port.Delay, port.LookBehind);
+        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            const auto d = std::max(br.Delay, br.LookBehind);
+            delayOrLookBehind = std::max(delayOrLookBehind, d);
+        }
+        if (delayOrLookBehind) {
+            produced = b.CreateSaturatingSub(produced, b.getSize(delayOrLookBehind));
+        }
+        itemCount = produced;
+    } else {
+        auto consumedRef = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+        Value * ptr = consumedRef.first;
+        if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
+            Constant * const ZERO = b.getInt32(0);
+            ptr = b.CreateInBoundsGEP(consumedRef.second, ptr, { ZERO, ZERO } );
+        }
+        itemCount = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment, true);
+    }
+    assert (itemCount);
+    return itemCount;
+}
+
+#if 0
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readConsumedItemCount
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
     if (mInitialConsumedItemCount[streamSet]) {
         return mInitialConsumedItemCount[streamSet];
     }
@@ -135,7 +186,10 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     if (out_degree(streamSet, mConsumerGraph) == 0) {
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate
-        assert (!isa<ManagedDynamicBuffer>(mBufferGraph[streamSet].Buffer));
+        if (isa<ManagedDynamicBuffer>(mBufferGraph[streamSet].OutputBuffer)) {
+            errs() << "bad ss: " << streamSet << "\n";
+        }
+        assert (!isa<ManagedDynamicBuffer>(mBufferGraph[streamSet].OutputBuffer));
         Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
         assert (isFromCurrentFunction(b, produced, false));
         const auto e = in_edge(streamSet, mBufferGraph);
@@ -172,6 +226,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     assert (itemCount);
     return itemCount;
 }
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief writeTransitoryConsumedItemCount

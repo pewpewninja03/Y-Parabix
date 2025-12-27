@@ -313,7 +313,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     } else {
                         mapStreamSetToThreadLocal[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
                         streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
-                        Type * const type = bn.Buffer->getType();
+                        Type * const type = bn.OutputBuffer->getType();
                         const size_t typeSize = b.getTypeSize(dl, type);
                         const BufferPort & bp = mBufferGraph[output];
                         const auto & M = bp.Maximum;
@@ -390,7 +390,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         if (LLVM_LIKELY(!bn.isInOutRedirect())) {
                             const auto k = PartitionCount + streamSet - FirstStreamSet;
                             mapThreadLocalToStreamSet[j] = k;  assert (k > 0);
-                        }                        
+                        }
                         // We add +1 here because some outputs might be unused but still cannot
                         // reuse memory of an input buffer
                         assert ((remaining[j] == 0) ^ bn.isInOutRedirect());

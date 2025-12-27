@@ -488,7 +488,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(KernelBuilder & b, const Bu
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
-        assert (!isa<ManagedDynamicBuffer>(bn.Buffer));
+        assert (!isa<ManagedDynamicBuffer>(bn.OutputBuffer));
         return;
     }
 
@@ -697,170 +697,6 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
 }
 
-#if 0
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasMoreInput
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
-
-    Value * const nonFinal = b.CreateIsNull(mIsFinalInvocation);
-    assert (mMaximumNumOfStrides);
-
-    Value * const notAtSegmentLimit = b.CreateICmpNE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
-
-    if (mIsPartitionRoot) {
-
-        ConstantInt * const i1_FALSE = b.getFalse();
-
-        graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
-        std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
-
-        bool anyNonCountable = false;
-
-        for (auto ei = ei_begin; ei != ei_end; ++ei) {
-            const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength()) {
-                const auto streamSet = source(*ei, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_UNLIKELY(bn.isConstant())) {
-                    continue;
-                }
-                const Binding & binding = port.Binding;
-                if (!isCountable(binding)) {
-                    anyNonCountable = true;
-                    break;
-                }
-            }
-        }
-
-        Constant * const MAX_INT = ConstantInt::getAllOnesValue(b.getSizeTy());
-
-        BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
-
-        BasicBlock * const lastTestExit = b.CreateBasicBlock("", nextNode);
-        PHINode * const enoughInputPhi = PHINode::Create(b.getInt1Ty(), 4, "", lastTestExit);
-
-        Value * enoughInput = b.CreateAnd(notAtSegmentLimit, nonFinal);
-
-        if (mAnyClosed) {
-            enoughInput = b.CreateAnd(mAnyClosed, enoughInput);
-        }
-
-        b.CreateCondBr(enoughInput, )
-
-
-
-        Value * const nextStrideIndex = b.CreateAdd(mNumOfLinearStrides, mStrideStepSize);
-
-        // any closed but not at segment limit nor is this a
-
-
-
-        bool isFirstCheck = true;
-
-        Value * hasEnough = nullptr;
-
-        for (auto ei = ei_begin; ei != ei_end; ++ei) {
-            const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength() || port.isCrossThreaded()) {
-                const auto streamSet = source(*ei, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_UNLIKELY(bn.isConstant())) {
-                    continue;
-                }
-
-                const Binding & binding = port.Binding;
-                const ProcessingRate & rate = binding.getRate();
-
-                // If the next rate we check is a PartialSum, always check it; otherwise we expect that
-                // if this test passes the first check, it will pass the remaining ones so don't bother
-                // creating a branch for the remaining checks.
-
-                Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
-                Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
-
-                if (rate.isPartialSum() || isFirstCheck) {
-
-                    if (hasEnough) {
-                        hasEnough = b.CreateOr(mAnyClosed, hasEnough);
-                        if (enoughInput) {
-                            enoughInput = b.CreateAnd(enoughInput, hasEnough);
-                        } else {
-                            enoughInput = hasEnough;
-                        }
-                    }
-
-                    BasicBlock * const nextTest = b.CreateBasicBlock("", lastTestExit);
-                    enoughInputPhi->addIncoming(i1_FALSE, b.GetInsertBlock());
-                    b.CreateUnlikelyCondBr(enoughInput, nextTest, lastTestExit);
-
-                    b.SetInsertPoint(nextTest);
-                    enoughInput = nullptr;
-                    hasEnough = nullptr;
-                    isFirstCheck = false;
-                }
-
-                if (anyNonCountable || port.isCrossThreaded() || bn.isNonThreadLocal()) {
-
-                    if (LLVM_UNLIKELY(port.isZeroExtended())) {
-                        avail = b.CreateSelect(isClosed(b, streamSet), MAX_INT, avail);
-                    } else if (port.Add) {
-                        ConstantInt * const ADD = b.getSize(port.Add);
-                        ConstantInt * const ZERO = b.getSize(0);
-                        Value * const added = b.CreateSelect(isClosed(b, streamSet), ADD, ZERO);
-                        avail = b.CreateAdd(avail, added);
-                    }
-
-                    if (LLVM_UNLIKELY(CheckAssertions())) {
-                        const Binding & inputBinding = port.Binding;
-                        Value * valid = b.CreateOr(b.CreateICmpULE(processed, avail), isClosed(b, streamSet));
-                        b.CreateAssert(valid,
-                                        "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
-                                        mCurrentKernelName,
-                                        b.GetString(inputBinding.getName()),
-                                        processed, avail,
-                                        b.GetString("hasMoreInput"));
-                    }
-
-                    Value * const remaining = b.CreateSub(avail, processed, "remaining");
-                    Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
-                    Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
-                    Value * const hasMore = b.CreateICmpUGE(remaining, required);
-                    if (hasEnough) {
-                        hasEnough = b.CreateAnd(hasEnough, hasMore);
-                    } else {
-                        hasEnough = hasMore;
-                    }
-                }
-            }
-        }
-
-        if (hasEnough) {
-            hasEnough = b.CreateOr(mAnyClosed, hasEnough);
-            if (enoughInput) {
-                enoughInput = b.CreateAnd(enoughInput, hasEnough);
-            } else {
-                enoughInput = hasEnough;
-            }
-        }
-
-        enoughInputPhi->addIncoming(enoughInput, b.GetInsertBlock());
-        b.CreateBr(lastTestExit);
-
-        b.SetInsertPoint(lastTestExit);
-     //   Value * hasEnough = enoughInputPhi; assert (enoughInputPhi);
-        return enoughInputPhi; // b.CreateAnd(hasEnough, nonFinal);
-
-    } else {
-        //  (final segment OR up<max) AND NOT final stride
-        return b.CreateAnd(b.CreateOr(mFinalPartitionSegment, notAtSegmentLimit), nonFinal);
-   }
-
-}
-
-#endif
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAccessibleInputItems
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -888,8 +724,6 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
         return v;
     }
 
-    const StreamSetBuffer * const buffer = bn.Buffer;
-    assert (!isa<RepeatingBuffer>(buffer));
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
     Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     #ifdef PRINT_DEBUG_MESSAGES
@@ -897,7 +731,8 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     debugPrint(b, prefix + "_available = %" PRIu64, available);
     debugPrint(b, prefix + "_processed (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), processed);
     #endif
-    Value * accessible = buffer->getLinearlyAccessibleItems(b, processed, available);
+
+    Value * accessible = b.CreateSub(available, processed);
     if (LLVM_UNLIKELY(port.Add > 0)) {
         Value * const closed = isClosed(b, streamSet);
         Value * const addedItems = b.CreateSelect(closed, b.getSize(port.Add), b.getSize(0));
@@ -966,7 +801,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     const auto outputPort = port.Port;
     assert (outputPort.Type == PortType::Output);
     const auto prefix = makeBufferName(mKernelId, outputPort);
-    const StreamSetBuffer * const buffer = bn.Buffer;
+    const StreamSetBuffer * const buffer = bn.OutputBuffer;
 
     Value * const required = mLinearOutputItemsPhi[outputPort];
 
@@ -1028,9 +863,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
         mustExpand = buffer->reserveCapacity(b, produced, consumed, required, mBufferExpansionFunction, sharedHandle, b.getSize(outputPort.Number));
     } else {
         mustExpand = buffer->reserveCapacity(b, produced, consumed, required, nullptr, nullptr, nullptr);
-    }
-    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
-        cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
     }
     b.CreateBr(afterCopyBackOrExpand);
 
@@ -1115,7 +947,7 @@ Value * PipelineCompiler::getNumOfWritableStrides(KernelBuilder & b,
     return numOfStrides;
 }
 
-
+#if 0
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getWritableOutputItems
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1133,7 +965,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     const auto streamSet = target(output, mBufferGraph);
     const BufferNode & bn = mBufferGraph[streamSet];
     assert (bn.isNonThreadLocal());
-    const StreamSetBuffer * const buffer = bn.Buffer;
+    const StreamSetBuffer * const buffer = bn.OutputBuffer;
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
 
@@ -1182,6 +1014,115 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     mInternalWritableOutputItems[outputPort] = writable;
     return writable;
 }
+#endif
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getWritableOutputItems
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const BufferPort & port, const bool force) {
+
+    const auto outputPort = port.Port;
+    assert (outputPort.Type == PortType::Output);
+
+    Value * const alreadyComputed = mInternalWritableOutputItems[outputPort];
+    if (alreadyComputed && !force) {
+        return alreadyComputed;
+    }
+
+    const auto output = getOutput(mKernelId, outputPort);
+    const auto streamSet = target(output, mBufferGraph);
+    const BufferNode & bn = mBufferGraph[streamSet];
+    assert (bn.isNonThreadLocal());
+    const StreamSetBuffer * const buffer = bn.OutputBuffer;
+
+    Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
+
+    const auto src = mConsumerGraph[streamSet];
+
+    #ifdef PRINT_DEBUG_MESSAGES
+    const auto prefix = makeBufferName(mKernelId, outputPort);
+    debugPrint(b, prefix + "_produced%" PRIu64 " = %" PRIu64, b.getSize(src), produced);
+    #endif
+
+    Value * writable = nullptr;
+
+
+    if (LLVM_UNLIKELY(src == 0)) {
+        writable = ConstantInt::getAllOnesValue(b.getSizeTy());
+   } else  if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
+        Value * const avail = mLocallyAvailableItems[src]; assert (avail);
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + "_avail%" PRIu64 " = %" PRIu64, b.getSize(src), avail);
+        #endif
+
+
+        if (LLVM_UNLIKELY(true || CheckAssertions())) {
+            const Binding & output = getOutputBinding(outputPort);
+            Value * const sanityCheck = b.CreateICmpULE(produced, avail);
+            b.CreateAssert(sanityCheck,
+                            "%s.%s: produced count (%" PRIu64 ") exceeds avail count (%" PRIu64 ")",
+                            mCurrentKernelName,
+                            b.GetString(output.getName()),
+                            produced, avail);
+        }
+
+        writable = b.CreateSaturatingSub(avail, produced);
+    } else {
+
+        assert (mConsumerGraph[streamSet] != 0);
+
+        Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
+
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + "_consumed%" PRIu64 " = %" PRIu64, b.getSize(src), consumed);
+        #endif
+
+
+        if (LLVM_UNLIKELY(true || CheckAssertions())) {
+            const Binding & output = getOutputBinding(outputPort);
+            Value * const sanityCheck = b.CreateICmpULE(consumed, produced);
+            b.CreateAssert(sanityCheck,
+                            "%s.%s: consumed count (%" PRIu64 ") exceeds produced count (%" PRIu64 ")",
+                            mCurrentKernelName,
+                            b.GetString(output.getName()),
+                            consumed, produced);
+        }
+
+//        ConstantInt * overflow = nullptr;
+//        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
+//            overflow = b.getSize(port.EmptyOverflow);
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            debugPrint(b, prefix + "_overflow%" PRIu64 " = %" PRIu64, b.getSize(src), overflow);
+//            #endif
+//        }
+
+
+//        Value * c = consumed;
+//        if (bn.hasNonFixedRateConsumer() || !port.isFixed()) {
+//            c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
+//            #ifdef PRINT_DEBUG_MESSAGES
+//            debugPrint(b, prefix + "_c%" PRIu64 " = %" PRIu64, b.getSize(src), c);
+//            #endif
+//        }
+//        writable = buffer->getLinearlyWritableItems(b, produced, c, overflow);
+
+        Value * p = produced;
+        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
+            p = b.CreateAdd(produced, b.getSize(port.EmptyOverflow));
+        }
+        Value * c = consumed;
+        if (bn.hasNonFixedRateConsumer() || !port.isFixed()) {
+            c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
+        }
+        writable = buffer->getLinearlyWritableItems(b, p, c);
+    }
+
+    // cache the values for later use
+    mInternalWritableOutputItems[outputPort] = writable;
+    return writable;
+}
+
 
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1493,15 +1434,6 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     assert (ref.Type == PortType::Input);
     assert (previouslyTransferred);
 
-    const auto srcStreamSet = getInputBufferVertex(mKernelId, ref);
-
-
-
-    const auto & srcBufferNode = mBufferGraph[srcStreamSet];
-    const StreamSetBuffer * const buffer = srcBufferNode.Buffer;
-
-
-
     ConstantInt * const sz_ZERO = b.getSize(0);
     Value * position = mCurrentProcessedItemCountPhi[ref];
 
@@ -1562,7 +1494,23 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
 
     }
 
-    Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
+
+    const auto srcStreamSet = getInputBufferVertex(mKernelId, ref);
+    const auto & srcBufferNode = mBufferGraph[srcStreamSet];
+    const StreamSetBuffer * const buffer = srcBufferNode.OutputBuffer;
+
+    Value * currentPtr = nullptr;
+
+    if (isa<ManagedDynamicBuffer>(buffer)) {
+        IntegerType * const sizeTy = b.getSizeTy();
+        PointerType * const ptrTy = sizeTy->getPointerTo(buffer->getAddressSpace());
+        assert (srcBufferNode.ManagedStructId < ManagedBufferStructCount);
+        Value * const addr = b.getScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(srcBufferNode.ManagedStructId));
+        currentPtr = b.CreateGEP(sizeTy, b.CreatePointerCast(addr, ptrTy), position);
+    } else {
+        currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
+    }
+
     Value * current = b.CreateAlignedLoad(b.getSizeTy(), currentPtr, SizeTyABIAlignment);
 
 //    const auto producer = parent(srcStreamSet, mBufferGraph);
@@ -1641,7 +1589,17 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 //    const auto refInput = getInput(mKernelId, ref);
 //    const BufferPort & refInputRate = mBufferGraph[refInput];
     const auto refBufferVertex = getInputBufferVertex(ref);
-    const StreamSetBuffer * const popCountBuffer = mBufferGraph[refBufferVertex].Buffer;
+    const auto & bn = mBufferGraph[refBufferVertex];
+    const StreamSetBuffer * const popCountBuffer = bn.OutputBuffer;
+
+    Value * inputBaseAddr = nullptr;
+
+    if (isa<ManagedDynamicBuffer>(popCountBuffer)) {
+        PointerType * const ptrTy = sizeTy->getPointerTo(popCountBuffer->getAddressSpace());
+        assert (bn.ManagedStructId < ManagedBufferStructCount);
+        inputBaseAddr = b.getScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(bn.ManagedStructId));
+        inputBaseAddr = b.CreatePointerCast(inputBaseAddr, ptrTy);
+    }
 
     BasicBlock * const popCountLoop =
         b.CreateBasicBlock(prefix + "Loop", mKernelCheckOutputSpace);
@@ -1690,7 +1648,13 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     }
 
     Value * const pos = b.CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
-    Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
+    Value * ptr = nullptr;
+    if (inputBaseAddr) {
+        ptr = b.CreateGEP(sizeTy, inputBaseAddr, pos);
+    } else {
+        ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
+    }
+
     Value * const requiredItems = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     Value * const notEnough = b.CreateICmpUGT(requiredItems, sourceItemCount);
 
@@ -1772,8 +1736,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         Value * const produced = mProducedAtTermination[outputPort.Port];
 
         const BufferNode & bn = mBufferGraph[streamSet];
-
-        StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
+        StreamSetBuffer * const buffer = bn.OutputBuffer;
         VectorType * const vecTy = b.fwVectorType(fw);
         PointerType * const vecPtrTy = vecTy->getPointerTo();
 

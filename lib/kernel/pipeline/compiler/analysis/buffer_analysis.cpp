@@ -1,5 +1,6 @@
 #include "pipeline_analysis.hpp"
 #include "lexographic_ordering.hpp"
+#include "evolutionary_algorithm.hpp"
 #include <boost/container/flat_set.hpp>
 #include <unistd.h>
 #include <z3.h>
@@ -746,7 +747,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
         currentPartitionId = partitionId;
         #endif
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-            const auto streamSet = source(e, mBufferGraph);            
+            const auto streamSet = source(e, mBufferGraph);
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
             inputRate.Flags |= BufferPortType::CanModifySegmentLength;
@@ -884,27 +885,29 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
         return;
     }
 
-    mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
+    mInternalBuffers.reserve((LastStreamSet - FirstStreamSet + 1) * 2);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
 
-        if (LLVM_UNLIKELY(bn.Buffer != nullptr)) {
+        if (LLVM_UNLIKELY(bn.OutputBuffer != nullptr)) {
             assert (bn.isExternal());
             continue;
         }
 
-        StreamSetBuffer * buffer = nullptr;
+        StreamSetBuffer * inputBuffer = nullptr;
+        StreamSetBuffer * outputBuffer = nullptr;
         if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) > 0)) {
             const auto src = parent(streamSet, InOutStreamSetReplacement);
             assert (FirstStreamSet <= src && src < streamSet);
-            bn.Buffer = mBufferGraph[src].Buffer;
+            const auto & srcNode = mBufferGraph[src];
+            bn.OutputBuffer = srcNode.OutputBuffer;
             continue;
         } else if (LLVM_UNLIKELY(bn.isTruncated())) {
             continue;
         } else if (LLVM_UNLIKELY(bn.isConstant())) {
             const auto ss = cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
-            buffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
+            outputBuffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
         } else {
             assert (!isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
@@ -913,22 +916,20 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
 
             if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
                 assert (!bn.isManagedOutput());
-                buffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
+                outputBuffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
             } else { // is internal buffer
                 assert (bn.IsLinear || !bn.isReturned());
-                buffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
+                outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
             }
         }
-
-        assert ("missing buffer?" && buffer);
-        mInternalBuffers[streamSet - FirstStreamSet].reset(buffer);
-        bn.Buffer = buffer;
+        assert ("missing buffer?" && outputBuffer);
+        mInternalBuffers.emplace_back(outputBuffer);
+        bn.OutputBuffer = outputBuffer;
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated())) {
-            StreamSetBuffer * buffer = nullptr;
             for (const auto e : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
                 if (mStreamGraph[e].Reason == ReasonType::Reference) {
                     const auto sourceStreamSet = source(e, mStreamGraph);
@@ -936,14 +937,12 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                     if (src.isConstant()) {
                         bn.Locality = BufferLocality::ConstantShared;
                     }
-                    buffer = src.Buffer;
+                    bn.OutputBuffer = src.OutputBuffer;
                     break;
                 }
             }
-            assert ("missing source buffer for truncated streamset?" && buffer);
-            bn.Buffer = buffer;
+            assert ("missing source buffer for truncated streamset?" && bn.OutputBuffer);
         }
-        assert (bn.Buffer);
     }
 
 }
@@ -1106,12 +1105,272 @@ void PipelineAnalysis::setStreamSetLockIds() {
     }
 }
 
+constexpr static unsigned MANAGED_BUFFER_INIT_POPULATION_SIZE = 15;
+
+constexpr static unsigned MANAGED_BUFFER_GA_MAX_INIT_TIME_SECONDS = 2;
+
+constexpr static unsigned MANAGED_BUFFER_POPULATION_SIZE = 30;
+
+constexpr static unsigned MANAGED_BUFFER_GA_MAX_TIME_SECONDS = 15;
+
+constexpr static unsigned MANAGED_BUFFER_GA_STALLS = 50;
+
+using ConflictGraph = adjacency_list<hash_setS, vecS, undirectedS>;
+
+struct ManagedBufferOptimizerWorker final : public PermutationBasedEvolutionaryAlgorithmWorker {
+
+
+    struct PartitionData {
+        unsigned StreamSetCount = 0;
+        unsigned PageCount = 0;
+        Rational MinStridesPerSegment{};
+        Rational SumOfStridesPerSegment;
+    };
+
+    constexpr static auto MAX_INT = std::numeric_limits<Rational::int_type>::max();
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief repair
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void repair(Candidate & /* candidate */, pipeline_random_engine & /* rng */) final { }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief fitness
+     ** ------------------------------------------------------------------------------------------------------------- */
+    size_t fitness(const Candidate & candidate, pipeline_random_engine & /* rng */) final {
+
+
+        const auto count = candidate.size();
+
+        for (unsigned i = 0; i < count; ++i) {
+            Position[candidate[i]] = i;
+        }
+
+        size_t maxColours = 1;
+
+        Colour[candidate[0]] = 0;
+
+        for (unsigned i = 1; i < count; ++i) {
+
+            AdjacentColours.reset();
+            const auto u = candidate[i];
+            for (auto v : make_iterator_range(adjacent_vertices(u, I))) {
+                if (Position[v] < i) {
+                    AdjacentColours.set(Colour[v]);
+                }
+            }
+            const auto c = AdjacentColours.find_first_unset();
+            AdjacentColours.set(c);
+            Colour[u] = c;
+            maxColours = std::max<size_t>(maxColours, AdjacentColours.find_last());
+        }
+        return maxColours;
+
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief translate
+     ** ------------------------------------------------------------------------------------------------------------- */
+    const std::vector<size_t> & translate(const OrderingDAWG & O, const unsigned candidateLength,
+                   pipeline_random_engine & rng) {
+        Candidate chosen;
+        chosen.reserve(candidateLength);
+        size_t u = 0;
+        while (out_degree(u, O) != 0) {
+            const auto e = first_out_edge(u, O);
+            const auto k = O[e];
+            chosen.push_back(k);
+            u = target(e, O);
+        }
+        assert (chosen.size() == candidateLength);
+        fitness(chosen, rng);
+        return Colour;
+    }
+
+
+    ManagedBufferOptimizerWorker(const unsigned candidateLength
+                               , const ConflictGraph & I
+                               , pipeline_random_engine & rng)
+    : I(I)
+    , Colour(candidateLength)
+    , Position(candidateLength)
+    , AdjacentColours(candidateLength) {
+
+    }
+
+private:
+
+    const ConflictGraph & I;
+    std::vector<size_t> Colour;
+    std::vector<size_t> Position;
+    BitVector AdjacentColours;
+
+};
+
+struct ManagedBufferOptimizer final : public PermutationBasedEvolutionaryAlgorithm {
+
+
+    WorkerPtr makeWorker(pipeline_random_engine & rng) final {
+        return std::make_unique<ManagedBufferOptimizerWorker>(candidateLength, I, rng);
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief translate
+     ** ------------------------------------------------------------------------------------------------------------- */
+    const std::vector<size_t> & getColours(const unsigned candidateLength, pipeline_random_engine & rng) {
+        auto w = (ManagedBufferOptimizerWorker *)mainWorker.get();
+        return w->translate(getResult(), candidateLength, rng);
+    }
+
+
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief constructor
+     ** ------------------------------------------------------------------------------------------------------------- */
+    ManagedBufferOptimizer(const unsigned numOfLocalStreamSets
+                          , const ConflictGraph & I
+                          , pipeline_random_engine & srcRng)
+    : PermutationBasedEvolutionaryAlgorithm (numOfLocalStreamSets,
+                                             MANAGED_BUFFER_GA_MAX_INIT_TIME_SECONDS,
+                                             MANAGED_BUFFER_INIT_POPULATION_SIZE,
+                                             MANAGED_BUFFER_GA_MAX_TIME_SECONDS,
+                                             MANAGED_BUFFER_POPULATION_SIZE,
+                                             MANAGED_BUFFER_GA_STALLS,
+                                             std::max(codegen::SegmentThreads, codegen::TaskThreads),
+                                             srcRng)
+    , I(I) {
+        assert (num_vertices(I) == numOfLocalStreamSets);
+    }
+
+
+private:
+
+    const ConflictGraph & I;
+
+};
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief identifyManagedBufferStructIds
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::identifyManagedBufferStructIds() {
+void PipelineAnalysis::identifyManagedBufferStructIds(pipeline_random_engine & rng) {
+
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
+
+    std::vector<size_t> index(LastStreamSet - FirstStreamSet + 1U, -1U);
+    size_t count = 0;
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+            if (LLVM_UNLIKELY(bn.isTruncated())) {
+                for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
+                    const auto & v = mStreamGraph[ref];
+                    if (v.Reason == ReasonType::Reference) {
+                        const auto srcStreamSet = source(ref, mBufferGraph);
+                        assert (srcStreamSet >= FirstStreamSet && srcStreamSet <= LastStreamSet);
+                        index[streamSet - FirstStreamSet] = index[srcStreamSet - FirstStreamSet];
+                        break;
+                    }
+                }
+            } else if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+                auto srcStreamSet = parent(streamSet, InOutStreamSetReplacement);
+                while (LLVM_UNLIKELY(in_degree(srcStreamSet, InOutStreamSetReplacement) != 0)) {
+                    srcStreamSet = parent(srcStreamSet, InOutStreamSetReplacement);
+                    assert (FirstStreamSet <= srcStreamSet && srcStreamSet <= LastStreamSet);
+                }
+                assert (srcStreamSet < streamSet);
+                index[streamSet - FirstStreamSet] = index[srcStreamSet - FirstStreamSet];
+            } else {
+                assert (!bn.hasZeroElementsOrWidth() || bn.isConstant());
+                index[streamSet - FirstStreamSet] = count++;
+            }
+        }
+    }
+
+    if (count == 0) {
+        return;
+    }
+
+    std::vector<size_t> remaining(count, 0);
+
+    ConflictGraph C(count);
+
+    for (auto kernel = FirstKernel; kernel <= PipelineOutput; ++kernel) {
+        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            const auto streamSet = target(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+                const auto i = index[streamSet - FirstStreamSet];
+                assert (i < count);
+                remaining[i] += 1U;
+            }
+        }
 
 
+        for (size_t i = 1; i < count; ++i) {
+            if (remaining[i] > 0) {
+                for (size_t j = 0; j < i; ++j) {
+                    if (remaining[j] > 0) {
+                        add_edge(j, i, C);
+                    }
+                }
+            }
+        }
+
+        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            const auto streamSet = target(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+                const auto i = index[streamSet - FirstStreamSet];
+                assert (i < count);
+                remaining[i] += out_degree(streamSet, mBufferGraph) - 1U;
+            }
+        }
+
+        for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+            const auto streamSet = source(e, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+                const auto i = index[streamSet - FirstStreamSet];
+                assert (i < count);
+                assert (remaining[i] > 0);
+                remaining[i]--;
+            }
+        }
+    }
+
+    #ifndef NDEBUG
+    for (size_t i = 0; i < count; ++i) {
+        assert (remaining[i] == 0);
+    }
+    #endif
+
+    ManagedBufferOptimizer BA(count, C, rng);
+
+    BA.runGA();
+
+    const auto colours = BA.getColours(count, rng);
+
+    size_t managedCount = 0;
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+            const auto j = index[streamSet - FirstStreamSet];
+            assert (j < count);
+            #ifndef NDEBUG
+            for (auto k : make_iterator_range(adjacent_vertices(j, C))) {
+                assert (colours[j] != colours[k]);
+            }
+            #endif
+            const auto c = colours[j];
+            bn.ManagedStructId = c;
+            managedCount = std::max(managedCount, c + 1U);
+        }
+    }
+
+    ManagedBufferStructCount = managedCount;
 
 }
 
