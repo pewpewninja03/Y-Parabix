@@ -86,7 +86,6 @@ extern std::string TraceOption;
 extern std::string CCCOption;
 extern std::string ThreadLocalPermittedOptions;
 extern std::string PreserveAllStreamSetDataOptions;
-extern std::string DisableKernelTransferOptions;
 extern PipelineCompilationModeOptions PipelineCompilationMode;
 #ifdef ENABLE_PAPI
 extern std::string PapiCounterOptions;

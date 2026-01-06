@@ -315,8 +315,6 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
 
             assert (out_degree(mCurrentPartitionId, ThreadLocalPlacement) > 0);
 
-
-
             ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.OutputBuffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();

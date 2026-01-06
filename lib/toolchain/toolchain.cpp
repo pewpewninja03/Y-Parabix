@@ -102,14 +102,6 @@ std::string PreserveAllStreamSetDataOptions = "";
 static cl::opt<std::string, true> optPreserveAllStreamSetDataOption("preserve-all-streamset-data", cl::location(PreserveAllStreamSetDataOptions), cl::ValueOptional,
                                                             cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
 
-std::string DisableKernelTransferOptions = "";
-static cl::opt<std::string, true> optDisableKernelTransferOptions("disable-kernel-transfer", cl::location(DisableKernelTransferOptions), cl::ValueOptional,
-                                                            cl::desc("Comma delimited list of which kernels cannot be moved to subsequent partitions (default=none)"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
-
-
-
-
-
 
 #ifdef ENABLE_PAPI
 std::string PapiCounterOptions = OmittedOption;
