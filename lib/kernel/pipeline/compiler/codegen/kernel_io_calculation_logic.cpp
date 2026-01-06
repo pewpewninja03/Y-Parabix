@@ -1057,7 +1057,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
         #endif
 
 
-        if (LLVM_UNLIKELY(true || CheckAssertions())) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             const Binding & output = getOutputBinding(outputPort);
             Value * const sanityCheck = b.CreateICmpULE(produced, avail);
             b.CreateAssert(sanityCheck,
@@ -1079,7 +1079,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
         #endif
 
 
-        if (LLVM_UNLIKELY(true || CheckAssertions())) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             const Binding & output = getOutputBinding(outputPort);
             Value * const sanityCheck = b.CreateICmpULE(consumed, produced);
             b.CreateAssert(sanityCheck,
@@ -1732,32 +1732,91 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         const auto output = in_edge(streamSet, mBufferGraph);
         const BufferPort & outputPort = mBufferGraph[output];
 
-        Value * const initial = mInitiallyProducedItemCount[streamSet];
-        Value * const produced = mProducedAtTermination[outputPort.Port];
-
         const BufferNode & bn = mBufferGraph[streamSet];
         StreamSetBuffer * const buffer = bn.OutputBuffer;
         VectorType * const vecTy = b.fwVectorType(fw);
         PointerType * const vecPtrTy = vecTy->getPointerTo();
 
         const auto spanLength = bn.PartialSumSpanLength;
+
         // If we produced no items but invoked the popcount kernel, it will have left the sum
         // in the stream[produced] position. This is the only safe position to read as we may
         // have executed a final block with 0 input items.
+
+        // TODO: is this only necessary if its a partition root?
+        Value * const initial = mInitiallyProducedItemCount[streamSet];
+        Value * const produced = mProducedAtTermination[outputPort.Port];
         Value * const unchanged = b.CreateICmpEQ(produced, initial);
         Value * const index = b.CreateSelect(unchanged, produced, b.CreateSub(produced, sz_ONE));
-        Value * const start = b.CreateRoundDown(index, sz_stepsPerBlock);
+        Value * const offset = b.CreateURem(index, sz_stepsPerBlock);
+        Value * const start = b.CreateSub(index, offset);
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
+#if 0
+        if (LLVM_UNLIKELY(CheckAssertions())) {
+
+            IntegerType * sizeTy = b.getSizeTy();
+
+            Value * const writeStart = b.CreatePtrToInt(addr, sizeTy);
+            auto & dl = b.getModule()->getDataLayout();
+            const auto writeLength = b.getTypeSize(dl, vecTy) * spanLength; assert (writeLength > 0);
+            Value * const writeEnd = b.CreateAdd(writeStart, b.getSize(writeLength));
+
+            Value * intStart = nullptr;
+            Value * intEnd = nullptr;
+            if (bn.isThreadLocal()) {
+                Value * const tlAddr = b.CreatePtrToInt(mThreadLocalStreamSetBaseAddress, sizeTy);
+                intStart = b.CreateAdd(tlAddr, mThreadLocalStartOffset[streamSet]);
+                intEnd = b.CreateAdd(tlAddr, mThreadLocalEndOffset[streamSet]);
+            } else {
+                intStart = b.CreatePtrToInt(buffer->getMallocAddress(b), sizeTy);
+                Value * const cap = b.CreatePtrToInt(buffer->getInternalCapacity(b), sizeTy);
+                intEnd = b.CreateAdd(intStart, cap);
+            }
+
+            Value * const atOrAfterStart = b.CreateICmpULE(intStart, writeStart);
+            Value * const atOrBeforeEnd = b.CreateICmpULE(writeEnd, intEnd);
+
+            b.CreateAssert(b.CreateAnd(atOrAfterStart, atOrBeforeEnd),
+                           "%s.%s: final partial sum splat operation writes outside of streamset range",
+                           mCurrentKernelName, b.GetString(outputPort.Binding.get().getName()));
+
+//            for (auto kernel = mCurrentPartitionRoot; kernel <= mKernelId; ++kernel) {
+//                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//                    const auto conflict = target(output, mBufferGraph);
+//                    if (LLVM_UNLIKELY(conflict == streamSet)) continue;
+//                    const BufferNode & an = mBufferGraph[conflict];
+//                    if (an.isThreadLocal()) {
+//                        for (const auto input : make_iterator_range(out_edges(conflict, mBufferGraph))) {
+//                            const auto consumer = target(input, mBufferGraph);
+//                            if (consumer > mKernelId) {
+//                                assert (KernelPartitionId[consumer] == mCurrentPartitionId);
+
+//                                const BufferPort & inputPort = mBufferGraph[input];
+
+//                                Value * const tlStart = b.CreateAdd(tlAddr, mThreadLocalStartOffset[conflict]);
+//                                b.CallPrintInt("tlStart" + std::to_string(conflict), tlStart);
+//                                Value * const beforeStart = b.CreateICmpULE(writeEnd, tlStart);
+//                                Value * const tlEnd = b.CreateAdd(tlAddr, mThreadLocalEndOffset[conflict]);
+//                                b.CallPrintInt("tlEnd" + std::to_string(conflict), tlEnd);
+//                                Value * const afterEnd = b.CreateICmpULE(tlEnd, writeStart);
+
+//                                b.CreateAssert(b.CreateOr(beforeStart, afterEnd),
+//                                               "%s.%s: final partial sum splat operation corrupts streamset %s.%s",
+//                                               mCurrentKernelName, b.GetString(outputPort.Binding.get().getName()),
+//                                               mKernelName[kernel], b.GetString(inputPort.Binding.get().getName()));
+//                                break;
+//                            }
+//                        }
+
+//                    }
+//                }
+//            }
+
+        }
+#endif
 
         Value * const vecAddr = b.CreatePointerCast(addr, vecPtrTy);
         Value * const baseValue = b.CreateBlockAlignedLoad(vecTy, vecAddr);
-        Value * const offset = b.CreateURem(index, sz_stepsPerBlock);
-
-        #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
-        debugPrint(b, "  < splat values %" PRIu64 ", %" PRIu64 ", %" PRIu64 ", %" PRIu64 "\n",
-                   produced, index, start, offset);
-        #endif
-
         Value * const total = b.CreateExtractElement(baseValue, offset);
         Value * const splat = b.simd_fill(fw, total);
         Value * const mask = b.mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
@@ -1765,7 +1824,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         Value * const mergedValue = b.CreateOr(baseValue, maskedSplat);
         b.CreateBlockAlignedStore(mergedValue, vecAddr);
         for (unsigned k = 1; k <= spanLength; ++k) {
-            Value * const ptr = b.CreateGEP(b.getBitBlockType(), vecAddr, b.getSize(k));
+            Value * const ptr = b.CreateGEP(vecTy, vecAddr, b.getSize(k));
             b.CreateBlockAlignedStore(splat, ptr);
         }
 

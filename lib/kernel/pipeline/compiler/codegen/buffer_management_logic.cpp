@@ -894,7 +894,6 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
 
     Value * addr = nullptr;
     if (isa<ManagedDynamicBuffer>(buffer) && rateData.Port.Type == PortType::Input) {
-        assert (bufferNode.ManagedStructId < ManagedBufferStructCount);
         addr = b.getScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(bufferNode.ManagedStructId));
         addr = b.CreatePointerCast(addr, buffer->getPointerType());
     } else {

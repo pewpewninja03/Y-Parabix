@@ -60,9 +60,6 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilde
     if (LLVM_UNLIKELY(CheckAssertions())) {
         b.CreateAssert(segmentLengthScalingFactor, "segmentLengthScalingFactor cannot be zero %s", mCurrentKernelName);
     }
-
-   // b.CallPrintInt(mTarget->getName() + ".segmentLengthScalingFactor", segmentLengthScalingFactor);
-
     for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
         const auto f = FirstKernelInPartition[i];
         if (mBufferGraph[f].controlsSlidingWindow()) {

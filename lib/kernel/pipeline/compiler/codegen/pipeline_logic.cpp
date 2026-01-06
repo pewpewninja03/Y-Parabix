@@ -631,7 +631,7 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     // this pipeline thread's thread local state, freeing the pipeline's will
     // also free the inner kernels.
     if (LLVM_LIKELY(num_edges(ThreadLocalPlacement) > 0)) {
-        Value * tlptr =b.getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
+        Value * tlptr = b.getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
         b.CreateFree(tlptr);
     }
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {

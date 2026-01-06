@@ -326,11 +326,22 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
         out << "}|{IO:";
         print_rational(bn.RelativeIORate);
-        const auto p = PartitionCount + streamSet - FirstStreamSet;
-        if (in_degree(p, ThreadLocalPlacement) > 0) {
-            out << "|TL:";
-            const auto r = first_in_edge(p, ThreadLocalPlacement);
-            print_rational(ThreadLocalPlacement[r]);
+        if (bn.isThreadLocal()) {
+            const auto p = PartitionCount + streamSet - FirstStreamSet;
+            if (in_degree(p, ThreadLocalPlacement) > 0) {
+                out << "|TL:";
+                const auto r = first_in_edge(p, ThreadLocalPlacement);
+                print_rational(ThreadLocalPlacement[r]);
+            }
+//            auto c = adjacent_vertices(streamSet - FirstStreamSet, ThreadLocalConflictGraph);
+//            if (c.first != c.second) {
+//                out << " TL__CONFLICT: ";
+//                auto i = c.first;
+//                out << (FirstStreamSet + *i);
+//                while (++i != c.second) {
+//                    out << ',' << (FirstStreamSet + *i);
+//                }
+//            }
         }
         if (out_degree(streamSet, InOutStreamSetReplacement) != 0) {
             const auto inOutTarget = child(streamSet, InOutStreamSetReplacement);

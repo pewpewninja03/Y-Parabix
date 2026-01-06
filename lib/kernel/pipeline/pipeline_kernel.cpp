@@ -899,6 +899,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (!codegen::PreserveAllStreamSetDataOptions.empty()) {
         out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
     }
+    if (!codegen::DisableKernelTransferOptions.empty()) {
+        out << "+DKT:" << codegen::DisableKernelTransferOptions;
+    }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableCycleCounter))) {
             out << "+CYC";

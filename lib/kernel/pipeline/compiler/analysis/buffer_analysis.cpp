@@ -96,6 +96,8 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
             auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory || noThreadLocal;
 
+
+
             if (rate.isFixed()) {
                 bp.Flags |= BufferPortType::IsFixed;
             } else if (LLVM_UNLIKELY(rate.isUnknown())) {
@@ -220,6 +222,13 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                                                         << " may not be applied to the same streamset more than once.";
                                                     report_fatal_error(msg.str());
                                                 }
+                                                if (streamSet < refStreamSet) {
+                                                    SmallVector<char, 256> tmp;
+                                                    raw_svector_ostream msg(tmp);
+                                                    msg << "InOut attribute on " << kernelObj->getName() << "." << bindingNode.Binding.get().getName()
+                                                        << " was applied to an undominated streamset.";
+                                                    report_fatal_error(msg.str());
+                                                }
                                                 add_edge(refStreamSet, streamSet, InOutStreamSetReplacement);
                                                 bp.Flags |= (refPort.Flags & BufferPortType::IsDeferred);
                                                 bn.Type |= BufferType::InOutRedirect;
@@ -274,6 +283,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             for (auto i = I.lower(); i <= I.upper(); ++i) {
                 BufferNode & bn = mBufferGraph[i];
                 bn.Type |= BufferType::PreserveEntireStreamSet;
+                mNonThreadLocalStreamSets.insert(i);
             }
         }
 
@@ -492,13 +502,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                     mNonThreadLocalStreamSets.insert(id);
                 }
                 mNonThreadLocalStreamSets.insert(streamSet);
-                for (auto id = streamSet;;) {
-                    if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
-                        break;
-                    }
-                    id = child(id, InOutStreamSetReplacement);
-                    mNonThreadLocalStreamSets.insert(id);
-                }
             }
         }
     }

@@ -578,6 +578,8 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         }
         assert (produced);
 
+        Value * vba = nullptr;
+
         if (LLVM_UNLIKELY(rt.isShared())) {
             addNextArg(b.CreatePointerCast(buffer->getHandle(), voidPtrTy));
         } else if (LLVM_UNLIKELY(rt.isManaged())) {
@@ -593,8 +595,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
             hasManagedOutput = true;
         } else {
-
-            Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
+            vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
             #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
@@ -623,11 +624,10 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             if (requiresItemCount(rt.Binding)) {
                 addNextArg(mLinearOutputItemsPhi[rt.Port]);
             }
-            if (LLVM_UNLIKELY(checkStreamSet)) {
-                Value * max = nullptr;
-                const BufferNode & bn = mBufferGraph[streamSet];
+            Value * max = nullptr;
+            if (LLVM_UNLIKELY(CheckAssertions() || checkStreamSet)) {
                 if (bn.isThreadLocal()) {
-                    max = b.CreateAdd(produced, buffer->getCapacity(b));
+                    max = b.CreateAdd(produced, mLinearOutputItemsPhi[rt.Port]);
                 } else {
                     Value * base = readConsumedItemCount(b, streamSet); assert (base);
                     max = b.CreateAdd(base, buffer->getInternalCapacity(b));
@@ -635,7 +635,21 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 if (rt.Add) {
                     max = b.CreateAdd(max, b.getSize(rt.Add));
                 }
-                max = b.CreateRoundUpRational(max, rt.Maximum);
+                if (LLVM_UNLIKELY(bn.isThreadLocal())) {
+                    ExternalBuffer tmp(0, b, buffer->getBaseType(), 0);
+                    Value * h = b.CreateAllocaAtEntryPoint(tmp.getHandleType(b));
+                    tmp.setHandle(h);
+                    tmp.setBaseAddress(b, vba);
+                    Value * end = tmp.getRawItemPointer(b, b.getSize(0), max);
+                    Value * endInt = b.CreatePtrToInt(end, b.getSizeTy());
+                    Value * lim = b.CreateGEP(b.getInt8Ty(), mThreadLocalStreamSetBaseAddress, mThreadLocalEndOffset[streamSet]);
+                    Value * limInt = b.CreatePtrToInt(lim, b.getSizeTy());
+                    b.CreateAssert(b.CreateICmpULE(endInt, limInt),
+                                   "Kernel execution will exceed thread-local buffer %s.%s space limit",
+                                   mCurrentKernelName, b.GetString(rt.Binding.get().getName()));
+                }
+            }
+            if (LLVM_UNLIKELY(checkStreamSet)) {
                 addNextArg(max);
             }
         }
