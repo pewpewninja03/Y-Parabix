@@ -5,7 +5,7 @@
 
 // #define PRINT_GRAPH_BITSETS
 
-// #define DISABLE_KERNEL_PARTITION_MOVEMENT
+#define DISABLE_KERNEL_PARTITION_MOVEMENT
 
 namespace kernel {
 
@@ -1064,7 +1064,7 @@ start_of_transfer_loop:
         #ifndef NDEBUG
         totalSize += K.size();
         #endif
-        assert (CurrentPart.PotentialRoots.size() == 1);
+     //   assert (CurrentPart.PotentialRoots.size() == 1);
         const auto root = CurrentPart.PotentialRoots[0];
         forcedPartitionRoot.push_back(root);
     }

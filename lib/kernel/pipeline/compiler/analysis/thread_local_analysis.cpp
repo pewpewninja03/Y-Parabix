@@ -6,6 +6,7 @@
 #include <toolchain/toolchain.h>
 #include <z3.h>
 #include <queue>
+#include <stack>
 
 #if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
     typedef int64_t Z3_int64;
@@ -330,7 +331,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     }
 
-    ThreadLocalPlacementGraph T(PartitionCount + n);
+    const auto m = PartitionCount + n;
+
+    ThreadLocalPlacementGraph T(m + 1U);
 
     if (numOfThreadLocalStreamSets) {
 
@@ -384,7 +387,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         assert (j < numOfThreadLocalStreamSets);
                         assert (remaining[j] == (bn.isInOutRedirect() ? 1U : 0));
                         remaining[j] += 1U;
-                        if (!bn.isInOutRedirect()) {
+                        if (LLVM_LIKELY(!bn.isInOutRedirect())) {
                             mapThreadLocalToStreamSet[j] = streamSet;
                         }
                     }
@@ -431,6 +434,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         #if !defined(NDEBUG) && !defined(PREVENT_THREAD_LOCAL_BUFFERS_FROM_SHARING_MEMORY)
         for (size_t i = 0; i < numOfThreadLocalStreamSets; ++i) {
             assert (remaining[i] == 0);
+            assert (in_degree(mapThreadLocalToStreamSet[i], InOutStreamSetReplacement) == 0);
         }
         #endif
 
@@ -438,17 +442,41 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         for (auto e : make_iterator_range(edges(I))) {
 
-            std::function<void(size_t, size_t)> add_conflict_edge = [&](size_t u, size_t v) {
+            std::function<void(size_t, size_t)> add_conflict_edge = [&](const size_t u, const size_t v) {
                 assert (FirstStreamSet <= u && u <= LastStreamSet);
                 assert (FirstStreamSet <= v && v <= LastStreamSet);
                 assert (in_degree(u, InOutStreamSetReplacement) == 0);
                 assert (in_degree(v, InOutStreamSetReplacement) == 0);
                 add_edge(u - FirstStreamSet, v - FirstStreamSet, ThreadLocalConflictGraph);
+                if (LLVM_UNLIKELY(out_degree(u, InOutStreamSetReplacement) > 0)) {
+                    add_conflict_edge(child(u, InOutStreamSetReplacement), v);
+                }
+                if (LLVM_UNLIKELY(out_degree(v, InOutStreamSetReplacement) > 0)) {
+                    add_conflict_edge(u, child(v, InOutStreamSetReplacement));
+                }
             };
 
             add_conflict_edge(mapThreadLocalToStreamSet[source(e, I)], mapThreadLocalToStreamSet[target(e, I)]);
 
         }
+
+        #ifdef PRINT_Z3_OPTIMIZATION
+        BEGIN_SCOPED_REGION
+            auto & out = errs();
+            out << "digraph \"" << "I" << "\" {\n";
+            for (unsigned i = 0; i < n; ++i) {
+                out << "v" << i << " [label=\"";
+                out << "S_" << (FirstStreamSet + i);
+                out << "\"];\n";
+            }
+            for (const auto e : make_iterator_range(edges(ThreadLocalConflictGraph))) {
+                const auto s = source(e, ThreadLocalConflictGraph);
+                const auto t = target(e, ThreadLocalConflictGraph);
+                out << "v" << s << " -> v" << t << ";\n";
+            }
+            out << "}\n\n";
+        END_SCOPED_REGION
+        #endif
 
         BufferLayoutOptimizer BA(numOfThreadLocalStreamSets,
                                  packedPartitionCount,
@@ -491,14 +519,14 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             assert (!edge(u, w, T).second);
             add_edge(u, w, percentOfPagePerStride, T);
 
-            auto c = v;
-            while (LLVM_UNLIKELY(out_degree(c, InOutStreamSetReplacement))) {
-                c = child(c, InOutStreamSetReplacement);
-                assert (FirstStreamSet <= c && c <= LastStreamSet);
-                const auto w = PartitionCount + c - FirstStreamSet;
-                assert (!edge(u, w, T).second);
-                add_edge(u, w, percentOfPagePerStride, T);
-            }
+//            auto c = v;
+//            while (LLVM_UNLIKELY(out_degree(c, InOutStreamSetReplacement))) {
+//                c = child(c, InOutStreamSetReplacement);
+//                assert (FirstStreamSet <= c && c <= LastStreamSet);
+//                const auto w = PartitionCount + c - FirstStreamSet;
+//                assert (!edge(u, w, T).second);
+//                add_edge(u, w, percentOfPagePerStride, T);
+//            }
 
             #ifndef NDEBUG
             for (auto e : make_iterator_range(in_edges(w, T))) {
@@ -509,6 +537,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         for (unsigned i = 0; i < numOfThreadLocalStreamSets; ++i) {
             const auto streamSet = mapThreadLocalToStreamSet[i];
+            assert (!mBufferGraph[streamSet].isInOutRedirect());
             const auto & C = intervals[i];
             #ifndef NDEBUG
             assert (C.upper() > C.lower());
@@ -552,11 +581,161 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             }
         }
 
-        transitive_reduction_dag(T);
-
         #ifdef PRINT_Z3_OPTIMIZATION
         const ThreadLocalPlacementGraph T0(T);
         #endif
+#if 1
+        // We need to compute both the most-expensive *longest* partition -> sink path and the most-expensive path,
+        // which are not necessarily the same path.
+
+        std::stack<Vertex> S;
+        std::vector<size_t> unvistedAncestors(m + 1);
+        std::vector<size_t> depth(m + 1);
+        std::vector<Rational> pathCost(m + 1);
+        std::vector<size_t> partitionId(m + 1);
+        for (unsigned i = 0; i < PartitionCount; ++i) {
+            depth[i] = 1;
+            unvistedAncestors[i] = 0;
+        }
+        for (unsigned i = PartitionCount; i < m; ++i) {
+            #ifndef NDEBUG
+            depth[i] = 0;
+            #endif
+            const auto a = in_degree(i, T);
+            unvistedAncestors[i] = a;
+            if (a != 0 && out_degree(i, T) == 0) {
+                add_edge(i, m, Rational{0}, T);
+            }
+        }
+        unvistedAncestors[m] = in_degree(m, T);
+        assert (unvistedAncestors[m] > 0);
+        for (unsigned partId = 0; partId < PartitionCount; ++partId) {
+            assert (unvistedAncestors[partId] == 0);
+            partitionId[partId] = partId;
+            if (out_degree(partId, T) > 0) {
+                for (auto u = partId;;) {
+                    for (auto e : make_iterator_range(out_edges(u, T))) {
+                        const auto v = target(e, T);
+                        auto & U = unvistedAncestors[v];
+                        assert (U > 0);
+                        if (--U == 0) {
+                            S.push(v);
+                        }
+                    }
+                    if (S.empty()) {
+                        break;
+                    }
+                    u = S.top();
+                    assert (PartitionCount <= u && u <= m);
+                    assert (unvistedAncestors[u] == 0);
+                    S.pop();
+                    assert (in_degree(u, T) > 0);
+                    size_t d = 0;
+                    Rational pc{0};
+                    for (auto e : make_iterator_range(in_edges(u, T))) {
+                        const auto v = source(e, T);
+                        assert (depth[v] > 0);
+                        d = std::max(d, depth[v]);
+                       //  assert (T[e] > 0 || v < PartitionCount);
+                        pc = std::max(pc, pathCost[v] + T[e]);
+                    }
+                    assert (pc > 0);
+                    depth[u] = d + 1U;
+                    pathCost[u] = pc;
+                    partitionId[u] = partId;
+                }
+            }
+        }
+
+        #ifndef NDEBUG
+        for (unsigned i = PartitionCount; i <= m; ++i) {
+            assert (unvistedAncestors[i] == 0);
+        }
+        #endif
+        // Before we prune the graph, mark which "sinks" for each partition component that
+        // will be used to calculate the total memory required
+
+        for (unsigned i = 0; i <= m; ++i) {
+            T[i] = false;
+        }
+
+        for (unsigned partId = 0; partId < PartitionCount; ++partId) {
+            if (out_degree(partId, T) > 0) {
+                Rational maxWeight{0};
+                size_t maxWeightDepth = 0;
+                size_t maxDepth = 0;
+                Rational maxDepthWeight{0};
+                size_t sink1 = m;
+                size_t sink2 = m;
+
+                for (auto e : make_iterator_range(in_edges(m, T))) {
+                    const auto u = source(e, T);
+                    assert (u >= PartitionCount);
+                    if (partId != partitionId[u]) {
+                        continue;
+                    }
+                    const auto & C = pathCost[u];
+                    const auto d = depth[u];
+                    if (maxWeight <= C) {
+                        if (maxWeightDepth < d || maxWeight < C) {
+                            maxWeightDepth = d;
+                            maxWeight = C;
+                            sink1 = u;
+                        }
+                    }
+                    if (maxDepth <= d) {
+                        if (maxDepth < d || maxDepthWeight < C) {
+                            maxDepth = d;
+                            maxDepthWeight = C;
+                            sink2 = u;
+                        }
+                    }
+                }
+
+                assert (depth[sink1] <= depth[sink2]);
+                assert (pathCost[sink2] <= pathCost[sink1]);
+
+                T[sink1] = true;
+                T[sink2] = true;
+            }
+        }
+        for (auto u = m; u >= PartitionCount; --u) {
+            if (in_degree(u, T) > 1U) {
+                const auto & W = pathCost[u];
+                const auto d = depth[u];
+                size_t maxWeightDepth = 0;
+                Rational maxDepthWeight{0};
+                size_t keep1 = -1U;
+                size_t keep2 = -1U;
+
+                for (auto e : make_iterator_range(in_edges(u, T))) {
+                    const auto v = source(e, T);
+                    const auto & C = pathCost[v];
+                    assert (C < W || u == m);
+                    assert ((C + T[e]) <= W);
+                    if ((C + T[e]) == W) {
+                        if (maxWeightDepth < depth[v]) {
+                            maxWeightDepth = depth[v];
+                            keep1 = v;
+                        }
+                    }
+                    if ((depth[v] + 1U) == d) {
+                        if (maxDepthWeight < C) {
+                            maxDepthWeight = C;
+                            keep2 = v;
+                        }
+                    }
+                }
+                remove_in_edge_if(u, [&](const ThreadLocalPlacementGraph::edge_descriptor e) -> bool {
+                    const auto v = source(e, T);
+                    return (v >= PartitionCount) && (v != keep1) && (v != keep2);
+                }, T);
+            }
+        }
+
+#else
+
+        transitive_reduction_dag(T);
 
         // TODO: this is probably too complex a solution. is it not equivalent to simply check the path lengths
         // and conclude if one is longer, then with a small segment length, it'd be preferred over the other in
@@ -609,10 +788,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         // TODO: preprocess the io scaling vars to determine if two partition vars are equivalent?
 
         using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
-
-        const Z3_ast ioScalingVar = Z3_mk_fresh_const(ctx, nullptr, varType);
-        hard_assert(Z3_mk_gt(ctx, ioScalingVar, z3_ZERO));
-
 
         auto identifyLowerValueAncestors = [&](std::vector<Vertex> & ancestors) -> std::vector<Z3_ast> {
             // sort ancestors in decending sum/length cost
@@ -702,6 +877,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             }
         }
 
+        const Z3_ast ioScalingVar = Z3_mk_fresh_const(ctx, nullptr, varType);
+        hard_assert(Z3_mk_gt(ctx, ioScalingVar, z3_ZERO));
+
         for (unsigned i = 0; i < PartitionCount; ++i) {
             if (out_degree(i, T) > 0) {
 
@@ -724,16 +902,18 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         args[0] = v;
                         args[1] = constant(V);
                         v = Z3_mk_mul(ctx, 2, args.data());
-                        if (LLVM_LIKELY(V != lcmOfDenom)) {
-                            const Z3_ast r = Z3_mk_mod(ctx, v, z3_LCM_OF_DENOM);
-                            args[0] = v;
-                            args[1] = r;
-                            const Z3_ast a = Z3_mk_sub(ctx, 2, args.data());
-                            args[0] = a;
-                            args[1] = z3_LCM_OF_DENOM;
-                            const Z3_ast b = Z3_mk_add(ctx, 2, args.data());
-                            v = Z3_mk_ite(ctx, Z3_mk_eq(ctx, r, z3_ZERO), a, b);
-                        }
+                    }
+                    if (LLVM_LIKELY(V != lcmOfDenom)) {
+                        FixedArray<Z3_ast, 2> args;
+                        const Z3_ast r = Z3_mk_mod(ctx, v, z3_LCM_OF_DENOM);
+                        args[0] = v;
+                        args[1] = r;
+                        const Z3_ast floorV = Z3_mk_sub(ctx, 2, args.data());
+                        // ceil v
+                        args[0] = floorV;
+                        args[1] = z3_LCM_OF_DENOM;
+                        const Z3_ast ceilingV = Z3_mk_add(ctx, 2, args.data());
+                        v = Z3_mk_ite(ctx, Z3_mk_eq(ctx, r, z3_ZERO), floorV, ceilingV);
                     }
                     M.emplace(std::make_pair(V, addToScalingVar), v);
                     return v;
@@ -798,6 +978,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                                 for (unsigned i = 0; i != d; ++i) {
                                     if (pathCost[i]) {
                                         if (priorOffset) {
+
                                             priorOffset = Z3_mk_ite(ctx, Z3_mk_gt(ctx, pathCost[i], priorOffset), pathCost[i], priorOffset);
                                         } else {
                                             priorOffset = pathCost[i];
@@ -854,52 +1035,61 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         Z3_solver_dec_ref(ctx, solver);
         Z3_del_context(ctx);
         Z3_reset_memory();
+#endif
 
         #ifdef PRINT_Z3_OPTIMIZATION
-        auto print_T = [&](StringRef name) {
-            auto & out = errs();
+        BEGIN_SCOPED_REGION
+        auto & out = errs();
+        out << "digraph \"" << "T" << "\" {\n";
+        for (unsigned i = 0; i < PartitionCount + n; ++i) {
+            if (degree(i, T) > 0) {
+                out << "v" << i << " [label=\"";
+                if (i < PartitionCount) {
+                    out << "P_" << i;
+                } else {
+                    out << "S_" << (FirstStreamSet + i - PartitionCount);
 
-            out << "digraph \"" << name << "\" {\n";
-            for (unsigned i = 0; i < PartitionCount + n; ++i) {
-                if (degree(i, T) > 0) {
-                    out << "v" << i << " [label=\"";
-                    if (i < PartitionCount) {
-                        out << "P_" << i;
-                    } else {
-                        out << "S_" << (FirstStreamSet + i - PartitionCount);
+                    out << " (W:" << pathCost[i].numerator() << "/" << pathCost[i].denominator() << " d:" << depth[i] << ")";
+
+                    if (T[i]) {
+                        out << '*';
                     }
-                    out << "\"];\n";
-                }
-            }
 
-            for (const auto e : make_iterator_range(edges(T0))) {
-                const auto s = source(e, T);
-                const auto t = target(e, T);
-                const auto & V = T0[e];
+
+                }
+
+
+                out << "\"];\n";
+            }
+        }
+
+        for (const auto e : make_iterator_range(edges(T0))) {
+            const auto s = source(e, T0);
+            const auto t = target(e, T0);
+            const auto & V = T0[e];
+            out << "v" << s << " -> v" << t <<
+                   " [label=\"" << V.numerator() << "/" << V.denominator() << "\"";
+            if (!edge(s, t, T).second) {
+                out << ", color=\"red\"";
+            }
+            out << "];\n";
+        }
+
+        for (const auto e : make_iterator_range(edges(T))) {
+            const auto s = source(e, T);
+            const auto t = target(e, T);
+            if (!edge(s, t, T0).second) {
+                const auto & V = T[e];
                 out << "v" << s << " -> v" << t <<
                        " [label=\"" << V.numerator() << "/" << V.denominator() << "\"";
-                if (!edge(s, t, T).second) {
-                    out << ", color=\"red\"";
-                }
+                out << ", color=\"green\"";
                 out << "];\n";
+
             }
+        }
 
-            for (const auto e : make_iterator_range(edges(T))) {
-                const auto s = source(e, T);
-                const auto t = target(e, T);
-                if (!edge(s, t, T0).second) {
-                    const auto & V = T[e];
-                    out << "v" << s << " -> v" << t <<
-                           " [label=\"" << V.numerator() << "/" << V.denominator() << "\"";
-                    out << ", color=\"green\"";
-                    out << "];\n";
-
-                }
-            }
-
-            out << "}\n\n";
-        };
-        print_T("T");
+        out << "}\n\n";
+        END_SCOPED_REGION
         #endif
     }
 
