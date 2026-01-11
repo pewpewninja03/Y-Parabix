@@ -135,10 +135,12 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
 
         const auto m = PartitionCount + LastStreamSet - FirstStreamSet + 1;
         assert (num_vertices(ThreadLocalPlacement) == m + 1);
-        std::vector<unsigned> toVisit(m, 0);
+        std::vector<unsigned> toVisit(m + 1, 0);
         for (unsigned i = PartitionCount; i < m; ++i) {
             toVisit[i] = in_degree(i, ThreadLocalPlacement);
         }
+        assert (in_degree(m, ThreadLocalPlacement) < -1U);
+        toVisit[m] = -1U;
 
         const auto pageSize = getPageSize();
         assert (is_pow2(pageSize));
@@ -171,9 +173,6 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 assert (T > 0);
                 T--;
                 if (T == 0) {
-
-
-
                     const auto streamSet = v + FirstStreamSet - PartitionCount;
                     const BufferNode & bn = mBufferGraph[streamSet];
                     assert (bn.isThreadLocal());

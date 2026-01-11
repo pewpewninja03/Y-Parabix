@@ -4,15 +4,7 @@
 #include <boost/icl/interval_set.hpp>
 #include <boost/integer/common_factor.hpp>
 #include <toolchain/toolchain.h>
-#include <z3.h>
-#include <queue>
 #include <stack>
-
-#if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
-    typedef int64_t Z3_int64;
-#else
-    typedef long long int        Z3_int64;
-#endif
 
 // #define PRINT_Z3_OPTIMIZATION
 
@@ -498,8 +490,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         const auto bw = b.getBitBlockWidth();
 
 
-        size_t lcmOfDenom = 1U;
-
+        Rational::int_type denomLCM = 1U;
 
         auto add_edge_to_T = [&](const size_t u, const size_t v, const size_t weight) {
 
@@ -513,20 +504,11 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             const auto firstKernel = FirstKernelInPartition[partId];
 
             Rational percentOfPagePerStride{weight, StrideRepetitionVector[firstKernel] * pageSize * bw};
-            lcmOfDenom = boost::integer::lcm(lcmOfDenom, percentOfPagePerStride.denominator());
+            denomLCM = boost::integer::lcm(denomLCM, percentOfPagePerStride.denominator());
             const auto w = PartitionCount + v - FirstStreamSet;
             assert (w < PartitionCount + n);
             assert (!edge(u, w, T).second);
             add_edge(u, w, percentOfPagePerStride, T);
-
-//            auto c = v;
-//            while (LLVM_UNLIKELY(out_degree(c, InOutStreamSetReplacement))) {
-//                c = child(c, InOutStreamSetReplacement);
-//                assert (FirstStreamSet <= c && c <= LastStreamSet);
-//                const auto w = PartitionCount + c - FirstStreamSet;
-//                assert (!edge(u, w, T).second);
-//                add_edge(u, w, percentOfPagePerStride, T);
-//            }
 
             #ifndef NDEBUG
             for (auto e : make_iterator_range(in_edges(w, T))) {
@@ -551,8 +533,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 add_edge_to_T(partId, streamSet, unitWeight[i]);
             }
         }
-
-        assert (lcmOfDenom > 0);
 
         for (auto e : make_iterator_range(edges(I))) {
             const auto a = source(e, I);
@@ -584,14 +564,14 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         #ifdef PRINT_Z3_OPTIMIZATION
         const ThreadLocalPlacementGraph T0(T);
         #endif
-#if 1
+
         // We need to compute both the most-expensive *longest* partition -> sink path and the most-expensive path,
         // which are not necessarily the same path.
 
         std::stack<Vertex> S;
         std::vector<size_t> unvistedAncestors(m + 1);
         std::vector<size_t> depth(m + 1);
-        std::vector<Rational> pathCost(m + 1);
+        std::vector<Rational::int_type> pathCost(m + 1);
         std::vector<size_t> partitionId(m + 1);
         for (unsigned i = 0; i < PartitionCount; ++i) {
             depth[i] = 1;
@@ -612,7 +592,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         for (unsigned partId = 0; partId < PartitionCount; ++partId) {
             assert (unvistedAncestors[partId] == 0);
             partitionId[partId] = partId;
+            pathCost[partId] = 0;
             if (out_degree(partId, T) > 0) {
+                assert (in_degree(partId, T) == 0);
                 for (auto u = partId;;) {
                     for (auto e : make_iterator_range(out_edges(u, T))) {
                         const auto v = target(e, T);
@@ -631,17 +613,21 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     S.pop();
                     assert (in_degree(u, T) > 0);
                     size_t d = 0;
-                    Rational pc{0};
+                    Rational::int_type pc{0};
                     for (auto e : make_iterator_range(in_edges(u, T))) {
                         const auto v = source(e, T);
                         assert (depth[v] > 0);
                         d = std::max(d, depth[v]);
-                       //  assert (T[e] > 0 || v < PartitionCount);
-                        pc = std::max(pc, pathCost[v] + T[e]);
+                        const auto c = T[e] * denomLCM;
+                        assert (c.denominator() == 1);
+                        const auto x = c.numerator() * c.numerator();
+                        assert ("overflow?" && (x > c.numerator() || c.numerator() <= 1));
+                        pc = std::max(pc, pathCost[v] + x);
                     }
                     assert (pc > 0);
                     depth[u] = d + 1U;
                     pathCost[u] = pc;
+
                     partitionId[u] = partId;
                 }
             }
@@ -661,10 +647,10 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         for (unsigned partId = 0; partId < PartitionCount; ++partId) {
             if (out_degree(partId, T) > 0) {
-                Rational maxWeight{0};
+                size_t maxWeight{0};
                 size_t maxWeightDepth = 0;
                 size_t maxDepth = 0;
-                Rational maxDepthWeight{0};
+                size_t maxDepthWeight{0};
                 size_t sink1 = m;
                 size_t sink2 = m;
 
@@ -674,7 +660,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     if (partId != partitionId[u]) {
                         continue;
                     }
-                    const auto & C = pathCost[u];
+                    const auto C = pathCost[u];
                     const auto d = depth[u];
                     if (maxWeight <= C) {
                         if (maxWeightDepth < d || maxWeight < C) {
@@ -699,343 +685,51 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 T[sink2] = true;
             }
         }
+
         for (auto u = m; u >= PartitionCount; --u) {
             if (in_degree(u, T) > 1U) {
-                const auto & W = pathCost[u];
-                const auto d = depth[u];
+                const auto W = pathCost[u];
+                const auto du = depth[u];
                 size_t maxWeightDepth = 0;
-                Rational maxDepthWeight{0};
+                size_t maxDepthWeight{0};
                 size_t keep1 = -1U;
                 size_t keep2 = -1U;
 
                 for (auto e : make_iterator_range(in_edges(u, T))) {
                     const auto v = source(e, T);
                     const auto & C = pathCost[v];
+                    const auto dv = depth[v];
                     assert (C < W || u == m);
-                    assert ((C + T[e]) <= W);
-                    if ((C + T[e]) == W) {
-                        if (maxWeightDepth < depth[v]) {
-                            maxWeightDepth = depth[v];
+
+                    const auto c = T[e] * denomLCM;
+                    assert (c.denominator() == 1);
+                    const auto x = c.numerator() * c.numerator();
+                    const auto X = C + x;
+                    assert (X <= W);
+                    // is this edge on a heaviest path?
+                    if (X == W) {
+                        // if so is it a longest-heaviest path?
+                        if (maxWeightDepth < dv) {
+                            maxWeightDepth = dv;
                             keep1 = v;
                         }
                     }
-                    if ((depth[v] + 1U) == d) {
-                        if (maxDepthWeight < C) {
-                            maxDepthWeight = C;
+                    // is this edge on a longest path?
+                    if ((dv + 1U) == du) {
+                        // if so is it a heaviest-longest path?
+                        if (maxDepthWeight < X) {
+                            maxDepthWeight = X;
                             keep2 = v;
                         }
                     }
                 }
+                assert (keep1 != -1U || keep2 != -1U);
                 remove_in_edge_if(u, [&](const ThreadLocalPlacementGraph::edge_descriptor e) -> bool {
                     const auto v = source(e, T);
                     return (v >= PartitionCount) && (v != keep1) && (v != keep2);
                 }, T);
             }
         }
-
-#else
-
-        transitive_reduction_dag(T);
-
-        // TODO: this is probably too complex a solution. is it not equivalent to simply check the path lengths
-        // and conclude if one is longer, then with a small segment length, it'd be preferred over the other in
-        // that case? Similarly, if we take two paths and sort their weights, we could say one is bigger than
-        // with a large segment size whenever any i-th edge weight is larger in one than the other.
-
-        // TODO: just have them loop back to the partition root to indicate final cost?
-
-        const auto cfg = Z3_mk_config();
-        Z3_set_param_value(cfg, "model", "true");
-        Z3_set_param_value(cfg, "proof", "false");
-        Z3_set_param_value(cfg, "timeout", "2000");
-        const auto ctx = Z3_mk_context(cfg);
-        Z3_del_config(cfg);
-        const auto solver = Z3_mk_solver(ctx);
-        Z3_solver_inc_ref(ctx, solver);
-
-        const auto varType = Z3_mk_int_sort(ctx);
-
-        auto hard_assert = [&](Z3_ast c) {
-            Z3_solver_assert(ctx, solver, c);
-        };
-
-        auto check = [&]() -> Z3_lbool {
-            return Z3_solver_check(ctx, solver);
-        };
-
-        auto constant = [&](const size_t value) {
-            return Z3_mk_int(ctx, value, varType);
-        };
-
-        const Z3_ast z3_ZERO = constant(0);
-
-        const Z3_ast z3_LCM_OF_DENOM = constant(lcmOfDenom);
-
-        std::queue<unsigned> Q;
-
-        std::vector<unsigned> pending(n);
-
-        for (unsigned i = 0; i < n; ++i) {
-            pending[i] = in_degree(PartitionCount + i, T);
-        }
-
-        std::vector<Z3_ast> totalCost(PartitionCount + n, nullptr);
-        std::vector<Rational> totalPathSum(n, Rational{0});
-        std::vector<unsigned> totalPathLength(n, 0);
-
-        flat_map<std::pair<unsigned, unsigned>, Z3_ast> M;
-
-        // TODO: preprocess the io scaling vars to determine if two partition vars are equivalent?
-
-        using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
-
-        auto identifyLowerValueAncestors = [&](std::vector<Vertex> & ancestors) -> std::vector<Z3_ast> {
-            // sort ancestors in decending sum/length cost
-
-            const auto m = ancestors.size();
-
-            if (m > 2) {
-
-                std::sort(ancestors.begin(), ancestors.end(), [&](const Vertex a, const Vertex b) {
-                    assert (a >= PartitionCount);
-                    const auto lA = totalPathLength[a - PartitionCount];
-                    assert (b >= PartitionCount);
-                    const auto lB = totalPathLength[b - PartitionCount];
-                    if (lA > lB) {
-                        return true;
-                    } else if (lA == lB) {
-                        const auto & sA = totalPathSum[a - PartitionCount];
-                        assert (sA.numerator() > 0);
-                        const auto & sB = totalPathSum[b - PartitionCount];
-                        assert (sB.numerator() > 0);
-                        return sA > sB;
-                    } else {
-                        return false;
-                    }
-                });
-
-            }
-
-            std::vector<Z3_ast> result(m);
-            for (unsigned i = 0; i != m; ++i) {
-                assert (ancestors[i] >= PartitionCount);
-                result[i] = totalCost[ancestors[i]]; assert (result[i]);
-            }
-
-            for (unsigned i = 1; i < m; ++i) {
-                assert (result[i]);
-                for (unsigned j = 0; j != i; ++j) {
-
-                    if (result[j] == nullptr) {
-                        continue; // path_j was already pruned as being strictly less than some other path
-                    }
-
-                    Z3_solver_push(ctx, solver);
-                    const auto JltIClause = Z3_mk_gt(ctx, result[i], result[j]);
-                    hard_assert(JltIClause);
-                    // hard_assert(Z3_mk_exists_const(ctx, 0, 1, vars, 0, 0, JltIClause));
-                    const Z3_lbool ExistsIgtJ = check();
-                    Z3_solver_pop(ctx, solver, 1);
-
-                    // If there is no assignment of var s.t. path_j < path_i then we know that
-                    // the memory allocation resulting from path_j is at least as large as path_i.
-
-                    if (ExistsIgtJ == Z3_L_FALSE) {
-                        // for all assignments of var, path_j >= path_i
-                        result[i] = nullptr;
-                        break;
-                    }
-
-                    Z3_solver_push(ctx, solver);
-                    const auto IltJClause = Z3_mk_gt(ctx, result[j], result[i]);
-                    hard_assert(IltJClause);
-                    // hard_assert(Z3_mk_exists_const(ctx, 0, 1, vars, 0, 0, IltJClause));
-                    const Z3_lbool ExistsJgtI = check();
-                    Z3_solver_pop(ctx, solver, 1);
-
-                    if (ExistsJgtI == Z3_L_FALSE) {
-                        // for all assignments of var, path_i >= path_j
-                        result[j] = nullptr;
-                    }
-                }
-            }
-
-            return result;
-        };
-
-        for (unsigned i = 0; i < PartitionCount; ++i) {
-            T[i] = false;
-        }
-
-        std::vector<Vertex> pathSinks;
-        for (unsigned i = 0; i < n; ++i) {
-            const auto u = PartitionCount + i;
-            const bool isSink = (out_degree(u, T) == 0 && in_degree(u, T) != 0);
-            T[u] = isSink;
-            if (isSink) {
-                pathSinks.push_back(u);
-            }
-        }
-
-        const Z3_ast ioScalingVar = Z3_mk_fresh_const(ctx, nullptr, varType);
-        hard_assert(Z3_mk_gt(ctx, ioScalingVar, z3_ZERO));
-
-        for (unsigned i = 0; i < PartitionCount; ++i) {
-            if (out_degree(i, T) > 0) {
-
-                auto CeilMulVar = [&](const Rational & R, const unsigned addToScalingVar) {
-                    assert (R.denominator() == 1);
-                    const auto V = R.numerator();
-                    auto f = M.find(std::make_pair(V, addToScalingVar));
-                    if (f != M.end()) {
-                        return f->second;
-                    }
-                    Z3_ast v = ioScalingVar;
-                    if (LLVM_UNLIKELY(addToScalingVar > 0)) {
-                        FixedArray<Z3_ast, 2> args;
-                        args[0] = v;
-                        args[1] = constant(addToScalingVar);
-                        v = Z3_mk_add(ctx, 2, args.data());
-                    }
-                    if (LLVM_LIKELY(V > 1)) {
-                        FixedArray<Z3_ast, 2> args;
-                        args[0] = v;
-                        args[1] = constant(V);
-                        v = Z3_mk_mul(ctx, 2, args.data());
-                    }
-                    if (LLVM_LIKELY(V != lcmOfDenom)) {
-                        FixedArray<Z3_ast, 2> args;
-                        const Z3_ast r = Z3_mk_mod(ctx, v, z3_LCM_OF_DENOM);
-                        args[0] = v;
-                        args[1] = r;
-                        const Z3_ast floorV = Z3_mk_sub(ctx, 2, args.data());
-                        // ceil v
-                        args[0] = floorV;
-                        args[1] = z3_LCM_OF_DENOM;
-                        const Z3_ast ceilingV = Z3_mk_add(ctx, 2, args.data());
-                        v = Z3_mk_ite(ctx, Z3_mk_eq(ctx, r, z3_ZERO), floorV, ceilingV);
-                    }
-                    M.emplace(std::make_pair(V, addToScalingVar), v);
-                    return v;
-                };
-
-                assert (Q.empty());
-                for (auto e : make_iterator_range(out_edges(i, T))) {
-                    const auto v = target(e, T);
-                    assert (v >= PartitionCount);
-                    assert (in_degree(v, T) == 1);
-                    const auto k = v - PartitionCount;
-                    assert (pending[k] == 1);
-                    pending[k] = 0;
-                    const Rational & R = T[e];
-                    assert (R.numerator() > 0);
-                    totalPathSum[k] = R;
-                    assert (totalPathLength[k] == 0);
-                    totalPathLength[k] = 1;
-                    totalCost[v] = CeilMulVar(R * lcmOfDenom, overflowWeight[k]);
-                    Q.push(v);
-                }
-
-                for (;;) {
-                    assert (!Q.empty());
-                    const auto u = Q.front(); Q.pop();
-                    for (auto e : make_iterator_range(out_edges(u, T))) {
-                        const auto v = target(e, T);
-                        assert (v >= PartitionCount);
-                        const auto k = v - PartitionCount;
-                        assert (pending[k] > 0);
-                        if (--pending[k] == 0) {
-                            const auto d = in_degree(v, T);
-                            assert (d > 0);
-                            Z3_ast priorOffset = nullptr;
-
-                            Rational priorPathSum{0};
-                            unsigned priorPathLength{0};
-
-                            const auto cost = T[e]; // may end up deleting this edge/value
-
-                            if (LLVM_LIKELY(d == 1)) {
-                                const auto w = u - PartitionCount;
-                                assert (totalPathSum[w].numerator() > 0);
-                                priorPathSum = totalPathSum[w];
-                                assert (totalPathLength[w] > 0);
-                                priorPathLength = totalPathLength[w];
-                                priorOffset = totalCost[u];
-                            } else {
-                                ThreadLocalPlacementGraph::in_edge_iterator begin, end;
-                                std::tie(begin, end) = in_edges(v, T);
-                                std::vector<Vertex> ancestor(d);
-                                auto ei = begin;
-                                for (unsigned i = 0; i != d; ++i, ++ei) {
-                                    ancestor[i] = source(*ei, T);
-                                    assert (ancestor[i] >= PartitionCount);
-                                    assert (totalPathLength[ancestor[i] - PartitionCount] > 0);
-                                    assert (totalPathSum[ancestor[i] - PartitionCount] > 0);
-                                }
-
-                                const auto pathCost = identifyLowerValueAncestors(ancestor);
-
-                                for (unsigned i = 0; i != d; ++i) {
-                                    if (pathCost[i]) {
-                                        if (priorOffset) {
-
-                                            priorOffset = Z3_mk_ite(ctx, Z3_mk_gt(ctx, pathCost[i], priorOffset), pathCost[i], priorOffset);
-                                        } else {
-                                            priorOffset = pathCost[i];
-                                        }
-                                        assert (ancestor[i] >= PartitionCount);
-                                        const auto w = ancestor[i] - PartitionCount;
-                                        assert (totalPathSum[w].numerator() > 0);
-                                        priorPathSum = std::max(priorPathSum, totalPathSum[w]);
-                                        priorPathLength = std::max(priorPathLength, totalPathLength[w]);
-                                    } else {
-                                        // prune the edge from the graph since we do not need to consider
-                                        // this path when determining the memory placement of this buffer
-                                        assert (edge(ancestor[i], v, T).second);
-                                        remove_edge(ancestor[i], v, T);
-                                        assert (!edge(ancestor[i], v, T).second);
-                                    }
-                                }
-                            }
-
-                            FixedArray<Z3_ast, 2> args;
-                            args[0] = priorOffset; assert (priorOffset);
-                            args[1] = CeilMulVar(cost * lcmOfDenom, overflowWeight[k]);
-                            totalCost[v] = Z3_mk_add(ctx, 2, args.data());
-
-                            assert (totalPathSum[k] == Rational{0});
-                            totalPathSum[k] = priorPathSum + cost;
-                            assert (totalPathSum[k].numerator() > 0);
-                            assert (totalPathLength[k] == 0);
-                            totalPathLength[k] = priorPathLength + 1U;
-                            Q.push(v);
-                        }
-                    }
-                    if (Q.empty()) {
-                        break;
-                    }
-                }
-            }
-        }
-
-        const auto l = pathSinks.size();
-
-        if (LLVM_UNLIKELY(l == 1)) {
-            add_edge(pathSinks[0], PartitionCount + n, Rational{0}, T);
-        } else { assert (l > 0);
-            const auto sinkval = identifyLowerValueAncestors(pathSinks);
-            for (unsigned i = 0; i != l; ++i) {
-                if (sinkval[i]) {
-                    add_edge(pathSinks[i], PartitionCount + n, Rational{0}, T);
-                }
-            }
-            assert (in_degree(PartitionCount + n, T) > 0);
-        }
-
-        Z3_solver_dec_ref(ctx, solver);
-        Z3_del_context(ctx);
-        Z3_reset_memory();
-#endif
 
         #ifdef PRINT_Z3_OPTIMIZATION
         BEGIN_SCOPED_REGION
@@ -1049,7 +743,9 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 } else {
                     out << "S_" << (FirstStreamSet + i - PartitionCount);
 
-                    out << " (W:" << pathCost[i].numerator() << "/" << pathCost[i].denominator() << " d:" << depth[i] << ")";
+                    const Rational C{pathCost[i], denomLCM};
+
+                    out << " (W:" << C.numerator() << "/" << C.denominator() << " d:" << depth[i] << ")";
 
                     if (T[i]) {
                         out << '*';

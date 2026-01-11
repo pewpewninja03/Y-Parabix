@@ -125,8 +125,10 @@ void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
  * @brief readConsumedItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t streamSet) {
+    assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
     assert (in_degree(streamSet, mBufferGraph) > 0);
     const auto id = mConsumerGraph[streamSet];
+    assert (FirstStreamSet <= id && id <= LastStreamSet);
     if (mInitialConsumedItemCount[id]) {
         return mInitialConsumedItemCount[id];
     }

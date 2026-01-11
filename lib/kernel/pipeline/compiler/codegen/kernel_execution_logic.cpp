@@ -628,11 +628,14 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             if (LLVM_UNLIKELY(CheckAssertions() || checkStreamSet)) {
                 if (bn.isThreadLocal()) {
                     max = b.CreateAdd(produced, mLinearOutputItemsPhi[rt.Port]);
+                } else if (bn.isConstant()) {
+                    max = ConstantInt::getAllOnesValue(b.getSizeTy());
                 } else {
                     Value * base = readConsumedItemCount(b, streamSet); assert (base);
                     max = b.CreateAdd(base, buffer->getInternalCapacity(b));
                 }
                 if (rt.Add) {
+                    assert (!bn.isConstant());
                     max = b.CreateAdd(max, b.getSize(rt.Add));
                 }
                 if (LLVM_UNLIKELY(bn.isThreadLocal())) {
