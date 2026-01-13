@@ -411,7 +411,7 @@ void GrepEngine::initRE(re::RE * re) {
         bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
         mRE = toUTF8(mRE, useInternalNaming);
     }
-    re::LookAheadNamer LA;
+    re::LookAheadNamer LA(*mLengthAlphabet);
     mRE = LA.transformRE(mRE);
     for (auto m : LA.mNameMap) {
         mExternalTable.declareExternal(indexCode, m.first, new RE_External(this, m.second, mLengthAlphabet));
