@@ -53,8 +53,6 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
-        P.addFlowControlAnnotations();
-
         P.identifyTerminationChecks();
 
         P.makeTerminationPropagationGraph();
@@ -197,8 +195,6 @@ private:
 
     void buildZeroInputGraph();
 
-    void addFlowControlAnnotations();
-
     void setStreamSetLockIds();
 
     void identifyManagedBufferStructIds(pipeline_random_engine & rng);
@@ -273,6 +269,7 @@ public:
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
+    std::vector<size_t>             PartitionPhaseBoundaries;
 
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;
@@ -292,10 +289,7 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        FirstComputePartitionId = 0;
-    unsigned                        LastComputePartitionId = 0;
     unsigned                        ManagedBufferStructCount = 0;
-    bool                            AllowIOProcessThread = false;
 
     bool                            HasZeroExtendedStream = false;
     bool                            RequiresIllustratorObject = false;
@@ -320,7 +314,7 @@ public:
     ThreadLocalConflictGraphType    ThreadLocalConflictGraph;
 
     std::vector<unsigned>           PartitionJumpTargetId;
-    RedundantStreamSetMap           RedundantStreamSets;
+    RedundantStreamSetMap           RemappedStreamSets;
 
     ConsumerGraph                   mConsumerGraph;
 

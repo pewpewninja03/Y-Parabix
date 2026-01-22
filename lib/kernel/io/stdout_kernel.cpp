@@ -17,12 +17,6 @@ namespace llvm { class Type; }
 
 using namespace llvm;
 
-#ifdef __APPLE__
-#define PWRITE pwrite
-#else
-#define PWRITE pwrite64
-#endif
-
 namespace kernel {
 
 void StdOutKernel::linkExternalMethods(KernelBuilder & b) {
@@ -35,21 +29,17 @@ void StdOutKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     Value * bytesDone = b.getProcessedItemCount("codeUnitBuffer");
     Value * codeUnitBuffer = b.getRawInputPointer("codeUnitBuffer", bytesDone);
-    codeUnitBuffer = b.CreatePointerCast(codeUnitBuffer, b.getInt8PtrTy());
-
     Value * bytesToDo = b.getAccessibleItemCount("codeUnitBuffer");
-    if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
-        bytesDone = b.CreateMul(bytesDone, b.getSize(mCodeUnitWidth / 8));
-        bytesToDo = b.CreateMul(bytesToDo, b.getSize(mCodeUnitWidth / 8));
-    } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
-        bytesDone = b.CreateUDiv(bytesDone, b.getSize(8 / mCodeUnitWidth));
-        bytesToDo = b.CreateUDiv(bytesToDo, b.getSize(8 / mCodeUnitWidth));
+    if (mCodeUnitWidth != 8) {
+        codeUnitBuffer = b.CreatePointerCast(codeUnitBuffer, b.getInt8PtrTy());
+        if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
+            bytesToDo = b.CreateMul(bytesToDo, b.getSize(mCodeUnitWidth / 8));
+        } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
+            bytesToDo = b.CreateUDiv(bytesToDo, b.getSize(8 / mCodeUnitWidth));
+        }
     }
-
-    Constant * const stdOutFd = b.getInt32(STDOUT_FILENO);
-
     FixedArray<Value *, 3> args3;
-    args3[0] = stdOutFd;
+    args3[0] = b.getInt32(STDOUT_FILENO);
     args3[1] = codeUnitBuffer;
     args3[2] = bytesToDo;
     Function * writeFunc = m->getFunction("write");
@@ -68,7 +58,7 @@ StdOutKernel::StdOutKernel(LLVMTypeSystemInterface & ts, StreamSet *codeUnitBuff
 }
 
 void FileSink::linkExternalMethods(KernelBuilder & b) {
-    b.LinkFunction("pwrite", PWRITE);
+    b.LinkFunction("write", write);
 }
 
 void FileSink::generateInitializeMethod(KernelBuilder & b) {
@@ -127,29 +117,28 @@ void FileSink::generateInitializeMethod(KernelBuilder & b) {
 }
 
 void FileSink::generateDoSegmentMethod(KernelBuilder & b) {
+    Module * const m = b.getModule();
+
     Value * bytesDone = b.getProcessedItemCount("codeUnitBuffer");
     Value * codeUnitBuffer = b.getRawInputPointer("codeUnitBuffer", bytesDone);
-    codeUnitBuffer = b.CreatePointerCast(codeUnitBuffer, b.getInt8PtrTy());
     Value * bytesToDo = b.getAccessibleItemCount("codeUnitBuffer");
-    if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
-        bytesDone = b.CreateMul(bytesDone, b.getSize(mCodeUnitWidth / 8));
-        bytesToDo = b.CreateMul(bytesToDo, b.getSize(mCodeUnitWidth / 8));
-    } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
-        bytesDone = b.CreateUDiv(bytesDone, b.getSize(8 / mCodeUnitWidth));
-        bytesToDo = b.CreateUDiv(bytesToDo, b.getSize(8 / mCodeUnitWidth));
+    if (mCodeUnitWidth != 8) {
+        codeUnitBuffer = b.CreatePointerCast(codeUnitBuffer, b.getInt8PtrTy());
+        if (LLVM_UNLIKELY(mCodeUnitWidth > 8)) {
+            bytesToDo = b.CreateMul(bytesToDo, b.getSize(mCodeUnitWidth / 8));
+        } else if (LLVM_UNLIKELY(mCodeUnitWidth < 8)) {
+            bytesToDo = b.CreateUDiv(bytesToDo, b.getSize(8 / mCodeUnitWidth));
+        }
     }
+
     Value * const fileDescriptor = b.getScalarField("fileDescriptor");
 
-    FixedArray<Value *, 4> args;
-    args[0] = fileDescriptor;
-    args[1] = codeUnitBuffer;
-    args[2] = bytesToDo;
-    args[3] = bytesDone;
-
-    Function * pwriteFunc = b.getModule()->getFunction("pwrite");
-    b.CreateCall(pwriteFunc, args);
-
-    //b.CreateWriteCall(fileDescriptor, codeUnitBuffer, bytesToDo);
+    FixedArray<Value *, 3> args3;
+    args3[0] = fileDescriptor;
+    args3[1] = codeUnitBuffer;
+    args3[2] = bytesToDo;
+    Function * writeFunc = m->getFunction("write");
+    b.CreateCall(writeFunc, args3);
 }
 
 void FileSink::generateFinalizeMethod(KernelBuilder & b) {

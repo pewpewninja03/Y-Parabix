@@ -72,6 +72,8 @@ static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc(
 static cl::opt<bool> FilterViolations("FilterViolations", cl::desc("Only include reorderable sequences in work items if they are misordered or start with a decomposable character"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> UseIndexedShiftBack("IndexedShiftBack", cl::desc("Use IndexedShiftBack in place of Filter/Spread combination"), cl::init(false), cl::cat(NFD_Options));
 
+static cl::opt<bool> UseLayers("UseLayers", cl::desc("Use pipeline layers"), cl::init(false), cl::cat(NFD_Options));
+
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
@@ -955,6 +957,10 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
         StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
         NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
         
+        if (UseLayers) {
+            P.InsertPhaseBoundary();
+        }
+
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);
         

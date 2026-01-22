@@ -61,6 +61,7 @@ enum RelationshipNodeFlag {
     IndirectFamily = 1
     , ImplicitlyAdded = 2
     , IsSideEffecting = 4
+    , IsPipelineLayerBoundary = 8
 };
 
 struct RelationshipNode {
@@ -295,14 +296,16 @@ enum BufferLocality {
 enum KernelFlags {
     PermitSegmentSizeSlidingWindowing = 1
     , ControlsSegmentSizeSlidingWindowing = 2
+    , LayerBoundaryPosition = 4
 };
 
 struct BufferNode {
 
-    StreamSetBuffer * OutputBuffer = nullptr;
+
 
     unsigned Type = 0;
-    bool IsLinear = false;
+
+    StreamSetBuffer * Buffer = nullptr;
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
@@ -312,6 +315,8 @@ struct BufferNode {
     unsigned NumOfOverflowStrides = 0;
 
     bool RequiresUnderflow = false;
+
+    bool IsLinear = false;
 
     unsigned PartialSumSpanLength = 0;
 
@@ -417,7 +422,8 @@ enum BufferPortType : unsigned {
     CanModifySegmentLength = 128,
     IsCrossThreaded = 256,
     Illustrated = 512,
-    InputMayBeTruncated = 1024
+    InputMayBeTruncated = 1024,
+    LayerBoundaryPort = 2048
 };
 
 struct BufferPort {
@@ -427,9 +433,8 @@ struct BufferPort {
     Rational Minimum;
     Rational Maximum;
     unsigned Flags = 0;
-
-
     unsigned SymbolicRateId = 0U;
+    double LayerBoundaryRestriction = 0.0;
 
     // binding attributes
     unsigned Add = 0;

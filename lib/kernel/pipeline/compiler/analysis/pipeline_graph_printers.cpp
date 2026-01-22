@@ -234,7 +234,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << "color=blue,";
         }
 
-        const StreamSetBuffer * const buffer = bn.OutputBuffer;
+        const StreamSetBuffer * const buffer = bn.Buffer;
 
         out << "label=\"" << streamSet;
         out << " |{";

@@ -38,9 +38,8 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
-        assert (!mIsIOProcessThread);
         assert (mSegNo == mExternalSegNo && mSegNo);
-    } else if ((mUseDynamicMultithreading || UseJumpGuidedSynchronization) && !mIsIOProcessThread) {
+    } else if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
         Value * const segNoPtr = b.getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
         // fetches a number before the prior one to fetch the same number updates it.
@@ -60,7 +59,7 @@ void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * con
     if (mIsNestedPipeline) {
         return;
     }
-    if ((mUseDynamicMultithreading || UseJumpGuidedSynchronization) && !mIsIOProcessThread) {
+    if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
         return;
     }
     Value * segNo = mSegNo;  assert (mSegNo);
@@ -194,44 +193,6 @@ void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsig
         debugPrint(b, prefix + ": released %ssegment number %" PRIu64, __getSyncLockName(b, type), segNo);
         #endif
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief waitUntilCurrentSegmentNumberIsLessThan
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b, const unsigned kernelId, Value * const windowLength) {
-
-    // TODO: this should affect dynamic multithreading sync cost
-
-    assert (b.GetInsertBlock());
-    BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
-    const auto lockType = isDataParallel(kernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
-    const auto prefix = makeKernelName(kernelId) + ":" + __getSyncLockNameString(lockType);
-    BasicBlock * const segmentCheckLoop = b.CreateBasicBlock(prefix + "_crossTheadWaitLoop", nextNode);
-    BasicBlock * const segmentCheckExit = b.CreateBasicBlock(prefix + "_crossTheadWaitExit", nextNode);
-    Value * const syncLockPtr = getSynchronizationLockPtrForKernel(b, kernelId, lockType);
-    Value * terminatedPtr = nullptr;
-    if (mIsIOProcessThread) {
-        std::tie(terminatedPtr, std::ignore) = b.getScalarFieldPtr(COMPUTE_THREAD_TERMINATION_STATE);
-    }
-    b.CreateBr(segmentCheckLoop);
-
-    b.SetInsertPoint(segmentCheckLoop);
-    Value * min = b.CreateAtomicLoadAcquire(b.getSizeTy(), syncLockPtr);
-    assert (!mIsIOProcessThread || windowLength);
-    if (mIsIOProcessThread) {
-        min = b.CreateAdd(min, windowLength);
-    }
-    Value * const isProgressedFarEnough = b.CreateICmpULT(mSegNo, min);
-    Value * isTerminated = nullptr;
-    if (mIsIOProcessThread) {
-        isTerminated = b.CreateIsNotNull(b.CreateAlignedLoad(b.getSizeTy(), terminatedPtr, SizeTyABIAlignment, true));
-    } else {
-        isTerminated = b.CreateIsNotNull(readTerminationSignal(b, kernelId));
-    }
-    b.CreateLikelyCondBr(b.CreateOr(isProgressedFarEnough, isTerminated), segmentCheckExit, segmentCheckLoop);
-
-    b.SetInsertPoint(segmentCheckExit);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

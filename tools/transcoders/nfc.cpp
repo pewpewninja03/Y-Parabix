@@ -58,6 +58,9 @@ static cl::opt<bool> NoFocus("NoFocus", cl::desc("Process the entire file withou
 static cl::opt<bool> MultiStage("MultiStage", cl::desc("Use two pipeline stages"), cl::init(false), cl::cat(NFC_Options));
 static cl::opt<bool> ByteFiltering("ByteFiltering", cl::desc("Use byte filtering for focused work"), cl::init(false), cl::cat(NFC_Options));
 
+static cl::opt<bool> UseLayers("UseLayers", cl::desc("Use pipeline layers"), cl::init(false), cl::cat(NFC_Options));
+
+
 //static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-bit Unicode"),  cl::cat(NFC_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
@@ -231,6 +234,10 @@ void focus_stage_logic(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * 
         FilterByMask(P, WorkSelectionMask, BasisBits, FocusedWorkBasis);
     }
 
+    if (UseLayers) {
+        P.InsertPhaseBoundary();
+    }
+
     StreamSet * const NonModifiedMask = P.CreateStreamSet(1, 1);
     Invert(P, WorkSelectionMask, NonModifiedMask);
     SHOW_STREAM(NonModifiedMask);
@@ -388,7 +395,6 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     source_logic(P, ByteStream, BasisBits);
-
     if (NoFocus) {
         StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
         DetermineNFC_WorkSpans(P, BasisBits, WorkSelectionMask);

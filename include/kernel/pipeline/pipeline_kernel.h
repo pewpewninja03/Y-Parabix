@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <functional>
 #include <kernel/pipeline/driver/driver.h>
+#include <kernel/pipeline/pipeline_layer.h>
 #include <boost/container/flat_map.hpp>
 #include <kernel/illustrator/illustrator_binding.h>
 
@@ -70,6 +71,8 @@ public:
 
     using Kernels = std::vector<KernelBinding>;
 
+    using PhaseBoundaries = std::vector<std::pair<std::unique_ptr<PipelinePhaseBoundary>, size_t>>;
+
     struct CallBinding {
         std::string Name;
         llvm::FunctionType * Type;
@@ -128,6 +131,22 @@ public:
 
     llvm::Function * addOrDeclareMainFunction(KernelBuilder & b, const MainMethodGenerationType method) const final;
 
+    PipelinePhaseBoundary * InsertPhaseBoundary() {
+        auto boundary = std::make_unique<PipelinePhaseBoundary>();
+        auto ptr = boundary.get();
+        mPhaseBoundaries.emplace_back(std::move(boundary), mKernels.size());
+        return ptr;
+    }
+
+    template<typename... OtherBoundaryTypes>
+    PipelinePhaseBoundary * InsertLayerBoundary(const StreamSet * const streamSet, const double restriction, OtherBoundaryTypes... other) {
+        auto boundary = std::make_unique<PipelinePhaseBoundary>();
+        auto ptr = boundary.get();
+        __addPhaseBoundary(ptr, streamSet, restriction, other...);
+        mPhaseBoundaries.emplace_back(std::move(boundary), mKernels.size());
+        return ptr;
+    }
+
 protected:
 
     PipelineKernel(LLVMTypeSystemInterface & ts,
@@ -137,7 +156,8 @@ protected:
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
                    Relationships && internallyGenerated,
-                   LengthAssertions && lengthAssertions);
+                   LengthAssertions && lengthAssertions,
+                   PhaseBoundaries && layerBoundaries);
 
     PipelineKernel(LLVMTypeSystemInterface & ts,
                    std::string && signature,
@@ -162,8 +182,8 @@ private:
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs,
                    Relationships && internallyGenerated,
-                   LengthAssertions && lengthAssertions);
-
+                   LengthAssertions && lengthAssertions,
+                   PhaseBoundaries && layerBoundaries);
 
 private:
 
@@ -213,6 +233,20 @@ protected:
         return mIllustratorBindings;
     }
 
+private:
+
+    template<typename... OtherBoundaryTypes>
+    static void __addPhaseBoundary(PipelinePhaseBoundary * boundary, const StreamSet * const streamSet, const double expected, OtherBoundaryTypes... other) {
+        boundary->addExpectedIORatio(streamSet, expected);
+        __addPhaseBoundary(boundary, other...);
+    }
+
+    template<typename... OtherBoundaryTypes>
+    static void __addPhaseBoundary(PipelinePhaseBoundary * boundary) {
+
+    }
+
+
 protected:
 
     unsigned                            mNumOfKernelFamilyCalls;
@@ -222,7 +256,7 @@ protected:
     CallBindings                        mCallBindings;
     LengthAssertions                    mLengthAssertions;
     IllustratorBindings                 mIllustratorBindings;
-
+    PhaseBoundaries                     mPhaseBoundaries;
 };
 
 }

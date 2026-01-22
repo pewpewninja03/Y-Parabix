@@ -265,7 +265,7 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(KernelBuilder & b) {
             const auto streamSet = source(e, mConsumerGraph);
             assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);
             if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-                const ConsumerEdge & c = mConsumerGraph[e]; assert (c.Index > 0);
+                const ConsumerEdge & c = mConsumerGraph[e];
                 setConsumedItemCount(b, streamSet, processed, c.Index);
             }
 

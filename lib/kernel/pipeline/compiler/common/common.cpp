@@ -124,7 +124,7 @@ const Binding & PipelineCommonGraphFunctions::getOutputBinding(const size_t kern
  ** ------------------------------------------------------------------------------------------------------------- */
 StreamSetBuffer * PipelineCommonGraphFunctions::getOutputBuffer(const size_t kernel, const StreamSetPort outputPort) const {
     assert (outputPort.Type == PortType::Output);
-    return mBufferGraphRef[getOutputBufferVertex(kernel, outputPort)].OutputBuffer;
+    return mBufferGraphRef[getOutputBufferVertex(kernel, outputPort)].Buffer;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

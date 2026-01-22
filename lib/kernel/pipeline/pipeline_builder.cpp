@@ -12,6 +12,7 @@
 #include <llvm/IR/Constants.h>
 #include <toolchain/toolchain.h>
 #include "compiler/pipeline_compiler.hpp"
+#include <boost/format.hpp>
 
 // TODO: the builders should detect if there is only one kernel in a pipeline / both branches are equivalent and return the single kernel. Modify addOrDeclareMainFunction.
 
@@ -495,6 +496,32 @@ Kernel * PipelineBuilder::makeKernel() {
                 sig << '_' << k << '.' << G[e];
             }
         }
+
+        const auto & L = mTarget->mPhaseBoundaries;
+        const auto numOfLayers = L.size();
+        for (size_t i = 0; i < numOfLayers; ++i) {
+            const auto & layerBoundary = L[i];
+            sig << '$' << layerBoundary.second;
+            for (const auto & r : layerBoundary.first->getRestrictions()) {
+                const auto f = M.find(r.first);
+                if (LLVM_UNLIKELY(f == M.end())) {
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream out(tmp);
+                    out << "Layer boundary " << (i + 1) << " references streamset that does not produced by or passed into the pipeline.";
+                    report_fatal_error(StringRef(out.str()));
+                }
+                const auto d = r.second;
+                const auto ds = (boost::format("%.2f") % d).str();
+                if (LLVM_UNLIKELY(d < 0.0 || d > 1.0)) {
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream out(tmp);
+                    out << "Layer boundary " << (i + 1) << " segment-size ratio (" << ds << ") must be between 0.0 and 1.0.";
+                    report_fatal_error(StringRef(out.str()));
+                }
+                sig << '.' << ds;
+            }
+        }
+
         sig.flush();
 
     } else { // the programmer provided a unique name

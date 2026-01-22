@@ -373,7 +373,6 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     assert (inputPort.Type == PortType::Input);
 
     const BufferNode & bn = mBufferGraph[streamSet];
-    if (LLVM_UNLIKELY(bn.isConstant())) return;
 
     // Only the partition root dictates how many strides this kernel will end up doing. All other kernels
     // simply have to trust that the root determined the correct number or we'd be forced to have an
@@ -488,7 +487,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(KernelBuilder & b, const Bu
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
-        assert (!isa<ManagedDynamicBuffer>(bn.OutputBuffer));
+        assert (!isa<ManagedDynamicBuffer>(bn.Buffer));
         return;
     }
 
@@ -801,7 +800,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     const auto outputPort = port.Port;
     assert (outputPort.Type == PortType::Output);
     const auto prefix = makeBufferName(mKernelId, outputPort);
-    const StreamSetBuffer * const buffer = bn.OutputBuffer;
+    const StreamSetBuffer * const buffer = bn.Buffer;
 
     Value * const required = mLinearOutputItemsPhi[outputPort];
 
@@ -842,7 +841,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     if (LLVM_LIKELY(bn.LockId == 0)) {
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-            assert (!mIsIOProcessThread);
             acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
         }
     } else {
@@ -1033,7 +1031,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     const auto streamSet = target(output, mBufferGraph);
     const BufferNode & bn = mBufferGraph[streamSet];
     assert (bn.isNonThreadLocal());
-    const StreamSetBuffer * const buffer = bn.OutputBuffer;
+    const StreamSetBuffer * const buffer = bn.Buffer;
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
 
@@ -1497,7 +1495,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
 
     const auto srcStreamSet = getInputBufferVertex(mKernelId, ref);
     const auto & srcBufferNode = mBufferGraph[srcStreamSet];
-    const StreamSetBuffer * const buffer = srcBufferNode.OutputBuffer;
+    const StreamSetBuffer * const buffer = srcBufferNode.Buffer;
 
     Value * currentPtr = nullptr;
 
@@ -1590,7 +1588,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 //    const BufferPort & refInputRate = mBufferGraph[refInput];
     const auto refBufferVertex = getInputBufferVertex(ref);
     const auto & bn = mBufferGraph[refBufferVertex];
-    const StreamSetBuffer * const popCountBuffer = bn.OutputBuffer;
+    const StreamSetBuffer * const popCountBuffer = bn.Buffer;
 
     Value * inputBaseAddr = nullptr;
 
@@ -1733,7 +1731,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         const BufferPort & outputPort = mBufferGraph[output];
 
         const BufferNode & bn = mBufferGraph[streamSet];
-        StreamSetBuffer * const buffer = bn.OutputBuffer;
+        StreamSetBuffer * const buffer = bn.Buffer;
         VectorType * const vecTy = b.fwVectorType(fw);
         PointerType * const vecPtrTy = vecTy->getPointerTo();
 
@@ -1751,69 +1749,6 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         Value * const offset = b.CreateURem(index, sz_stepsPerBlock);
         Value * const start = b.CreateSub(index, offset);
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
-#if 0
-        if (LLVM_UNLIKELY(CheckAssertions())) {
-
-            IntegerType * sizeTy = b.getSizeTy();
-
-            Value * const writeStart = b.CreatePtrToInt(addr, sizeTy);
-            auto & dl = b.getModule()->getDataLayout();
-            const auto writeLength = b.getTypeSize(dl, vecTy) * spanLength; assert (writeLength > 0);
-            Value * const writeEnd = b.CreateAdd(writeStart, b.getSize(writeLength));
-
-            Value * intStart = nullptr;
-            Value * intEnd = nullptr;
-            if (bn.isThreadLocal()) {
-                Value * const tlAddr = b.CreatePtrToInt(mThreadLocalStreamSetBaseAddress, sizeTy);
-                intStart = b.CreateAdd(tlAddr, mThreadLocalStartOffset[streamSet]);
-                intEnd = b.CreateAdd(tlAddr, mThreadLocalEndOffset[streamSet]);
-            } else {
-                intStart = b.CreatePtrToInt(buffer->getMallocAddress(b), sizeTy);
-                Value * const cap = b.CreatePtrToInt(buffer->getInternalCapacity(b), sizeTy);
-                intEnd = b.CreateAdd(intStart, cap);
-            }
-
-            Value * const atOrAfterStart = b.CreateICmpULE(intStart, writeStart);
-            Value * const atOrBeforeEnd = b.CreateICmpULE(writeEnd, intEnd);
-
-            b.CreateAssert(b.CreateAnd(atOrAfterStart, atOrBeforeEnd),
-                           "%s.%s: final partial sum splat operation writes outside of streamset range",
-                           mCurrentKernelName, b.GetString(outputPort.Binding.get().getName()));
-
-//            for (auto kernel = mCurrentPartitionRoot; kernel <= mKernelId; ++kernel) {
-//                for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//                    const auto conflict = target(output, mBufferGraph);
-//                    if (LLVM_UNLIKELY(conflict == streamSet)) continue;
-//                    const BufferNode & an = mBufferGraph[conflict];
-//                    if (an.isThreadLocal()) {
-//                        for (const auto input : make_iterator_range(out_edges(conflict, mBufferGraph))) {
-//                            const auto consumer = target(input, mBufferGraph);
-//                            if (consumer > mKernelId) {
-//                                assert (KernelPartitionId[consumer] == mCurrentPartitionId);
-
-//                                const BufferPort & inputPort = mBufferGraph[input];
-
-//                                Value * const tlStart = b.CreateAdd(tlAddr, mThreadLocalStartOffset[conflict]);
-//                                b.CallPrintInt("tlStart" + std::to_string(conflict), tlStart);
-//                                Value * const beforeStart = b.CreateICmpULE(writeEnd, tlStart);
-//                                Value * const tlEnd = b.CreateAdd(tlAddr, mThreadLocalEndOffset[conflict]);
-//                                b.CallPrintInt("tlEnd" + std::to_string(conflict), tlEnd);
-//                                Value * const afterEnd = b.CreateICmpULE(tlEnd, writeStart);
-
-//                                b.CreateAssert(b.CreateOr(beforeStart, afterEnd),
-//                                               "%s.%s: final partial sum splat operation corrupts streamset %s.%s",
-//                                               mCurrentKernelName, b.GetString(outputPort.Binding.get().getName()),
-//                                               mKernelName[kernel], b.GetString(inputPort.Binding.get().getName()));
-//                                break;
-//                            }
-//                        }
-
-//                    }
-//                }
-//            }
-
-        }
-#endif
 
         Value * const vecAddr = b.CreatePointerCast(addr, vecPtrTy);
         Value * const baseValue = b.CreateBlockAlignedLoad(vecTy, vecAddr);

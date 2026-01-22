@@ -20,7 +20,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     assert (FirstKernel <= mKernelId && mKernelId <= LastKernel);
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
-    assert ("every kernel ought to be marked a partition root if jumping is disabled" && (!mIsIOProcessThread || mIsPartitionRoot));
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
@@ -85,11 +84,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mKernelInitiallyTerminated = nullptr;
     mKernelJumpToNextUsefulPartition = nullptr;
 
-    assert (mIsPartitionRoot || !mIsIOProcessThread);
-
     if (LLVM_UNLIKELY(mIsPartitionRoot || mKernelCanTerminateEarly)) {
         mKernelInitiallyTerminated = b.CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-        if (LLVM_LIKELY(mIsPartitionRoot && !mIsIOProcessThread && !mUsesNestedSynchronizationVariable)) {
+        if (LLVM_LIKELY(mIsPartitionRoot && !mUsesNestedSynchronizationVariable)) {
             // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
             const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
             assert (jumpId > mCurrentPartitionId);
@@ -212,7 +209,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
     clearUnwrittenOutputData(b);
@@ -270,7 +266,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     computeFullyProcessedItemCounts(b, terminated);
     computeMinimumConsumedItemCounts(b);
     computeFullyProducedItemCounts(b, terminated);
-    if (mIsPartitionRoot && !mIsIOProcessThread) {
+    if (mIsPartitionRoot) {
         updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtLoopExitPhi, mPotentialSegmentLengthAtLoopExitPhi);
     }
     replacePhiCatchWithCurrentBlock(b, mKernelLoopExitPhiCatch, mKernelExit);
@@ -289,7 +285,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     /// -------------------------------------------------------------------------------------
 
     if (mKernelJumpToNextUsefulPartition) {
-        assert (!mIsIOProcessThread);
         writeJumpToNextPartition(b);
     }
 
@@ -396,7 +391,6 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         }
     }
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
     BasicBlock * const exitBlock = b.GetInsertBlock();
@@ -694,7 +688,6 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
         // whether the partition is out of input
         hasBranchToLoopExit = true;
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-            assert (!mIsIOProcessThread);
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
             acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
         }

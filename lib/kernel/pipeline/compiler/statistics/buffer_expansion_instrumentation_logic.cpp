@@ -36,7 +36,7 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
         }
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+        if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
             noManagedBuffer = false;
         }
     }
@@ -185,7 +185,7 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+        if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
 
             const auto prefix = makeBufferName(kernelId, bp.Port);
             Value * traceData; Type * traceDataTy;
@@ -403,7 +403,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                 const BufferPort & br = mBufferGraph[output];
                 const auto buffer = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[buffer];
-                if (br.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+                if (br.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
 
                     //  # KERNEL                      PORT                      BUFFER         SEG #      ITEM CAPACITY
 

@@ -298,8 +298,6 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
 
     auto & DL = b.getModule()->getDataLayout();
 
-    const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
-
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = target(output, mBufferGraph);
         assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
@@ -308,7 +306,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
 
             assert (out_degree(mCurrentPartitionId, ThreadLocalPlacement) > 0);
 
-            ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.OutputBuffer);
+            ExternalBuffer * const buffer = cast<ExternalBuffer>(bn.Buffer);
             Value * const produced = mInitiallyProducedItemCount[streamSet];
             PointerType * const ptrTy = buffer->getPointerType();
 

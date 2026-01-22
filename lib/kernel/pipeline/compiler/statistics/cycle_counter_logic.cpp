@@ -26,7 +26,7 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const auto & bn = mBufferGraph[streamSet];
-            if (bn.OutputBuffer->isLinear()) {
+            if (bn.Buffer->isLinear()) {
                 copyPropertyTy = otherPropertyTy;
                 break;
             }
@@ -467,6 +467,7 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
  * @brief printOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
+#warning not right for phases yet
 #if 1
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         ConstantInt * const ZERO = b.getInt32(0);
@@ -1995,18 +1996,7 @@ Value * PipelineCompiler::getMaxSegmentNumber(KernelBuilder & b) const {
         Value * const ptr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         return b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     };
-    const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
-    Value * segNo = getKernelSegNo(firstComputeKernel);
-    if (firstComputeKernel != FirstKernel) {
-        segNo = b.CreateUMax(segNo, getKernelSegNo(firstComputeKernel - 1));
-    } else {
-        // TODO: this won't work yet
-        const auto afterLastComputePartitionId = FirstKernelInPartition[LastComputePartitionId + 1];
-        if (LLVM_UNLIKELY(afterLastComputePartitionId != PipelineOutput)) {
-            segNo = b.CreateUMax(segNo, getKernelSegNo(afterLastComputePartitionId));
-        }
-    }
-    return segNo;
+    return getKernelSegNo(FirstKernel);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

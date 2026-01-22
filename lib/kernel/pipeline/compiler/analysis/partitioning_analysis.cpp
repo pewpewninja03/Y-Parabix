@@ -5,7 +5,7 @@
 
 // #define PRINT_GRAPH_BITSETS
 
-#define DISABLE_KERNEL_PARTITION_MOVEMENT
+// #define DISABLE_KERNEL_PARTITION_MOVEMENT
 
 namespace kernel {
 
@@ -211,6 +211,8 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
 
     std::vector<unsigned> forcedPartitionRoot;
 
+    bool nextKernelIsAfterBoundary = false;
+
     for (unsigned i = 0; i < m; ++i) {
 
         const auto u = sequence[i];
@@ -222,7 +224,7 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
 
             bool hasInputRateChange = false;
             bool hasLookAheads = false;
-            auto demarcateOutputs = (node.Kernel == mPipelineKernel);
+            auto demarcateOutputs = (node.Kernel == mPipelineKernel) || (node.Flags & RelationshipNodeFlag::IsPipelineLayerBoundary) != 0;
             const auto initialRateId = nextRateId;
 
             assert (node.Kernel);
@@ -1462,53 +1464,45 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     std::vector<BitSet> rateDomSet(PartitionCount);
 
-    unsigned nextRateId = 0;
-
-    auto expandCapacity = [&](BitSet & bs) {
-        const auto size = (nextRateId + 127U) & (~63U);
-        if (bs.size() != size) {
-            bs.resize(size, false);
-        }
-    };
+    for (size_t i = 0; i < PartitionCount; ++i) {
+        rateDomSet[i].resize(PartitionCount * 2, false);
+    }
 
     auto addRateId = [&](const unsigned id, const unsigned rateId) {
         auto & bs = rateDomSet[id];
-        expandCapacity(bs);
+        assert (rateId < PartitionCount * 2);
         bs.set(rateId);
     };
 
     PartitionGraph J(PartitionCount);
 
-    for (auto streamSet = FirstStreamSet; streamSet < LastStreamSet; ++streamSet) {
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);      ;
 
-        if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
-            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
-            assert (isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
-        } else {
-            const auto output = in_edge(streamSet, mBufferGraph);
+    unsigned nextRateId = 0;
+
+    for (auto kernel = PipelineInput; kernel < PipelineOutput; ++kernel) {
+        const auto pid = KernelPartitionId[kernel];
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto & outputPort = mBufferGraph[output];
             const Binding & binding = outputPort.Binding;
-
             const auto hasVarOutput = isNonSynchronousRate(binding);
 
-            const auto producer = source(output, mBufferGraph);
-            const auto pid = KernelPartitionId[producer];
-
             auto rateId = nextRateId;
-            nextRateId += hasVarOutput ? 1 : 0;
+
+            const auto streamSet = target(output, mBufferGraph);
             for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const auto consumer = target(input, mBufferGraph);
                 const auto cid = KernelPartitionId[consumer];
                 if (cid != pid) {
                     add_edge(pid, cid, J);
                     if (hasVarOutput) {
-                        addRateId(cid, rateId);
+                        addRateId(cid, nextRateId);
                     }
                 }
             }
+
+            nextRateId += hasVarOutput ? 1U : 0U;
         }
-
-
     }
 
     // Now compute the transitive reduction of the partition relationships
@@ -1527,89 +1521,56 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         }
     }
 
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        expandCapacity(rateDomSet[i]);
-    }
+    for (size_t i = 1U; i < numOfPhases; ++i) {
+        const auto firstPartition = PartitionPhaseBoundaries[i - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
 
-    BitSet intersection;
-    expandCapacity(intersection);
+        BitSet intersection(PartitionCount * 2);
 
-    for (auto partitionId = 1U; partitionId < PartitionCount; ++partitionId) { // topological ordering
-        auto & ds = rateDomSet[partitionId];
+        for (auto partitionId = firstPartition; partitionId < oneAfterLastPartition; ++partitionId) { // topological ordering
+            auto & ds = rateDomSet[partitionId];
 
-        if (out_degree(partitionId, J) == 0) {
-            ds.reset();
-        } else {
-            if (in_degree(partitionId, J) > 0) {
-                intersection.set();
-                for (const auto e : make_iterator_range(in_edges(partitionId, J))) {
-                    const unsigned producerId = source(e, J);
-                    assert (producerId <= partitionId);
-                    intersection &= rateDomSet[producerId];
-                }
-                ds |= intersection;
-            }
-        }
-
-        if (ds.none()) {
-            const auto rateId = nextRateId++;
-            for (unsigned i = 0; i < PartitionCount; ++i) {
-                expandCapacity(rateDomSet[i]);
-            }
-            expandCapacity(intersection);
-            ds.set(rateId);
-        }
-    }
-
-
-    for (size_t i = 1U; i < PartitionCount - 1; ++i) {
-        const BitSet & prior =  rateDomSet[i - 1];
-        const BitSet & current =  rateDomSet[i];
-        auto j = i + 1U;
-        if (prior != current && in_degree(i, J) > 0) {
-            assert (current.any());
-            for (; j < (PartitionCount - 1); ++j) {
-                const BitSet & next =  rateDomSet[j];
-                if (!current.is_subset_of(next)) {
-                    break;
+            if (out_degree(partitionId, J) == 0) {
+                ds.reset();
+            } else {
+                if (in_degree(partitionId, J) > 0) {
+                    intersection.set();
+                    for (const auto e : make_iterator_range(in_edges(partitionId, J))) {
+                        const unsigned producerId = source(e, J);
+                        assert (producerId <= partitionId);
+                        if (producerId >= firstPartition) {
+                            intersection &= rateDomSet[producerId];
+                        }
+                    }
+                    ds |= intersection;
                 }
             }
+
+            if (ds.none()) {
+                ds.set(nextRateId++);
+            }
         }
-        assert (j > i);
 
-        PartitionJumpTargetId[i] = j;
-    }
-
-    if (LLVM_UNLIKELY(!IsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables)) {
-        const auto lastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1U] - 1U;
-        for (auto partId = FirstComputePartitionId; partId <= LastComputePartitionId; ++partId) {
-            if (LLVM_UNLIKELY(PartitionJumpTargetId[partId] == (PartitionCount - 1))) {
-                const auto kernelId = FirstKernelInPartition[partId];
-                if (kernelId < lastComputeKernel) {
-                    mBufferGraph[kernelId].Type |= StartsNestedSynchronizationRegion;
+        for (auto partitionId = firstPartition; partitionId < oneAfterLastPartition; ++partitionId) {
+            const BitSet & prior =  rateDomSet[partitionId - 1];
+            const BitSet & current =  rateDomSet[partitionId];
+            auto j = partitionId + 1U;
+            if (prior != current && in_degree(partitionId, J) > 0) {
+                assert (current.any());
+                for (; j < oneAfterLastPartition; ++j) {
+                    const BitSet & next =  rateDomSet[j];
+                    if (!current.is_subset_of(next)) {
+                        break;
+                    }
                 }
             }
+            assert (j > partitionId);
+
+            PartitionJumpTargetId[partitionId] = j;
         }
+
     }
 
-
-
-    PartitionJumpTargetId[0] = 0;
-    if (LLVM_LIKELY(FirstComputePartitionId > 0)) {
-        for (size_t i = 2; i < FirstComputePartitionId; ++i) {
-            PartitionJumpTargetId[i - 1] = i;
-        }
-        PartitionJumpTargetId[(FirstComputePartitionId - 1)] = (LastComputePartitionId + 1);
-        for (size_t i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
-            if (PartitionJumpTargetId[i] > LastComputePartitionId) {
-                PartitionJumpTargetId[i] = (PartitionCount - 1);
-            }
-        }
-    }
-    assert (PartitionCount > 1);
-    for (auto i = (LastComputePartitionId + 1); i < (PartitionCount - 1); ++i) {
-        PartitionJumpTargetId[i] = (i + 1);
-    }
     PartitionJumpTargetId[(PartitionCount - 1)] = (PartitionCount - 1);
 
 #endif

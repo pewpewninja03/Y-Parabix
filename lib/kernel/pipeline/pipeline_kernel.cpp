@@ -970,7 +970,8 @@ PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
                                Bindings && stream_inputs, Bindings && stream_outputs,
                                Bindings && scalar_inputs, Bindings && scalar_outputs,
                                Relationships && internallyGenerated,
-                               LengthAssertions && lengthAssertions)
+                               LengthAssertions && lengthAssertions,
+                               PhaseBoundaries && layerBoundaries)
 : PipelineKernel(Internal{}
 , ts
 , annotateSignatureWithPipelineFlags(std::move(signature))
@@ -983,6 +984,7 @@ PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
 , std::move(scalar_outputs)
 , std::move(internallyGenerated)
 , std::move(lengthAssertions)
+, std::move(layerBoundaries)
 ) {
 
 
@@ -995,7 +997,8 @@ PipelineKernel::PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs,
                Relationships && internallyGenerated,
-               LengthAssertions && lengthAssertions)
+               LengthAssertions && lengthAssertions,
+               PhaseBoundaries && layerBoundaries)
 : Kernel(ts, TypeId::Pipeline,
          makePipelineHashName(signature),
          std::move(stream_inputs), std::move(stream_outputs),
@@ -1006,7 +1009,8 @@ PipelineKernel::PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
 , mInternallyGeneratedStreamSets(std::move(internallyGenerated))
 , mKernels(std::move(kernels))
 , mCallBindings(std::move(callBindings))
-, mLengthAssertions(std::move(lengthAssertions)) {
+, mLengthAssertions(std::move(lengthAssertions))
+, mPhaseBoundaries(std::move(layerBoundaries)){
 
 }
 

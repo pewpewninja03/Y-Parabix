@@ -85,7 +85,6 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
             assert (isRoot);
             assert (UseJumpGuidedSynchronization);
-            assert (FirstComputePartitionId <= partitionId && partitionId <= LastComputePartitionId);
             mTarget->addInternalScalar(sizeTy,
                 NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
         }
@@ -116,14 +115,6 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     addZeroInputStructProperties(b);
     addLocalDynamicBufferStructs(b);
 
-    const auto first = FirstKernelInPartition[FirstComputePartitionId];
-    const auto last = FirstKernelInPartition[LastComputePartitionId + 1];
-
-    if (first > FirstKernel || last <= LastKernel) {
-        mTarget->addInternalScalar(sizeTy, COMPUTE_THREAD_TERMINATION_STATE);
-    }
-
-
 }
 
 
@@ -145,16 +136,11 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     bool isStateless = false;
 
-    const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
-    const auto onAfterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
-
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
-        if (LLVM_LIKELY(firstComputeKernelId <= kernelId && kernelId < onAfterLastComputeKernelId)) {
-            if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
-                isStateless = true;
-                mIsStatelessKernel.set(kernelId);
-            }
+        if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
+            isStateless = true;
+            mIsStatelessKernel.set(kernelId);
         }
     }
     #endif
@@ -178,12 +164,10 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     const auto name = makeKernelName(kernelId);
 
-    if (kernelId < onAfterLastComputeKernelId) {
-        const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
-        if (isRoot && (kernelId >= firstComputeKernelId)) {
-            addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
-        }
+    const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+    if (isRoot) {
+        addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
     }
 
     addConsumerKernelProperties(b, kernelId);
@@ -252,7 +236,6 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     }
 
     if (LLVM_UNLIKELY(allowDataParallelExecution)) {
-        assert (kernelId < onAfterLastComputeKernelId);
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
@@ -265,7 +248,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
             const BufferPort & bp = mBufferGraph[output];
             const auto streamSet = target(output, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
                 const BufferPort & rd = mBufferGraph[output];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
                 LLVMContext & C = b.getContext();
@@ -637,7 +620,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
         b.CreateFree(b.getScalarField(ZERO_EXTENDED_BUFFER));
     }
-//    freePendingFreeableDynamicBuffers(b);
     freeZeroedInputBuffers(b);
 }
 

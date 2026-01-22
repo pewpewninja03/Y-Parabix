@@ -52,6 +52,8 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
 struct RelationshipGraphBuilder {
 
+    using LayerBoundaries = PipelineKernel::PhaseBoundaries;
+
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief addProducerRelationships
      ** ------------------------------------------------------------------------------------------------------------- */
@@ -372,12 +374,7 @@ struct RelationshipGraphBuilder {
                 }
             }
         }
-
-
     }
-
-
-
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief addPopCountKernels
@@ -772,7 +769,7 @@ struct RelationshipGraphBuilder {
                                     break;
                                 }
 
-                                RedundantStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
+                                RemappedStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
 
                                 struct EdgeReplacement {
                                     ProgramGraph::vertex_descriptor Source;
@@ -910,7 +907,9 @@ struct RelationshipGraphBuilder {
             }
         }
 
-        for (const auto v : make_iterator_range(vertices(G))) {
+        const auto m = num_vertices(G);
+
+        for (size_t v = 0; v < m; ++v) {
             if (LLVM_UNLIKELY(visited.count(v) == 0)) {
                 RelationshipNode & rn = G[v];
                 clear_vertex(v, G);
@@ -921,6 +920,41 @@ struct RelationshipGraphBuilder {
 
     }
 
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief markKernelLayerDemarcations
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void markKernelLayerDemarcations(KernelVertexVec & kernelList, const PipelineKernel::PhaseBoundaries & boundaries) {
+        if (LLVM_LIKELY(boundaries.empty())) return;
+
+        size_t boundaryIndex = 0;
+        size_t lastKeptKernel = 0;
+
+        const auto n = kernelList.size();
+        for (unsigned i = 0; i < n; ++i) {
+
+            const auto v = kernelList[i];
+            const RelationshipNode & rn = G[v];
+            assert (rn.Type == RelationshipNode::IsKernel || rn.Type == RelationshipNode::IsNil);
+
+            if (LLVM_LIKELY(rn.Type == RelationshipNode::IsKernel)) {
+                lastKeptKernel = v;
+            }
+
+            const auto & boundary = boundaries[boundaryIndex];
+            if (boundary.second == i) {
+                RelationshipNode & rn = G[lastKeptKernel];
+                rn.Flags |= RelationshipNodeFlag::IsPipelineLayerBoundary;
+                ++boundaryIndex;
+                if (LLVM_UNLIKELY(boundaryIndex == boundaries.size())) {
+                    break;
+                }
+            }
+
+        }
+
+
+
+    }
 
     RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
     : G(G)
@@ -929,7 +963,7 @@ struct RelationshipGraphBuilder {
     , mInternalKernels(P.mInternalKernels)
     , mInternalBindings(P.mInternalBindings)
     , mInternalBuffers(P.mInternalBuffers)
-    , RedundantStreamSets(P.RedundantStreamSets) {
+    , RemappedStreamSets(P.RemappedStreamSets) {
         std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
     }
 
@@ -939,12 +973,13 @@ struct RelationshipGraphBuilder {
     OwningVector<Kernel> &          mInternalKernels;
     OwningVector<Binding> &         mInternalBindings;
     OwningVector<StreamSetBuffer> & mInternalBuffers;
-    RedundantStreamSetMap &         RedundantStreamSets;
+    RedundantStreamSetMap &         RemappedStreamSets;
     CommandLineScalarVec            CommandLineScalars;
     TruncatedStreamSetVec           TruncatedStreamSets;
     StreamSetVertexMap              RepeatingStreamSets;
-};
 
+};
+    const auto n = mKernels.size();
 
     RelationshipGraphBuilder B(Relationships, *this);
 
@@ -952,7 +987,7 @@ struct RelationshipGraphBuilder {
     assert (num_vertices(Relationships) == 0);
     const unsigned p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
-    const auto n = mKernels.size();
+
     KernelVertexVec vertex(n);
 
     if (LLVM_UNLIKELY(mPipelineKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
@@ -970,7 +1005,7 @@ struct RelationshipGraphBuilder {
             report_fatal_error(StringRef(msg.str()));
         }
 
-        const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
+        auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
 
         if (LLVM_UNLIKELY(K->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
             RequiresIllustratorObject = true;
@@ -1043,9 +1078,7 @@ struct RelationshipGraphBuilder {
     // Pipeline optimizations
     B.combineDuplicateKernels(vertex);
     B.removeUnusedKernels(p_in, p_out);
-
-
-
+    B.markKernelLayerDemarcations(vertex, mPipelineKernel->mPhaseBoundaries);
 
 }
 
@@ -1129,7 +1162,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     unsigned inputPartitionId = -1U;
     unsigned outputPartitionId = -1U;
-    unsigned currentGroupId = -1U;
+//    unsigned currentGroupId = -1U;
 
     assert (kernels[0] == PipelineInput);
     assert (kernels[numOfKernels - 1] == PipelineOutput);
@@ -1174,7 +1207,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
         #else
         if (origPartitionId != inputPartitionId) {
             inputPartitionId = origPartitionId;
-            const PartitionData & P = partitionGraph[origPartitionId];
+//            const PartitionData & P = partitionGraph[origPartitionId];
 //            const auto groupId = P.LinkedGroupId;
 //            if (groupId != currentGroupId) {
                 ++outputPartitionId;
@@ -1250,13 +1283,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     assert (Relationships[kernels[PipelineInput]].Kernel == mPipelineKernel);
     assert (Relationships[kernels[PipelineOutput]].Kernel == mPipelineKernel);
 
-//    StreamSetIORate.resize(numOfStreamSets, Rational{0});
     for (unsigned i = 0; i < numOfStreamSets; ++i) {
         assert (subsitution[streamSets[i]] == -1U);
-//        auto f = StreamSetIORateMap.find(streamSets[i]);
-//        if (f != StreamSetIORateMap.end()) {
-//            StreamSetIORate[i] = f->second;
-//        }
         subsitution[streamSets[i]] = FirstStreamSet + i;
     }
 

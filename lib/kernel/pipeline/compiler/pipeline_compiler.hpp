@@ -226,7 +226,6 @@ public:
     void readDoSegmentState(KernelBuilder & b, StructType * const threadStructTy, Value * const propertyState);
     void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
 
-    void writeProcessThreadMessage(KernelBuilder & b, StringRef label, StructType * const threadStateTy, Value * const threadState) const;
     inline Value * isProcessThread(KernelBuilder & b, StructType * const threadStateTy, Value * const threadState) const;
     void updateExternalProducedItemCounts(KernelBuilder & b);
     void writeMaximumStrideLengthMetadata(KernelBuilder & b) const;
@@ -400,8 +399,6 @@ public:
     void resetInternalBufferHandles();
     void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
     void addLocalDynamicBufferStructs(KernelBuilder & b);
-    void assignLocalDynamicBufferStructs(KernelBuilder & b) const;
-    void resetLocalDynamicBufferStructs(KernelBuilder & b) const;
     void updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId);
 
     Rational getReturnedBufferScaleFactor(const size_t streamSet) const;
@@ -485,7 +482,6 @@ public:
 
     void releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     Value * getSynchronizationLockPtrForKernel(KernelBuilder & b, const unsigned kernelId, const unsigned lockType) const;
-    void waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b, const unsigned kernelId, Value * const windowLength);
     inline LLVM_READNONE bool isMultithreaded() const;
     Value * obtainNextSegmentNumber(KernelBuilder & b);
 
@@ -653,8 +649,6 @@ protected:
     const unsigned                              LastScalar;
     const unsigned                              PartitionCount;
     const unsigned                              ManagedBufferStructCount;
-    const unsigned                              FirstComputePartitionId;
-    const unsigned                              LastComputePartitionId;
 
     #ifdef ENABLE_PAPI
     const unsigned                              NumOfPAPIEvents;
@@ -662,7 +656,6 @@ protected:
     constexpr static unsigned                   NumOfPAPIEvents = 0;
     #endif
 
-    const bool                                  AllowIOProcessThread;
     const bool                                  PipelineHasTerminationSignal;
     const bool                                  HasZeroExtendedStream;
     const bool                                  EnableCycleCounter;
@@ -672,6 +665,7 @@ protected:
     const bool                                  TraceDynamicMultithreading;
     const bool                                  UseJumpGuidedSynchronization;
 
+    const std::vector<size_t>                   PartitionPhaseBoundaries;
     const KernelIdVector                        KernelPartitionId;
     const KernelIdVector                        FirstKernelInPartition;
     const std::vector<unsigned>                 StrideStepLength;
@@ -695,8 +689,8 @@ protected:
     const ThreadLocalConflictGraphType          ThreadLocalConflictGraph;
 
     // pipeline state
-    bool                                        mIsIOProcessThread = false;
     bool                                        mKernelRequiresIllustratorObject = false;
+    size_t                                      mCurrentPipelinePhase = 0;
     unsigned                                    mKernelId = 0;
     const Kernel *                              mKernel = nullptr;
     Value *                                     mKernelSharedHandle = nullptr;
@@ -972,8 +966,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , LastScalar(P.LastScalar)
 , PartitionCount(P.PartitionCount)
 , ManagedBufferStructCount(P.ManagedBufferStructCount)
-, FirstComputePartitionId(P.FirstComputePartitionId)
-, LastComputePartitionId(P.LastComputePartitionId)
 #ifdef ENABLE_PAPI
 , NumOfPAPIEvents([&]() -> unsigned {
     const auto & S = codegen::PapiCounterOptions;
@@ -984,7 +976,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
     }
 }())
 #endif
-, AllowIOProcessThread(P.AllowIOProcessThread)
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
 , EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
@@ -993,6 +984,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
 , TraceDynamicMultithreading(mUseDynamicMultithreading && DebugOptionIsSet(codegen::TraceDynamicMultithreading))
 , UseJumpGuidedSynchronization(!mIsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables)
+, PartitionPhaseBoundaries(std::move(P.PartitionPhaseBoundaries))
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))
 , StrideStepLength(std::move(P.StrideRepetitionVector))
@@ -1026,7 +1018,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
 , mKernelProducesCrossThreadedData(PipelineOutput - PipelineInput + 1)
-, mPartitionEntryPoint(PartitionCount + 1, mAllocator)
+, mPartitionEntryPoint(PartitionCount, mAllocator)
 
 , mKernelTerminationSignal(FirstKernel, LastKernel, mAllocator)
 , mInitialConsumedItemCount(FirstStreamSet, LastStreamSet, mAllocator)

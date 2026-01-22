@@ -303,7 +303,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     } else {
                         mapStreamSetToThreadLocal[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
                         streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
-                        Type * const type = bn.OutputBuffer->getType();
+                        Type * const type = bn.Buffer->getType();
                         const size_t typeSize = b.getTypeSize(dl, type);
                         const BufferPort & bp = mBufferGraph[output];
                         const auto W = bp.Maximum * typeSize * StrideRepetitionVector[kernel];

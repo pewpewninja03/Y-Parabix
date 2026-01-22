@@ -90,7 +90,7 @@ static constexpr auto ALIGNED_ALLOC_NAME = "std_aligned_alloc";
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
 
-#define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+// #define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
 
 using namespace llvm;
 

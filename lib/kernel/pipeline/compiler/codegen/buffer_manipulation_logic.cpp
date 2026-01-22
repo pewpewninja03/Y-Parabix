@@ -40,7 +40,7 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b, Bas
                 assert ((blockWidth % itemWidth) == 0);
                 requiredBytes = b.CreateRoundUp(requiredBytes, factor);
             }
-            requiredBytes = b.CreateMul(requiredBytes, bn.OutputBuffer->getStreamSetCount(b));
+            requiredBytes = b.CreateMul(requiredBytes, bn.Buffer->getStreamSetCount(b));
 
             const auto fieldWidth = input.getFieldWidth();
             if (fieldWidth < 8) {
@@ -113,7 +113,7 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & 
             }
             const BufferNode & bn = mBufferGraph[source(e, mBufferGraph)];
             const Binding & binding = rt.Binding;
-            const StreamSetBuffer * buffer = bn.OutputBuffer;
+            const StreamSetBuffer * buffer = bn.Buffer;
 
             Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
             Constant * const ZERO = b.getSize(0);
@@ -199,7 +199,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         const auto streamSet = source(e, mBufferGraph);
 
         const BufferNode & bn = mBufferGraph[streamSet];
-        const StreamSetBuffer * const buffer = bn.OutputBuffer;
+        const StreamSetBuffer * const buffer = bn.Buffer;
 
         const auto inputPort = port.Port;
         assert (inputPort.Type == PortType::Input);
@@ -543,7 +543,7 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
             continue;
         }
 
-        const StreamSetBuffer * const buffer = bn.OutputBuffer;
+        const StreamSetBuffer * const buffer = bn.Buffer;
 
         Value * const numOfStreams = buffer->getStreamSetCount(b);
 

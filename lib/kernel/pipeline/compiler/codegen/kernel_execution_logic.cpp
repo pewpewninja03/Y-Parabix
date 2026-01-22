@@ -40,8 +40,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
-        assert (!mIsIOProcessThread);
-
         if (mCurrentKernelIsStateFree) {
             updateProcessedAndProducedItemCounts(b);
         }
@@ -568,7 +566,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
         const auto streamSet = target(port, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        const StreamSetBuffer * const buffer = bn.OutputBuffer;
+        const StreamSetBuffer * const buffer = bn.Buffer;
 
         Value * produced = nullptr;
         if (rt.isDeferred()) {
