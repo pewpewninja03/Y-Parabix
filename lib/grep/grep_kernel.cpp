@@ -504,6 +504,9 @@ Bindings GrepKernelOptions::makeStreamSetInputBindings() {
 }
 
 Bindings GrepKernelOptions::makeStreamSetOutputBindings() {
+    if (grepOffset(mRE) == 0) {
+        return {Binding{"matches", mResults}};
+    }
     return {Binding{"matches", mResults, FixedRate(), Add1()}};
 }
 
@@ -641,7 +644,7 @@ MatchedLinesKernel::MatchedLinesKernel (LLVMTypeSystemInterface & ts, StreamSet 
 : PabloKernel(ts, "MatchedLines" + std::to_string(Matches->getNumElements()),
 // inputs
 {Binding{"matchResults", Matches}
-,Binding{"lineBreaks", LineBreakStream, FixedRate()}},
+,Binding{"lineBreaks", LineBreakStream, FixedRate(), Principal()}},
 // output
 {Binding{"matchedLines", MatchedLines}}) {
 
