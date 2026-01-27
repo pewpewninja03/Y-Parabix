@@ -479,7 +479,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_processed = %" PRIu64, processed);
             #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
-            StreamSetBuffer * bf = mBufferGraph[source(port, mBufferGraph)].OutputBuffer;
+            StreamSetBuffer * bf = mBufferGraph[source(port, mBufferGraph)].Buffer;
             if (isa<ManagedDynamicBuffer>(bf)) {
             Value * start = b.CreatePointerCast(bf->getMallocAddress(b), b.getInt8PtrTy());
             Value * end = b.CreateGEP(b.getInt8Ty(), start, bf->getInternalCapacity(b));
@@ -605,7 +605,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
         #ifdef PRINT_DEBUG_MESSAGES
         #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
-        StreamSetBuffer * bf = mBufferGraph[target(port, mBufferGraph)].OutputBuffer;
+        StreamSetBuffer * bf = mBufferGraph[target(port, mBufferGraph)].Buffer;
         if (isa<ManagedDynamicBuffer>(bf)) {
         Value * start = b.CreatePointerCast(bf->getMallocAddress(b), b.getInt8PtrTy());
         Value * end = b.CreateGEP(b.getInt8Ty(), start, bf->getInternalCapacity(b));

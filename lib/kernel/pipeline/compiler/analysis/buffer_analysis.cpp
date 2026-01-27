@@ -42,23 +42,29 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
 
-    PartitionPhaseBoundaries.push_back(KernelPartitionId[FirstKernel]);
+    assert (PartitionPhaseBoundaries[1] > 0);
+    auto nextPhaseStart = FirstKernelInPartition[PartitionPhaseBoundaries[1]];
+    assert (PipelineInput < nextPhaseStart);
+    unsigned currentPhase = 1;
 
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
 
         const RelationshipNode & node = mStreamGraph[kernel];
         assert (node.Type == RelationshipNode::IsKernel);
 
-        if (LLVM_UNLIKELY((node.Flags & RelationshipNodeFlag::IsPipelineLayerBoundary) != 0) && !IsNestedPipeline) {
-            const auto nextPartitionId = KernelPartitionId[kernel + 1];
-            assert (KernelPartitionId[kernel] < nextPartitionId);
-            assert (PartitionPhaseBoundaries.back() < nextPartitionId);
-            PartitionPhaseBoundaries.push_back(nextPartitionId);
-        }
-
         const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
 
         unsigned numOfZeroBoundGreedyInputs = 0;
+
+        assert (kernel <= nextPhaseStart);
+        if (kernel == nextPhaseStart) {
+            ++currentPhase;
+            if (LLVM_LIKELY(currentPhase < PartitionPhaseBoundaries.size())) {
+                const auto nextPartId = PartitionPhaseBoundaries[currentPhase];
+                assert (KernelPartitionId[kernel] < nextPartId);
+                nextPhaseStart = FirstKernelInPartition[nextPartId];
+            }
+        }
 
         auto makeBufferPort = [&](const RelationshipType port,
                                   const RelationshipNode & bindingNode,
@@ -141,7 +147,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             }
 
             BufferNode & bn = mBufferGraph[streamSet];
-
             for (const Attribute & attr : binding.getAttributes()) {
                 switch (attr.getKind()) {
                     case AttrId::Add:
@@ -302,6 +307,8 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
         const auto numOfPorts = numOfInputs + numOfOutputs;
 
+        mBufferGraph[kernel].ProducedPhaseId = currentPhase;
+
         if (LLVM_UNLIKELY(numOfPorts == 0)) {
             continue;
         }
@@ -332,7 +339,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             }
             const Binding & bd = rn.Binding;
             const ProcessingRate & rate = bd.getRate();
-
 
             // The following targets a StreamCompress/StreamExpand edge case in icgrep. StreamExpand
             // has a popcount input, fixed input and fixed output. StreamCompress produces data at a
@@ -466,6 +472,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                 const auto streamSet = source(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
                 add_edge(streamSet, kernel, makeBufferPort(port, rn, false, streamSet), mBufferGraph);
+                assert (mBufferGraph[parent(streamSet, mBufferGraph)].ProducedPhaseId <= currentPhase);
             } else {
                 const auto binding = target(e, mStreamGraph);
                 const RelationshipNode & rn = mStreamGraph[binding];
@@ -475,10 +482,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                 const auto streamSet = target(f, mStreamGraph);
                 assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
                 add_edge(kernel, streamSet, makeBufferPort(port, rn, nonGuaranteedInputRate, streamSet), mBufferGraph);
-//                if (numOfInputs == 0) {
-//                    const auto & R = StreamSetIORate[streamSet - FirstStreamSet];
-//                    lowestSourceStreamSetIORate = std::min(lowestSourceStreamSetIORate, R);
-//                }
+                mBufferGraph[streamSet].ProducedPhaseId = currentPhase;
             }
         }
 
@@ -493,8 +497,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             report_fatal_error(out.str());
         }
     }
-
-    PartitionPhaseBoundaries.push_back(KernelPartitionId[PipelineOutput]);
 
     if (LLVM_UNLIKELY(!codegen::ThreadLocalPermittedOptions.empty())) {
 
@@ -752,9 +754,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
 
     const auto numOfPhases = PartitionPhaseBoundaries.size();
 
-    for (size_t i = 1U; i < numOfPhases; ++i) {
-        const auto firstPartition = PartitionPhaseBoundaries[i - 1];
-        const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
+    for (size_t currentPhase = 1U; currentPhase < numOfPhases; ++currentPhase) {
+        const auto firstPartition = PartitionPhaseBoundaries[currentPhase - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[currentPhase];
         const auto firstKernel = FirstKernelInPartition[firstPartition];
         const auto oneAfterLastKernel = FirstKernelInPartition[oneAfterLastPartition];
 
@@ -766,11 +768,14 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             #endif
             for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                 const auto streamSet = source(e, mBufferGraph);
+                const BufferNode & N = mBufferGraph[streamSet];
+//                if (N.ProducedPhaseId < currentPhase) {
+//                    continue;
+//                }
                 BufferPort & inputRate = mBufferGraph[e];
                 #ifdef TEST_ALL_KERNEL_INPUTS
                 inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 #else
-                const BufferNode & N = mBufferGraph[streamSet];
                 if (isPartitionRoot) {
                     inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 } else if (N.isThreadLocal() || N.isConstant()) {

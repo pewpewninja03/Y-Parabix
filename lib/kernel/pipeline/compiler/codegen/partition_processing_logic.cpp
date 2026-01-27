@@ -12,9 +12,10 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
 
     BasicBlock * const pipelineEnd =  b.CreateBasicBlock("PipelineEnd");
     const auto firstPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1];
+    assert (PartitionPhaseBoundaries[mCurrentPipelinePhase] > 0);
     const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
+    assert (oneAfterLastPartition < PartitionCount);
     for (unsigned i = firstPartition; i < oneAfterLastPartition; ++i) {
-        assert (mPartitionEntryPoint[i] == nullptr);
         mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
     }
     mPartitionEntryPoint[oneAfterLastPartition] = pipelineEnd;
@@ -24,8 +25,6 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        const auto firstPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1];
-        const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
         for (unsigned i = firstPartition + 1; i < oneAfterLastPartition; ++i) {
             mPartitionStartTimePhi[i] =
                 PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
@@ -52,9 +51,9 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     // need to check if its closed or not.
 
     const auto firstComputeKernel = FirstKernelInPartition[firstPartition];
-    const auto lastComputeKernel = FirstKernelInPartition[oneAfterLastPartition] - 1U;
+    const auto oneAfterLastComputeKernel = FirstKernelInPartition[oneAfterLastPartition];
 
-    for (auto producer = firstComputeKernel; producer <= lastComputeKernel; ++producer) {
+    for (auto producer = firstComputeKernel; producer < oneAfterLastComputeKernel; ++producer) {
         for (const auto output : make_iterator_range(out_edges(producer, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
@@ -71,9 +70,11 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             auto lastReader = producer;
             for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const auto consumer = target(input, mBufferGraph);
-                lastReader = std::max<size_t>(lastReader, consumer);
+                if (lastReader < consumer && consumer < oneAfterLastComputeKernel) {
+                    lastReader = consumer;
+                }
             }
-            const auto readsPartId = KernelPartitionId[std::min<size_t>(lastReader, lastComputeKernel)];
+            const auto readsPartId = KernelPartitionId[lastReader];
             assert (firstPartition <= readsPartId && readsPartId < oneAfterLastPartition);
             const auto prodPrefix = prefix + "_produced@partition";
             const auto prodPartId = KernelPartitionId[producer];
@@ -361,7 +362,9 @@ void PipelineCompiler::phiOutPartitionStatusFlags(KernelBuilder & b, const unsig
     BasicBlock * const exitPoint = b.GetInsertBlock();
 
     const auto firstPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1];
+    assert (firstPartition < targetPartitionId);
     const auto firstComputeKernel = FirstKernelInPartition[firstPartition];
+    assert (targetPartitionId <= PartitionPhaseBoundaries[mCurrentPipelinePhase]);
 
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
     const auto firstKernelOfTargetPartition = FirstKernelInPartition[targetPartitionId];

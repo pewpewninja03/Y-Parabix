@@ -619,7 +619,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
             const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength() || port.isCrossThreaded()) {
+            if (port.canModifySegmentLength()) {
                 const auto streamSet = source(*ei, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (LLVM_UNLIKELY(bn.isConstant())) {
@@ -647,7 +647,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     isFirstCheck = false;
                 }
 
-                if (anyNonCountable || port.isCrossThreaded() || bn.isNonThreadLocal()) {
+                if (anyNonCountable || bn.isNonThreadLocal()) {
 
                     Value * const closed = isClosed(b, streamSet);
 

@@ -465,7 +465,6 @@ void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
         const BufferPort & port = mBufferGraph[input];
         const auto streamSet = source(input, mBufferGraph);
         if (mLocallyAvailableItems[streamSet] == nullptr) {
-            assert (mBufferGraph[streamSet].isExternal() || mBufferGraph[streamSet].isConstant());
             mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
         }
     }
@@ -477,34 +476,30 @@ void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t streamSet) {
     const BufferNode & bn = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(bn.isConstant())) {
+        return ConstantInt::getAllOnesValue(b.getSizeTy());
+    }
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         return readAvailableItemCount(b, getTruncatedStreamSetSourceId(streamSet));
     }
     Value * produced = nullptr;
-    if (LLVM_UNLIKELY(bn.isConstant())) {
-        produced = ConstantInt::getAllOnesValue(b.getSizeTy());
+    const auto f = in_edge(streamSet, mBufferGraph);
+    const auto producer = source(f, mBufferGraph);
+    if (LLVM_UNLIKELY(producer == PipelineInput)) {
+        const BufferPort & outputPort = mBufferGraph[f];
+        assert (outputPort.Port.Type == PortType::Output);
+        assert (bn.isExternal());
+        // the output port of the pipeline input is an input streamset of the pipeline kernel.
+        produced = getAvailableInputItems(outputPort.Port.Number);
+        writeTransitoryConsumedItemCount(b, streamSet, produced);
+    } else if (LLVM_UNLIKELY(bn.ProducedPhaseId < mCurrentPipelinePhase)) {
+        const BufferPort & br = mBufferGraph[f];
+        const auto prefix = makeBufferName(producer, br.Port);
+        produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
     } else {
-        const auto f = in_edge(streamSet, mBufferGraph);
-        const auto producer = source(f, mBufferGraph);
-        if (LLVM_UNLIKELY(producer == PipelineInput)) {
-            const BufferPort & outputPort = mBufferGraph[f];
-            assert (outputPort.Port.Type == PortType::Output);
-            assert (bn.isExternal());
-            // the output port of the pipeline input is an input streamset of the pipeline kernel.
-            produced = getAvailableInputItems(outputPort.Port.Number);
-            writeTransitoryConsumedItemCount(b, streamSet, produced);
-        } else {
-            produced = mLocallyAvailableItems[streamSet];
-
-//            const auto prefix = makeBufferName(producer, outputPort.Port);
-//            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-//                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-//            } else {
-//                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
-//            }
-        }
+        assert (bn.ProducedPhaseId == mCurrentPipelinePhase);
+        produced = mLocallyAvailableItems[streamSet]; assert (produced);
     }
-    assert (produced);
     return produced;
 }
 
@@ -671,27 +666,6 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
     }
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief writeCrossThreadedProducedItemCountAfterTermination
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::writeCrossThreadedProducedItemCountAfterTermination(KernelBuilder & b) {
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isCrossThreaded()) {
-            assert (bn.isInternal());
-            assert (bn.isNonThreadLocal());
-            assert (HasTerminationSignal.test(mKernelId));
-            const BufferPort & br = mBufferGraph[e];
-            const auto outputPort = br.Port;
-            Value * const produced = mProducedAtTermination[outputPort];
-            b.CreateAlignedStore(produced, mProducedItemCountPtr[outputPort], SizeTyABIAlignment);
-        }
-    }
-}
-
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordFinalProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -809,7 +783,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
     assert ("buffer cannot be null!" && buffer);
 
     Value * addr = nullptr;
-    if (isa<ManagedDynamicBuffer>(buffer) && rateData.Port.Type == PortType::Input) {
+    if (isa<ManagedDynamicBuffer>(buffer) && rateData.Port.Type == PortType::Input && bufferNode.ProducedPhaseId == mCurrentPipelinePhase) {
         addr = b.getScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(bufferNode.ManagedStructId));
         addr = b.CreatePointerCast(addr, buffer->getPointerType());
     } else {

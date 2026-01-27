@@ -288,42 +288,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << ty->getIntegerBitWidth();
         }
 
-        #ifndef USE_SIMPLE_BUFFER_GRAPH
-//        if (bn.isThreadLocal()) {
-//            assert (num_vertices(ThreadLocalPlacement) > 0);
-//            if (LLVM_LIKELY(num_vertices(ThreadLocalPlacement) > 0)) {
-//                auto id = streamSet;
-//                while (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) > 0)) {
-//                    id = parent(id, InOutStreamSetReplacement);
-//                }
-//                const auto src = PartitionCount + id - FirstStreamSet;
-//                out << " [OFFSET:";
-//                size_t offset = 0;
-//                assert (in_degree(src, ThreadLocalPlacement) > 0);
-//                auto joiner = '[';
-//                for (auto before : make_iterator_range(in_edges(src, ThreadLocalPlacement)))  {
-//                    const auto j = source(before, ThreadLocalPlacement);
-//                    const auto & v = ThreadLocalPlacement[before];
-//                    if (j < PartitionCount) {
-//                        continue;
-//                    }
-//                    const auto k = FirstStreamSet + j - PartitionCount;
-//                    out << joiner << k;
-//                    joiner = ',';
-//                }
-//                if (joiner == ',') {
-//                    out << "]+";
-//                }
-//                Rational O(offset, StrideRepetitionVector[parent(streamSet, mBufferGraph)]);
-//                out << O.numerator();
-//                if (O.denominator() > 1) {
-//                    out << '/' << O.denominator();
-//                }
-//                out << "]";
-//            }
-//        }
-        #endif
-
         out << "}|{IO:";
         print_rational(bn.RelativeIORate);
         if (bn.isThreadLocal()) {
@@ -333,15 +297,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
                 const auto r = first_in_edge(p, ThreadLocalPlacement);
                 print_rational(ThreadLocalPlacement[r]);
             }
-//            auto c = adjacent_vertices(streamSet - FirstStreamSet, ThreadLocalConflictGraph);
-//            if (c.first != c.second) {
-//                out << " TL__CONFLICT: ";
-//                auto i = c.first;
-//                out << (FirstStreamSet + *i);
-//                while (++i != c.second) {
-//                    out << ',' << (FirstStreamSet + *i);
-//                }
-//            }
         }
         if (out_degree(streamSet, InOutStreamSetReplacement) != 0) {
             const auto inOutTarget = child(streamSet, InOutStreamSetReplacement);
@@ -383,7 +338,13 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
     };
 
     auto currentPartition = PartitionCount;
+    size_t nextPhaseStart = -1U;
+    size_t currentPhaseIndex = 1;
+    if (LLVM_LIKELY(!PartitionPhaseBoundaries.empty())) {
+        nextPhaseStart = PartitionPhaseBoundaries[currentPhaseIndex++];
+    }
     bool closePartition = false;
+    bool closePhase = false;
 
     std::vector<unsigned> firstKernelOfPartition(PartitionCount);
 
@@ -398,11 +359,31 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
     auto checkOpenPartitionLabel = [&](const unsigned kernel, const bool ignorePartition) {
         const auto partitionId = KernelPartitionId[kernel];
+        assert (partitionId <= nextPhaseStart);
         if (partitionId != currentPartition || ignorePartition) {
             checkClosePartitionLabel();
+            if (partitionId == nextPhaseStart) {
+                if (closePhase) {
+                    out << "}\n";
+                    closePhase = false;
+                }
+                if (currentPhaseIndex < PartitionPhaseBoundaries.size()) {
+                    nextPhaseStart = PartitionPhaseBoundaries[currentPhaseIndex];
+                    out << "subgraph cluster_phase" << (currentPhaseIndex - 1) << " {\n"
+                           "label=\"Phase #" << (currentPhaseIndex - 1)  << "\";"
+                           "fontcolor=\"blue\";"
+                           "style=\"rounded,dashed\";"
+                           "color=\"blue\";";
+                    out <<  "\n";
+                    ++currentPhaseIndex;
+                    closePhase = true;
+                }
+
+            }
+
             firstKernelInPartition = true;
             if (LLVM_LIKELY(!ignorePartition)) {
-                out << "subgraph cluster" << partitionId << " {\n"
+                out << "subgraph cluster_partition" << partitionId << " {\n"
                        "label=\"Partition #" << partitionId  << "\";"
                        "fontcolor=\"red\";"
                        "style=\"rounded,dashed,bold\";"
@@ -478,10 +459,18 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << "<Family>\\n";
         }
 
-        const auto & bn = mBufferGraph[kernel];
-
-        if (bn.Type & StartsNestedSynchronizationRegion) {
-            out << "<NewSegmentRegion>\\n";
+        if (firstKernelInPartition && !mTerminationCheck.empty()) {
+            const auto c = mTerminationCheck[currentPartition];
+            if (c) {
+                out << "<Termination:";
+                if (c & TerminationCheckFlag::Soft) {
+                    out << "S";
+                }
+                if (c & TerminationCheckFlag::Hard) {
+                    out << "H";
+                }
+                out << ">\\n";
+            }
         }
 
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
@@ -514,6 +503,10 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         auto name = kernel->getName();
         boost::replace_all(name, "\"", "\\\"");
         printKernel(i, name, false, false);
+    }
+    if (closePhase) {
+        out << "}\n";
+        closePhase = false;
     }
 
     bool hidePipelineOutput = in_degree(PipelineOutput, mBufferGraph) == 0;

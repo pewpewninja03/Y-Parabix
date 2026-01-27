@@ -12,19 +12,38 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);
 
-    TerminationGraph G(PartitionCount + numOfPhases - 2);
-
+    size_t requiredChecks = 0;
     for (size_t i = 1U; i < numOfPhases; ++i) {
         const auto firstPartition = PartitionPhaseBoundaries[i - 1];
         const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
+        requiredChecks = std::max(requiredChecks, oneAfterLastPartition - firstPartition);
+    }
+
+    TerminationGraph G(requiredChecks + 1);
+
+    ReverseTopologicalOrdering ordering;
+    ordering.reserve(requiredChecks + 1);
+
+    mTerminationCheck.resize(PartitionCount, 0U);
+
+    for (size_t i = 1U; i < numOfPhases; ++i) {
+        for (size_t j = 0; j <= requiredChecks; ++j) {
+            clear_vertex(j, G);
+        }
+
+        const auto firstPartition = PartitionPhaseBoundaries[i - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
+        assert (firstPartition < oneAfterLastPartition);
         const auto firstKernelInCurrentPhase = FirstKernelInPartition[firstPartition];
-        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];\
+        assert (firstKernelInCurrentPhase < oneAfterLastKernelInCurrentPhase);
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
+        const auto terminal = oneAfterLastPartition - firstPartition;
 
-        const auto terminal = PartitionCount + i - 2;
-
+        assert (in_degree(terminal, G) == 0);
         for (auto kernel = firstKernelInCurrentPhase; kernel < oneAfterLastKernelInCurrentPhase; ++kernel) {
-
             const auto pid = KernelPartitionId[kernel];
+            assert (firstPartition <= pid);
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
@@ -32,9 +51,10 @@ void PipelineAnalysis::identifyTerminationChecks() {
                 for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                     const auto consumer = target(input, mBufferGraph);
                     const auto cid = KernelPartitionId[consumer];
+                    assert (firstPartition <= cid);
                     if (cid != pid) {
-                        const auto id = (cid < oneAfterLastPartition) ? cid : terminal;
-                        add_edge(pid, id, G);
+                        const auto id = std::min<size_t>(cid, oneAfterLastPartition);
+                        add_edge(pid - firstPartition, id - firstPartition, G);
                     }
                 }
             }
@@ -48,51 +68,26 @@ void PipelineAnalysis::identifyTerminationChecks() {
             }
 
         }
+        assert (in_degree(terminal, G) > 0);
 
-    }
+        ordering.clear();
+        topological_sort(G, std::back_inserter(ordering));
+        transitive_closure_dag(ordering, G);
+        transitive_reduction_dag(ordering, G);
 
-
-//    assert (FirstCall == (PipelineOutput + 1U));
-
-//    for (auto consumer = PipelineOutput; consumer <= LastCall; ++consumer) {
-//        for (const auto relationship : make_iterator_range(in_edges(consumer, mScalarGraph))) {
-//            const auto scalar = source(relationship, mScalarGraph);
-//            for (const auto production : make_iterator_range(in_edges(scalar, mScalarGraph))) {
-//                const auto producer = source(production, mScalarGraph);
-//                const auto partitionId = KernelPartitionId[producer];
-//                assert ("cannot occur" && partitionId != terminal);
-//                add_edge(partitionId, terminal, G);
-//            }
-//        }
-//    }
-
-    ReverseTopologicalOrdering ordering;
-    ordering.reserve(num_vertices(G));
-    topological_sort(G, std::back_inserter(ordering));
-    transitive_closure_dag(ordering, G);
-    transitive_reduction_dag(ordering, G);
-
-    mTerminationCheck.resize(PartitionCount, 0U);
-
-    for (size_t i = 1U; i < numOfPhases; ++i) {
-        // we are only interested in the incoming edges of the pipeline output
-        const auto terminal = PartitionCount + i - 2;
+        // we are only interested in the incoming edges of the terminal node
         for (const auto e : make_iterator_range(in_edges(terminal, G))) {
             const auto partId = source(e, G);
             assert (partId < PartitionCount);
             mTerminationCheck[partId] = TerminationCheckFlag::Soft;
         }
 
-        const auto firstPartition = PartitionPhaseBoundaries[i - 1];
-        const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
-        const auto firstKernelInCurrentPhase = FirstKernelInPartition[firstPartition];
-        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+    }
 
-        // hard terminations
-        for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
-            if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::MayFatallyTerminate))) {
-                mTerminationCheck[KernelPartitionId[i]] |= TerminationCheckFlag::Hard;
-            }
+    // hard terminations
+    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+        if (LLVM_UNLIKELY(getKernel(i)->hasAttribute(AttrId::MayFatallyTerminate))) {
+            mTerminationCheck[KernelPartitionId[i]] |= TerminationCheckFlag::Hard;
         }
     }
 

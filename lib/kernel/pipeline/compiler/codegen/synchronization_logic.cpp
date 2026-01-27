@@ -39,16 +39,18 @@ namespace kernel {
 void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo && mSegNo);
-    } else if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
-        Value * const segNoPtr = b.getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
+    } else { // if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
+        assert (mCurrentPipelinePhase > 0);
+        assert (mCurrentPipelinePhase < PartitionPhaseBoundaries.size());
+        Value * const segNoPtr = b.getScalarFieldPtr(PHASE_NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(mCurrentPipelinePhase)).first;
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
         // fetches a number before the prior one to fetch the same number updates it.
         mSegNo = b.CreateAtomicFetchAndAdd(b.getSize(1), segNoPtr);
-    } else {
-        Value * initialSegNo = mSegNo;
-        PHINode * const segNo = b.CreatePHI(initialSegNo->getType(), 2, "segNo");
-        segNo->addIncoming(initialSegNo, entryBlock);
-        mSegNo = segNo;
+//    } else {
+//        Value * initialSegNo = mSegNo;
+//        PHINode * const segNo = b.CreatePHI(initialSegNo->getType(), 2, "segNo");
+//        segNo->addIncoming(initialSegNo, entryBlock);
+//        mSegNo = segNo;
     }
 }
 
@@ -62,9 +64,9 @@ void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * con
     if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
         return;
     }
-    Value * segNo = mSegNo;  assert (mSegNo);
-    Value * const nextSegNo = b.CreateAdd(segNo, mNumOfFixedThreads); assert (mNumOfFixedThreads);
-    cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
+//    Value * segNo = mSegNo;  assert (mSegNo);
+//    Value * const nextSegNo = b.CreateAdd(segNo, mNumOfFixedThreads); assert (mNumOfFixedThreads);
+//    cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
 }
 
 namespace  {

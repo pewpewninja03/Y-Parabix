@@ -15,14 +15,6 @@ void PipelineCompiler::addTerminationProperties(KernelBuilder & b, const size_t 
             mTarget->addInternalScalar(sizeTy, CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(kernelId), groupId);
         }
 
-        for (auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-            if (LLVM_UNLIKELY(mBufferGraph[e].isCrossThreaded())) {
-                mKernelProducesCrossThreadedData.set(kernelId);
-                mTarget->addInternalScalar(sizeTy, CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX + std::to_string(kernelId), groupId);
-                break;
-            }
-        }
-
     } else {
         assert (in_degree(kernelId, mTerminationPropagationGraph) == 0);
     }
@@ -148,6 +140,9 @@ Value * PipelineCompiler::isClosed(KernelBuilder & b, const StreamSetPort inputP
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally) {
     const BufferNode & bn = mBufferGraph[streamSet];
+    if (LLVM_UNLIKELY(bn.ProducedPhaseId < mCurrentPipelinePhase)) {
+        return b.getTrue();
+    }
     if (LLVM_UNLIKELY(bn.isConstant())) {
         return b.getFalse();
     } else {

@@ -135,6 +135,11 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
 
     Value * itemCount = nullptr;
     if (out_degree(id, mConsumerGraph) == 0) {
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.Type & BufferType::PreserveEntireStreamSet) {
+            return b.getSize(0);
+        }
+
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate
         Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);

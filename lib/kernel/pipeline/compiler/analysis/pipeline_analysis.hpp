@@ -41,7 +41,7 @@ public:
         P.simpleSchedulePartitionedProgram(initialGraph, rng);
 
         // Construct the Stream and Scalar graphs
-        P.transcribeRelationshipGraph(initialGraph, initialGraph);
+        P.transcribeRelationshipGraph(initialGraph);
 
         P.generateInitialBufferGraph(b);
 
@@ -129,7 +129,7 @@ private:
 
     void identifyPipelineInputs();
 
-    void transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph);
+    void transcribeRelationshipGraph(const PartitionGraph & partitionGraph);
 
     void gatherInfo() {
         MaxNumOfInputPorts = in_degree(PipelineOutput, mBufferGraph);
@@ -270,6 +270,7 @@ public:
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
     std::vector<size_t>             PartitionPhaseBoundaries;
+    flat_map<size_t, size_t>        KernelPhaseId;
 
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;

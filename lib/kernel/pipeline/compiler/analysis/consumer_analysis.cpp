@@ -24,14 +24,34 @@ void PipelineAnalysis::makeConsumerGraph() {
             id = 0;
         } else {
 
-restart:    const auto & cn = mBufferGraph[id];
+            bool hasCrossPhaseConsumer = false;
 
-            if (LLVM_UNLIKELY(cn.isInOutRedirect())) {
+restart:    auto & sn = mBufferGraph[id];
+
+            if (LLVM_UNLIKELY(hasCrossPhaseConsumer)) {
+mark_preserve_streamset:
+                sn.Type |= BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
+            } else {
+                const auto producer = parent(id, mBufferGraph);
+                assert (PipelineInput <= producer && producer <= PipelineOutput);
+                const auto prodPhaseId = mBufferGraph[producer].ProducedPhaseId;
+                for (const auto input : make_iterator_range(out_edges(id, mBufferGraph))) {
+                    const auto consumer = target(input, mBufferGraph);
+                    assert (producer < consumer && consumer <= PipelineOutput);
+                    const auto consPhaseId = mBufferGraph[consumer].ProducedPhaseId;
+                    if (consPhaseId != prodPhaseId) {
+                        hasCrossPhaseConsumer = true;
+                        goto mark_preserve_streamset;
+                    }
+                }
+            }
+
+            if (LLVM_UNLIKELY(sn.isInOutRedirect())) {
                 id = parent(id, InOutStreamSetReplacement);
                 goto restart;
             }
 
-            if (LLVM_UNLIKELY(cn.isTruncated())) {
+            if (LLVM_UNLIKELY(sn.isTruncated())) {
                 for (auto ref : make_iterator_range(in_edges(id, mStreamGraph))) {
                     const auto & v = mStreamGraph[ref];
                     if (v.Reason == ReasonType::Reference) {
@@ -57,12 +77,16 @@ restart:    const auto & cn = mBufferGraph[id];
         // as we would then have to retain a scalar for it. If this streamset is
         // returned to the outside environment, we cannot ever release data from it
         // even if it has an internal consumer.
-
         const auto id = mConsumerGraph[streamSet];
         if (id == 0) {
             continue;
         }
         assert (FirstStreamSet <= id && id <= streamSet);
+
+        BufferNode & sn = mBufferGraph[id];
+        if (LLVM_UNLIKELY(sn.Type & BufferType::PreserveEntireStreamSet)) {
+            continue;
+        }
 
         const auto pe = in_edge(streamSet, mBufferGraph);
         const auto producer = source(pe, mBufferGraph);
@@ -97,7 +121,6 @@ restart:    const auto & cn = mBufferGraph[id];
         assert (lastConsumer[streamSet - FirstStreamSet] == 0 || mConsumerGraph[streamSet] == streamSet);
 
         if (!allConsumersFixedRate) {
-            BufferNode & sn = mBufferGraph[id];
             sn.Type |= BufferType::HasNonFixedRateConsumer;
         }
 

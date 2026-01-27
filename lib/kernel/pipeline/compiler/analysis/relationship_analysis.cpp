@@ -920,39 +920,7 @@ struct RelationshipGraphBuilder {
 
     }
 
-    /** ------------------------------------------------------------------------------------------------------------- *
-     * @brief markKernelLayerDemarcations
-     ** ------------------------------------------------------------------------------------------------------------- */
-    void markKernelLayerDemarcations(KernelVertexVec & kernelList, const PipelineKernel::PhaseBoundaries & boundaries) {
-        if (LLVM_LIKELY(boundaries.empty())) return;
-
-        size_t boundaryIndex = 0;
-        size_t lastKeptKernel = 0;
-
-        const auto n = kernelList.size();
-        for (unsigned i = 0; i < n; ++i) {
-
-            const auto v = kernelList[i];
-            const RelationshipNode & rn = G[v];
-            assert (rn.Type == RelationshipNode::IsKernel || rn.Type == RelationshipNode::IsNil);
-
-            if (LLVM_LIKELY(rn.Type == RelationshipNode::IsKernel)) {
-                lastKeptKernel = v;
-            }
-
-            const auto & boundary = boundaries[boundaryIndex];
-            if (boundary.second == i) {
-                RelationshipNode & rn = G[lastKeptKernel];
-                rn.Flags |= RelationshipNodeFlag::IsPipelineLayerBoundary;
-                ++boundaryIndex;
-                if (LLVM_UNLIKELY(boundaryIndex == boundaries.size())) {
-                    break;
-                }
-            }
-
-        }
-
-
+    void markPhaseBoundaries() {
 
     }
 
@@ -994,6 +962,21 @@ struct RelationshipGraphBuilder {
         RequiresIllustratorObject = true;
     }
 
+    size_t boundaryIndex = 0;
+    size_t nextBoundaryPosition;
+
+    const auto & boundaries = mPipelineKernel->mPhaseBoundaries;
+
+    if (boundaries.empty()) {
+        nextBoundaryPosition = -1U;
+    } else {
+        const auto & boundary = boundaries[boundaryIndex];
+        nextBoundaryPosition = boundary.second;
+        assert (nextBoundaryPosition < n);
+    }
+
+    KernelPhaseId.reserve(n);
+
     for (unsigned i = 0; i < n; ++i) {
         const auto & P = mKernels[i];
         const Kernel * K = P.Object;
@@ -1005,14 +988,32 @@ struct RelationshipGraphBuilder {
             report_fatal_error(StringRef(msg.str()));
         }
 
-        auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
+        const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
+
+        assert (boundaryIndex <= boundaries.size());
+
+        if (LLVM_UNLIKELY(nextBoundaryPosition == i)) {
+            ++boundaryIndex;
+            if (boundaryIndex == boundaries.size()) {
+                nextBoundaryPosition = -1U;
+            } else {
+                const auto & boundary = boundaries[boundaryIndex];
+                nextBoundaryPosition = boundary.second;
+                assert (nextBoundaryPosition < n);
+            }
+        }
 
         if (LLVM_UNLIKELY(K->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
             RequiresIllustratorObject = true;
         }
 
-        vertex[i] = Relationships.add(RelationshipNode::IsKernel, K, flags);
+        const auto v = Relationships.add(RelationshipNode::IsKernel, K, flags);
+        KernelPhaseId.emplace_hint(KernelPhaseId.end(), v, boundaryIndex);
+        vertex[i] = v;
     }
+
+    assert (boundaryIndex == boundaries.size());
+
     const unsigned p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     PipelineOutput = p_out;
 
@@ -1078,14 +1079,13 @@ struct RelationshipGraphBuilder {
     // Pipeline optimizations
     B.combineDuplicateKernels(vertex);
     B.removeUnusedKernels(p_in, p_out);
-    B.markKernelLayerDemarcations(vertex, mPipelineKernel->mPhaseBoundaries);
 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief transcribeRelationshipGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph) {
+void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partitionGraph) {
 
     using Vertices = Vec<unsigned, 64>;
 
@@ -1178,16 +1178,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
         assert (rep.denominator() == 1);
         const auto sl = rep.numerator();
         StrideRepetitionVector[newKernelId] = sl;
-//        const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
-//        Rational ONE{1};
-//        const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
-//        const auto max = ceiling(ONE + cov3);
-//        assert (min <= max);
-
-
-//        MinimumNumOfStrides[newKernelId] = sl * min;
-//        MaximumNumOfStrides[newKernelId] = sl * max;
     };
+
+    size_t priorPhaseId = 0;
 
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
         const auto in = kernels[i];
@@ -1203,24 +1196,24 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
         // renumber the partitions to reflect the selected ordering
         #ifdef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
-        ++outputPartitionId;
-        #else
+        inputPartitionId = -1U;
+        #endif
         if (origPartitionId != inputPartitionId) {
             inputPartitionId = origPartitionId;
-//            const PartitionData & P = partitionGraph[origPartitionId];
-//            const auto groupId = P.LinkedGroupId;
-//            if (groupId != currentGroupId) {
-                ++outputPartitionId;
-//                currentGroupId = groupId;
-//            }
+            ++outputPartitionId;
+            const PartitionData & P = partitionGraph[origPartitionId];
+            if (P.PhaseId != priorPhaseId) {
+                PartitionPhaseBoundaries.push_back(outputPartitionId);
+                priorPhaseId = P.PhaseId;
+            }
         }
-        #endif
         KernelPartitionId[out] = outputPartitionId;
     }
-
     const auto newPipelineOutput = LastKernel + 1U;
     KernelPartitionId[newPipelineOutput] = ++outputPartitionId;
     subsitution[PipelineOutput] = newPipelineOutput;
+    PartitionPhaseBoundaries.push_back(outputPartitionId);
+    assert (PartitionPhaseBoundaries.size() == mPipelineKernel->mPhaseBoundaries.size() + 2);
 
     BEGIN_SCOPED_REGION
     const auto f = PartitionIds.find(PipelineOutput);
@@ -1230,7 +1223,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     END_SCOPED_REGION
 
     PartitionCount = outputPartitionId + 1U;
-
     FirstKernelInPartition.resize(PartitionCount + 1U);
     FirstKernelInPartition[0] = PipelineInput;
 
@@ -1302,9 +1294,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     }
     // When constructing the initial partition graph, we identified which streamsets were
     // thread-local before we considered termination properties.
-    mNonThreadLocalStreamSets.reserve(num_edges(initialGraph));
-    for (auto e : make_iterator_range(edges(initialGraph))) {
-        const auto & streamSet = initialGraph[e];
+    mNonThreadLocalStreamSets.reserve(num_edges(partitionGraph));
+    for (auto e : make_iterator_range(edges(partitionGraph))) {
+        const auto & streamSet = partitionGraph[e];
         if (streamSet.Id) {
             mNonThreadLocalStreamSets.insert(subsitution[streamSet.Id]);
         }

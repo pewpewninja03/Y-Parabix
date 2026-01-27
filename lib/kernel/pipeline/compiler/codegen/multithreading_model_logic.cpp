@@ -359,7 +359,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
         Value * terminated = nullptr;
 
-        for (auto currentPhase = 1; currentPhase < numOfPhases; ++currentPhase) {
+        for (mCurrentPipelinePhase = 1; mCurrentPipelinePhase < numOfPhases; ++mCurrentPipelinePhase) {
 
             Value * minimumThreads = nullptr;
             Value * maximumThreads = nullptr;
@@ -422,7 +422,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 args.push_back(activeThreadsPhi);
             }
 
-            Function * const doSegFunc = doSegmentPhaseFunction[currentPhase];
+            Function * const doSegFunc = doSegmentPhaseFunction[mCurrentPipelinePhase];
 
             Value * csRetVal = nullptr;
             if (CheckAssertions()) {
@@ -893,7 +893,6 @@ void PipelineCompiler::start(KernelBuilder & b) {
         mRethrowException = b.WriteDefaultRethrowBlock();
     }
 
-    assert (mExpectedNumOfStridesMultiplier == nullptr);
     Value * const ns = b.CreateUMax(getNumOfStrides(), b.getSize(1));
 
     mExpectedNumOfStridesMultiplier = ns; // b.CreateCeilUMulRational(ns, mTarget->getStride());

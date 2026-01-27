@@ -281,6 +281,7 @@ enum BufferType : unsigned {
     , StartsNestedSynchronizationRegion = 1024
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
+    , CrossesPhaseBoundary = 8192
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -296,7 +297,6 @@ enum BufferLocality {
 enum KernelFlags {
     PermitSegmentSizeSlidingWindowing = 1
     , ControlsSegmentSizeSlidingWindowing = 2
-    , LayerBoundaryPosition = 4
 };
 
 struct BufferNode {
@@ -323,6 +323,7 @@ struct BufferNode {
     unsigned OutputItemCountId = 0;
     unsigned LockId = 0;
     unsigned ManagedStructId = 0;
+    unsigned ProducedPhaseId = 0;
 
     Rational RelativeIORate{0};
 
@@ -360,6 +361,10 @@ struct BufferNode {
 
     bool preserveEntireStreamSet() const {
         return (Type & BufferType::PreserveEntireStreamSet) != 0;
+    }
+
+    bool crossesPhaseBoundary() const {
+        return (Type & BufferType::CrossesPhaseBoundary) != 0;
     }
 
     bool isTruncated() const {
@@ -420,10 +425,8 @@ enum BufferPortType : unsigned {
     IsShared = 32,
     IsManaged = 64,
     CanModifySegmentLength = 128,
-    IsCrossThreaded = 256,
     Illustrated = 512,
-    InputMayBeTruncated = 1024,
-    LayerBoundaryPort = 2048
+    InputMayBeTruncated = 1024
 };
 
 struct BufferPort {
@@ -450,10 +453,6 @@ struct BufferPort {
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;
-    }
-
-    bool isCrossThreaded() const {
-        return (Flags & BufferPortType::IsCrossThreaded) != 0;
     }
 
     bool isFixed() const {
@@ -590,7 +589,7 @@ struct PartitionData {
     Rational                ExpectedStridesPerSegment{1};
     Rational                StridesPerSegmentCoV{0};
     unsigned                LinkedGroupId = 0;
-
+    unsigned                PhaseId = 0;
 };
 
 struct PartitionStreamSet {

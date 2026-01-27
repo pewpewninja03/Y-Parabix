@@ -32,7 +32,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mKernel->hasAttribute(AttrId::ExecuteStridesIndividually)
             || ((mRecordHistogramData || mKernelRequiresIllustratorObject || mHasPipelineIllustratedStreamSet) && !hasAnyGreedyInput(mKernelId));
     mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
-    mProducesCrossThreadedData = mKernelProducesCrossThreadedData.test(mKernelId);
     mHasPrincipalInputRate = hasPrincipalInputRate();
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
@@ -215,23 +214,8 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     splatMultiStepPartialSumValues(b);
     if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
         writeInternalProcessedAndProducedItemCounts(b, true);
-    } else if (LLVM_UNLIKELY(mProducesCrossThreadedData)) {
-        // When we have a cross-threaded buffer, we need to write out their produced counts
-        // prior to writing the termination signal otherwise we risk a consumer assuming
-        // a streamset is closed but does not know the correct item count. Rather than
-        // potentially slowing down the loop exit by writing an unnecessary value to the
-        // global state, we just write it here despite knowing it'll be written again later.
-        writeCrossThreadedProducedItemCountAfterTermination(b);
     }
     if (HasTerminationSignal.test(mKernelId)) {
-        // Synchronization numbers continually increase as pipelines acquire/release their locks
-        // but when we have a cross-threaded buffer, we also store the synchronization number
-        // of the terminating segment so that a cross-threaded consumer knows can determine
-        // whether every producer of a buffer it's reading has completed the same terminating
-        // segment and only then treating the closed state as truthful.
-        if (LLVM_UNLIKELY(mProducesCrossThreadedData)) {
-            b.setScalarField(CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX + std::to_string(mKernelId), mSegNo);
-        }
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
     }

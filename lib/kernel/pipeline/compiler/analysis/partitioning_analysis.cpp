@@ -74,7 +74,8 @@ struct PartitionBindingNode {
     std::vector<std::pair<unsigned, unsigned>> Transferable;
     std::vector<unsigned> PotentialRoots;
     std::vector<unsigned> AllKernels;
-    unsigned PartitionId;
+    unsigned PartitionId = 0;
+    unsigned PhaseId = 0;
 
     PartitionBindingNode & operator=(const PartitionBindingNode & other) {
         AllKernels.assign(other.AllKernels.begin(), other.AllKernels.end());
@@ -96,8 +97,9 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     std::vector<unsigned> sequence;
     sequence.reserve(n);
 
-    std::vector<unsigned> allKernels;
-    allKernels.reserve(n / 2);
+    const auto numOfKernels = mKernels.size() + 2;
+
+    std::vector<unsigned> allKernels(numOfKernels);
 
     std::vector<unsigned> sequencePosition(n); // , -1U
 
@@ -113,11 +115,10 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     // For simplicity, force the pipeline input to be the first and the pipeline output
     // to be the last one.
 
-    // For some reason, the Mac C++ compiler cannot link the constexpr PipelineInput value?
-    // Hardcoding 0 here as a temporary workaround.
     sequencePosition[0] = 0;
     sequence.push_back(0);
-    allKernels.push_back(0);
+    allKernels[PipelineInput] = 0;
+    size_t kernelIndex = 1;
     for (unsigned u : ordering) {
         const RelationshipNode & node = Relationships[u];
         switch (node.Type) {
@@ -132,7 +133,8 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                     assert (R.Kernel != mPipelineKernel);
                     const auto k = sequence.size();
                     sequencePosition[u] = k;
-                    allKernels.push_back(k);
+                    assert (kernelIndex < numOfKernels);
+                    allKernels[kernelIndex++] = k;
                     sequence.push_back(u);
                 }
                 END_SCOPED_REGION
@@ -152,9 +154,11 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
         }
     }
 
+    assert (kernelIndex == numOfKernels - 1);
+
     const auto k = sequence.size();
     sequencePosition[PipelineOutput] = k;
-    allKernels.push_back(k);
+    allKernels[numOfKernels - 1] = k;
     sequence.push_back(PipelineOutput);
     END_SCOPED_REGION
     const auto m = sequence.size();
@@ -194,14 +198,17 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     // NOTE: any decisions made during this pass *must* be provably correct for any
     // situation because the choices will *not* be verified.
 
+    const auto & boundaries = mPipelineKernel->mPhaseBoundaries;
+
+    const auto numOfPhases = boundaries.size() + 1;
+
     for (unsigned i = 0; i < m; ++i) {
         BitSet & V = G[i];
-        V.resize(n);
+        V.resize(n + numOfPhases);
         assert (V.none());
     }
 
-    const auto numOfKernels = allKernels.size();
-    unsigned nextRateId = 0;
+    unsigned nextRateId = numOfPhases;
 
     std::map<std::tuple<BitSet, size_t, size_t>, size_t> L;
     flat_set<size_t> LookAheadIds;
@@ -210,8 +217,6 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     potentiallyMergable.reserve(numOfKernels);
 
     std::vector<unsigned> forcedPartitionRoot;
-
-    bool nextKernelIsAfterBoundary = false;
 
     for (unsigned i = 0; i < m; ++i) {
 
@@ -224,8 +229,28 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
 
             bool hasInputRateChange = false;
             bool hasLookAheads = false;
-            auto demarcateOutputs = (node.Kernel == mPipelineKernel) || (node.Flags & RelationshipNodeFlag::IsPipelineLayerBoundary) != 0;
+            auto demarcateOutputs = (node.Kernel == mPipelineKernel);
+
             const auto initialRateId = nextRateId;
+
+            const auto pf = KernelPhaseId.find(u);
+            if (LLVM_LIKELY(pf != KernelPhaseId.end())) {
+                const auto phaseId = pf->second;
+                assert (phaseId < numOfPhases);
+                // Although inputs to this phase can be from a prior phase, inputs cannot be from
+                // a subsequent one without violating the notion of phases. Report any such conflict
+                // as a fatal error.
+                const auto phaseConflictId = V.find_next(phaseId + 1); // returns -1U if no more bits are set
+                static_assert (BitSet::npos == std::numeric_limits<size_t>::max());
+                if (LLVM_UNLIKELY(phaseConflictId < numOfPhases)) {
+                    // TODO: make this error a bit more informative later
+                    SmallVector<char, 128> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << "Error: phase " << phaseId << " has inputs from phase " << phaseConflictId << "\n";
+                    report_fatal_error(msg.str());
+                }
+                V.set(phaseId);
+            }
 
             assert (node.Kernel);
 
@@ -353,7 +378,6 @@ found_rate_change:
                 O |= V;
 
                 if (rate.isFixed() && !demarcateOutputs) {
-
 
                     // Check the attributes to see whether any impose a partition change
                     for (const Attribute & attr : b.getAttributes()) {
@@ -502,6 +526,34 @@ add_output_rate:    assert (nextRateId < n);
         const auto producer = allKernels[i];
         assert (Relationships[sequence[producer]].Type == RelationshipNode::IsKernel);
         const auto prodPartId = getComponentIndex(producer);
+
+        auto & X = P[prodPartId];
+        if (LLVM_UNLIKELY(X.PhaseId == 0)) {
+            X.PartitionId = partitionId[producer];
+            auto pf = KernelPhaseId.find(sequence[producer]);
+            if (LLVM_LIKELY(pf != KernelPhaseId.end())) {
+                X.PhaseId = pf->second + 1U;
+            }
+        } else {
+            assert (X.PartitionId == partitionId[producer]);
+            #ifndef NDEBUG
+            auto pf = KernelPhaseId.find(sequence[producer]);
+            if (LLVM_LIKELY(pf != KernelPhaseId.end())) {
+                assert (X.PhaseId = (pf->second + 1U));
+            }
+            #endif
+        }
+    }
+
+    for (unsigned i = 0; i < numOfKernels; ++i) {
+
+        const auto producer = allKernels[i];
+        assert (Relationships[sequence[producer]].Type == RelationshipNode::IsKernel);
+        const auto prodPartId = getComponentIndex(producer);
+
+        auto & X = P[prodPartId];
+        const auto phaseId = X.PhaseId;
+
         unsigned localConsumers = 0;
         for (const auto e : make_iterator_range(out_edges(producer, G))) {
             const auto streamSet = target(e, G);
@@ -518,20 +570,21 @@ add_output_rate:    assert (nextRateId < n);
                 }
                 BEGIN_SCOPED_REGION
                 const auto consPartId = getComponentIndex(consumer);
-                // we may only migrate kernels with no local users from a partition to the next
-                // but as we migrate them, more opportunities may arise.
-                if (prodPartId == consPartId) {
-                    ++localConsumers;
-                    assert (partitionId[producer] == partitionId[consumer]);
+                const auto consPhaseId = P[consPartId].PhaseId;
+                if (LLVM_LIKELY(consPhaseId == phaseId || consPhaseId == 0 || phaseId == 0)) {
+                    // we may only migrate kernels with no local users from a partition to the next
+                    // but as we migrate them, more opportunities may arise.
+                    if (prodPartId == consPartId) {
+                        ++localConsumers;
+                        assert (partitionId[producer] == partitionId[consumer]);
+                    }
+                    add_edge(prodPartId, consPartId, BindingInfo{producer, consumer}, P);
                 }
-                add_edge(prodPartId, consPartId, BindingInfo{producer, consumer}, P);
                 END_SCOPED_REGION
 already_added:  continue;
             }
         }
 
-        auto & X = P[prodPartId];
-        X.PartitionId = partitionId[producer];
         X.AllKernels.emplace_back(producer);
 
         BEGIN_SCOPED_REGION
@@ -549,6 +602,7 @@ already_added:  continue;
         END_SCOPED_REGION
     }
 
+
     #ifdef PRINT_GRAPH_BITSETS
     BEGIN_SCOPED_REGION
     auto & out = errs();
@@ -556,16 +610,10 @@ already_added:  continue;
     out << "digraph \"P\" {\n";
     for (auto v : make_iterator_range(vertices(P))) {
         const PartitionBindingNode & D = P[v];
-        out << "v" << v << " [label=\"";
-        bool addNewLine = false;
+        out << "v" << v << " [label=\"\\n";
         for (const auto k : D.AllKernels) {
             const RelationshipNode & node = Relationships[sequence[k]];
             assert (node.Type == RelationshipNode::IsKernel);
-
-            if (addNewLine) {
-                out << "\\n";
-            }
-            addNewLine = true;
 
             out << k << ". " << node.Kernel->getName();
 
@@ -596,7 +644,12 @@ already_added:  continue;
                 out << ']';
             }
 
+            out << "\\n";
+
         }
+
+        out << "Phase: " << D.PhaseId;
+
         out << "\",shape=rect];\n";
     }
     for (auto e : make_iterator_range(edges(P))) {
@@ -614,7 +667,6 @@ already_added:  continue;
     assert (P[0].AllKernels.size() == 1);
     assert (sequence[P[0].AllKernels[0]] == PipelineInput);
     assert (P[0].Transferable.size() == 0);
-
 
     assert (P[componentCount - 1].AllKernels.size() == 1);
     assert (sequence[P[componentCount - 1].AllKernels[0]] == PipelineOutput);
@@ -931,6 +983,10 @@ start_of_transfer_loop:
                         #endif
 
                         auto & TransferPart = partGraph[transferPartId];
+                        if (LLVM_UNLIKELY(TransferPart.PhaseId == 0)) {
+                            TransferPart.PhaseId = CurrentPart.PhaseId;
+                        }
+
                         TransferPart.Transferable.emplace_back(potentiallyTransferedKernel, localConsumers);
 
                         auto & T = TransferPart.AllKernels;
@@ -1010,6 +1066,7 @@ start_of_transfer_loop:
                 const auto & Pi = P[i];
                 auto & Gi = filteredClone[i];
                 Gi.PartitionId = Pi.PartitionId;
+                Gi.PhaseId = Pi.PhaseId;
                 Gi.AllKernels.assign(Pi.AllKernels.begin(), Pi.AllKernels.end());
                 Gi.PotentialRoots.push_back(vec[i]);
                 Gi.Transferable.assign(Pi.Transferable.begin(), Pi.Transferable.end());
@@ -1036,6 +1093,53 @@ start_of_transfer_loop:
     }
 
 #endif
+
+    if (numOfPhases > 0) {
+
+        std::vector<size_t> phaseStartOffset(numOfPhases + 1, 0);
+        phaseStartOffset[0] = PipelineInput + 1U;
+
+        for (unsigned i = 1; i < componentCount - 1; ++i) {
+            const auto j = ordering[componentCount - i - 1U];
+            auto & CurrentPart = P[j]; // reverse order
+            if (LLVM_UNLIKELY(CurrentPart.AllKernels.empty())) {
+                continue;
+            }
+            if (LLVM_UNLIKELY(CurrentPart.PhaseId == 0)) {
+                // Kernels inserted by the compiler are initially set as phase 0. If such
+                // a kernel could not be placed into a partition with a user-defined one,
+                // it may still be in a phase 0 partition. Assign it the phase # of its
+                // closest consuming phase.
+
+                unsigned newPhaseId = numOfPhases;
+                for (auto e : make_iterator_range(out_edges(j, P))) {
+                    const auto & TransferPart = P[target(e, P)];
+                    newPhaseId = std::min(newPhaseId, TransferPart.PhaseId);
+                }
+                assert (newPhaseId > 0 && newPhaseId <= numOfPhases);
+                CurrentPart.PhaseId = newPhaseId;
+            }
+            phaseStartOffset[CurrentPart.PhaseId]++;
+        }
+
+        // get the partial sum of the counts to compute the actual offsets
+        for (unsigned i = 1; i <= numOfPhases; ++i) {
+            phaseStartOffset[i] += phaseStartOffset[i - 1U];
+        }
+
+        std::vector<Vertex> revisedOrdering(componentCount, 0);
+        revisedOrdering[0] = ordering[0];
+        for (unsigned i = 1; i < componentCount - 1; ++i) {
+            const auto j = ordering[i];
+            const auto & C = P[j];
+            assert (C.PhaseId > 0);
+            auto & offset = phaseStartOffset[C.PhaseId - 1U];
+            assert (revisedOrdering[offset] == 0);
+            revisedOrdering[offset++] = j;
+        }
+        revisedOrdering[componentCount - 1] = ordering[componentCount - 1];
+        ordering = revisedOrdering;
+    }
 
     forcedPartitionRoot.clear();
 
@@ -1066,23 +1170,23 @@ start_of_transfer_loop:
         #ifndef NDEBUG
         totalSize += K.size();
         #endif
-     //   assert (CurrentPart.PotentialRoots.size() == 1);
         const auto root = CurrentPart.PotentialRoots[0];
         forcedPartitionRoot.push_back(root);
     }
+    const auto finalComponentCount = forcedPartitionRoot.size();
+    assert (finalComponentCount > 1);
 
     assert (allKernels.size() == totalSize);
     assert (ordering[componentCount - 1] == componentCount - 1);
     assert (P[componentCount - 1].AllKernels.size() == 1);
 
-    const auto finalComponentCount = forcedPartitionRoot.size();
-    assert (finalComponentCount > 1);
 
     std::sort(forcedPartitionRoot.begin(), forcedPartitionRoot.end());
 
     PartitionGraph partGraph(finalComponentCount);
 
     size_t currentCompId = 0;
+    size_t priorPhaseId = 0;
 
     for (unsigned compId = 0; compId < componentCount; ++compId) {
         const auto index = ordering[compId];
@@ -1096,6 +1200,8 @@ start_of_transfer_loop:
         PartitionData & pd = partGraph[currentCompId];
         auto & R = pd.Kernels;
         pd.LinkedGroupId = CurrentPart.PartitionId;
+        pd.PhaseId = CurrentPart.PhaseId;
+        assert (priorPhaseId <= pd.PhaseId || compId == componentCount - 1);
         R.assign(K.begin(), K.end());
         for (unsigned j = 0; j < partitionSize; ++j) {
             const auto v = K[j];
@@ -1126,7 +1232,6 @@ found_interpartition_edge:
         }
         ++currentCompId;
     }
-
     assert (currentCompId == finalComponentCount);
 
     #ifndef NDEBUG
@@ -1476,7 +1581,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     PartitionGraph J(PartitionCount);
 
-    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);      ;
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);
 
     unsigned nextRateId = 0;
 
@@ -1486,8 +1591,6 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
             const auto & outputPort = mBufferGraph[output];
             const Binding & binding = outputPort.Binding;
             const auto hasVarOutput = isNonSynchronousRate(binding);
-
-            auto rateId = nextRateId;
 
             const auto streamSet = target(output, mBufferGraph);
             for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {

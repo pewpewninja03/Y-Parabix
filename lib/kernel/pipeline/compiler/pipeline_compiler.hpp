@@ -68,6 +68,8 @@ const static std::string ZERO_EXTENDED_SPACE = "ZeS";
 const static std::string KERNEL_THREAD_LOCAL_SUFFIX = ".KTL";
 const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
 
+const static std::string PHASE_NEXT_LOGICAL_SEGMENT_NUMBER = "@PLSN";
+
 const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
 const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
 const static std::string BUFFER_SEGMENT_LENGTH = "BSL";
@@ -82,7 +84,6 @@ const static std::string DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_TH
 const static std::array<std::string, 3> LOGICAL_SEGMENT_SUFFIX = { ".LSN", ".LSNs", ".LSNt" };
 
 const static std::string INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX = ".ISS";
-const static std::string CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX = "@CTSTN";
 
 const static std::string COMPUTE_THREAD_TERMINATION_STATE = "@CTTS";
 
@@ -331,7 +332,6 @@ public:
     void computeMinimumConsumedItemCounts(KernelBuilder & b);
     void writeConsumedItemCounts(KernelBuilder & b);
     void recordFinalProducedItemCounts(KernelBuilder & b);
-    void writeCrossThreadedProducedItemCountAfterTermination(KernelBuilder & b);
     void writeUpdatedItemCounts(KernelBuilder & b);
 
     void writeOutputScalars(KernelBuilder & b, const size_t index, std::vector<Value *> & args);
@@ -733,7 +733,6 @@ protected:
     FixedVector<Value *>                        mThreadLocalEndOffset;
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
-    BitVector                                   mKernelProducesCrossThreadedData;
 
     // partition state
     FixedVector<BasicBlock *>                   mPartitionEntryPoint;
@@ -811,7 +810,6 @@ protected:
 
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
-    bool                                        mProducesCrossThreadedData = false;
     bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
@@ -1017,7 +1015,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mThreadLocalEndOffset(FirstStreamSet, LastStreamSet, mAllocator)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
-, mKernelProducesCrossThreadedData(PipelineOutput - PipelineInput + 1)
 , mPartitionEntryPoint(PartitionCount, mAllocator)
 
 , mKernelTerminationSignal(FirstKernel, LastKernel, mAllocator)

@@ -68,27 +68,40 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
-    if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
-        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineInput));
+
+    const auto numOfPhases = PartitionPhaseBoundaries.size();
+
+    for (size_t phase = 1; phase < numOfPhases; ++phase) {
+
+        const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[phase];
+        const auto firstKernelInCurrentPhase = std::max(FirstKernelInPartition[firstPartition], FirstKernel);
+        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
+
+        mTarget->addInternalScalar(sizeTy, PHASE_NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
+
+        for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
+            const auto partitionId = KernelPartitionId[i];
+            const bool isRoot = (partitionId != currentPartitionId);
+            currentPartitionId = partitionId;
+            addInternalKernelProperties(b, i, isRoot);
+            #ifdef ENABLE_PAPI
+            addPAPIEventCounterKernelProperties(b, i, isRoot);
+            #endif
+            addProducedItemCountDeltaProperties(b, i);
+            addUnconsumedItemCountProperties(b, i);
+            if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
+                assert (isRoot);
+                assert (UseJumpGuidedSynchronization);
+                mTarget->addInternalScalar(sizeTy,
+                    NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
+            }
+        }
+
     }
 
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        const auto partitionId = KernelPartitionId[i];
-        const bool isRoot = (partitionId != currentPartitionId);
-        currentPartitionId = partitionId;
-        addInternalKernelProperties(b, i, isRoot);
-        #ifdef ENABLE_PAPI
-        addPAPIEventCounterKernelProperties(b, i, isRoot);
-        #endif
-        addProducedItemCountDeltaProperties(b, i);
-        addUnconsumedItemCountProperties(b, i);
-        if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
-            assert (isRoot);
-            assert (UseJumpGuidedSynchronization);
-            mTarget->addInternalScalar(sizeTy,
-                NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
-        }
-    }
+
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         auto currentPartitionId = -1U;
