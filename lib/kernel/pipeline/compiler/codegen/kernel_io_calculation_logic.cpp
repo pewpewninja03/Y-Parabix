@@ -114,11 +114,11 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     mPotentialSegmentLength = numOfLinearStrides;
     if (mIsPartitionRoot) {
         assert (numOfLinearStrides);
-        Value * maxNumOfLinearStrides = b.CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
-        // TODO: this has an issue when we only have circular buffers; we may end up reaching the end
-        // of some buffer each
         mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
-        numOfLinearStrides = b.CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
+//        if (LLVM_LIKELY(!mIsNestedPipeline)) {
+            Value * maxNumOfLinearStrides = b.CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
+            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
+//        }
     }
 
     assert (numOfLinearStrides);
@@ -136,6 +136,12 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
             ensureSufficientOutputSpace(b, port, streamSet);
         }
     }
+
+//    if (LLVM_UNLIKELY(mIsNestedPipeline && mIsPartitionRoot)) {
+//        mMaximumNumOfStrides = mUpdatedNumOfStrides;
+//        allocateThreadLocalMemoryForMaximumNumOfStrides(b);
+//        remapThreadLocalBufferMemory(b);
+//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

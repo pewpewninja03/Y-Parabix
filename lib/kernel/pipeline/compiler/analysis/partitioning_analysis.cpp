@@ -81,6 +81,8 @@ struct PartitionBindingNode {
         AllKernels.assign(other.AllKernels.begin(), other.AllKernels.end());
         PotentialRoots.assign(other.PotentialRoots.begin(), other.PotentialRoots.end());
         Transferable.assign(other.Transferable.begin(), other.Transferable.end());
+        PartitionId = other.PartitionId;
+        PhaseId = other.PhaseId;
         return *this;
     }
 };
@@ -97,9 +99,9 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     std::vector<unsigned> sequence;
     sequence.reserve(n);
 
-    const auto numOfKernels = mKernels.size() + 2;
+    size_t numOfKernels = 1;
 
-    std::vector<unsigned> allKernels(numOfKernels);
+    std::vector<unsigned> allKernels(mKernels.size() + 2);
 
     std::vector<unsigned> sequencePosition(n); // , -1U
 
@@ -118,7 +120,6 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     sequencePosition[0] = 0;
     sequence.push_back(0);
     allKernels[PipelineInput] = 0;
-    size_t kernelIndex = 1;
     for (unsigned u : ordering) {
         const RelationshipNode & node = Relationships[u];
         switch (node.Type) {
@@ -133,8 +134,8 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                     assert (R.Kernel != mPipelineKernel);
                     const auto k = sequence.size();
                     sequencePosition[u] = k;
-                    assert (kernelIndex < numOfKernels);
-                    allKernels[kernelIndex++] = k;
+                    assert (numOfKernels < allKernels.size());
+                    allKernels[numOfKernels++] = k;
                     sequence.push_back(u);
                 }
                 END_SCOPED_REGION
@@ -154,11 +155,10 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
         }
     }
 
-    assert (kernelIndex == numOfKernels - 1);
-
     const auto k = sequence.size();
     sequencePosition[PipelineOutput] = k;
-    allKernels[numOfKernels - 1] = k;
+    assert (numOfKernels < allKernels.size());
+    allKernels[numOfKernels++] = k;
     sequence.push_back(PipelineOutput);
     END_SCOPED_REGION
     const auto m = sequence.size();
@@ -744,52 +744,112 @@ already_added:  continue;
     #ifndef NDEBUG
     std::fill(ordering.begin(), ordering.end(), -1U);
     #endif
-    ordering[0] = 0;
     partitionPostDominators[0].resize(componentCount, false);
     partitionPostDominators[0].set(0);
+    ordering[0] = 0;
     ordering[componentCount - 1] = componentCount - 1;
     partitionPostDominators[componentCount - 1].resize(componentCount, false);
     partitionPostDominators[componentCount - 1].set(componentCount - 1);
+
     if (LLVM_LIKELY(componentCount > 2)) {
-        for (unsigned v = componentCount - 1; --v != 0; ) {
-            Q.push(v);
-        }
-        for (;;) {
-start_of_loop:
-            const auto v = Q.front();
-            Q.pop();
-            for (const auto e : make_iterator_range(out_edges(v, P))) {
-                const auto u = target(e, P);
-                if (LLVM_UNLIKELY(u != v && partitionPostDominators[u].empty())) {
-                    assert (!Q.empty());
-                    Q.push(v);
-                    goto start_of_loop;
+
+        std::vector<size_t> remaining(componentCount);
+
+        const auto cm = componentCount - 1;
+        const auto final = in_degree(cm, P) == 0 ? cm : componentCount;
+
+        for (unsigned v = 0; v < final; ++v) {
+            size_t d = 0;
+            for (const auto e : make_iterator_range(in_edges(v, P))) {
+                const auto u = source(e, P);
+                if (u != v) {
+                    ++d;
                 }
             }
-            auto & D = partitionPostDominators[v];
-            assert (D.empty());
-            // ordering is written in reverse order that we process the queue in so
-            // that the result is a topological ordering of the initial partitions.
-            assert (ordering[Q.size() + 1] == -1U);
-            ordering[Q.size() + 1] = v;
-            D.resize(componentCount, false);
-            D.set(v);
+            if (d == 0) {
+                Q.push(v);
+            }
+            remaining[v] = d;
+        }
+
+        assert (Q.size() > 0);
+        size_t orderingIndex = 0;
+        for (;;) {
+
+            const auto v = Q.front();
+            assert (remaining[v] == 0);
+            Q.pop();
+            ordering[orderingIndex++] = v;
+
             for (const auto e : make_iterator_range(out_edges(v, P))) {
                 const auto u = target(e, P);
-                if (u != v) {
-                    const auto & X = partitionPostDominators[u];
-                    assert (X.size() == componentCount);
-                    assert (X.test(v) == 0);
-                    D |= X;
+                if (u == v) continue;
+                assert (remaining[u] > 0);
+                if (--remaining[u] == 0) {
+                    Q.push(u);
                 }
             }
             if (Q.empty()) {
                 break;
             }
         }
+        assert (ordering[0] == 0);
+        assert (ordering[componentCount - 1] == componentCount - 1);
+        assert (Q.size() == 0);
+        for (unsigned v = componentCount; --v != 0U; ) {
+            size_t d = 0;
+            for (const auto e : make_iterator_range(out_edges(v, P))) {
+                const auto u = target(e, P);
+                if (u != v) {
+                    ++d;
+                }
+            }
+            if (d == 0) {
+                Q.push(v);
+            }
+            remaining[v] = d;
+        }
+        assert (Q.size() > 0);
+        remaining[0] = -1U;
+        for (;;) {
+            const auto v = Q.front();
+            assert (remaining[v] == 0);
+            Q.pop();
+
+            auto & D = partitionPostDominators[v];
+            assert (D.empty() || (D.count() == 1 && D.test(v) && (v == 0 || v == cm)));
+            D.resize(componentCount, false);
+            D.set(v);
+
+            for (const auto e : make_iterator_range(out_edges(v, P))) {
+                const auto u = target(e, P);
+                assert (remaining[u] == 0);
+                if (u != v) {
+                    const auto & X = partitionPostDominators[u];
+                    assert (X.size() == componentCount);
+                    assert (X.test(v) == 0);
+                    assert (X.any());
+                    D |= X;
+                }
+            }
+
+
+            for (const auto e : make_iterator_range(in_edges(v, P))) {
+                const auto u = source(e, P);
+                if (u == v) continue;
+                assert (remaining[u] > 0);
+                if (--remaining[u] == 0) {
+                    Q.push(u);
+                }
+            }
+
+            if (Q.empty()) {
+                break;
+            }
+        }
     }
 
-    assert (ordering[componentCount - 1] == componentCount - 1);
+
 
     // to maximize our ability to move a kernel to the deepest partition, we move according
     // to the ordering position.
@@ -1094,17 +1154,16 @@ start_of_transfer_loop:
 
 #endif
 
+     assert (componentCount > 0);
+
     if (numOfPhases > 0) {
 
-        std::vector<size_t> phaseStartOffset(numOfPhases + 1, 0);
+        std::vector<size_t> phaseStartOffset(numOfPhases + 1U, 0);
         phaseStartOffset[0] = PipelineInput + 1U;
 
-        for (unsigned i = 1; i < componentCount - 1; ++i) {
+        for (unsigned i = 1U; i < componentCount - 1U; ++i) {
             const auto j = ordering[componentCount - i - 1U];
             auto & CurrentPart = P[j]; // reverse order
-            if (LLVM_UNLIKELY(CurrentPart.AllKernels.empty())) {
-                continue;
-            }
             if (LLVM_UNLIKELY(CurrentPart.PhaseId == 0)) {
                 // Kernels inserted by the compiler are initially set as phase 0. If such
                 // a kernel could not be placed into a partition with a user-defined one,
@@ -1114,6 +1173,10 @@ start_of_transfer_loop:
                 unsigned newPhaseId = numOfPhases;
                 for (auto e : make_iterator_range(out_edges(j, P))) {
                     const auto & TransferPart = P[target(e, P)];
+                    if (TransferPart.PhaseId  == 0) {
+                        errs() << "PH0: " << target(e, P) << "\n";
+                    }
+                    assert (TransferPart.PhaseId > 0);
                     newPhaseId = std::min(newPhaseId, TransferPart.PhaseId);
                 }
                 assert (newPhaseId > 0 && newPhaseId <= numOfPhases);
@@ -1129,7 +1192,7 @@ start_of_transfer_loop:
 
         std::vector<Vertex> revisedOrdering(componentCount, 0);
         revisedOrdering[0] = ordering[0];
-        for (unsigned i = 1; i < componentCount - 1; ++i) {
+        for (unsigned i = 1; i < componentCount - 1U; ++i) {
             const auto j = ordering[i];
             const auto & C = P[j];
             assert (C.PhaseId > 0);
@@ -1175,8 +1238,7 @@ start_of_transfer_loop:
     }
     const auto finalComponentCount = forcedPartitionRoot.size();
     assert (finalComponentCount > 1);
-
-    assert (allKernels.size() == totalSize);
+    assert (numOfKernels == totalSize);
     assert (ordering[componentCount - 1] == componentCount - 1);
     assert (P[componentCount - 1].AllKernels.size() == 1);
 

@@ -15,6 +15,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     assert (PartitionPhaseBoundaries[mCurrentPipelinePhase] > 0);
     const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
     assert (oneAfterLastPartition < PartitionCount);
+
     for (unsigned i = firstPartition; i < oneAfterLastPartition; ++i) {
         mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
     }
@@ -51,7 +52,10 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     // need to check if its closed or not.
 
     const auto firstComputeKernel = FirstKernelInPartition[firstPartition];
+    assert (FirstKernel <= firstComputeKernel);
     const auto oneAfterLastComputeKernel = FirstKernelInPartition[oneAfterLastPartition];
+    assert (firstComputeKernel < oneAfterLastComputeKernel);
+    assert (oneAfterLastComputeKernel <= PipelineOutput);
 
     for (auto producer = firstComputeKernel; producer < oneAfterLastComputeKernel; ++producer) {
         for (const auto output : make_iterator_range(out_edges(producer, mBufferGraph))) {
@@ -106,7 +110,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             toCheck.reset();
 
             const auto final = std::min<size_t>(partitionId, oneAfterLastPartition);
-            for (auto p = firstPartition; p < final; ++p) {
+            for (auto p = firstPartition; p < partitionId; ++p) {
                 if (mTerminationCheck[p]) {
                     toCheck.set(FirstKernelInPartition[p]);
                 }
@@ -130,6 +134,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
 
             for (auto k = firstComputeKernel; k < firstKernelInPartition; ++k) {
                 if (toCheck.test(k)) {
+                    assert (FirstKernel <= firstComputeKernel && firstComputeKernel <= LastKernel);
                     PHINode * const phi = PHINode::Create(sizeTy, 2, prefix + std::to_string(k), entryPoint);
                     mPartitionTerminationSignalPhi[partitionId][k - FirstKernel] = phi;
                 }

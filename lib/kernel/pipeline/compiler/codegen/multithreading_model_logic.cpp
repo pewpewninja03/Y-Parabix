@@ -1187,7 +1187,10 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         const auto firstPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1];
         const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
         const auto firstKernelInCurrentPhase = FirstKernelInPartition[firstPartition];
+        assert (FirstKernel <= firstKernelInCurrentPhase);
         const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (firstKernelInCurrentPhase < oneAfterLastKernelInCurrentPhase);
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
 
         start(b);
 

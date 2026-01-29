@@ -953,7 +953,7 @@ struct RelationshipGraphBuilder {
 
     // Copy the list of kernels and add in any internal kernels
     assert (num_vertices(Relationships) == 0);
-    const unsigned p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
+    const auto p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
 
     KernelVertexVec vertex(n);
@@ -976,6 +976,8 @@ struct RelationshipGraphBuilder {
     }
 
     KernelPhaseId.reserve(n);
+
+    KernelPhaseId.emplace_hint(KernelPhaseId.end(), p_in, boundaryIndex);
 
     for (unsigned i = 0; i < n; ++i) {
         const auto & P = mKernels[i];
@@ -1014,8 +1016,10 @@ struct RelationshipGraphBuilder {
 
     assert (boundaryIndex == boundaries.size());
 
-    const unsigned p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
+    const auto p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     PipelineOutput = p_out;
+
+    KernelPhaseId.emplace_hint(KernelPhaseId.end(), p_out, boundaryIndex);
 
     // From the pipeline's perspective, a pipeline input node "produces" the inputs of the pipeline and a
     // pipeline output node "consumes" its outputs. Internally this means the inputs and outputs of the
@@ -1180,7 +1184,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         StrideRepetitionVector[newKernelId] = sl;
     };
 
-    size_t priorPhaseId = 0;
+    size_t priorPhaseId = -1U;
 
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
         const auto in = kernels[i];
@@ -1202,7 +1206,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
             inputPartitionId = origPartitionId;
             ++outputPartitionId;
             const PartitionData & P = partitionGraph[origPartitionId];
-            if (P.PhaseId != priorPhaseId) {
+            if (priorPhaseId != P.PhaseId && outputPartitionId > 0) {
                 PartitionPhaseBoundaries.push_back(outputPartitionId);
                 priorPhaseId = P.PhaseId;
             }

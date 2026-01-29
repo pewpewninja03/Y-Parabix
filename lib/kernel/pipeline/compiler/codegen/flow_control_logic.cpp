@@ -115,12 +115,14 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
             mMaximumNumOfStrides = b.CreateRoundUpRational(mMaximumNumOfStrides, StrideStepLength[mKernelId]);
         }
         allocateThreadLocalMemoryForMaximumNumOfStrides(b);
+
     } else {
         const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
         assert (factor.numerator() > 0);
         mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
     }
+
 }
 
 

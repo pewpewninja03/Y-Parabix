@@ -515,24 +515,11 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 addNextArg(inputItems);
             }
 
-            if (LLVM_UNLIKELY(CheckAssertions() && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
-                const Binding & input = rt.Binding;
-                const auto streamSet = source(port, mBufferGraph);
-                Value * required = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mLinearInputItemsPhi[inputPort]);
-                Value * avail = mLocallyAvailableItems[streamSet];
-                Value * const isValid = b.CreateICmpUGE(avail, required);
-                b.CreateAssert(isValid,
-                                "%s.%s: requires more input (%" PRIu64 ") "
-                                "than available (%" PRIu64 ")",
-                                mCurrentKernelName,
-                                b.GetString(input.getName()),
-                                required, avail);
-            }
+            Value * max = nullptr;
 
-            if (LLVM_UNLIKELY(checkStreamSet)) {
+            if (LLVM_UNLIKELY(checkStreamSet || CheckAssertions() && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
                 const auto streamSet = source(port, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
-                Value * max = nullptr;
                 if (bn.isConstant()) {
                     max = getGuaranteedRepeatingStreamSetLength(b, streamSet);
 //                } else if (bn.isThreadLocal()) {
@@ -542,13 +529,29 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 } else {
                     max = mLocallyAvailableItems[streamSet]; assert (max);
                 }
-                max = b.CreateRoundUpRational(max, rt.Maximum);
                 if (rt.LookAhead) {
                     const auto la = round_up_to(rt.LookAhead, b.getBitBlockWidth());
                     max = b.CreateAdd(max, b.getSize(la));
                 }
-                addNextArg(max);
+                if (LLVM_UNLIKELY(checkStreamSet)) {
+                    addNextArg(b.CreateRoundUpRational(max, rt.Maximum));
+                }
             }
+
+            if (LLVM_UNLIKELY(CheckAssertions() && !(mIsPartitionRoot || rt.canModifySegmentLength()))) {
+                const Binding & input = rt.Binding;
+                const auto streamSet = source(port, mBufferGraph);
+                Value * required = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], mLinearInputItemsPhi[inputPort]);
+                Value * const isValid = b.CreateICmpUGE(max, required);
+                b.CreateAssert(isValid,
+                                "%s.%s: requires more input (%" PRIu64 ") "
+                                "than available (%" PRIu64 ")",
+                                mCurrentKernelName,
+                                b.GetString(input.getName()),
+                                required, max);
+            }
+
+
 
         }
     }

@@ -64,7 +64,8 @@ void PipelineAnalysis::identifyTerminationChecks() {
             const Kernel * const kernelObj = getKernel(kernel); assert (kernelObj);
             if (LLVM_UNLIKELY(kernelObj->hasAttribute(AttrId::SideEffecting))) {
                 const auto pid = KernelPartitionId[kernel];
-                add_edge(pid, terminal, G);
+                assert (firstPartition <= pid && pid < oneAfterLastPartition);
+                add_edge(pid - firstPartition, terminal, G);
             }
 
         }

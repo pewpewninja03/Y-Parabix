@@ -252,6 +252,12 @@ Kernel * PipelineBuilder::makeKernel() {
             if (LLVM_UNLIKELY(obj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
                 requiresIllustratorObj = true;
             }
+
+            auto writeString = [&](StringRef nm) {
+                sig.write_hex(nm.size());
+                sig << ':' << nm << ':';
+            };
+
             if (K.isFamilyCall()) {
                 ++numOfNestedKernelFamilyCalls;
                 sig << 'F';
@@ -259,15 +265,41 @@ Kernel * PipelineBuilder::makeKernel() {
                 const auto m = obj->getNumOfNestedKernelFamilyCalls();
                 numOfNestedKernelFamilyCalls += m;
                 if (LLVM_UNLIKELY(m > 0)) {
-                    sig << 'f' << m;
+                    sig << 'N' << m;
                 }
                 sig << 'K';
+
                 if (obj->hasSignature()) {
-                    sig << obj->getSignature();
+                    writeString(obj->getSignature());
                 } else {
-                    sig << obj->getName();
+                    writeString(obj->getName());
                 }
             }
+#if 0
+            const auto & inputs = obj->getInputStreamSetBindings();
+
+            for (unsigned j = 0; j < inputs.size(); ++j) {
+                const auto & I = inputs[j];
+                const auto R = cast<StreamSet>(I.getRelationship());
+                sig << 'I' << j << ':' << R->getNumElements() << 'x' << R->getFieldWidth();
+                for (const auto & a : I.getAttributes()) {
+                    a.print(sig);
+                }
+                sig << ':';
+            }
+
+            const auto & outputs = obj->getOutputStreamSetBindings();
+
+            for (unsigned j = 0; j < outputs.size(); ++j) {
+                const auto & O = outputs[j];
+                const auto R = cast<StreamSet>(O.getRelationship());
+                sig << 'O' << j << ':' << R->getNumElements() << 'x' << R->getFieldWidth();
+                for (const auto & a : O.getAttributes()) {
+                    a.print(sig);
+                }
+                sig << ':';
+            }
+
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
                 const auto & S = obj->getInternallyGeneratedStreamSets();
                 for (size_t k = 0; k < S.size(); ++k) {
@@ -275,6 +307,7 @@ Kernel * PipelineBuilder::makeKernel() {
                     add_edge((firstKernel + i), j, -((int)k + 1), G);
                 }
             }
+#endif
         }
 
         if (numOfNestedKernelFamilyCalls) {
