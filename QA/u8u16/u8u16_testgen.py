@@ -27,22 +27,22 @@ def random_sequence_of_given_UTF8_length(pfx_type, lgth):
     return seq
 
 def codepoint_to_UTF8(cp):
-    if cp <= 0x7F: return chr(cp)
-    suffix = chr(0x80 + (cp & 0x3F))
+    if cp <= 0x7F: return [cp]
+    suffix = 0x80 + (cp & 0x3F)
     if cp <= 0x7FF:
-        return chr(0xC0 + (cp >> 6)) + suffix
-    suffix = chr(0x80 + ((cp >> 6) & 0x3F)) + suffix
+        return [0xC0 + (cp >> 6), suffix]
+    suffix2 = 0x80 + ((cp >> 6) & 0x3F)
     if cp <= 0xFFFF:
-        return chr(0xE0 + (cp >> 12)) + suffix
-    suffix = chr(0x80 + ((cp >> 12) & 0x3F)) + suffix
-    return chr(0xF0 + (cp >> 18)) + suffix
+        return [0xE0 + (cp >> 12), suffix2, suffix]
+    suffix3 = 0x80 + ((cp >> 12) & 0x3F)
+    return [0xF0 + (cp >> 18), suffix3, suffix2, suffix]
     
 def codepoint_to_UTF16BE(cp):
     if cp <= 0xFFFF:
-        return chr(cp >> 8) + chr(cp & 0xFF)
+        return [cp >> 8, cp & 0xFF]
     else:
         b = cp - 0x10000
-        return chr(0xD8 + (b >> 18)) + chr((b >> 10) & 0xFF) + chr(0xDC + ((b >> 8) & 0x3)) + chr(b & 0xFF)
+        return [0xD8 + (b >> 18), (b >> 10) & 0xFF, 0xDC + ((b >> 8) & 0x3), b & 0xFF]
 
 def codepoint_seq_to_UTF8(cpseq):
     utf8 = []
@@ -84,8 +84,8 @@ def gen_UTF8_incomplete_sequences():
              [randint(0xF1, 0xF4), randint(0x80, 0x8F), randint(0x80, 0xBF)]]
 
 def gen_err_string(error_sequence):
-    s = ''
-    for byte_val in error_sequence: s+= chr(byte_val)
+    s = ""
+    for b in error_sequence: s += "%X" % b
     return s
 
 prefix_groups = [(0,0), (1,4), (29,31), (60,64), (124,128), (129, 2045), (2046, 2047), (2048, 4196)]
@@ -102,16 +102,16 @@ def generate_illegal_sequence_tests():
                pfx_seq = random_sequence_of_given_UTF8_length(pfx_type, pfx_lgth)
                sfx_seq = random_sequence_of_given_UTF8_length(sfx_type, sfx_lgth)
                err_string = gen_err_string(error_seq)
-               filename = 'Illegal_UTF-8_%s@%i' % (b2a_hex(err_string), pfx_lgth)
-               f1 = file('TestFiles/' + filename, 'w')
-               for cp in pfx_seq: f1.write(codepoint_to_UTF8(cp))
-               f1.write(err_string)
-               for cp in sfx_seq: f1.write(codepoint_to_UTF8(cp))
+               filename = 'Illegal_UTF-8_%s@%i' % (err_string, pfx_lgth)
+               f1 = open('TestFiles/' + filename, 'wb')
+               for cp in pfx_seq: f1.write(bytes(codepoint_to_UTF8(cp)))
+               f1.write(bytes(error_seq))
+               for cp in sfx_seq: f1.write(bytes(codepoint_to_UTF8(cp)))
                f1.close()
-               f2 = file('ExpectedOutput/Files/' + filename, 'w')
-               for cp in pfx_seq: f2.write(codepoint_to_UTF16BE(cp))
+               f2 = open('ExpectedOutput/Files/' + filename, 'wb')
+               for cp in pfx_seq: f2.write(bytes(codepoint_to_UTF16BE(cp)))
                f2.close()
-               f3 = file('ExpectedOutput/Messages/' + filename, 'w')
+               f3 = open('ExpectedOutput/Messages/' + filename, 'w')
                f3.write("Illegal UTF-8 sequence at position %i in source.\n" % pfx_lgth)
                f3.close()
 
@@ -122,43 +122,43 @@ def generate_incomplete_sequence_tests():
            pfx_type = randint(1,4)
            pfx_seq = random_sequence_of_given_UTF8_length(pfx_type, pfx_lgth)
            err_string = gen_err_string(error_seq)
-           filename = 'Incomplete_UTF-8_%s@%i' % (b2a_hex(err_string), pfx_lgth)
-           f1 = file('TestFiles/' + filename, 'w')
-           for cp in pfx_seq: f1.write(codepoint_to_UTF8(cp))
-           f1.write(err_string)
+           filename = 'Incomplete_UTF-8_%s@%i' % (err_string, pfx_lgth)
+           f1 = open('TestFiles/' + filename, 'wb')
+           for cp in pfx_seq: f1.write(bytes(codepoint_to_UTF8(cp)))
+           f1.write(bytes(error_seq))
            f1.close()
-           f2 = file('ExpectedOutput/Files/' + filename, 'w')
-           for cp in pfx_seq: f2.write(codepoint_to_UTF16BE(cp))
+           f2 = open('ExpectedOutput/Files/' + filename, 'wb')
+           for cp in pfx_seq: f2.write(bytes(codepoint_to_UTF16BE(cp)))
            f2.close()
-           f3 = file('ExpectedOutput/Messages/' + filename, 'w')
+           f3 = open('ExpectedOutput/Messages/' + filename, 'w')
            f3.write("EOF with incomplete UTF-8 sequence at position %i in source.\n" % pfx_lgth)
            f3.close()
 
 
 def gen_random_all_UTF8():
-    f1 = file('TestFiles/All_Codepoint_UTF-8', 'w')
-    f2 = file('ExpectedOutput/Files/All_Codepoint_UTF-8', 'w')
-    f3 = file('ExpectedOutput/Messages/All_Codepoint_UTF-8', 'w')
+    f1 = open('TestFiles/All_Codepoint_UTF-8', 'wb')
+    f2 = open('ExpectedOutput/Files/All_Codepoint_UTF-8', 'wb')
+    f3 = open('ExpectedOutput/Messages/All_Codepoint_UTF-8', 'wb')
     tbl = {}
     for i in range(0, 0x20FFFF):
         cp = random_codepoint(4)
         tbl[cp] = 1
-        f1.write(codepoint_to_UTF8(cp))
-        f2.write(codepoint_to_UTF16BE(cp))
+        f1.write(bytes(codepoint_to_UTF8(cp)))
+        f2.write(bytes(codepoint_to_UTF16BE(cp)))
     for max_lgth in range(1,3):
         for i in range(0,4096):
             cp = random_codepoint(max_lgth)
             tbl[cp] = 1
-            f1.write(codepoint_to_UTF8(cp))
-            f2.write(codepoint_to_UTF16BE(cp))
+            f1.write(bytes(codepoint_to_UTF8(cp)))
+            f2.write(bytes(codepoint_to_UTF16BE(cp)))
     for i in range(0, 0xD7FF):
-        if not tbl.has_key(i):
-            f1.write(codepoint_to_UTF8(i))
-            f2.write(codepoint_to_UTF16BE(i))
+        if i not in tbl:
+            f1.write(bytes(codepoint_to_UTF8(i)))
+            f2.write(bytes(codepoint_to_UTF16BE(i)))
     for i in range(0xE000, 0x10FFFF):
-        if not tbl.has_key(i):
-            f1.write(codepoint_to_UTF8(i))
-            f2.write(codepoint_to_UTF16BE(i))
+        if i not in tbl:
+            f1.write(bytes(codepoint_to_UTF8(i)))
+            f2.write(bytes(codepoint_to_UTF16BE(i)))
     f1.close()
     f2.close()
     f3.close()
