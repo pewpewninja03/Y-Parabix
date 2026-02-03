@@ -24,6 +24,8 @@ int minMatchLength(const RE * re);
    without variable advances. */
 bool validateFixedUTF8(const RE * r);
 
+bool HasCodepointReference(const RE * r);
+
 bool isTypeForLocal(const RE * re);
     
 bool hasAssertion(const RE * re);

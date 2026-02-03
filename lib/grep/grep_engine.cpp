@@ -365,6 +365,7 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
+    /*
     if (hasGraphemeClusterBoundary(mRE)) {
         auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
         mExternalTable.declareExternal(u8, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
@@ -390,13 +391,37 @@ void GrepEngine::initRE(re::RE * re) {
         auto WB = new Level2WordBoundaryExternal(this, &cc::Unicode);
         mExternalTable.declareExternal(Unicode, "\\b{w}", WB);
     }
+    */
     for (auto m : PE.mNameMap) {
         if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
             if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
                 mExternalTable.declareExternal(indexCode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
             } else { //PropertyExpression::Kind::Boundary
                 UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
-                if ((prop != UCD::g) && (prop != UCD::w)) {  // Boundary expressions, except GCB.
+                if (prop == UCD::g) {
+                    auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
+                    mExternalTable.declareExternal(u8, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
+                    re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
+                    re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
+                    mExternalTable.declareExternal(u8, epict->getFullName(), new PropertyExternal(epict));
+                    auto u8_GCB = new GraphemeClusterBreak(this, &cc::UTF8);
+                    mExternalTable.declareExternal(u8, "\\b{g}", u8_GCB);
+                    if (indexCode == Unicode) {
+                        mExternalTable.declareExternal(Unicode, "\\b{g}", new FilterByMaskExternal(u8, {"u8index","\\b{g}"}, u8_GCB));
+                    }
+                } else if (prop == UCD::w) {
+                    auto WB_basis = new PropertyBasisExternal(UCD::WB);
+                    std::string WB_basis_name = "UCD:" + getPropertyFullName(UCD::WB) + "_basis";
+                    mExternalTable.declareExternal(u8, WB_basis_name, WB_basis);
+                    mExternalTable.declareExternal(Unicode, WB_basis_name, new FilterByMaskExternal(u8, {"u8index", WB_basis_name}));
+                    re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
+                    re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
+                    auto u8_epict = new PropertyExternal(epict);
+                    mExternalTable.declareExternal(u8, epict->getFullName(), u8_epict);
+                    mExternalTable.declareExternal(Unicode, epict->getFullName(), new FilterByMaskExternal(u8, {"u8index", epict->getFullName()}, u8_epict));
+                    auto WB = new Level2WordBoundaryExternal(this, &cc::Unicode);
+                    mExternalTable.declareExternal(Unicode, "\\b{w}", WB);
+                } else {  // Boundary expressions, except GCB.
                     auto prop_basis = new PropertyBasisExternal(prop);
                     mExternalTable.declareExternal(indexCode, getPropertyFullName(prop) + "_basis", prop_basis);
                     auto boundary = new PropertyBoundaryExternal(prop);
@@ -995,7 +1020,7 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
             E.CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
         }
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            E.captureBixNum("Filtered", Filtered);
+            E.captureByteData("Filtered", Filtered);
         }
         StreamSet * MatchSpans;
         MatchSpans = getMatchSpan(E, mRE, Matches);

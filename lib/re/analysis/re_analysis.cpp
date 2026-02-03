@@ -12,7 +12,7 @@
 #include <re/transforms/to_utf8.h>
 #include <unicode/core/unicode_set.h>
 #include <unicode/utf/utf_encoder.h>
-
+#include <unicode/data/PropertyObjectTable.h>
 #include <util/small_flat_set.hpp>
 
 using namespace llvm;
@@ -354,6 +354,20 @@ struct FixedUTF8Validator : public RE_Validator {
 
 bool validateFixedUTF8(const RE * r) {
     return FixedUTF8Validator().validateRE(r);
+}
+
+struct CodepointReferenceFree : public RE_Validator {
+    CodepointReferenceFree() : RE_Validator("CodepointReferenceFree") {}
+
+    bool validateReference(const Reference * ref) override {
+        UCD::property_t p = ref->getReferencedProperty();
+        UCD::PropertyObject * propObj = UCD::getPropertyObject(p);
+        return !isa<UCD::CodePointPropertyObject>(propObj);
+    }
+};
+
+bool HasCodepointReference(const RE * r) {
+    return !CodepointReferenceFree().validateRE(r);
 }
 
 bool hasAssertion(const RE * re) {
