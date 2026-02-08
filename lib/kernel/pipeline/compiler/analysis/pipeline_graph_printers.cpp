@@ -396,7 +396,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         }
     };
 
-
+    bool needsTerminationSymbol = false;
 
     auto printKernel = [&](const unsigned kernel, const StringRef name,
                            const bool ignorePartition, const bool hideKernel) {
@@ -459,20 +459,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << "<Family>\\n";
         }
 
-        if (firstKernelInPartition && !mTerminationCheck.empty()) {
-            const auto c = mTerminationCheck[currentPartition];
-            if (c) {
-                out << "<Termination:";
-                if (c & TerminationCheckFlag::Soft) {
-                    out << "S";
-                }
-                if (c & TerminationCheckFlag::Hard) {
-                    out << "H";
-                }
-                out << ">\\n";
-            }
-        }
-
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
         #ifndef USE_SIMPLE_BUFFER_GRAPH
         if (kernelObj->requiresExplicitPartialFinalStride()) {
@@ -483,6 +469,25 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             printStreamSet(target(e, mBufferGraph), true);
+        }
+
+        if (firstKernelInPartition && !mTerminationCheck.empty()) {
+            const auto c = mTerminationCheck[KernelPartitionId[kernel]];
+            if (c) {
+
+                out << "v" << kernel << " -> vterm [";
+                if (c & TerminationCheckFlag::Soft) {
+                    out << "style=\"dotted\"";
+                    if (c & TerminationCheckFlag::Hard) {
+                        out << ',';
+                    }
+                }
+                if (c & TerminationCheckFlag::Hard) {
+                    out << "color=\"red\"";
+                }
+                out << "];\n";
+                needsTerminationSymbol = true;
+            }
         }
 
         firstKernelInPartition = false;
@@ -525,6 +530,10 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         printStreamSet(streamSet, false);
+    }
+
+    if (needsTerminationSymbol) {
+        out << "vterm [label=\"\",shape=doublecircle];\n";
     }
 
     for (auto e : make_iterator_range(edges(mBufferGraph))) {
@@ -618,30 +627,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             }
         }
         #endif
-
-        using DistId = ProcessingRateProbabilityDistribution::DistributionTypeId;
-
-
-
-        const auto & D = binding.getDistribution();
-        switch (D.getTypeId()) {
-            case DistId::Uniform: break;
-            case DistId::Normal:
-                out << " [Dist: " << "Normal "
-                    << llvm::format("%0.2f", D.getMean())
-                    << ","
-                    << llvm::format("%0.2f", D.getStdDev()) << "]";
-                break;
-            case DistId::Gamma:
-                out << " [Dist: " << "Gamma "
-                    << llvm::format("%0.2f", D.getAlpha())
-                    << ","
-                    << llvm::format("%0.2f", D.getBeta()) << "]";
-                break;
-            case DistId::Maximum:
-                out << "[Dist: " << "Max" << "]";
-                break;
-        }
 
 
         if (port.LookBehind) {

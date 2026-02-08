@@ -426,7 +426,8 @@ enum BufferPortType : unsigned {
     IsManaged = 64,
     CanModifySegmentLength = 128,
     Illustrated = 512,
-    InputMayBeTruncated = 1024
+    InputMayBeTruncated = 1024,
+    InputMustAlwaysBeFullyConsumed = 2048,
 };
 
 struct BufferPort {
@@ -489,6 +490,10 @@ struct BufferPort {
 
     bool inputMayBeTruncated() const {
         return (Flags & BufferPortType::InputMayBeTruncated) != 0;
+    }
+
+    bool inputMustAlwaysBeFullConsumed() const {
+        return (Flags & BufferPortType::InputMustAlwaysBeFullyConsumed) != 0;
     }
 
     bool operator < (const BufferPort & rn) const {

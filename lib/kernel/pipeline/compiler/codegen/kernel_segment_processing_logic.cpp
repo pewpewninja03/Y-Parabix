@@ -117,7 +117,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     readConsumedItemCounts(b);
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
-    remapThreadLocalBufferMemory(b);
+    //if (LLVM_LIKELY(!mIsNestedPipeline)) {
+        remapThreadLocalBufferMemory(b);
+    //}
     checkForSufficientIO(b);
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {

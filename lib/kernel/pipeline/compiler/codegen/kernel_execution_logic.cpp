@@ -251,7 +251,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     } else {
         doSegmentRetVal = b.CreateCall(doSegFuncType, doSegment, args);
     }
-
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
     }
@@ -495,6 +494,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 } else {
                     isExhausted = mExhaustedInputPort[inputPort]; assert (isExhausted);
                 }
+                isExhausted = b.CreateOr(isExhausted, b.CreateICmpEQ(mCurrentNumOfLinearStrides, b.getSize(0)));
                 isExhausted = b.CreateZExt(isExhausted, sizeTy);
                 #ifdef PRINT_DEBUG_MESSAGES
                 debugPrint(b, makeBufferName(mKernelId, inputPort) + "_isExhausted = %" PRIu64, isExhausted);

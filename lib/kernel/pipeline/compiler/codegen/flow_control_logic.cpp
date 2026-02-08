@@ -99,23 +99,32 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
     if (mIsPartitionRoot) {
         assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
         assert (mKernelId == FirstKernelInPartition[mCurrentPartitionId]);
+        //if (LLVM_LIKELY(!mIsNestedPipeline)) {
+            // If the min and max num of strides is equal, we almost certainly have strictly fixed
+            // rate input into this partition. However if this a nested pipeline, we cannot assume
+            // that the outer pipeline will feed data to this at a fixed rate.
 
-        // If the min and max num of strides is equal, we almost certainly have strictly fixed
-        // rate input into this partition. However if this a nested pipeline, we cannot assume
-        // that the outer pipeline will feed data to this at a fixed rate.
+            const auto & bn = mBufferGraph[mKernelId];
+            if (bn.controlsSlidingWindow() || bn.permitSlidingWindow()) {
+                mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
+            } else {
+                const auto factor = calculateBufferScalingFactor(mKernelId);
+                mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
 
-        const auto & bn = mBufferGraph[mKernelId];
-        if (bn.controlsSlidingWindow()) {
-            mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
-        } else if (bn.permitSlidingWindow()) {
-            mMaximumNumOfStrides = nullptr;
-        } else {
-            const auto factor = calculateBufferScalingFactor(mKernelId);
-            mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
-            mMaximumNumOfStrides = b.CreateRoundUpRational(mMaximumNumOfStrides, StrideStepLength[mKernelId]);
-        }
-        allocateThreadLocalMemoryForMaximumNumOfStrides(b);
 
+                for (auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+                    const auto & bp = mBufferGraph[input];
+                    if (LLVM_UNLIKELY(bp.inputMustAlwaysBeFullConsumed())) {
+                        const auto streamSet = source(input, mBufferGraph);
+                        Value * potential = b.CreateCeilUDivRational(mLocallyAvailableItems[streamSet], bp.Minimum);
+                        mMaximumNumOfStrides = b.CreateUMax(mMaximumNumOfStrides, potential);
+                    }
+                }
+
+                mMaximumNumOfStrides = b.CreateRoundUpRational(mMaximumNumOfStrides, StrideStepLength[mKernelId]);
+            }
+            allocateThreadLocalMemoryForMaximumNumOfStrides(b);
+        //}
     } else {
         const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;

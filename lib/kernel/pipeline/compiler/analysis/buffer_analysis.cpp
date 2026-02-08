@@ -524,9 +524,14 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
     for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
         const auto & inPort = mBufferGraph[input];
         const auto streamSet = target(input, mBufferGraph);
+        const auto select = !IsNestedPipeline || isAddressable(inPort.Binding);
+        const auto ioFlag = select ?
+            BufferPortType::CanModifySegmentLength :
+            (BufferPortType::CanModifySegmentLength | BufferPortType::InputMustAlwaysBeFullyConsumed);
 
         for (const auto cons : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             auto & consPort = mBufferGraph[cons];
+            consPort.Flags |= ioFlag;
             if (LLVM_UNLIKELY(consPort.LookAhead > inPort.LookAhead)) {
                 const Binding & binding = consPort.Binding;
                 if (LLVM_LIKELY(isAddressable(binding) || !IsNestedPipeline)) {

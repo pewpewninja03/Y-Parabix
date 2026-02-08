@@ -829,11 +829,12 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         mIsFinal = b.getTrue();
         mNumOfStrides = mRawNumOfStrides;
     } else {
+        mIsFinal = b.CreateIsNull(mRawNumOfStrides);
         if (LLVM_UNLIKELY(mTarget->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-            mIsFinal = nullptr;
+            // mIsFinal = nullptr;
             mNumOfStrides = mRawNumOfStrides;
         } else {
-            mIsFinal = b.CreateIsNull(mRawNumOfStrides);
+            // mIsFinal = b.CreateIsNull(mRawNumOfStrides);
             mNumOfStrides = b.CreateSelect(mIsFinal, b.getSize(1), mRawNumOfStrides);
         }
         if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {

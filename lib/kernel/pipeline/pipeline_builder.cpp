@@ -252,12 +252,6 @@ Kernel * PipelineBuilder::makeKernel() {
             if (LLVM_UNLIKELY(obj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
                 requiresIllustratorObj = true;
             }
-
-            auto writeString = [&](StringRef nm) {
-                sig.write_hex(nm.size());
-                sig << ':' << nm << ':';
-            };
-
             if (K.isFamilyCall()) {
                 ++numOfNestedKernelFamilyCalls;
                 sig << 'F';
@@ -265,41 +259,15 @@ Kernel * PipelineBuilder::makeKernel() {
                 const auto m = obj->getNumOfNestedKernelFamilyCalls();
                 numOfNestedKernelFamilyCalls += m;
                 if (LLVM_UNLIKELY(m > 0)) {
-                    sig << 'N' << m;
+                    sig << 'f' << m;
                 }
                 sig << 'K';
-
                 if (obj->hasSignature()) {
-                    writeString(obj->getSignature());
+                    sig << obj->getSignature();
                 } else {
-                    writeString(obj->getName());
+                    sig << obj->getName();
                 }
             }
-#if 0
-            const auto & inputs = obj->getInputStreamSetBindings();
-
-            for (unsigned j = 0; j < inputs.size(); ++j) {
-                const auto & I = inputs[j];
-                const auto R = cast<StreamSet>(I.getRelationship());
-                sig << 'I' << j << ':' << R->getNumElements() << 'x' << R->getFieldWidth();
-                for (const auto & a : I.getAttributes()) {
-                    a.print(sig);
-                }
-                sig << ':';
-            }
-
-            const auto & outputs = obj->getOutputStreamSetBindings();
-
-            for (unsigned j = 0; j < outputs.size(); ++j) {
-                const auto & O = outputs[j];
-                const auto R = cast<StreamSet>(O.getRelationship());
-                sig << 'O' << j << ':' << R->getNumElements() << 'x' << R->getFieldWidth();
-                for (const auto & a : O.getAttributes()) {
-                    a.print(sig);
-                }
-                sig << ':';
-            }
-
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
                 const auto & S = obj->getInternallyGeneratedStreamSets();
                 for (size_t k = 0; k < S.size(); ++k) {
@@ -307,7 +275,6 @@ Kernel * PipelineBuilder::makeKernel() {
                     add_edge((firstKernel + i), j, -((int)k + 1), G);
                 }
             }
-#endif
         }
 
         if (numOfNestedKernelFamilyCalls) {
@@ -528,33 +495,32 @@ Kernel * PipelineBuilder::makeKernel() {
                 const auto k = source(e, G);
                 sig << '_' << k << '.' << G[e];
             }
-        }
 
-        const auto & L = mTarget->mPhaseBoundaries;
-        const auto numOfLayers = L.size();
-        for (size_t i = 0; i < numOfLayers; ++i) {
-            const auto & layerBoundary = L[i];
-            sig << '$' << layerBoundary.second;
-            for (const auto & r : layerBoundary.first->getRestrictions()) {
-                const auto f = M.find(r.first);
-                if (LLVM_UNLIKELY(f == M.end())) {
-                    SmallVector<char, 256> tmp;
-                    raw_svector_ostream out(tmp);
-                    out << "Layer boundary " << (i + 1) << " references streamset that does not produced by or passed into the pipeline.";
-                    report_fatal_error(StringRef(out.str()));
+            const auto & L = mTarget->mPhaseBoundaries;
+            const auto numOfLayers = L.size();
+            for (size_t i = 0; i < numOfLayers; ++i) {
+                const auto & layerBoundary = L[i];
+                sig << '$' << layerBoundary.second;
+                for (const auto & r : layerBoundary.first->getRestrictions()) {
+                    const auto f = M.find(r.first);
+                    if (LLVM_UNLIKELY(f == M.end())) {
+                        SmallVector<char, 256> tmp;
+                        raw_svector_ostream out(tmp);
+                        out << "Layer boundary " << (i + 1) << " references streamset that does not produced by or passed into the pipeline.";
+                        report_fatal_error(StringRef(out.str()));
+                    }
+                    const auto d = r.second;
+                    const auto ds = (boost::format("%.2f") % d).str();
+                    if (LLVM_UNLIKELY(d < 0.0 || d > 1.0)) {
+                        SmallVector<char, 256> tmp;
+                        raw_svector_ostream out(tmp);
+                        out << "Layer boundary " << (i + 1) << " segment-size ratio (" << ds << ") must be between 0.0 and 1.0.";
+                        report_fatal_error(StringRef(out.str()));
+                    }
+                    sig << '.' << ds;
                 }
-                const auto d = r.second;
-                const auto ds = (boost::format("%.2f") % d).str();
-                if (LLVM_UNLIKELY(d < 0.0 || d > 1.0)) {
-                    SmallVector<char, 256> tmp;
-                    raw_svector_ostream out(tmp);
-                    out << "Layer boundary " << (i + 1) << " segment-size ratio (" << ds << ") must be between 0.0 and 1.0.";
-                    report_fatal_error(StringRef(out.str()));
-                }
-                sig << '.' << ds;
             }
         }
-
         sig.flush();
 
     } else { // the programmer provided a unique name
@@ -596,6 +562,7 @@ Kernel * PipelineBuilder::makeKernel() {
 
     return mTarget;
 }
+
 
 using AttributeCombineSet = flat_map<AttrId, unsigned>;
 

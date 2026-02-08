@@ -421,22 +421,11 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const segmentSize) {
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
         assert (FirstKernel == LastKernel);
-        assert (LastStreamSet <= FirstStreamSet);
         return;
     }
 
     getABIAlignments(b);
 
-    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
-        assert (LastKernel == PipelineInput);
-        #ifndef NDEBUG
-        for (auto streamSet = (PipelineOutput + 1); streamSet <= LastStreamSet; ++streamSet) {
-            const auto & bn = mBufferGraph[streamSet];
-            assert (bn.isUnowned() && bn.isExternal());
-        }
-        #endif
-        return;
-    }
 
     initializeInitialSlidingWindowSegmentLengths(b, segmentSize);
 

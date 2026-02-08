@@ -1213,6 +1213,11 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         }
         KernelPartitionId[out] = outputPartitionId;
     }
+    if (LLVM_UNLIKELY(PartitionPhaseBoundaries.empty())) {
+        assert (numOfKernels == 2);
+        PartitionPhaseBoundaries.push_back(0);
+    }
+
     const auto newPipelineOutput = LastKernel + 1U;
     KernelPartitionId[newPipelineOutput] = ++outputPartitionId;
     subsitution[PipelineOutput] = newPipelineOutput;

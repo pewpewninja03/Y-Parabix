@@ -8,6 +8,12 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::identifyTerminationChecks() {
 
+    mTerminationCheck.resize(PartitionCount, 0U);
+
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        return;
+    }
+
     using TerminationGraph = adjacency_list<hash_setS, vecS, bidirectionalS>;
 
     const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);
@@ -24,8 +30,6 @@ void PipelineAnalysis::identifyTerminationChecks() {
     ReverseTopologicalOrdering ordering;
     ordering.reserve(requiredChecks + 1);
 
-    mTerminationCheck.resize(PartitionCount, 0U);
-
     for (size_t i = 1U; i < numOfPhases; ++i) {
         for (size_t j = 0; j <= requiredChecks; ++j) {
             clear_vertex(j, G);
@@ -38,10 +42,12 @@ void PipelineAnalysis::identifyTerminationChecks() {
         const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];\
         assert (firstKernelInCurrentPhase < oneAfterLastKernelInCurrentPhase);
         assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
+        assert ((oneAfterLastKernelInCurrentPhase == PipelineOutput) ^ ((i + 1) < numOfPhases));
         const auto terminal = oneAfterLastPartition - firstPartition;
 
         assert (in_degree(terminal, G) == 0);
         for (auto kernel = firstKernelInCurrentPhase; kernel < oneAfterLastKernelInCurrentPhase; ++kernel) {
+            assert (FirstKernel <= kernel && kernel <= LastKernel);
             const auto pid = KernelPartitionId[kernel];
             assert (firstPartition <= pid);
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
@@ -69,6 +75,7 @@ void PipelineAnalysis::identifyTerminationChecks() {
             }
 
         }
+
         assert (in_degree(terminal, G) > 0);
 
         ordering.clear();
@@ -78,8 +85,8 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
         // we are only interested in the incoming edges of the terminal node
         for (const auto e : make_iterator_range(in_edges(terminal, G))) {
-            const auto partId = source(e, G);
-            assert (partId < PartitionCount);
+            const auto partId = firstPartition + source(e, G);
+            assert (KernelPartitionId[FirstKernel] <= partId && partId <= KernelPartitionId[LastKernel]);
             mTerminationCheck[partId] = TerminationCheckFlag::Soft;
         }
 
@@ -91,7 +98,7 @@ void PipelineAnalysis::identifyTerminationChecks() {
             mTerminationCheck[KernelPartitionId[i]] |= TerminationCheckFlag::Hard;
         }
     }
-
+    assert (mTerminationCheck[KernelPartitionId[PipelineOutput]] == 0);
 }
 
 #if 0
