@@ -207,17 +207,29 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
     return false;
 #else
     const Kernel * const kernelObj = getKernel(kernel);
+
+    if (kernelObj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) {
+        return false;
+    }
+
+    if ((mBufferGraphRef[kernel].Type & HasIllustratedStreamset) != 0) {
+        return false;
+    }
+
     bool isExplicitlyMarkedAsStateFree = false;
-    bool hasOverridableAttribute = false;
-    bool hasForbiddenAttribute = false;
+    bool hasTerminationSignal = false;
+    bool hasOverridableAttribute = kernelObj->getNumOfNestedKernelFamilyCalls() > 0;
 
     for (const Attribute & attr : kernelObj->getAttributes()) {
         switch (attr.getKind()) {
+            case AttrId::InternallySynchronized:
+            #ifndef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
+                return true;
+            #endif
             case AttrId::MayFatallyTerminate:
             case AttrId::CanTerminateEarly:
             case AttrId::MustExplicitlyTerminate:
-            case AttrId::InternallySynchronized:
-                hasForbiddenAttribute = true;
+                hasTerminationSignal = true;
                 break;
             case AttrId::SideEffecting:
                 hasOverridableAttribute = true;
@@ -229,11 +241,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
         }
     }
 
-    if ((mBufferGraphRef[kernel].Type & HasIllustratedStreamset) != 0) {
-        return false;
-    }
-
-    if (hasForbiddenAttribute || kernelObj->getNumOfNestedKernelFamilyCalls()) {
+    if (hasTerminationSignal) {
         return false;
     }
 
@@ -282,11 +290,8 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
             return false;
         }
     }
-    if (LLVM_UNLIKELY(isExplicitlyMarkedAsStateFree)) {
-        return true;
-    }
-    if (LLVM_UNLIKELY(hasOverridableAttribute)) {
-        return false;
+    if (LLVM_UNLIKELY(isExplicitlyMarkedAsStateFree || hasOverridableAttribute)) {
+        return isExplicitlyMarkedAsStateFree;
     }
     StructType * const st = kernelObj->getSharedStateType();
     if (st == nullptr) {

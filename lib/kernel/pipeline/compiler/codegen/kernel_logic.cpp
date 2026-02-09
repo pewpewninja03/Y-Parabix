@@ -197,17 +197,6 @@ bool PipelineCompiler::hasAnyGreedyInput(const unsigned kernelId) const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isDataParallel
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::isDataParallel(const size_t kernel) const {
-    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
-    return mIsStatelessKernel.test(kernel) || mIsInternallySynchronized.test(kernel);
-    #else
-    return mIsStatelessKernel.test(kernel);
-    #endif
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasPrincipalInputRate
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineCompiler::hasPrincipalInputRate() const {
@@ -314,7 +303,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     // TODO: make it so these are only needed in debug mode for assertion checks?
 
     mExecuteStridesIndividually = false;
-    mCurrentKernelIsStateFree = false;
+    mAllowDataParallelExecution = false;
     mAllowDataParallelExecution = false;
     mHasPrincipalInput = false;
 

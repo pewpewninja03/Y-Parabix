@@ -11,6 +11,7 @@ namespace kernel {
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::executeKernel(KernelBuilder & b) {
+
     #ifndef NDEBUG
     Value * const initialSegNum = mSegNo;
     #endif
@@ -31,15 +32,8 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mExecuteStridesIndividually =
         mKernel->hasAttribute(AttrId::ExecuteStridesIndividually)
             || ((mRecordHistogramData || mKernelRequiresIllustratorObject || mHasPipelineIllustratedStreamSet) && !hasAnyGreedyInput(mKernelId));
-    mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
+    mAllowDataParallelExecution = isDataParallel(mKernelId);
     mHasPrincipalInputRate = hasPrincipalInputRate();
-    #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
-    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
-    mAllowDataParallelExecution = mCurrentKernelIsStateFree || mKernelIsInternallySynchronized;
-    #else
-    mAllowDataParallelExecution = mCurrentKernelIsStateFree;
-    #endif
-    #endif
 
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -214,7 +208,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     }
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
-    if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         writeInternalProcessedAndProducedItemCounts(b, true);
     }
     if (HasTerminationSignal.test(mKernelId)) {

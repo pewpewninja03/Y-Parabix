@@ -40,42 +40,45 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
-        if (mCurrentKernelIsStateFree) {
-            updateProcessedAndProducedItemCounts(b);
-        }
+        if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
 
-        // If this is the final subsegment before termination, we do not release the
-        // pre-invocation synchronization until *after* we've written the termination
-        // status. Although most of the time, this would not be a severe issue ---
-        // assuming the internal kernel can safely execute a 0-item segment --- when
-        // inputs to a kernel have differing lengths, this could mean we might produce
-        // output data that wouldn't be observed in a single-threaded run.
+            mHasMoreInput = b.getFalse();
+            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
 
-        mHasMoreInput = hasMoreInput(b);
-        Value * waitToRelease = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));
+        } else {
 
-        const auto prefix = makeKernelName(mKernelId);
+            // If this is the final subsegment before termination, we do not release the
+            // pre-invocation synchronization until *after* we've written the termination
+            // status. Although most of the time, this would not be a severe issue ---
+            // assuming the internal kernel can safely execute a 0-item segment --- when
+            // inputs to a kernel have differing lengths, this could mean we might produce
+            // output data that wouldn't be observed in a single-threaded run.
 
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, "* " + prefix + "_finalInvoc = %" PRIu64, mIsFinalInvocation);
-        debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, waitToRelease);
-        #endif
+            updateProcessedAndProducedItemCounts(b, nullptr);
+            mHasMoreInput = hasMoreInput(b);
+            Value * waitToRelease = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));
 
-        BasicBlock * const releaseSyncLock =
-            b.CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
-        BasicBlock * const resumeKernelExecution =
-            b.CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
-        b.CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
+            const auto prefix = makeKernelName(mKernelId);
 
-        b.SetInsertPoint(releaseSyncLock);
+            #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, "* " + prefix + "_finalInvoc = %" PRIu64, mIsFinalInvocation);
+            debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, waitToRelease);
+            #endif
 
-        if (mCurrentKernelIsStateFree) {
+            BasicBlock * const releaseSyncLock =
+                b.CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
+            BasicBlock * const resumeKernelExecution =
+                b.CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
+            b.CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
+
+            b.SetInsertPoint(releaseSyncLock);
             writeInternalProcessedAndProducedItemCounts(b, false);
-        }
-        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+            b.CreateBr(resumeKernelExecution);
 
-        b.CreateBr(resumeKernelExecution);
-        b.SetInsertPoint(resumeKernelExecution);
+            b.SetInsertPoint(resumeKernelExecution);
+        }
+
     }
 
     BasicBlock * individualStrideLoop = nullptr;
@@ -112,8 +115,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
         outerProcessedPhis.resize(indeg);
         outerProcessedDeferredPhis.resize(indeg);
-
-        //bool hasRelativeInput = false;
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
@@ -269,8 +270,14 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     } else {
         mTerminatedExplicitly = nullptr;
     }
-    if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {
-        updateProcessedAndProducedItemCounts(b);
+    if (LLVM_LIKELY(!mAllowDataParallelExecution || mKernelIsInternallySynchronized)) {
+
+        Value * rejectedTermSignal = nullptr;
+        if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
+            rejectedTermSignal = b.CreateAnd(b.CreateIsNull(mCurrentNumOfLinearStrides), b.CreateIsNull(mTerminatedExplicitly));
+        }
+
+        updateProcessedAndProducedItemCounts(b, rejectedTermSignal);
         readReturnedOutputVirtualBaseAddresses(b);
     }
 
@@ -670,18 +677,10 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateProcessedAndProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
+void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b, Value * rejectedTermSignal) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
-
-    const auto mustExplicitlyTerminate = mKernel->hasAttribute(AttrId::MustExplicitlyTerminate);
-
-    Value * rejectedTermSignal = nullptr;
-    if (mustExplicitlyTerminate) {
-        assert (mTerminatedExplicitly && !mCurrentKernelIsStateFree);
-        rejectedTermSignal = b.CreateAnd(b.CreateIsNull(mCurrentNumOfLinearStrides), b.CreateIsNull(mTerminatedExplicitly));
-    }
 
     size_t principalProducerPartId = 0;
 
@@ -704,10 +703,10 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
         const auto & port = mBufferGraph[inputEdge];
         const Binding & input = port.Binding;
         const ProcessingRate & rate = input.getRate();
-        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy())) {
+        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy() || mAllowDataParallelExecution)) {
 
             Value * inputItems = mCurrentLinearInputItems[inputPort];
-            if (LLVM_UNLIKELY(mustExplicitlyTerminate && port.TransitiveAdd > 0 && rate.isFixed())) {
+            if (LLVM_UNLIKELY(rejectedTermSignal && port.TransitiveAdd > 0 && rate.isFixed())) {
                 inputItems = revertTransitiveAddCalculation(b, rate, inputItems, rejectedTermSignal);
             }
             processed = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], inputItems);
@@ -776,7 +775,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
         Value * produced = nullptr;
         const Binding & output = getOutputBinding(outputPort);
         const ProcessingRate & rate = output.getRate();
-        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum())) {
+        if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || mAllowDataParallelExecution)) {
             produced = b.CreateAdd(mCurrentProducedItemCountPhi[outputPort], mCurrentLinearOutputItems[outputPort]);
             assert (output.isDeferred() ^ (mCurrentProducedDeferredItemCountPhi[outputPort] == nullptr));
             if (mCurrentProducedDeferredItemCountPhi[outputPort]) {

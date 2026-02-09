@@ -302,7 +302,7 @@ void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsign
             if (kernel < mKernelId) {
                 produced = mLocallyAvailableItems[streamSet];
             } else if (kernel == mKernelId && !mAllowDataParallelExecution) {
-                assert (!mCurrentKernelIsStateFree);
+                assert (!mAllowDataParallelExecution);
                 if (fromKernelEntryBlock) {
                     if (LLVM_UNLIKELY(br.isDeferred())) {
                         produced = mInitiallyProducedDeferredItemCount[streamSet];

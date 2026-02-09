@@ -983,9 +983,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     Value * const beforeExpansion = getWritableOutputItems(b, port);
 
     Value * hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
-    if (streamSet == 10) {
-        hasEnoughSpace = b.CreateAnd(hasEnoughSpace, b.CreateICmpNE(mSegNo, b.getSize(0)));
-    }
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), beforeExpansion);
@@ -1019,7 +1016,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
         }
     } else {
         assert (bn.LockId > mKernelId);
-        const auto lockType = mIsStatelessKernel.test(bn.LockId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        const auto lockType = isDataParallel(bn.LockId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLockWithTimingInstrumentation(b, bn.LockId, lockType, mSegNo);
     }
 

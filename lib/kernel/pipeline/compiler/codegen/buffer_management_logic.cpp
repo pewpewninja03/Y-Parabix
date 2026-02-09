@@ -529,7 +529,7 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
 
         } else {
 
-            const auto & suffix = (mCurrentKernelIsStateFree) ?
+            const auto & suffix = (mAllowDataParallelExecution & !mKernelIsInternallySynchronized) ?
                 STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
             auto prodRef = b.getScalarFieldPtr(prefix + suffix);
@@ -537,6 +537,7 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
             Value * itemCount = b.CreateAlignedLoad(prodRef.second, prodRef.first, SizeTyABIAlignment);
             mInitiallyProcessedItemCount[inputPort] = itemCount;
             if (br.isDeferred()) {
+                assert (!mAllowDataParallelExecution || mKernelIsInternallySynchronized);
                 auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 mProcessedDeferredItemCountPtr[inputPort] = defRef.first;
                 itemCount = b.CreateAlignedLoad(defRef.second, defRef.first, SizeTyABIAlignment);
@@ -585,7 +586,7 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
 
         } else {
 
-            const auto & suffix = (mCurrentKernelIsStateFree) ?
+            const auto & suffix = (mAllowDataParallelExecution & !mKernelIsInternallySynchronized) ?
                 STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
             auto prodRef = b.getScalarFieldPtr(prefix + suffix);
@@ -596,6 +597,7 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
             mInitiallyProducedItemCount[streamSet] = itemCount;
 
             if (br.isDeferred()) {
+                assert (!mAllowDataParallelExecution || mKernelIsInternallySynchronized);
                 auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 Value * itemCountPtr = defRef.first;
                 Value * itemCount = b.CreateAlignedLoad(defRef.second, itemCountPtr, SizeTyABIAlignment);
@@ -618,7 +620,7 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         }
         const StreamSetPort inputPort = br.Port;
         Value * ptr = nullptr;
-        if (mCurrentKernelIsStateFree) {
+        if (mAllowDataParallelExecution & !mKernelIsInternallySynchronized) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
             ptr = b.getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
         } else {
@@ -630,7 +632,7 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, mUpdatedProcessedPhi[inputPort]);
         #endif
         if (br.isDeferred()) {
-            assert (!mCurrentKernelIsStateFree);
+            assert (!mAllowDataParallelExecution || mKernelIsInternallySynchronized);
             b.CreateAlignedStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort], SizeTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_processed(deferred) = %" PRIu64, mUpdatedProcessedDeferredPhi[inputPort]);
@@ -645,7 +647,7 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         }
         const StreamSetPort outputPort = br.Port;
         Value * ptr = nullptr;
-        if (mCurrentKernelIsStateFree) {
+        if (mAllowDataParallelExecution & !mKernelIsInternallySynchronized) {
             const auto prefix = makeBufferName(mKernelId, outputPort);
             ptr = b.getScalarFieldPtr(prefix + ITEM_COUNT_SUFFIX).first;
         } else {
@@ -657,7 +659,7 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, mUpdatedProducedPhi[outputPort]);
         #endif
         if (br.isDeferred()) {
-            assert (!mCurrentKernelIsStateFree);
+            assert (!mAllowDataParallelExecution || mKernelIsInternallySynchronized);
             b.CreateAlignedStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort], SizeTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_produced(deferred) = %" PRIu64, mUpdatedProducedDeferredPhi[outputPort]);
@@ -752,9 +754,6 @@ void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBu
         const auto handleName = makeBufferName(kernelId, rd.Port);
         Value * const vba = b.getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
         StreamSetBuffer * const buffer = bn.Buffer;
-//        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) { assert (bn.isOwned());
-//            cast<ManagedDynamicBuffer>(buffer)->updateLocalHandleValues(b);
-//        }
         buffer->setBaseAddress(b, vba);
 //        if (CheckAssertions()) {
 //            b.CreateAssert(vba, "%s.%s last good virtual base addresss cannot be null",

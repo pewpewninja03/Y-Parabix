@@ -147,12 +147,12 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     mKernel = getKernel(kernelId);
     assert (mKernel->isGenerated());
 
-    bool isStateless = false;
+    bool allowDataParallelExecution = false;
 
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
         if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
-            isStateless = true;
+            allowDataParallelExecution = true;
             mIsStatelessKernel.set(kernelId);
         }
     }
@@ -162,12 +162,6 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     if (LLVM_UNLIKELY(isInternallySynchronized)) {
         mIsInternallySynchronized.set(kernelId);
     }
-
-    #if defined(ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL)
-    const auto allowDataParallelExecution = isStateless || isInternallySynchronized;
-    #else
-    const auto allowDataParallelExecution = isStateless;
-    #endif
 
     IntegerType * const sizeTy = b.getSizeTy();
 
@@ -185,6 +179,8 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     addConsumerKernelProperties(b, kernelId);
 
+    const auto isStateFree = allowDataParallelExecution & !isInternallySynchronized;
+
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         // If this is relative, the processed and produced counts can be computed from the original stream
@@ -193,7 +189,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (LLVM_UNLIKELY(isStateless)) {
+        if (LLVM_UNLIKELY(isStateFree)) {
             mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
         if (LLVM_UNLIKELY(br.isDeferred())) {
@@ -208,7 +204,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (LLVM_UNLIKELY(isStateless)) {
+        if (LLVM_UNLIKELY(isStateFree)) {
             mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
         if (LLVM_UNLIKELY(br.isDeferred())) {
@@ -425,7 +421,6 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
     }
 
     getABIAlignments(b);
-
 
     initializeInitialSlidingWindowSegmentLengths(b, segmentSize);
 

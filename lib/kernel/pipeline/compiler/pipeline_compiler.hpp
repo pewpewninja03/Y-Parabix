@@ -310,7 +310,7 @@ public:
 
     void writeKernelCall(KernelBuilder & b);
     void buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args);
-    void updateProcessedAndProducedItemCounts(KernelBuilder & b);
+    void updateProcessedAndProducedItemCounts(KernelBuilder & b, Value * rejectedTermSignal);
     void writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination);
     void readAndUpdateInternalProcessedAndProducedItemCounts(KernelBuilder & b);
     void readReturnedOutputVirtualBaseAddresses(KernelBuilder & b) const;
@@ -600,12 +600,16 @@ public:
 
     bool hasAtLeastOneNonGreedyInput() const;
     bool hasAnyGreedyInput(const unsigned kernelId) const;
-    bool isDataParallel(const size_t kernel) const;
+
+    inline bool isDataParallel(const size_t kernel) const {
+        return mIsStatelessKernel.test(kernel);
+    }
+
     bool hasPrincipalInputRate() const;
 
     void getABIAlignments(KernelBuilder & b);
 
-    bool CheckAssertions() const {
+    inline bool CheckAssertions() const {
         #ifdef FORCE_PIPELINE_ASSERTIONS
         return true;
         #else
@@ -817,7 +821,6 @@ protected:
     bool                                        mIsOptimizationBranch = false;
     bool                                        mMayHaveInsufficientIO = false;
     bool                                        mExecuteStridesIndividually = false;
-    bool                                        mCurrentKernelIsStateFree = false;
     bool                                        mAllowDataParallelExecution = false;
     bool                                        mHasPrincipalInputRate = false;
     bool                                        mHasPipelineIllustratedStreamSet = false;

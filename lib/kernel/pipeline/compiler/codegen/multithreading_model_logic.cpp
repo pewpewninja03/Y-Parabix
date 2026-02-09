@@ -99,8 +99,20 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
         const auto firstKernelInCurrentPhase = FirstKernelInPartition[firstPartition];
         const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
-        const auto m = oneAfterLastKernelInCurrentPhase - firstKernelInCurrentPhase;
-        largestPhaseSize = std::max(largestPhaseSize, m);
+        auto count = oneAfterLastKernelInCurrentPhase - firstKernelInCurrentPhase;
+        #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
+        for (auto kernel = firstKernelInCurrentPhase; kernel < oneAfterLastKernelInCurrentPhase; ++kernel) {
+            if (LLVM_UNLIKELY(mIsInternallySynchronized.test(kernel))) {
+                if (LLVM_UNLIKELY(isKernelFamilyCall(kernel))) {
+                    // TODO: should pull a "constant" from the main function?
+                } else {
+                    // TODO: need function to count how many threads could be supported
+                    count += 16 - 1;
+                }
+            }
+        }
+        #endif
+        largestPhaseSize = std::max(largestPhaseSize, count);
     }
 
     // TODO: redesign to avoid the unnecessary store?

@@ -77,7 +77,7 @@ void PipelineCompiler::addPAPIEventCounterKernelProperties(KernelBuilder & b, co
         ArrayType * const papiDataTy = ArrayType::get(getPAPIEventCounterType(b), NUM_OF_PAPI_KERNEL_COUNTERS);
         const auto prefix = makeKernelName(kernel) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX;
         const auto groupId = getCacheLineGroupId(kernel);
-        if (mIsStatelessKernel.test(kernel)) {
+        if (isDataParallel(kernel)) {
             mTarget->addThreadLocalScalar(papiDataTy, prefix, groupId, ThreadLocalScalarAccumulationRule::Sum);
         } else {
             mTarget->addInternalScalar(papiDataTy, prefix, groupId);
