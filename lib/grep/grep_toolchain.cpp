@@ -52,4 +52,10 @@ static cl::opt<bool, true> OptUseByteFilterByMask("UseByteFilterByMask", cl::loc
 bool UseNestedColourizationPipeline;
 static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),
                                          cl::desc("Use a nested pipeline for colourization."), cl::init(true));
+
+bool UsePhaseForColourization;
+static cl::opt<bool, true> UsePhaseForColourizationOption("UsePhaseForColourization", cl::location(UsePhaseForColourization),
+                                                          cl::desc("Use independent phase for colourization"), cl::init(true));
+
+
 }
