@@ -257,6 +257,8 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             switch (buffer->getBufferKind()) {
                 case BufferId::ManagedDynamicBuffer:
                     out << 'M'; break;
+                case BufferId::FdBackedDynamicBuffer:
+                    out << 'F'; break;
                 case BufferId::ExternalBuffer:
                     assert (bn.isExternal() || bn.isThreadLocal() || bn.isUnowned());
                     break;

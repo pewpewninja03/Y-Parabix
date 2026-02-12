@@ -70,6 +70,20 @@ mark_preserve_streamset:
         mConsumerGraph[streamSet] = id;
     }
 
+    // FIXME: for now we cannot safely release fd-backed buffers as output buffers.
+    for (auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+        auto streamSet = source(output, mBufferGraph);
+        for (;;) {
+            BufferNode & sn = mBufferGraph[streamSet];
+            sn.Type &= ~BufferType::CrossesPhaseBoundary;
+            if (LLVM_UNLIKELY(sn.isInOutRedirect())) {
+                streamSet = parent(streamSet, InOutStreamSetReplacement);
+            } else {
+                break;
+            }
+        }
+    }
+
     std::vector<size_t> lastConsumer(LastStreamSet - FirstStreamSet + 1U, 0U);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {

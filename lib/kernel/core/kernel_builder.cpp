@@ -127,7 +127,6 @@ void KernelBuilder::setTerminationSignal(Value * const value) {
 }
 
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    auto & dl = getModule()->getDataLayout();
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
     Module * const m = getModule();
@@ -145,7 +144,6 @@ Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * cons
 }
 
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    auto & dl = getModule()->getDataLayout();
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
     Module * const m = getModule();

@@ -26,6 +26,8 @@
 // TODO: if an external buffer is marked as managed, have it allocate and manage the
 // buffer but not deallocate it.
 
+// #define DISABLE_FD_BACKED_BUFFERS
+
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -955,6 +957,10 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
             if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
                 assert (!bn.isManagedOutput());
                 outputBuffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
+            #ifndef DISABLE_FD_BACKED_BUFFERS
+            } else if (bn.crossesPhaseBoundary()) {
+                outputBuffer = new FdBackedDynamicBuffer(streamSet, b, output.getType(), 0U);
+            #endif
             } else { // is internal buffer
                 assert (bn.IsLinear || !bn.isReturned());
                 outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);

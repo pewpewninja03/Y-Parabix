@@ -1681,8 +1681,8 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
-            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
-            assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
+//            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
+//            assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
             if (LLVM_UNLIKELY(isLocal.isManaged() && expectedNumOfStrides)) {
                 assert (isa<ManagedDynamicBuffer>(buffer));
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};
