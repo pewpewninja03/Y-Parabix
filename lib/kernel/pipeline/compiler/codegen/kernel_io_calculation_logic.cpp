@@ -498,7 +498,7 @@ void PipelineCompiler::checkForSufficientOutputSpace(KernelBuilder & b, const Bu
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth())) {
-        assert (!isa<ManagedDynamicBuffer>(bn.Buffer));
+        assert (!bn.Buffer->isDynamic());
         return;
     }
 
@@ -1670,7 +1670,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
 
     Value * currentPtr = nullptr;
 
-    if (isa<ManagedDynamicBuffer>(buffer)) {
+    if (buffer->isDynamic()) {
         IntegerType * const sizeTy = b.getSizeTy();
         PointerType * const ptrTy = sizeTy->getPointerTo(buffer->getAddressSpace());
         assert (srcBufferNode.ManagedStructId < ManagedBufferStructCount);
@@ -1763,7 +1763,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     Value * inputBaseAddr = nullptr;
 
-    if (isa<ManagedDynamicBuffer>(popCountBuffer)) {
+    if (popCountBuffer->isDynamic()) {
         PointerType * const ptrTy = sizeTy->getPointerTo(popCountBuffer->getAddressSpace());
         assert (bn.ManagedStructId < ManagedBufferStructCount);
         inputBaseAddr = b.getScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(bn.ManagedStructId));

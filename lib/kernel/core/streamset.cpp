@@ -363,12 +363,15 @@ constexpr const char __RESIZE_FD_BACKED_BUFFER[] =    "__ss_rfb";
 constexpr auto ____RESIZE_FD_BACKED_BUFFER_LENGTH = std::string_view(__RESIZE_FD_BACKED_BUFFER).size();
 constexpr const char __MUNMAP[] =    "munmap";
 constexpr auto __MUNMAP_LENGTH = std::string_view(__MUNMAP).size();
+constexpr const char __CLOSE[] =    "close";
+constexpr auto __CLOSE_LENGTH = std::string_view(__CLOSE).size();
 
 void StreamSetBuffer::linkFunctions(KernelBuilder & b) {
     b.LinkFunction(StringRef{__MAKE_CIRCULAR_BUFFER, __MAKE_CIRCULAR_BUFFER_LENGTH}, make_circular_buffer);
     b.LinkFunction(StringRef{__MAKE_FD_BACKED_BUFFER, __MAKE_FD_BACKED_BUFFER_LENGTH}, make_fd_backed_buffer);
     b.LinkFunction(StringRef{__RESIZE_FD_BACKED_BUFFER, ____RESIZE_FD_BACKED_BUFFER_LENGTH}, resize_fd_backed_buffer);
     b.LinkFunction(StringRef{__MUNMAP, __MUNMAP_LENGTH}, munmap);
+    b.LinkFunction(StringRef{__CLOSE, __CLOSE_LENGTH}, close);
 }
 
 // External Buffer
@@ -2140,7 +2143,8 @@ void FdBackedDynamicBuffer::releaseBuffer(KernelBuilder & b) const {
     const auto intTyAlign = DL.getABITypeAlign(intTy).value();
     FixedArray<Value *, 1> args1;
     args1[0] = b.CreateAlignedLoad(intTy, fdField, intTyAlign);
-    b.CreateCall(m->getFunction("close"), args1);
+    Function * fClose = m->getFunction(__CLOSE); assert (fClose);
+    b.CreateCall(fClose, args1);
 
     freePendingDeletions(b, ConstantInt::getAllOnesValue(intPtrTy));
 }
@@ -2331,7 +2335,8 @@ Value * FdBackedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produc
         args[5] = pipelineHandle; // pipelineHandle
         args[6] = portNum; // portNum
     }
-    return b.CreateCall(f, args);
+    b.CreateCall(f, args);
+    return nullptr;
 }
 
 void FdBackedDynamicBuffer::freePendingDeletions(KernelBuilder & b, llvm::Value * consumed) const {

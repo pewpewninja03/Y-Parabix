@@ -504,9 +504,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
     const auto port = COMPILER->getStreamPort(name);
     if (LLVM_LIKELY(port.Type == PortType::Output)) {
         StreamSetBuffer * const buffer = COMPILER->getOutputStreamSetBuffer(port.Number);
-        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
-
-            auto managedBuffer = cast<ManagedDynamicBuffer>(buffer);
+        if (LLVM_LIKELY(buffer->isDynamic())) {
 
             Module * const m = getModule();
             assert ("unspecified module" && m);
@@ -557,7 +555,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 FunctionType * funcTy = FunctionType::get(getVoidTy(), paramTypes, false);
 
                 const auto ip = saveIP();
-                auto currentSharedHandle = managedBuffer->getHandle();
+                auto currentSharedHandle = buffer->getHandle();
                 f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
                 f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
 
@@ -576,7 +574,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 };
 
                 Value * const handle = CreatePointerCast(nextArg(), handlePtrTy);
-                managedBuffer->setHandle(handle);
+                buffer->setHandle(handle);
                 handle->setName("handle");
                 Value * const produced = nextArg();
                 produced->setName("produced");
@@ -612,18 +610,18 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 }
 
                 SetInsertPoint(expandInternalBuffer);
-                managedBuffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
+                buffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
                 CreateBr(exit);
 
                 SetInsertPoint(exit);
                 CreateRetVoid();
 
                 restoreIP(ip);
-                managedBuffer->setHandle(currentSharedHandle);
+                buffer->setHandle(currentSharedHandle);
             }
 
             SmallVector<Value *, 7> args(traceDynamicBuffers ? 7 : 4);
-            args[0] = CreatePointerCast(managedBuffer->getHandle(), voidPtrTy);
+            args[0] = CreatePointerCast(buffer->getHandle(), voidPtrTy);
             args[1] = producedItems;
             args[2] = consumedItems;
             args[3] = capacity;

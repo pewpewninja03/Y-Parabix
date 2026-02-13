@@ -132,14 +132,14 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     if (mInitialConsumedItemCount[id]) {
         return mInitialConsumedItemCount[id];
     }
+    const BufferNode & bn = mBufferGraph[id];
+    if (bn.Type & BufferType::PreserveEntireStreamSet) {
+        return b.getSize(0);
+    }
+    assert ((bn.Type & BufferType::CrossesPhaseBoundary) == 0);
 
     Value * itemCount = nullptr;
     if (out_degree(id, mConsumerGraph) == 0) {
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.Type & BufferType::PreserveEntireStreamSet) {
-            return b.getSize(0);
-        }
-
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate
         Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
@@ -193,10 +193,6 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     if (out_degree(streamSet, mConsumerGraph) == 0) {
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate
-        if (isa<ManagedDynamicBuffer>(mBufferGraph[streamSet].OutputBuffer)) {
-            errs() << "bad ss: " << streamSet << "\n";
-        }
-        assert (!isa<ManagedDynamicBuffer>(mBufferGraph[streamSet].OutputBuffer));
         Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
         assert (isFromCurrentFunction(b, produced, false));
         const auto e = in_edge(streamSet, mBufferGraph);

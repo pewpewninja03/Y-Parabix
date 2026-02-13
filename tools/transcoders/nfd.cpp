@@ -874,7 +874,9 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
         StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
         FilterByMask(P, NonModifiedMask, Source, NonModifiedBasis);
         SHOW_BIXNUM(NonModifiedBasis);
-
+        if (UseLayers) {
+            P.InsertPhaseBoundary();
+        }
         StreamSet * const OutputBasis = P.CreateStreamSet(8);
         MergeByMask(P, FinalWorkPlacementMask, TransformedBasis, NonModifiedBasis, OutputBasis);
         SHOW_BIXNUM(OutputBasis);

@@ -230,7 +230,8 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
 
                         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
                             if (reportCallback == nullptr) {
-                                reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel);
+                                reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel); assert (reportCallback);
+                                assert (getHandle());
                                 sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
                             }
                             const BufferPort & bp = mBufferGraph[output];
@@ -269,7 +270,7 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isDeallocatable() && !bn.isReturned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
-            if (isa<ManagedDynamicBuffer>(buffer)) {
+            if (buffer->isDynamic()) {
                 assert (isFromCurrentFunction(b, buffer->getHandle(), false));
                 buffer->releaseBuffer(b);
             }
@@ -286,7 +287,7 @@ void PipelineCompiler::freePendingDeletions(KernelBuilder & b, const size_t stre
         return;
     }
     StreamSetBuffer * const buffer = bn.Buffer;
-    if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+    if (LLVM_LIKELY(buffer->isDynamic())) {
         assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
         assert (out_degree(streamSet, mConsumerGraph) > 0);
         buffer->freePendingDeletions(b, consumed);
@@ -347,7 +348,7 @@ void PipelineCompiler::updateLocalDynamicBufferStructsUntil(KernelBuilder & b, c
             const auto streamSet = target(output, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
             StreamSetBuffer * const buffer = bn.Buffer;
-            if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
+            if (LLVM_LIKELY(buffer->isDynamic())) {
                 for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                     const auto consumer = target(input, mBufferGraph);
                     assert (mKernelId < consumer && consumer <= PipelineOutput);
@@ -782,7 +783,7 @@ Value * PipelineCompiler::getVirtualBaseAddress(KernelBuilder & b,
     assert ("buffer cannot be null!" && buffer);
 
     Value * addr = nullptr;
-    if (isa<ManagedDynamicBuffer>(buffer) && rateData.Port.Type == PortType::Input && bufferNode.ProducedPhaseId == mCurrentPipelinePhase) {
+    if (buffer->isDynamic() && rateData.Port.Type == PortType::Input && bufferNode.ProducedPhaseId == mCurrentPipelinePhase) {
         addr = b.getScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(bufferNode.ManagedStructId));
         addr = b.CreatePointerCast(addr, buffer->getPointerType());
     } else {

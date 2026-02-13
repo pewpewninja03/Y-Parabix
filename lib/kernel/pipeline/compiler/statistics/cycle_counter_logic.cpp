@@ -108,32 +108,21 @@ inline bool isSynchronizationCounter(const CycleCounter type) {
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
-#if 1
     assert (EnableCycleCounter || isSynchronizationCounter(type));
     Value * const counter = b.CreateReadCycleCounter();
     mCycleCounters[(unsigned)type] = counter;
-#else
-    mCycleCounters[(unsigned)type] = b.getSize(0);
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types) {
-#if 1
     Value * counter = b.CreateReadCycleCounter();
     assert (types.size() > 0);
     for (auto type : types) {
         assert (EnableCycleCounter || isSynchronizationCounter(type));
         mCycleCounters[(unsigned)type] = counter;
     }
-#else
-    for (auto type : types) {
-        assert (EnableCycleCounter || isSynchronizationCounter(type));
-        mCycleCounters[(unsigned)type] = b.getSize(0);
-    }
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -142,7 +131,7 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializ
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) {
     assert (FirstKernel <= kernelId && kernelId <= PipelineOutput);
     assert (EnableCycleCounter || isSynchronizationCounter(type));
-#if 1
+
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)type]; assert (start);
     Value * const duration = b.CreateSub(end, start);
@@ -186,18 +175,16 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
             }
         }
     }
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) {
-#if 1
     assert (EnableCycleCounter || mUseDynamicMultithreading);
+    assert (cond && cond->getType() == b.getInt1Ty());
     Value * const end = b.CreateReadCycleCounter();
-    Value * const start = mCycleCounters[(unsigned)ifTrue];
-    assert (start);
+    Value * const start = mCycleCounters[(unsigned)ifTrue]; assert (start);
     assert (mCycleCounters[(unsigned)ifFalse] == start);
     Value * const duration = b.CreateSub(end, start);
     const auto prefix = makeKernelName(kernelId);
@@ -214,14 +201,12 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
     Value * const sumRunningCount = b.CreateAlignedLoad(b.getSizeTy(), sumCounterPtr, SizeTyABIAlignment);
     Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
     b.CreateAlignedStore(sumUpdatedCount, sumCounterPtr, SizeTyABIAlignment);
-#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateTotalCycleCounterTime(KernelBuilder & b) const {
-#if 1
     assert (EnableCycleCounter);
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)FULL_PIPELINE_TIME];
@@ -231,7 +216,6 @@ void PipelineCompiler::updateTotalCycleCounterTime(KernelBuilder & b) const {
     Value * const ptr = getScalarFieldPtr(b, STATISTICS_CYCLE_COUNT_TOTAL).first;
     Value * const updated = b.CreateAdd(b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment), duration);
     b.CreateAlignedStore(updated, ptr, SizeTyABIAlignment);
-#endif
 }
 
 

@@ -23,66 +23,54 @@ void PipelineAnalysis::makeConsumerGraph() {
         if (bn.isThreadLocal() || bn.isConstant() || bn.hasZeroElementsOrWidth()) {
             id = 0;
         } else {
-
-            bool hasCrossPhaseConsumer = false;
-
-restart:    auto & sn = mBufferGraph[id];
-
-            if (LLVM_UNLIKELY(hasCrossPhaseConsumer)) {
-mark_preserve_streamset:
-                sn.Type |= BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
-            } else {
-                const auto producer = parent(id, mBufferGraph);
-                assert (PipelineInput <= producer && producer <= PipelineOutput);
-                const auto prodPhaseId = mBufferGraph[producer].ProducedPhaseId;
-                for (const auto input : make_iterator_range(out_edges(id, mBufferGraph))) {
-                    const auto consumer = target(input, mBufferGraph);
-                    assert (producer < consumer && consumer <= PipelineOutput);
-                    const auto consPhaseId = mBufferGraph[consumer].ProducedPhaseId;
-                    if (consPhaseId != prodPhaseId) {
-                        hasCrossPhaseConsumer = true;
-                        goto mark_preserve_streamset;
-                    }
-                }
-            }
-
+restart:    assert (id > 0);
+            auto & sn = mBufferGraph[id];
             if (LLVM_UNLIKELY(sn.isInOutRedirect())) {
                 id = parent(id, InOutStreamSetReplacement);
+                assert (id < streamSet);
+                id = mConsumerGraph[id];
                 goto restart;
             }
-
             if (LLVM_UNLIKELY(sn.isTruncated())) {
                 for (auto ref : make_iterator_range(in_edges(id, mStreamGraph))) {
                     const auto & v = mStreamGraph[ref];
                     if (v.Reason == ReasonType::Reference) {
                         id = source(ref, mBufferGraph);
+                        assert (id < streamSet);
+                        id = mConsumerGraph[id];
                         goto restart;
                     }
                 }
             }
-
-            if (LLVM_UNLIKELY(id != streamSet)) {
-                assert (id >= FirstStreamSet && id < streamSet);
-                id = mConsumerGraph[id];
+            assert (FirstStreamSet <= id && id <= streamSet);
+            if (PartitionPhaseBoundaries.size() > 2) {
+                const auto producer = parent(streamSet, mBufferGraph);
+                assert (PipelineInput <= producer && producer <= PipelineOutput);
+                const auto prodPhaseId = mBufferGraph[producer].ProducedPhaseId;
+                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                    const auto consumer = target(input, mBufferGraph);
+                    assert (producer < consumer && consumer <= PipelineOutput);
+                    const auto consPhaseId = mBufferGraph[consumer].ProducedPhaseId;
+                    if (LLVM_UNLIKELY(consPhaseId != prodPhaseId)) {
+                        sn.Type |= BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
+                        break;
+                    }
+                }
             }
         }
-        assert (id == 0 || (FirstStreamSet <= id && id <= streamSet));
         mConsumerGraph[streamSet] = id;
     }
 
+
+
     // FIXME: for now we cannot safely release fd-backed buffers as output buffers.
     for (auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        auto streamSet = source(output, mBufferGraph);
-        for (;;) {
-            BufferNode & sn = mBufferGraph[streamSet];
-            sn.Type &= ~BufferType::CrossesPhaseBoundary;
-            if (LLVM_UNLIKELY(sn.isInOutRedirect())) {
-                streamSet = parent(streamSet, InOutStreamSetReplacement);
-            } else {
-                break;
-            }
-        }
+        const auto streamSet = source(output, mBufferGraph);
+        const auto id = mConsumerGraph[streamSet];
+        BufferNode & sn = mBufferGraph[id];
+        sn.Type &= ~BufferType::CrossesPhaseBoundary;
     }
+
 
     std::vector<size_t> lastConsumer(LastStreamSet - FirstStreamSet + 1U, 0U);
 
@@ -96,11 +84,9 @@ mark_preserve_streamset:
             continue;
         }
         assert (FirstStreamSet <= id && id <= streamSet);
-
         BufferNode & sn = mBufferGraph[id];
-        if (LLVM_UNLIKELY(sn.Type & BufferType::PreserveEntireStreamSet)) {
-            continue;
-        }
+
+        assert (sn.isNonThreadLocal());
 
         const auto pe = in_edge(streamSet, mBufferGraph);
         const auto producer = source(pe, mBufferGraph);
@@ -115,36 +101,32 @@ mark_preserve_streamset:
 
         bool allConsumersFixedRate = true;
         const auto partId = KernelPartitionId[producer];
-        for (const auto ce : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(ce, mBufferGraph);
-            const BufferPort & input = mBufferGraph[ce];
-            const auto isFixed = input.isFixed();
-            if (LLVM_UNLIKELY(KernelPartitionId[consumer] == partId)) {
-                assert (isFixed);
-                assert (id >= FirstStreamSet);
-                auto & lc = lastConsumer[id - FirstStreamSet];
-                assert (consumer > 0);
-                lc = std::max(lc, consumer);
-            } else {
-                const unsigned index = out_degree(id, mConsumerGraph);
-                allConsumersFixedRate &= isFixed;
-                add_edge(id, consumer, ConsumerEdge{input.Port, index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            assert (id >= FirstStreamSet);
+            auto & lc = lastConsumer[id - FirstStreamSet];
+            assert (consumer > 0);
+            lc = std::max(lc, consumer);
+            if (KernelPartitionId[consumer] == partId) {
+                continue;
             }
+            const BufferPort & I = mBufferGraph[input];
+            const unsigned index = out_degree(id, mConsumerGraph);
+            allConsumersFixedRate &= I.isFixed();
+            add_edge(id, consumer, ConsumerEdge{I.Port, index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
 
-        assert (lastConsumer[streamSet - FirstStreamSet] == 0 || mConsumerGraph[streamSet] == streamSet);
-
-        if (!allConsumersFixedRate) {
-            sn.Type |= BufferType::HasNonFixedRateConsumer;
-        }
+        sn.Type |= allConsumersFixedRate ? 0U : BufferType::HasNonFixedRateConsumer;
 
     }
 
+#if 0
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const auto lc = lastConsumer[streamSet - FirstStreamSet];
-        if (lc != 0 && out_degree(streamSet, mConsumerGraph) == 0) {
+        if (out_degree(streamSet, mConsumerGraph) == 0) {
 
             assert (mConsumerGraph[streamSet] == streamSet);
+
+            const auto lc = lastConsumer[streamSet - FirstStreamSet];
 
             for (auto ss = streamSet; ss <= LastStreamSet; ++ss) {
                 if (mConsumerGraph[ss] == streamSet) {
@@ -160,15 +142,28 @@ mark_preserve_streamset:
                 }
             }
         }
-
-
     }
+#endif
 
-    for (auto id = FirstStreamSet; id <= LastStreamSet; ++id) {
+    constexpr auto propogatedFlagSet =
+        BufferType::PreserveEntireStreamSet |
+        BufferType::CrossesPhaseBoundary |
+        BufferType::HasNonFixedRateConsumer;
 
-        if (mConsumerGraph[id] == 0) {
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+
+        const auto id = mConsumerGraph[streamSet];
+
+        if (id == 0) {
             continue;
         }
+
+        const BufferNode & sn = mBufferGraph[id];
+        BufferNode & bn = mBufferGraph[streamSet];
+        assert (id == streamSet || (bn.Type & propogatedFlagSet) == 0);
+        bn.Type |= (sn.Type & propogatedFlagSet);
+
+        assert (bn.isNonThreadLocal());
 
         if (LLVM_UNLIKELY(out_degree(id, mConsumerGraph) == 0)) {
             const auto producer = parent(id, mBufferGraph);
@@ -181,33 +176,19 @@ mark_preserve_streamset:
             }
         }
 
-        #ifndef NDEBUG
-        const BufferNode & bn = mBufferGraph[id];
-        assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isTruncated()));
-        assert (in_degree(id, mConsumerGraph) == 1);
-        #endif
-
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
-
-        size_t lastConsumer = PipelineInput;
-        for (const auto input : make_iterator_range(out_edges(id, mConsumerGraph))) {
-            const auto consumer = target(input, mConsumerGraph);
-            lastConsumer = std::max<size_t>(lastConsumer, consumer);
-        }
-
-        assert (lastConsumer != 0);
 
         // Although we may already know the final consumed item count prior
         // to executing the last consumer, we need to defer writing the final
         // consumed item count until the very last consumer reads the data.
 
+        const auto lc = lastConsumer[id - FirstStreamSet];
         ConsumerGraph::edge_descriptor e;
         bool exists;
-        std::tie(e, exists) = edge(id, lastConsumer, mConsumerGraph); assert (exists);
+        std::tie(e, exists) = edge(id, lc, mConsumerGraph); assert (exists);
         ConsumerEdge & cn = mConsumerGraph[e];
         cn.Flags |= ConsumerEdge::WriteConsumedCount;
-
 
     }
 

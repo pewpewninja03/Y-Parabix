@@ -36,7 +36,7 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
         }
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+        if (bn.Buffer->isDynamic()) {
             noManagedBuffer = false;
         }
     }
@@ -185,7 +185,7 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
+        if (bp.isManaged() || bn.Buffer->isDynamic()) {
 
             const auto prefix = makeBufferName(kernelId, bp.Port);
             Value * traceData; Type * traceDataTy;
@@ -229,21 +229,22 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
             // consumer processed item count [3,n)
             const auto id = getTruncatedStreamSetSourceId(streamSet);
-            assert (out_degree(id, mConsumerGraph) > 0);
-            Value * consumerDataPtr; Type * consumerTy;
-            std::tie(consumerDataPtr, consumerTy) = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+            if (LLVM_LIKELY(out_degree(id, mConsumerGraph) > 0)) {
+                Value * consumerDataPtr; Type * consumerTy;
+                std::tie(consumerDataPtr, consumerTy) = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
 
-            indices[0] = i32_ZERO;
-            indices[1] = i32_ONE;
+                indices[0] = i32_ZERO;
+                indices[1] = i32_ONE;
 
-            Value * const processedPtr = b.CreateGEP(consumerTy, consumerDataPtr, indices);
+                Value * const processedPtr = b.CreateGEP(consumerTy, consumerDataPtr, indices);
 
-            indices[0] = traceIndex;
-            indices[1] = i32_THREE;
+                indices[0] = traceIndex;
+                indices[1] = i32_THREE;
 
-            Value * const logPtr = b.CreateGEP(entryTy, entryArray, indices);
-            Constant * const length = b.getSize(sizeTyWidth * numOfConsumers);
-            b.CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+                Value * const logPtr = b.CreateGEP(entryTy, entryArray, indices);
+                Constant * const length = b.getSize(sizeTyWidth * numOfConsumers);
+                b.CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+            }
 
             // TODO: if this was a maanged output, ideally we'd let the outer pipeline report it but that'd require us
             // to pass in the outer function pointer which might not have the same output portnum as the kernel does.
@@ -403,7 +404,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                 const BufferPort & br = mBufferGraph[output];
                 const auto buffer = target(output, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[buffer];
-                if (br.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
+                if (br.isManaged() || bn.Buffer->isDynamic()) {
 
                     //  # KERNEL                      PORT                      BUFFER         SEG #      ITEM CAPACITY
 

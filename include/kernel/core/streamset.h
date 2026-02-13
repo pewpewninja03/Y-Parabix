@@ -68,7 +68,7 @@ public:
     bool isSingleElementStreamSet() const;
 
     bool isDynamic() const {
-        return (mBufferKind == BufferKind::ManagedDynamicBuffer);
+        return (mBufferKind == BufferKind::ManagedDynamicBuffer || mBufferKind == BufferKind::FdBackedDynamicBuffer);
     }
 
     virtual ~StreamSetBuffer() = 0;

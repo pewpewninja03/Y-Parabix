@@ -257,7 +257,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
             const BufferPort & bp = mBufferGraph[output];
             const auto streamSet = target(output, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.Buffer)) {
+            if (bp.isManaged() || bn.Buffer->isDynamic()) {
                 const BufferPort & rd = mBufferGraph[output];
                 const auto prefix = makeBufferName(kernelId, rd.Port);
                 LLVMContext & C = b.getContext();

@@ -1305,7 +1305,7 @@ void PipelineAnalysis::identifyManagedBufferStructIds(pipeline_random_engine & r
     size_t count = 0;
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+        if (bn.Buffer->isDynamic()) {
             if (LLVM_UNLIKELY(bn.isTruncated())) {
                 for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
                     const auto & v = mStreamGraph[ref];
@@ -1343,7 +1343,7 @@ void PipelineAnalysis::identifyManagedBufferStructIds(pipeline_random_engine & r
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+            if (bn.Buffer->isDynamic()) {
                 const auto i = index[streamSet - FirstStreamSet];
                 assert (i < count);
                 remaining[i] += 1U;
@@ -1364,7 +1364,7 @@ void PipelineAnalysis::identifyManagedBufferStructIds(pipeline_random_engine & r
         for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+            if (bn.Buffer->isDynamic()) {
                 const auto i = index[streamSet - FirstStreamSet];
                 assert (i < count);
                 remaining[i] += out_degree(streamSet, mBufferGraph) - 1U;
@@ -1374,7 +1374,7 @@ void PipelineAnalysis::identifyManagedBufferStructIds(pipeline_random_engine & r
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+            if (bn.Buffer->isDynamic()) {
                 const auto i = index[streamSet - FirstStreamSet];
                 assert (i < count);
                 assert (remaining[i] > 0);
@@ -1399,7 +1399,7 @@ void PipelineAnalysis::identifyManagedBufferStructIds(pipeline_random_engine & r
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
+        if (bn.Buffer->isDynamic()) {
             const auto j = index[streamSet - FirstStreamSet];
             assert (j < count);
             #ifndef NDEBUG

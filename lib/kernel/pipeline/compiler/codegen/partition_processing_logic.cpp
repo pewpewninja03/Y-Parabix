@@ -15,6 +15,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     assert (PartitionPhaseBoundaries[mCurrentPipelinePhase] > 0);
     const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
     assert (oneAfterLastPartition < PartitionCount);
+    const auto count = oneAfterLastPartition - firstPartition + 1;
 
     for (unsigned i = firstPartition; i < oneAfterLastPartition; ++i) {
         mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
@@ -22,13 +23,13 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     mPartitionEntryPoint[oneAfterLastPartition] = pipelineEnd;
     for (unsigned i = firstPartition + 1; i <= oneAfterLastPartition; ++i) {
         mPartitionPipelineProgressPhi[i] =
-            PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+            PHINode::Create(boolTy, count, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
     }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         for (unsigned i = firstPartition + 1; i < oneAfterLastPartition; ++i) {
             mPartitionStartTimePhi[i] =
-                PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
+                PHINode::Create(sizeTy, count, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
         }
     }
 
@@ -786,7 +787,9 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
         // Since there may be multiple paths into this kernel, phi out the start time
         // for each path.
-        if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId < firstKernelInNextPhase)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId != PartitionPhaseBoundaries[mCurrentPipelinePhase])) {
+            assert (mPartitionStartTimePhi[nextPartitionId]);
+            assert (mCycleCounters[TOTAL_TIME]);
             mPartitionStartTimePhi[nextPartitionId]->addIncoming(mCycleCounters[TOTAL_TIME], exitBlock);
             mCycleCounters[TOTAL_TIME] = mPartitionStartTimePhi[nextPartitionId];
         }

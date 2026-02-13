@@ -947,7 +947,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         const auto isLocal =  Kernel::isLocalBuffer(output);
         if (LLVM_UNLIKELY(isLocal.isShared())) {
             Value * const handle = nextArg();
-            assert (isa<ManagedDynamicBuffer>(buffer));
+            assert (buffer->isDynamic());
             buffer->setHandle(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
         } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead
@@ -998,7 +998,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         /// writable / consumed item count
         /// ----------------------------------------------------
         Value * writable = nullptr;
-        assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
+        assert (buffer->isDynamic() || !isLocal.isManaged());
         if (isLocal.any()) {
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
@@ -1682,9 +1682,9 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
 //            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
-//            assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
+//            assert (buffer->isDynamic() || !isLocal.isManaged());
             if (LLVM_UNLIKELY(isLocal.isManaged() && expectedNumOfStrides)) {
-                assert (isa<ManagedDynamicBuffer>(buffer));
+                assert (buffer->isDynamic());
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};
                 const auto & ub = output.getRate().getUpperBound();
                 if (ub.numerator() > 0) {
