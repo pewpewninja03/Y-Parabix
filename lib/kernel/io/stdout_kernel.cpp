@@ -59,6 +59,7 @@ StdOutKernel::StdOutKernel(LLVMTypeSystemInterface & ts, StreamSet *codeUnitBuff
 
 void FileSink::linkExternalMethods(KernelBuilder & b) {
     b.LinkFunction("write", write);
+    b.LinkFunction("close", close);
 }
 
 void FileSink::generateInitializeMethod(KernelBuilder & b) {

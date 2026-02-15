@@ -808,6 +808,10 @@ NFD_FilterFunctionType NFD_filter_pipeline(CPUDriver & driver, NFD_BixData & NFD
 
 void NFD_Transform_Stage(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * WorkingBasis, StreamSet * TransformedBasis) {
 
+    if (UseLayers) {
+        P.InsertPhaseBoundary();
+    }
+
     StreamSet * const U21_u8indexed = P.CreateStreamSet(21, 1);
     P.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
     SHOW_BIXNUM(U21_u8indexed);
@@ -959,9 +963,6 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
         StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
         NFD_FilterStage(P, NFD_Data, BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
         
-        if (UseLayers) {
-            P.InsertPhaseBoundary();
-        }
 
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         NFD_Transform_Stage(P, NFD_Data, WorkingBasis, TransformedBasis);

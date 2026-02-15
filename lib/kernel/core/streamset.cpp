@@ -127,7 +127,7 @@ uint8_t * make_fd_backed_buffer(const size_t size, int & memfd) {
         report_fatal_error(msg.str());
     }
 
-    if (ftruncate(memfd, size) == -1) {
+    if (ftruncate(memfd, size) != 0) {
         report_fatal_error(Twine{"failed to size mmap buffer to ", std::to_string(size)});
     }
 
@@ -139,36 +139,29 @@ uint8_t * make_fd_backed_buffer(const size_t size, int & memfd) {
     return p;
 }
 
-uint8_t * resize_fd_backed_buffer(const size_t size, const int memfd, uint8_t * const buffer) {
+uint8_t * resize_fd_backed_buffer(const int memfd, uint8_t * const buffer, const size_t priorSize, const size_t newSize) {
 
-    assert (size > 0);
-    assert ((size % getPageSize()) == 0);
+    assert (newSize > 0);
+    assert ((newSize % getPageSize()) == 0);
 
-    if (ftruncate(memfd, size) == -1) {
-        report_fatal_error(Twine{"failed to resize mmap buffer to ", std::to_string(size)});
+//    if (msync(buffer, priorSize, MS_SYNC) != 0) {
+//        report_fatal_error(Twine{"failed to sync mmap buffer"});
+//    }
+
+    if (ftruncate(memfd, newSize) != 0) {
+        report_fatal_error(Twine{"failed to resize mmap buffer to ", std::to_string(newSize)});
     }
 
     // TODO: mremap could potentially take the old buffer as a hint where to place the new one and reuse the addr space
-    // but this function is not supplied on MacOS.
+    // but this function is not supplied on MacOS. Similarly, MAP_FIXED_NOREPLACE might work on Linux if defined?
 
-    uint8_t * p = (uint8_t*)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+    uint8_t * p = (uint8_t*)mmap(NULL, newSize, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
     if (p == MAP_FAILED) {
-        report_fatal_error("failed to allocate virtual address space");
+        report_fatal_error("failed to resize virtual address space");
     }
 
     return p;
 }
-
-void destroy_fd_backed_buffer(const size_t size, const int memfd, uint8_t * const buffer) {
-    if (LLVM_LIKELY(buffer != nullptr)) {
-        const auto r = munmap(buffer, size);
-        assert (r == 0);
-    }
-    if (memfd != -1) {
-        close(memfd);
-    }
-}
-
 
 #define ANON_MMAP_SIZE (2ULL * 1048576ULL)
 
@@ -367,11 +360,17 @@ constexpr const char __CLOSE[] =    "close";
 constexpr auto __CLOSE_LENGTH = std::string_view(__CLOSE).size();
 
 void StreamSetBuffer::linkFunctions(KernelBuilder & b) {
+    IntegerType * const i32Ty = b.getInt32Ty();
     b.LinkFunction(StringRef{__MAKE_CIRCULAR_BUFFER, __MAKE_CIRCULAR_BUFFER_LENGTH}, make_circular_buffer);
     b.LinkFunction(StringRef{__MAKE_FD_BACKED_BUFFER, __MAKE_FD_BACKED_BUFFER_LENGTH}, make_fd_backed_buffer);
     b.LinkFunction(StringRef{__RESIZE_FD_BACKED_BUFFER, ____RESIZE_FD_BACKED_BUFFER_LENGTH}, resize_fd_backed_buffer);
     b.LinkFunction(StringRef{__MUNMAP, __MUNMAP_LENGTH}, munmap);
-    b.LinkFunction(StringRef{__CLOSE, __CLOSE_LENGTH}, close);
+    BEGIN_SCOPED_REGION
+    FixedArray<Type *, 1> params;
+    params[0] = i32Ty;
+    FunctionType * fCloseTy = FunctionType::get(i32Ty, params, false);
+    b.LinkFunction(StringRef{__CLOSE, __CLOSE_LENGTH}, fCloseTy, (void*)close);
+    END_SCOPED_REGION
 }
 
 // External Buffer
@@ -2270,14 +2269,16 @@ Value * FdBackedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produc
         Value * const fd = b.CreateAlignedLoad(intTy, fdField, intTyAlign);
         assert (blockWidth > 8);
 
+        FixedArray<Value *, 4> args;
+        args[0] = fd;
+        args[1] = initialAddr;
+        args[2] = b.CreateMul(initialCapacity, bytesPerChunk);
+
         // allocate a buffer with at least twice the capacity and copy the unconsumed data back into it
         Value * const expandedCapacity = b.CreateAdd(initialCapacity, b.CreateRoundUp(requiredChunks, initialCapacity));
         Value * const expandedBytes = b.CreateMul(expandedCapacity, bytesPerChunk);
 
-        FixedArray<Value *, 3> args;
-        args[0] = expandedBytes;
-        args[1] = fd;
-        args[2] = initialAddr;
+        args[3] = expandedBytes;
 
         Function * const makeBuffer = m->getFunction(__RESIZE_FD_BACKED_BUFFER); assert (makeBuffer);
         Value * const expandedAddr = b.CreatePointerCast(b.CreateCall(makeBuffer, args), i8PtrTy);

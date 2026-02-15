@@ -253,13 +253,13 @@ Value * CBuilder::CreateReadCall(Value * fileDescriptor, Value * buf, Value * nb
 
 Value * CBuilder::CreateCloseCall(Value * fileDescriptor) {
     Module * const m = getModule();
-    IntegerType * int32Ty = getInt32Ty();
-    FunctionType * fty = FunctionType::get(int32Ty, {int32Ty}, true);
     Function * closeFn = m->getFunction("close");
     if (closeFn == nullptr) {
+        IntegerType * int32Ty = getInt32Ty();
+        FunctionType * fty = FunctionType::get(int32Ty, {int32Ty}, false);
         closeFn = Function::Create(fty, Function::ExternalLinkage, "close", m);
     }
-    return CreateCall(fty, closeFn, fileDescriptor);
+    return CreateCall(closeFn->getFunctionType(), closeFn, fileDescriptor);
 }
 
 Value * CBuilder::CreateUnlinkCall(Value * path) {

@@ -491,6 +491,8 @@ public:
         return mFlags;
     }
 
+    bool noMutableSharedScalars() const;
+
 protected:
 
     llvm::Function * getInitializeFunction(KernelBuilder & b, const bool alwayReturnDeclaration = true) const;
@@ -610,10 +612,6 @@ protected:
     virtual void generateFinalizeThreadLocalMethod(KernelBuilder &) { }
 
     virtual void generateFinalizeMethod(KernelBuilder &) { }
-
-private:
-
-    bool hasInternalScalars(const ScalarType type) const;
 
 protected:
 

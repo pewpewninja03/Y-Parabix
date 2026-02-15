@@ -433,6 +433,8 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             auto & dl = m->getDataLayout();
 
+            auto & C = m->getContext();
+
             auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec,
                                       StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
 
@@ -443,7 +445,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 std::vector<Type *> structTypes(n * 2);
 
                 for (unsigned i = 0; i < n; ++i) {
-                    StructType * const sty = StructType::create(b.getContext(), structTypeVec[i]);
+                    StructType * const sty = StructType::create(C, structTypeVec[i]);
                     assert (sty->isSized());
                     structTypes[i * 2] = sty;
                }
@@ -452,7 +454,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
                for (unsigned i = 0; i < n; ++i) {
 
-                   byteOffset += CBuilder::getTypeSize(dl, structTypes[i * 2]);
+                    byteOffset += CBuilder::getTypeSize(dl, structTypes[i * 2]);
 
                     Type * paddingTy = emptyTy;
 
@@ -472,7 +474,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 if (byteOffset == 0) return nullptr;
 
                 if (st == nullptr) {
-                    st = StructType::create(b.getContext(), structTypes, name);
+                    st = StructType::create(C, structTypes, name);
                 } else {
                     assert (st->isOpaque());
                     st->setBody(structTypes);
@@ -1576,15 +1578,15 @@ void SegmentOrientedKernel::generateKernelMethod(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasInternalScalars
+ * @brief hasAnySharedOrOutputScalars
  ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::hasInternalScalars(const ScalarType type) const {
+bool Kernel::noMutableSharedScalars() const {
     for (const InternalScalar & s : mInternalScalars) {
-        if (s.getScalarType() == type) {
-            return true;
+        if (LLVM_LIKELY(s.getScalarType() == ScalarType::Internal)) {
+            return false;
         }
     }
-    return false;
+    return mOutputScalars.empty();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
