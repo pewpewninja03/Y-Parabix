@@ -579,10 +579,11 @@ protected:
 
     void finalizeThreadLocalInstance(KernelBuilder & b, llvm::ArrayRef<llvm::Value *> args) const;
 
-protected:
+public:
 
     static std::string getStringHash(const llvm::StringRef str);
 
+protected:
     LLVM_READNONE bool hasFixedRateIO() const;
 
     virtual void addInternalProperties(KernelBuilder &) { }
