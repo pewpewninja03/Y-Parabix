@@ -16,6 +16,8 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexingA
 // return a pair consisting of the empty Sequence and the original RE.
 std::pair<RE *, RE *> ParseUniquePrefix(RE * r);
 
+unsigned maxLookaheadLength(const RE * re, const cc::Alphabet * lengthAlphabet);
+
 bool isFixedLength(const RE * re);
 
 int minMatchLength(const RE * re);
@@ -24,7 +26,9 @@ int minMatchLength(const RE * re);
    without variable advances. */
 bool validateFixedUTF8(const RE * r);
 
-bool HasCodepointReference(const RE * r);
+bool hasReference(const RE * r);
+
+bool hasCodepointReference(const RE * r);
 
 bool isTypeForLocal(const RE * re);
     
