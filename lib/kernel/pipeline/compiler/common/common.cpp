@@ -199,8 +199,6 @@ bool PipelineCommonGraphFunctions::mayHaveNonLinearIO(const size_t kernel) const
     return false;
 }
 
-#define DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isKernelStateFree
  ** ------------------------------------------------------------------------------------------------------------- */

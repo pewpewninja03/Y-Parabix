@@ -856,10 +856,15 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
         FilterByMask(P, NonModifiedMask, Source, NonModified);
         SHOW_BYTES(NonModified);
         
+        if (UseLayers) {
+            P.InsertPhaseBoundary();
+        }
+
         StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
         Invert(P, FinalWorkPlacementMask, NonModifiedPlacementMask);
         SHOW_STREAM(NonModifiedPlacementMask);
         
+
         StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
         SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
         

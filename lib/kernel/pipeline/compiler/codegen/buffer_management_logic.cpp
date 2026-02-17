@@ -85,8 +85,7 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
         StreamSetBuffer * const buffer = bn.Buffer;
         if (bn.isNonThreadLocal() == nonLocal) {
             if (LLVM_UNLIKELY(bn.isConstant())) {
-                assert (!isa<ManagedDynamicBuffer>(buffer));
-                assert (nonLocal);
+                assert (nonLocal && !buffer->isDynamic());
                 const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
                 buffer->setHandle(b.getScalarFieldPtr(handleName));
                 const auto & sn = mStreamGraph[streamSet];
@@ -218,13 +217,16 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                         assert (R.numerator() > 0);
                         Value * multiplier = b.CreateCeilUMulRational(maxStrides, R);
 
-                        if (LLVM_UNLIKELY(bn.isReturned())) {
-                            auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
-                            if (scaleFactor.numerator() == 0) {
-                                scaleFactor = R;
+                        if (LLVM_UNLIKELY(bn.isReturned() || bn.crossesPhaseBoundary())) {
+                            Value * expectedBufferSize = expectedSourceOutputSize;
+                            if (bn.isReturned()) {
+                                auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
+                                if (scaleFactor.numerator() == 0) {
+                                    scaleFactor = R;
+                                }
+                                assert (expectedSourceOutputSize);
+                                expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
                             }
-                            assert (expectedSourceOutputSize);
-                            Value * expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
                             multiplier = b.CreateUMax(multiplier, expectedBufferSize);
                         }
 

@@ -93,6 +93,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);
 
+#if 0
+
     unsigned largestPhaseSize = 0;
     for (size_t i = 1U; i < numOfPhases; ++i) {
         const auto firstPartition = PartitionPhaseBoundaries[i - 1];
@@ -118,6 +120,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     // TODO: redesign to avoid the unnecessary store?
 
     Value * maximumNumOfThreads = b.CreateUMin(b.getScalarField(MAXIMUM_NUM_OF_THREADS), b.getSize(largestPhaseSize));
+
+#endif
+
+    Value * maximumNumOfThreads = b.getScalarField(MAXIMUM_NUM_OF_THREADS);
+
     if (mUseDynamicMultithreading) {
         minimumNumOfThreads = b.getScalarField(MINIMUM_NUM_OF_THREADS);
         maximumNumOfThreads = b.CreateUMax(maximumNumOfThreads, minimumNumOfThreads);

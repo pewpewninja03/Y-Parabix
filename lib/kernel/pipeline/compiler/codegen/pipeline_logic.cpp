@@ -424,20 +424,27 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
 
     initializeInitialSlidingWindowSegmentLengths(b, segmentSize);
 
-    bool hasAnyReturnedBuffer = false;
-    for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        const auto streamSet = source(output, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isReturned())) {
-            if (getReturnedBufferScaleFactor(streamSet) > 0) {
-                hasAnyReturnedBuffer = true;
-                break;
+    assert (PartitionPhaseBoundaries.size() >= 2);
+
+    bool getInputSize = false;
+
+    if (PartitionPhaseBoundaries.size() > 2) {
+        getInputSize = true;
+    } else {
+        for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+            const auto streamSet = source(output, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isReturned())) {
+                if (getReturnedBufferScaleFactor(streamSet) > 0) {
+                    getInputSize = true;
+                    break;
+                }
             }
         }
     }
 
     Value * expectedSourceOutputSize = nullptr;
-    if (LLVM_UNLIKELY(hasAnyReturnedBuffer)) {
+    if (LLVM_UNLIKELY(getInputSize)) {
         Value * bufferScaling = nullptr;
         for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
             if (LLVM_UNLIKELY(in_degree(kernel, mBufferGraph) == 0)) {

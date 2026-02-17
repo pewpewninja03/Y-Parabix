@@ -540,8 +540,9 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                     const auto la = round_up_to(rt.LookAhead, b.getBitBlockWidth());
                     max = b.CreateAdd(max, b.getSize(la));
                 }
+                max = b.CreateRoundUpRational(max, rt.Maximum);
                 if (LLVM_UNLIKELY(checkStreamSet)) {
-                    addNextArg(b.CreateRoundUpRational(max, rt.Maximum));
+                    addNextArg(max);
                 }
             }
 
@@ -646,6 +647,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                     assert (!bn.isConstant());
                     max = b.CreateAdd(max, b.getSize(rt.Add));
                 }
+                max = b.CreateRoundUpRational(max, rt.Maximum);
                 if (LLVM_UNLIKELY(bn.isThreadLocal())) {
                     ExternalBuffer tmp(0, b, buffer->getBaseType(), 0);
                     Value * h = b.CreateAllocaAtEntryPoint(tmp.getHandleType(b));
