@@ -232,6 +232,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
 
+    Value * terminated = nullptr;
+
     SmallVector<Type *, 2> csRetValFields;
     csRetValFields.push_back(hasTermSignal ? sizeTy : boolTy);
     if (CheckAssertions()) {
@@ -246,9 +248,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     FunctionType * const doSegmentComputeFuncType = FunctionType::get(csRetValType, csParams, false);
 
-    SmallVector<Function *> doSegmentPhaseFunction(numOfPhases);
+    SmallVector<Function *, 3> pipelinePhase(numOfPhases - 1U);
 
-    for (mCurrentPipelinePhase = 1U; mCurrentPipelinePhase < numOfPhases; ++mCurrentPipelinePhase) {
+    for (mCurrentPipelinePhase = 1; mCurrentPipelinePhase < numOfPhases; ++mCurrentPipelinePhase) {
 
         // -------------------------------------------------------------------------------------------------------------------------
         // GENERATE DO SEGMENT (KERNEL EXECUTION) FUNCTION CODE
@@ -263,6 +265,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         auto makeDoSegmentLogicFunction = [&](Function * csFunc) -> void {
 
             csFunc->setCallingConv(CallingConv::C);
+
+            if (!mUseDynamicMultithreading) {
+                csFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
+            }
 
             if (LLVM_UNLIKELY(CheckAssertions())) {
                 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
@@ -334,13 +340,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         raw_string_ostream nm(tmp);
         nm << mTarget->getName() << "_ComputeThread" << firstKernelInCurrentPhase << '_' << oneAfterLastKernelInCurrentPhase;
 
-        Function * doSegmentComputeThreadFunc = Function::Create(doSegmentComputeFuncType, Function::InternalLinkage, nm.str(), m);
+        Function * const doSegmentComputeThreadFunc = Function::Create(doSegmentComputeFuncType, Function::InternalLinkage, nm.str(), m);
 
         makeDoSegmentLogicFunction(doSegmentComputeThreadFunc);
 
-        doSegmentPhaseFunction[mCurrentPipelinePhase] = doSegmentComputeThreadFunc;
-
+        pipelinePhase[mCurrentPipelinePhase - 1] = doSegmentComputeThreadFunc;
     }
+
 
 
     // -------------------------------------------------------------------------------------------------------------------------
@@ -373,8 +379,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
         }
         #endif
-
-        const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);
 
         Value * terminated = nullptr;
 
@@ -410,7 +414,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             }
             #endif
 
-
             // generate the pipeline logic for this thread
             BasicBlock * const mPipelineLoop = b.CreateBasicBlock("PipelineLoop");
             BasicBlock * const mPipelineEnd = b.CreateBasicBlock("PipelineEnd");
@@ -434,14 +437,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
             obtainCurrentSegmentNumber(b, entryBlock);
 
-            SmallVector<Value *, 3> args(2);
+            FixedArray<Value *, 2> args;
             args[0] = threadStruct;
             args[1] = mSegNo; assert (mSegNo);
-            if (mUseDynamicMultithreading && generateProcessThread) {
-                args.push_back(activeThreadsPhi);
-            }
 
-            Function * const doSegFunc = doSegmentPhaseFunction[mCurrentPipelinePhase];
+            Function * const doSegmentComputeThreadFunc = pipelinePhase[mCurrentPipelinePhase - 1];
 
             Value * csRetVal = nullptr;
             if (CheckAssertions()) {
@@ -449,13 +449,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 const auto prefix = makeKernelName(mKernelId);
                 BasicBlock * const invokeOk = b.CreateBasicBlock(prefix + "_invokeOk");
                 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
-                csRetVal = b.CreateInvoke(doSegFunc->getFunctionType(), doSegFunc, invokeOk, rethrowException, args);
+                csRetVal = b.CreateInvoke(doSegmentComputeFuncType, doSegmentComputeThreadFunc, invokeOk, rethrowException, args);
                 #else
-                csRetVal = b.CreateInvoke(doSegFunc->getFunctionType(), invokeOk, mRethrowException, args);
+                csRetVal = b.CreateInvoke(ddoSegmentComputeThreadFunc, invokeOk, mRethrowException, args);
                 #endif
                 b.SetInsertPoint(invokeOk);
             } else {
-                csRetVal = b.CreateCall(doSegFunc->getFunctionType(), doSegFunc, args);
+                csRetVal = b.CreateCall(doSegmentComputeFuncType, doSegmentComputeThreadFunc, args);
             }
 
             terminated = b.CreateExtractValue(csRetVal, {0});
@@ -469,8 +469,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 Value * const live = b.CreateOr(mMadeProgressInLastSegment, madeProgress);
                 b.CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
             }
-
-
 
             PHINode * startOfNextPeriodPhi = nullptr;
             PHINode * currentNumOfThreadsPhi = nullptr;
@@ -746,7 +744,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     b.restoreIP(resumePoint);
     FixedArray<Value *, 1> processArgs;
     processArgs[0] = b.CreatePointerCast(processState, voidPtrTy);
-    Value * const mainThreadRetVal = b.CreateCall(threadFuncType, threadFunc, processArgs);
+    Value * const mainThreadRetVal = b.CreateCall(threadFuncType, processThreadFunc, processArgs);
 
     Value * firstSegNo = nullptr;
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
@@ -977,21 +975,17 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
     const auto padding = SizeTyABIAlignment - (currentOffset % SizeTyABIAlignment);
     paramType[n * 2] = ArrayType::get(int8Ty, padding);
     fields[PIPELINE_PARAMS] = StructType::get(b.getContext(), paramType, true);
-
+     fields[INITIAL_SEG_NUMBER] = sizeTy;
     if (mUseDynamicMultithreading) {
-        fields[INITIAL_SEG_NUMBER] = emptyTy;
+        // fields[INITIAL_SEG_NUMBER] = emptyTy;
         fields[FIXED_NUMBER_OF_THREADS] = emptyTy;
         fields[ACCUMULATED_SEGMENT_TIME] = sizeTy;
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = sizeTy;
+        fields[CURRENT_THREAD_STATUS_FLAG] = sizeTy;
     } else {
-        fields[INITIAL_SEG_NUMBER] = sizeTy;
         fields[FIXED_NUMBER_OF_THREADS] = sizeTy;
         fields[ACCUMULATED_SEGMENT_TIME] = emptyTy;
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
-    }
-    if (mUseDynamicMultithreading) {
-        fields[CURRENT_THREAD_STATUS_FLAG] = sizeTy;
-    } else {
         fields[CURRENT_THREAD_STATUS_FLAG] = emptyTy;
     }
     IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
