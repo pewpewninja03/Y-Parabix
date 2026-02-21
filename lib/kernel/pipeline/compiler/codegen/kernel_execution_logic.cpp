@@ -24,8 +24,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     }
 
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized || mKernelRequiresIllustratorObject || mHasPipelineIllustratedStreamSet)) {
-        // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire.
-        // even if it can loop back but will only loop back at the final block, we can relax the need for this by adding +1.
         const auto prefix = makeKernelName(mKernelId);
         Value * const intSegNoPtr = b.getScalarFieldPtr(prefix + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX).first;
         mInternallySynchronizedSubsegmentNumber = b.CreateAlignedLoad(b.getSizeTy(), intSegNoPtr, SizeTyABIAlignment);
@@ -38,12 +36,14 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     mCurrentNumOfLinearStrides = mNumOfLinearStrides;
 
+    Value * waitToRelease = nullptr;
+
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
 
             mHasMoreInput = b.getFalse();
-            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+            waitToRelease = b.CreateIsNotNull(mIsFinalInvocation);
 
         } else {
 
@@ -56,29 +56,30 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
             updateProcessedAndProducedItemCounts(b, nullptr);
             mHasMoreInput = hasMoreInput(b);
-            Value * waitToRelease = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));
+            waitToRelease = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));
 
-            const auto prefix = makeKernelName(mKernelId);
-
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugPrint(b, "* " + prefix + "_finalInvoc = %" PRIu64, mIsFinalInvocation);
-            debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, waitToRelease);
-            #endif
-
-            BasicBlock * const releaseSyncLock =
-                b.CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
-            BasicBlock * const resumeKernelExecution =
-                b.CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
-            b.CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
-
-            b.SetInsertPoint(releaseSyncLock);
-            writeInternalProcessedAndProducedItemCounts(b, false);
-            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-            b.CreateBr(resumeKernelExecution);
-
-            b.SetInsertPoint(resumeKernelExecution);
         }
+        const auto prefix = makeKernelName(mKernelId);
 
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "* " + prefix + "_finalInvoc = %" PRIu64, mIsFinalInvocation);
+        debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, waitToRelease);
+        #endif
+
+        BasicBlock * const releaseSyncLock =
+            b.CreateBasicBlock(prefix + "_releasePreInvocationLock", mKernelCompletionCheck);
+        BasicBlock * const resumeKernelExecution =
+            b.CreateBasicBlock(prefix + "_resumeKernelExecution", mKernelCompletionCheck);
+        b.CreateUnlikelyCondBr(waitToRelease, resumeKernelExecution, releaseSyncLock);
+
+        b.SetInsertPoint(releaseSyncLock);
+        if (LLVM_LIKELY(!mKernelIsInternallySynchronized)) {
+            writeInternalProcessedAndProducedItemCounts(b, false);
+        }
+        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+        b.CreateBr(resumeKernelExecution);
+
+        b.SetInsertPoint(resumeKernelExecution);
     }
 
     BasicBlock * individualStrideLoop = nullptr;
@@ -266,19 +267,33 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     #endif
     if (mKernelCanTerminateEarly) {
         mTerminatedExplicitly = doSegmentRetVal;
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, "* " + prefix + "_kernelTerminationSignal = %" PRIu64, mTerminatedExplicitly);
+        #endif
         assert (doSegmentRetVal->getType()->isIntegerTy());
     } else {
         mTerminatedExplicitly = nullptr;
     }
-    if (LLVM_LIKELY(!mAllowDataParallelExecution || mKernelIsInternallySynchronized)) {
 
+    if (LLVM_LIKELY(!mAllowDataParallelExecution || mKernelIsInternallySynchronized)) {
         Value * rejectedTermSignal = nullptr;
         if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
             rejectedTermSignal = b.CreateAnd(b.CreateIsNull(mCurrentNumOfLinearStrides), b.CreateIsNull(mTerminatedExplicitly));
         }
-
         updateProcessedAndProducedItemCounts(b, rejectedTermSignal);
         readReturnedOutputVirtualBaseAddresses(b);
+        if (LLVM_UNLIKELY(mAllowDataParallelExecution && rejectedTermSignal)) {
+            // TODO: may need to rethink termination of internally synchronized kernels?
+            BasicBlock * releasePreLock = b.CreateBasicBlock("", mKernelCompletionCheck);
+            BasicBlock * afterRelease = b.CreateBasicBlock("", mKernelCompletionCheck);
+            b.CreateUnlikelyCondBr(rejectedTermSignal, releasePreLock, afterRelease);
+
+            b.SetInsertPoint(releasePreLock);
+            releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+            b.CreateBr(afterRelease);
+
+            b.SetInsertPoint(afterRelease);
+        }
     }
 
     if (LLVM_LIKELY(mRecordHistogramData)) {
@@ -501,8 +516,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
                 } else {
                     isExhausted = mExhaustedInputPort[inputPort]; assert (isExhausted);
                 }
-                isExhausted = b.CreateOr(isExhausted, b.CreateICmpEQ(mCurrentNumOfLinearStrides, b.getSize(0)));
-                isExhausted = b.CreateZExt(isExhausted, sizeTy);
+                isExhausted = b.CreateOr(b.CreateZExt(isExhausted, sizeTy), mIsFinalInvocation);
                 #ifdef PRINT_DEBUG_MESSAGES
                 debugPrint(b, makeBufferName(mKernelId, inputPort) + "_isExhausted = %" PRIu64, isExhausted);
                 #endif

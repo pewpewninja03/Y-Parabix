@@ -69,6 +69,8 @@ const static std::string KERNEL_THREAD_LOCAL_SUFFIX = ".KTL";
 const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
 
 const static std::string PHASE_NEXT_LOGICAL_SEGMENT_NUMBER = "@PLSN";
+const static std::string PHASE_ITERATION_SEGMENT_LIMIT_STEP = "@PILS";
+
 
 const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
 const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
@@ -76,6 +78,9 @@ const static std::string BUFFER_SEGMENT_LENGTH = "BSL";
 const static std::string DYNAMIC_MULTITHREADING_SEGMENT_PERIOD = "SEG.C";
 const static std::string DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD = "TSTA";
 const static std::string DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD = "TSTR";
+
+
+
 
 #define SYNC_LOCK_FULL 0U
 #define SYNC_LOCK_PRE_INVOCATION 1U
@@ -475,15 +480,17 @@ public:
 
 // synchronization functions
 
-    void obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock);
-    void incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock);
+    void obtainFirstSegmentNumber(KernelBuilder & b);
+    void obtainCurrentSegmentNumber(KernelBuilder & b);
+    void obtainNextSegmentNumber(KernelBuilder & b);
+
     void acquireSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     void acquireSynchronizationLockWithTimingInstrumentation(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
 
     void releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     Value * getSynchronizationLockPtrForKernel(KernelBuilder & b, const unsigned kernelId, const unsigned lockType) const;
     inline LLVM_READNONE bool isMultithreaded() const;
-    Value * obtainNextSegmentNumber(KernelBuilder & b);
+
 
 // family functions
 
@@ -667,7 +674,6 @@ protected:
     const bool                                  TraceUnconsumedItemCounts;
     const bool                                  TraceProducedItemCounts;
     const bool                                  TraceDynamicMultithreading;
-    const bool                                  UseJumpGuidedSynchronization;
 
     const std::vector<size_t>                   PartitionPhaseBoundaries;
     const KernelIdVector                        KernelPartitionId;
@@ -702,7 +708,6 @@ protected:
     Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
-    PHINode *                                   mPartitionExitSegNoPhi = nullptr;
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
@@ -721,10 +726,10 @@ protected:
     BasicBlock *                                mKernelExit = nullptr;
     BasicBlock *                                mRethrowException = nullptr;
 
+    Value *                                     mPhaseSegmentLimit = nullptr;
+
     Value *                                     mThreadLocalStreamSetBaseAddress = nullptr;
-    Value *                                     mSegmentSize = nullptr;
     Value *                                     mExpectedNumOfStridesMultiplier = nullptr;
-    Value *                                     mThreadLocalSizeMultiplier = nullptr;
 
     Vec<Value *, 16>                            mAddressableItemCountPtr;
     Vec<Value *, 16>                            mVirtualBaseAddressPtr;
@@ -810,14 +815,12 @@ protected:
     Rational                                    mFixedRateLCM;
     Value *                                     mTerminatedExplicitly = nullptr;
     Value *                                     mBranchToLoopExit = nullptr;
-    Value *                                     mNestedSegNum = nullptr;
 
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
     bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
-    bool                                        mUsesNestedSynchronizationVariable = false;
     bool                                        mIsOptimizationBranch = false;
     bool                                        mMayHaveInsufficientIO = false;
     bool                                        mExecuteStridesIndividually = false;
@@ -984,7 +987,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
 , TraceDynamicMultithreading(mUseDynamicMultithreading && DebugOptionIsSet(codegen::TraceDynamicMultithreading))
-, UseJumpGuidedSynchronization(!mIsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables)
 , PartitionPhaseBoundaries(std::move(P.PartitionPhaseBoundaries))
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))

@@ -278,7 +278,6 @@ enum BufferType : unsigned {
     , PreserveEntireStreamSet = 256
     // ------------------
     , HasIllustratedStreamset = 512
-    , StartsNestedSynchronizationRegion = 1024
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
     , CrossesPhaseBoundary = 8192
@@ -381,10 +380,6 @@ struct BufferNode {
 
     bool isManagedOutput() const {
         return (Type & BufferType::ManagedOutput) != 0;
-    }
-
-    bool startsNestedSynchronizationRegion() const {
-        return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;
     }
 
     bool requiresEmptyOverflow() const {

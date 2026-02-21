@@ -262,6 +262,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         const auto firstKernelInCurrentPhase = FirstKernelInPartition[firstPartition];
         const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
 
+        // cycle counter wrongly shows the first kernel of subsequent phases as culprits for jumping cost
+
         auto makeDoSegmentLogicFunction = [&](Function * csFunc) -> void {
 
             csFunc->setCallingConv(CallingConv::C);
@@ -382,6 +384,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
         Value * terminated = nullptr;
 
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugInit(b);
+        #endif
+
         for (mCurrentPipelinePhase = 1; mCurrentPipelinePhase < numOfPhases; ++mCurrentPipelinePhase) {
 
             Value * minimumThreads = nullptr;
@@ -389,6 +395,14 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             Value * synchronizationCostCheckPeriod = nullptr;
             Value * syncAddThreadThreadhold = nullptr;
             Value * syncRemoveThreadThreadhold = nullptr;
+
+            #ifdef PRINT_DEBUG_MESSAGES
+            if (mIsNestedPipeline) {
+                debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
+            } else {
+                debugPrint(b, "================================================= START %" PRIx64, getHandle());
+            }
+            #endif
 
             if (mUseDynamicMultithreading && generateProcessThread) {
                 minimumThreads = b.getScalarField(MINIMUM_NUM_OF_THREADS);
@@ -405,20 +419,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 syncRemoveThreadThreadhold = b.CreateFDiv(syncRemoveThreadThreadhold, f100);
             }
 
-            #ifdef PRINT_DEBUG_MESSAGES
-            debugInit(b);
-            if (mIsNestedPipeline) {
-                debugPrint(b, "------------------------------------------------- START %" PRIx64, getHandle());
-            } else {
-                debugPrint(b, "================================================= START %" PRIx64, getHandle());
-            }
-            #endif
-
             // generate the pipeline logic for this thread
             BasicBlock * const mPipelineLoop = b.CreateBasicBlock("PipelineLoop");
             BasicBlock * const mPipelineEnd = b.CreateBasicBlock("PipelineEnd");
 
             BasicBlock * const entryBlock = b.GetInsertBlock();
+            obtainFirstSegmentNumber(b);
             b.CreateBr(mPipelineLoop);
 
             b.SetInsertPoint(mPipelineLoop);
@@ -435,7 +441,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 activeThreadsPhi->addIncoming(minimumThreads, entryBlock);
             }
 
-            obtainCurrentSegmentNumber(b, entryBlock);
+            obtainCurrentSegmentNumber(b);
 
             FixedArray<Value *, 2> args;
             args[0] = threadStruct;
@@ -648,12 +654,11 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 }
             }
 
-            BasicBlock * const exitBlock = b.GetInsertBlock();
-            incrementCurrentSegNo(b, exitBlock);
-
             if (mIsNestedPipeline) {
                 b.CreateBr(mPipelineEnd);
             } else {
+                obtainNextSegmentNumber(b);
+                BasicBlock * const exitBlock = b.GetInsertBlock();
                 if (LLVM_UNLIKELY(CheckAssertions())) {
                     mMadeProgressInLastSegment->addIncoming(madeProgress, exitBlock);
                 }
@@ -1188,7 +1193,9 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
     }
     #endif
-
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugInit(b);
+    #endif
     readExternalConsumerItemCounts(b);
 
     const auto numOfPhases = PartitionPhaseBoundaries.size();
@@ -1215,7 +1222,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         b.SetInsertPoint(mPipelineLoop);
         mMadeProgressInLastSegment = b.CreatePHI(b.getInt1Ty(), 2, "madeProgressInLastSegment");
         mMadeProgressInLastSegment->addIncoming(b.getTrue(), entryBlock);
-        obtainCurrentSegmentNumber(b, entryBlock);
+        obtainCurrentSegmentNumber(b);
         branchToInitialPartition(b);
         for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
             setActiveKernel(b, i, true);
@@ -1229,6 +1236,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
             b.CreateBr(mPipelineEnd);
         } else {
             terminated = hasPipelineTerminated(b);
+            obtainNextSegmentNumber(b);
             Value * const done = b.CreateIsNotNull(terminated);
             if (LLVM_UNLIKELY(CheckAssertions())) {
                 Value * const progressedOrFinished = b.CreateOr(mPipelineProgress, done);
@@ -1237,9 +1245,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
             }
             BasicBlock * const exitBlock = b.GetInsertBlock();
             mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
-            if (!UseJumpGuidedSynchronization) {
-                incrementCurrentSegNo(b, exitBlock);
-            }
             b.CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
         }
         b.SetInsertPoint(mPipelineEnd);

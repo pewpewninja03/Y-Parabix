@@ -49,7 +49,7 @@ BOOST_NOINLINE void PipelineCompiler::debugPrint(KernelBuilder & b, Twine format
     argVals[1] = b.GetString(out.str());
     #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
     if (mThreadId) {
-        argVals.push_back(mThreadId);
+        argVals.push_back(mThreadId); assert (isFromCurrentFunction(b, mThreadId, false));
     }
     #endif
     argVals.append(std::initializer_list<llvm::Value *>{std::forward<Args>(args)...});

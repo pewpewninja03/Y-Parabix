@@ -42,8 +42,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     // kernels within the partition will execute. Otherwise we begin by bounding the kernel by the expected number
     // of strides w.r.t. its partition's root.
 
-    Constant * const sz_MAXINT = ConstantInt::getAllOnesValue(b.getSizeTy());
-
     Value * maxSegmentLength = mMaximumNumOfStrides;
 
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -382,8 +380,6 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
 
-    const BufferNode & bn = mBufferGraph[streamSet];
-
     // Only the partition root dictates how many strides this kernel will end up doing. All other kernels
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
@@ -597,24 +593,6 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
         graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
         std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
 
-        bool anyNonCountable = false;
-
-        for (auto ei = ei_begin; ei != ei_end; ++ei) {
-            const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength()) {
-                const auto streamSet = source(*ei, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_UNLIKELY(bn.isConstant())) {
-                    continue;
-                }
-                const Binding & binding = port.Binding;
-                if (!isCountable(binding)) {
-                    anyNonCountable = true;
-                    break;
-                }
-            }
-        }
-
         Constant * const MAX_INT = ConstantInt::getAllOnesValue(b.getSizeTy());
 
         BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
@@ -637,6 +615,8 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     continue;
                 }
 
+                assert (bn.isNonThreadLocal());
+
                 const Binding & binding = port.Binding;
                 const ProcessingRate & rate = binding.getRate();
 
@@ -647,10 +627,11 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                 Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
                 Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
 
-                if (rate.isPartialSum() || isFirstCheck) {
+                if ((rate.isPartialSum() && enoughInput) || isFirstCheck) {
 
                     BasicBlock * const nextTest = b.CreateBasicBlock("", lastTestExit);
                     enoughInputPhi->addIncoming(i1_FALSE, b.GetInsertBlock());
+                    assert (enoughInput);
                     b.CreateUnlikelyCondBr(enoughInput, nextTest, lastTestExit);
 
                     b.SetInsertPoint(nextTest);
@@ -658,39 +639,37 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     isFirstCheck = false;
                 }
 
-                if (anyNonCountable || bn.isNonThreadLocal()) {
 
-                    Value * const closed = isClosed(b, streamSet);
+                Value * const closed = isClosed(b, streamSet);
 
-                    if (LLVM_UNLIKELY(port.isZeroExtended())) {
-                        avail = b.CreateSelect(closed, MAX_INT, avail);
-                    } else if (port.Add) {
-                        ConstantInt * const ADD = b.getSize(port.Add);
-                        ConstantInt * const ZERO = b.getSize(0);
-                        Value * const added = b.CreateSelect(closed, ADD, ZERO);
-                        avail = b.CreateAdd(avail, added);
-                    }
+                if (LLVM_UNLIKELY(port.isZeroExtended())) {
+                    avail = b.CreateSelect(closed, MAX_INT, avail);
+                } else if (port.Add) {
+                    ConstantInt * const ADD = b.getSize(port.Add);
+                    ConstantInt * const ZERO = b.getSize(0);
+                    Value * const added = b.CreateSelect(closed, ADD, ZERO);
+                    avail = b.CreateAdd(avail, added);
+                }
 
-                    if (LLVM_UNLIKELY(CheckAssertions())) {
-                        const Binding & inputBinding = port.Binding;
-                        Value * valid = b.CreateOr(b.CreateICmpULE(processed, avail), isClosed(b, streamSet));
-                        b.CreateAssert(valid,
-                                        "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
-                                        mCurrentKernelName,
-                                        b.GetString(inputBinding.getName()),
-                                        processed, avail,
-                                        b.GetString("hasMoreInput"));
-                    }
+                if (LLVM_UNLIKELY(CheckAssertions())) {
+                    const Binding & inputBinding = port.Binding;
+                    Value * valid = b.CreateOr(b.CreateICmpULE(processed, avail), isClosed(b, streamSet));
+                    b.CreateAssert(valid,
+                                    "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
+                                    mCurrentKernelName,
+                                    b.GetString(inputBinding.getName()),
+                                    processed, avail,
+                                    b.GetString("hasMoreInput"));
+                }
 
-                    Value * const remaining = b.CreateSub(avail, processed, "remaining");
-                    Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
-                    Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
-                    Value * const hasMore = b.CreateOr(closed, b.CreateICmpUGE(remaining, required));
-                    if (enoughInput) {
-                        enoughInput = b.CreateAnd(enoughInput, hasMore);
-                    } else {
-                        enoughInput = hasMore;
-                    }
+                Value * const remaining = b.CreateSub(avail, processed, "remaining");
+                Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
+                Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
+                Value * const hasMore = b.CreateOr(closed, b.CreateICmpUGE(remaining, required));
+                if (enoughInput) {
+                    enoughInput = b.CreateAnd(enoughInput, hasMore);
+                } else {
+                    enoughInput = hasMore;
                 }
             }
         }

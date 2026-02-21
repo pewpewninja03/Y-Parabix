@@ -83,8 +83,6 @@ public:
 
         P.mapInternallyGeneratedStreamSets();
 
-        P.identifySynchronizationVariableLevels();
-
         // Finish the buffer graph
 
         P.addStreamSetsToBufferGraph(b);
@@ -251,10 +249,6 @@ private:
     // Internally generated streamsets
 
     void mapInternallyGeneratedStreamSets();
-
-    // Synchronization Level Analysis
-
-    void identifySynchronizationVariableLevels();
 
 public:
 

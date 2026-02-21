@@ -69,7 +69,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
 
-    const auto numOfPhases = PartitionPhaseBoundaries.size();
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
 
     for (size_t phase = 1; phase < numOfPhases; ++phase) {
 
@@ -81,6 +81,10 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
         mTarget->addInternalScalar(sizeTy, PHASE_NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
 
+        if ((phase + 1) < numOfPhases) {
+            mTarget->addThreadLocalScalar(sizeTy, PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
+        }
+
         for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
             const auto partitionId = KernelPartitionId[i];
             const bool isRoot = (partitionId != currentPartitionId);
@@ -91,13 +95,8 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
             #endif
             addProducedItemCountDeltaProperties(b, i);
             addUnconsumedItemCountProperties(b, i);
-            if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
-                assert (isRoot);
-                assert (UseJumpGuidedSynchronization);
-                mTarget->addInternalScalar(sizeTy,
-                    NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
-            }
         }
+
 
     }
 

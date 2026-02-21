@@ -79,7 +79,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(mIsPartitionRoot || mKernelCanTerminateEarly)) {
         mKernelInitiallyTerminated = b.CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-        if (LLVM_LIKELY(mIsPartitionRoot && !mUsesNestedSynchronizationVariable)) {
+        if (LLVM_LIKELY(mIsPartitionRoot)) {
             // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
             const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
             assert (jumpId > mCurrentPartitionId);
@@ -208,7 +208,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     }
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
-    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution && !mKernelIsInternallySynchronized)) {
         writeInternalProcessedAndProducedItemCounts(b, true);
     }
     if (HasTerminationSignal.test(mKernelId)) {
@@ -305,6 +305,9 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
     ConstantInt * const i1_TRUE = b.getTrue();
 
     if (LLVM_LIKELY(!mAllowDataParallelExecution)) {
+        #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
+        assert (!mKernelIsInternallySynchronized);
+        #endif
         mHasMoreInput = hasMoreInput(b);
     }
 
@@ -348,6 +351,7 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
 
     const auto prefix = makeKernelName(mKernelId);
     BasicBlock * const isFinalCheck = b.CreateBasicBlock(prefix + "_isFinalCheck", mKernelTerminated);
+    assert (mHasMoreInput);
     b.CreateUnlikelyCondBr(mHasMoreInput, mKernelLoopEntry, isFinalCheck);
 
     b.SetInsertPoint(isFinalCheck);
@@ -386,7 +390,7 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         assert (mProducedItemCount[port]);
         mProducedAtTerminationPhi[port]->addIncoming(mProducedItemCount[port], exitBlock);
     }
-    assert (terminationSignal->getType() == mTerminatedSignalPhi->getType());
+    assert (terminationSignal && terminationSignal->getType() == mTerminatedSignalPhi->getType());
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
     mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
     Value * const isFinal = b.CreateIsNotNull(terminationSignal);

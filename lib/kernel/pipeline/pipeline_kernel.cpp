@@ -887,9 +887,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (codegen::EnableDynamicMultithreading) {
         out << "+DM";
     }
-    if (codegen::EnableJumpGuidedSynchronizationVariables) {
-        out << "+JGS";
-    }
     if (codegen::UseProcessThreadForIO) {
         out << "+IOT";
     }
