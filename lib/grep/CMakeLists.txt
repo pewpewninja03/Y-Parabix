@@ -11,11 +11,11 @@ SRC
     grep_kernel.cpp
     grep_toolchain.cpp
     nested_grep_engine.cpp
-    regex_passes.cpp
 DEPS
     kernel.pipeline
     kernel.basis
     kernel.io
+    kernel.re
     kernel.scan
     kernel.streamutils
     kernel.util

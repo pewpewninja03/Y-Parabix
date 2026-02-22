@@ -26,6 +26,7 @@ SRC
     to_utf8.cpp
     expand_permutes.cpp
     variable_alt_promotion.cpp
+    regex_passes.cpp
 DEPS
     re.analysis
     re.printer

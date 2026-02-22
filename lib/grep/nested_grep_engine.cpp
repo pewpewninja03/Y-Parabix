@@ -1,5 +1,5 @@
 #include <grep/nested_grep_engine.h>
-#include <grep/regex_passes.h>
+#include <re/transforms/regex_passes.h>
 #include <re/unicode/casing.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>

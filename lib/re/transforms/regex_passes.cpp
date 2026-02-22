@@ -3,9 +3,9 @@
  *  SPDX-License-Identifier: OSL-3.0
  */
 
-#include <grep/regex_passes.h>
+#include <re/transforms/regex_passes.h>
 
-#include <grep/grep_engine.h>
+//#include <grep/grep_engine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
 #include <re/analysis/validation.h>
@@ -39,7 +39,8 @@ RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive) {
     }
     r = resolveEscapeNames(r);
     r = resolveGraphemeMode(r, false /* not in grapheme mode at top level*/);
-    r = UCD::linkAndResolve(r, grep::lineNumGrep);
+    //r = UCD::linkAndResolve(r, grep::lineNumGrep);
+    r = UCD::linkAndResolve(r);
     r = removeUnneededCaptures(r);
     r = UCD::inlineSimpleProperties(r);
     //r = resolveBoundaryProperties(r);

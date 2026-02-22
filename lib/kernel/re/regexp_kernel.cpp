@@ -3,21 +3,37 @@
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/streamset.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/bitwise/bixlogic.h>
+#include <kernel/streamutils/stream_shift.h>
+#include <kernel/unicode/charclasses.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_var.h>
 #include <pablo/pe_zeroes.h>
 #include <re/adt/adt.h>
 #include <re/analysis/re_analysis.h>
+#include <re/analysis/re_name_gather.h>
+#include <re/analysis/capture-ref.h>
 #include <re/printer/re_printer.h>
 #include <re/toolchain/toolchain.h>
+#include <re/transforms/regex_passes.h>
+#include <re/transforms/expand_permutes.h>
+#include <re/transforms/name_intro.h>
+#include <re/transforms/name_lookaheads.h>
+#include <re/transforms/reference_transform.h>
+#include <re/transforms/remove_nullable.h>
+#include <re/transforms/variable_alt_promotion.h>
 #include <re/cc/cc_compiler.h>         // for CC_Compiler
 #include <re/cc/cc_compiler_target.h>
 #include <re/compile/re_compiler.h>
 #include <re/transforms/name_intro.h>
+#include <unicode/data/PropertyObjects.h>
+#include <unicode/data/PropertyObjectTable.h>
+#include <unicode/utf/utf_compiler.h>
 
 using namespace re;
 using namespace pablo;
 using namespace kernel;
+using namespace llvm;
 
 RE_CompilerContext::RE_CompilerContext() : mCodeUnitAlphabet(nullptr), mCodeUnitStream(nullptr),
     mBarrierStream(nullptr), mIndexingAlphabet(nullptr), mIndexStream(nullptr),
@@ -180,3 +196,230 @@ void RE_Kernel::generatePabloMethod() {
     pb.createAssign(output, final_matches);
 }
 
+PabloAST * matchDistanceCheck(PabloBuilder & b, unsigned distance, std::vector<PabloAST *> basis1, std::vector<PabloAST *> basis2) {
+    PabloAST * differ = b.createZeroes();
+    for (unsigned i = 0; i < basis1.size(); i++) {
+        PabloAST * advanced = b.createAdvance(basis1[i], distance);
+        differ = b.createOr(differ, b.createXor(advanced, basis2[i]));
+    }
+    return differ;
+}
+
+void FixedDistanceMatchesKernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    auto basis = getInputStreamSet("Basis");
+    Var * mismatch = pb.createVar("mismatch", pb.createZeroes());
+    if (mHasCheckStream) {
+        auto ToCheck = getInputStreamSet("ToCheck")[0];
+        auto it = pb.createScope();
+        pb.createIf(ToCheck, it);
+        PabloAST * differ = matchDistanceCheck(it, mMatchDistance, basis, basis);
+        it.createAssign(mismatch, it.createAnd(ToCheck, differ));
+    } else {
+        pb.createAssign(mismatch, matchDistanceCheck(pb, mMatchDistance, basis, basis));
+    }
+    Var * const MatchVar = getOutputStreamVar("Matches");
+    pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), pb.createNot(mismatch, "matches"));
+}
+
+FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (LLVMTypeSystemInterface & ts, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
+: PabloKernel(ts, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
+// inputs
+{Binding{"Basis", Basis}},
+// output
+{Binding{"Matches", Matches}}), mMatchDistance(distance), mHasCheckStream(ToCheck != nullptr) {
+    if (mHasCheckStream) {
+        mInputStreamSets.push_back({"ToCheck", ToCheck});
+    }
+}
+
+void CodePointMatchKernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
+    if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
+        const UCD::UnicodeSet & nullSet = p->GetNullSet();
+        std::vector<UCD::UnicodeSet> & xfrm_ccs = p->GetBitTransformSets();
+        UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+        std::vector<Var *> xfrm_vars;
+        for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
+            xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
+        }
+        Var * nullVar = nullptr;
+        if (!nullSet.empty()) {
+            xfrm_ccs.push_back(nullSet);
+            nullVar = pb.createVar("null_set", pb.createZeroes());
+            xfrm_vars.push_back(nullVar);
+        }
+        unicodeCompiler.compile(xfrm_vars, xfrm_ccs);
+        std::vector<PabloAST *> basis = getInputStreamSet("Basis");
+        std::vector<PabloAST *> transformed(basis.size());
+        for (unsigned i = 0; i < basis.size(); i++) {
+            if (i < xfrm_vars.size()) {
+                transformed[i] = pb.createXor(xfrm_vars[i], basis[i]);
+            } else {
+                transformed[i] = basis[i];
+            }
+        }
+        PabloAST * mismatch;
+        bool involution = ((mProperty == UCD::bpb) || (mProperty == UCD::bmg));
+        if (involution) {
+            mismatch = matchDistanceCheck(pb, mMatchDistance, transformed, basis);
+        } else {
+            mismatch = matchDistanceCheck(pb, mMatchDistance, transformed, transformed);
+        }
+        if (!nullSet.empty()) {
+            mismatch = pb.createOr(mismatch, nullVar);
+        }
+        PabloAST * matches = pb.createInFile(pb.createNot(mismatch));
+        Var * const MatchVar = getOutputStreamVar("Matches");
+        pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), matches);
+    } else {
+        llvm::report_fatal_error("Expecting codepoint property");
+    }
+}
+
+CodePointMatchKernel::CodePointMatchKernel (LLVMTypeSystemInterface & ts, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
+: PabloKernel(ts, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
+// inputs
+{Binding{"Basis", Basis}},
+// output
+{Binding{"Matches", Matches}}),
+    mMatchDistance(distance),
+    mProperty(prop) {
+}
+
+
+
+void RE_PipelineBuilder::prepareExternals(RE * re) {
+    std::set<re::Name *> externals;
+    re::gatherNames(re, externals);
+    for (const auto & e : externals) {
+        compileExternal(e);
+    }
+}
+
+void RE_PipelineBuilder::compileExternal(Name * n) {
+    auto name = n->getFullName();
+    auto f = mCtxt.mExternals.find(name);
+    if (f != mCtxt.mExternals.end()) {
+        // already compiled.
+        return;
+    }
+    RE * defn = n->getDefinition();
+    if (defn == nullptr) {
+        llvm::report_fatal_error("RE_PipelineBuilder: Name is undefined.");
+    }
+    //  Need to compile this defn.   Make sure all referenced externals
+    //  are compiled first.
+    prepareExternals(defn);
+    //
+    // The defining expression can now be compiled.  In most cases,
+    // a single RE_Kernel can be used.   However, for lookahead
+    // assertions, special treatment is required.
+    unsigned amt = NamedLookAheadAmount(n, *mCtxt.mCodeUnitAlphabet);
+    if (amt == 0) {
+        // Not a lookahead; compile using a single kernel call.
+        StreamSet * extStrm = mPB.CreateStreamSet(1);
+        mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, defn, extStrm);
+        auto r = getLengthRange(defn, mCtxt.mCodeUnitAlphabet);
+        if (r.second == 0) {
+            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::ZeroWidth, 1, extStrm});
+        } else if (r.first == r.second) {
+            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::FixedLength, r.second, extStrm});
+        } else {
+            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::EndIndexed, r.second, extStrm});
+        }
+    } else {
+        RE * asserted = llvm::cast<Assertion>(defn)->getAsserted();
+        StreamSet * assertedStrm = mPB.CreateStreamSet(1);
+        mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, asserted, assertedStrm);
+        auto r = getLengthRange(asserted, mCtxt.mCodeUnitAlphabet);
+        if (r.first == r.second) {
+            // Fixed length lookaheads can be stored directly.
+            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::StartIndexed, r.second, assertedStrm});
+        } else {
+            // Apply the logic of matching a lookahead with a unique prefix.  
+            // Match positions for the lookahead (assertedStrm) are shifted back to the 
+            // prior prefix position.   This is implemented by making a mask stream
+            // consisting of full matches to the lookahead (assertedStrm) and matches
+            // to the unique prefix.  An indexed shift back of asserted matches
+            // moves the match to the position of its unique fixed length prefix.
+            if (!isa<Seq>(asserted) || !isa<Name>(cast<Seq>(asserted)->front())) {
+                llvm::report_fatal_error("Expecting named unique prefix lookahead");
+            }
+            Name * prefName = cast<Name>(cast<Seq>(asserted)->front());
+            auto f = mCtxt.mExternals.find(prefName->getFullName());
+            StreamSet * prefStrm = f->second.extStream;
+            StreamSet * maskStrm = mPB.CreateStreamSet(1);
+            OrCombine(mPB, prefStrm, assertedStrm, maskStrm);
+            StreamSet * assertedBack = mPB.CreateStreamSet(1);
+            mPB.CreateKernelCall<IndexedShiftBack>(maskStrm, assertedStrm, assertedBack);
+            StreamSet * extStrm = mPB.CreateStreamSet(1);
+            AndCombine(mPB, prefStrm, assertedBack, extStrm);
+            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::StartIndexed, amt, extStrm});
+        }
+    }
+}
+
+void RE_PipelineBuilder::createRE_Pipeline(RE * re, StreamSet * results) {
+    RE * xfrmdRE = processReferences(re);
+    xfrmdRE = prepareRE(xfrmdRE);
+    prepareExternals(xfrmdRE);
+    mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, xfrmdRE, results);
+}
+
+RE * RE_PipelineBuilder::prepareRE(RE * re) {
+    const cc::Alphabet * lengthAlphabet = mCtxt.mIndexingAlphabet ? mCtxt.mIndexingAlphabet : mCtxt.mCodeUnitAlphabet;
+    RE * xfrmedRE = expandPermutes(re);
+    xfrmedRE = resolveModesAndExternalSymbols(xfrmedRE, mCaseInsensitive);
+    //xfrmedRE = mPE.transformRE(xfrmedRE);
+    if (mMatchSpans) {
+        xfrmedRE = zeroBoundElimination(xfrmedRE);
+        xfrmedRE = variableAltPromotion(xfrmedRE, lengthAlphabet);
+    }
+    return xfrmedRE;
+}
+
+RE * RE_PipelineBuilder::processReferences(RE * re) {
+    re::ReferenceInfo mRefInfo = re::buildReferenceInfo(re);
+    llvm::errs() << "processReferences\n";
+    if (!mRefInfo.twixtREs.empty()) {
+        re::FixedReferenceTransformer FRT(mRefInfo);
+        RE * xfrmed = FRT.transformRE(re);
+        for (auto m : FRT.mNameMap) {
+            auto name = m.first;
+     llvm::errs() << "ref:" << name << "\n";
+           re::Reference * ref = cast<re::Reference>(m.second);
+            UCD::property_t p = ref->getReferencedProperty();
+            std::string instanceName = ref->getInstanceName();
+            auto captureLen = getLengthRange(ref->getCapture(), &cc::Unicode).first;
+            if (captureLen != 1) {
+                llvm::report_fatal_error("Capture length > 1 is a future extension");
+            }
+            auto mapping = mRefInfo.twixtREs.find(instanceName);
+            auto twixtLen = getLengthRange(mapping->second, &cc::Unicode).first;
+            auto dist = captureLen + twixtLen;
+            UCD::PropertyObject * propObj = UCD::getPropertyObject(p);
+            if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
+                std::string extName = UCD::getPropertyFullName(p) + "_basis";
+                std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
+                std::vector<re::CC *> ccs;
+                for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
+                StreamSet * propertyBasis = mPB.CreateStreamSet(ccs.size());
+                mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, propertyBasis);
+                StreamSet * distStrm = mPB.CreateStreamSet(1);
+                mPB.CreateKernelCall<FixedDistanceMatchesKernel>(dist, propertyBasis, distStrm);
+                mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::FixedLength, 1, distStrm});
+            } else if (isa<UCD::CodePointPropertyObject>(propObj)) {
+                // Identity or other codepoint properties
+                StreamSet * distStrm = mPB.CreateStreamSet(1);
+                mPB.CreateKernelCall<CodePointMatchKernel>(p, dist, mCtxt.mCodeUnitStream, distStrm);
+                mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::FixedLength, 1, distStrm});
+            } else {
+                llvm::report_fatal_error("Property reference must be an enumerated or codepoint property.");
+            }
+        }
+        return xfrmed;
+    }
+    return re;
+}

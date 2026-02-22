@@ -8,13 +8,12 @@
 #include <re/alphabet/alphabet.h>
 #include <kernel/core/streamset.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/program_builder.h>
+#include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/pipeline/program_builder.h>
 #include <pablo/pablo_kernel.h>
 #include <map>
 
 using Alphabets = std::vector<std::pair<const cc::Alphabet *, kernel::StreamSet *>>;
-
 
 enum ExternalStreamKind {ZeroWidth, FixedLength, StartIndexed, EndIndexed};
 
@@ -30,6 +29,7 @@ using ExternalNameMap = std::map<std::string, ExternalStream>;
 
 class RE_CompilerContext {
     friend class RE_Kernel;
+    friend class RE_PipelineBuilder;
 public:
     RE_CompilerContext();
 
@@ -69,3 +69,54 @@ private:
     RE_CompilerContext mContext;
     re::RE * mRE;
 };
+
+class RE_PipelineBuilder {
+public:
+    RE_PipelineBuilder(kernel::PipelineBuilder & P, RE_CompilerContext & ctxt) :
+        mPB(P), mCtxt(ctxt), mCaseInsensitive(false), mMatchSpans(false) {}
+    void setCaseInsensitive(bool caseless) {mCaseInsensitive = caseless;}
+    void setMatchSpans(bool wantspans) {mMatchSpans = wantspans;}
+
+    void createRE_Pipeline(re::RE * re, kernel::StreamSet * results);
+
+protected:
+    // Internal methods.
+    re::RE * prepareRE(re::RE * re);
+
+    re::RE * processReferences(re::RE * re);
+
+    void prepareExternals(re::RE * re);
+
+    void compileExternal(re::Name * name);
+
+private:
+    kernel::PipelineBuilder & mPB;
+    RE_CompilerContext mCtxt;
+    bool mCaseInsensitive;
+    bool mMatchSpans;
+
+};
+
+class FixedDistanceMatchesKernel : public pablo::PabloKernel {
+public:
+    FixedDistanceMatchesKernel(LLVMTypeSystemInterface & ts, unsigned distance, 
+                               kernel::StreamSet * Basis, kernel::StreamSet * Matches, kernel::StreamSet * ToCheck  = nullptr);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mMatchDistance;
+    bool mHasCheckStream;
+};
+
+class CodePointMatchKernel : public pablo::PabloKernel {
+public:
+    CodePointMatchKernel(LLVMTypeSystemInterface & ts, 
+                         UCD::property_t prop, unsigned distance, 
+                         kernel::StreamSet * Basis, kernel::StreamSet * Matches);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mMatchDistance;
+    UCD::property_t mProperty;
+};
+
