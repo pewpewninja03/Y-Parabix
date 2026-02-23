@@ -6,6 +6,7 @@
 #include <re/adt/re_re.h>
 #include <unicode/data/PropertyAliases.h>
 #include <llvm/ADT/Twine.h>
+#include <sstream>
 namespace UCD {
     class UnicodeSet;
 }
@@ -240,6 +241,7 @@ public:
     std::string getValueString() const { return mValue;}
     int getPropertyCode() const { return mPropertyCode;}
     RE * getResolvedRE() const { return mResolvedRE;}
+    std::string getFullName();
 
     static PropertyExpression * Create(PropertyExpression::Kind k,
                                        std::string id,
@@ -267,6 +269,18 @@ private:
     RE * mResolvedRE;
 };
 
+inline std::string PropertyExpression::getFullName() {
+    std::stringstream s;
+    s << mIdentifier;
+    if (mOperator == PropertyExpression::Operator::NEq) {
+        s << "!";
+    }
+    if (mValue != "") {
+        s << ":";
+    }
+    s << mValue;
+    return s.str();
+}
 
 inline PropertyExpression * makePropertyExpression(PropertyExpression::Kind k, std::string ident, PropertyExpression::Operator op = PropertyExpression::Operator::Eq, std::string v = "") {
     return PropertyExpression::Create(k, ident, op, v);
@@ -282,7 +296,7 @@ inline PropertyExpression * makeBoundaryExpression(std::string ident, std::strin
 
 inline void UnresolvedPropertyExpressionError(const PropertyExpression * pe) {
     std::string prop = pe->getPropertyIdentifier();
-    llvm::report_fatal_error(llvm::Twine("Error: Unresolved procperty expression in RE: ") + prop);
+    llvm::report_fatal_error(llvm::Twine("Error: Unresolved property expression in RE: ") + prop);
 }
 
 

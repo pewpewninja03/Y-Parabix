@@ -138,13 +138,11 @@ void NFC_U8_logic(PipelineBuilder & P, StreamSet * ExpansionMask, StreamSet * U8
     P.CreateKernelCall<ExcludedCompositeStage>(U8_Basis, EC_Basis);
     SHOW_BIXNUM(EC_Basis);
 
-    re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
-    CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
-    re::Name * CCC0_Name = re::makeName("CCC", "NR");
-    CCC0_Name->setDefinition(CCC0_Prop);
+    re::PropertyExpression * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+    CCC0_Prop = cast<re::PropertyExpression>(UCD::linkAndResolve(CCC0_Prop));
 
     StreamSet * const ccc_NR0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, EC_Basis, ccc_NR0, BitMovementMode::LookAhead);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Prop, EC_Basis, ccc_NR0, BitMovementMode::LookAhead);
     SHOW_STREAM(ccc_NR0);
 
     StreamSet * const ccc_NR = P.CreateStreamSet(1, 1);
