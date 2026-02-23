@@ -25,9 +25,10 @@ void PipelineAnalysis::makeConsumerGraph() {
         } else {
 
 restart:    const auto & cn = mBufferGraph[id];
-
             if (LLVM_UNLIKELY(cn.isInOutRedirect())) {
-                id = parent(id, InOutStreamSetReplacement);
+                while (in_degree(id, InOutStreamSetReplacement) > 0) {
+                    id = parent(id, InOutStreamSetReplacement);
+                }
                 goto restart;
             }
 

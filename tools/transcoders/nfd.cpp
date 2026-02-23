@@ -684,12 +684,10 @@ StreamSet * NFD_U21_Pipeline(PipelineBuilder & P, NFD_BixData & NFD_Data, Stream
 }
 
 StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, StreamSet * U8_Basis, StreamSet * u8index) {
-    re::RE * dtCanProp = re::makePropertyExpression("dt", "Can");
-    dtCanProp = UCD::linkAndResolve(dtCanProp);
-    re::Name * dtCanName = re::makeName("dt", "Can");
-    dtCanName->setDefinition(dtCanProp);
-    StreamSet * const DT_Can = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<UnicodePropertyKernelBuilder>(dtCanName, U8_Basis, DT_Can);
+    re::PropertyExpression * dtCanProp = re::makePropertyExpression("dt", "Can");
+    dtCanProp = cast<re::PropertyExpression>(UCD::linkAndResolve(dtCanProp));
+    StreamSet * DT_Can = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UnicodePropertyKernelBuilder>(dtCanProp, U8_Basis, DT_Can);
     SHOW_STREAM(DT_Can);
 
     StreamSet * const NFD_WorkItems = P.CreateStreamSet(1, 1);
@@ -730,12 +728,10 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
         SHOW_STREAM(NFD_WorkItems);
 
     } else {
-        re::RE * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
-        CCC0_Prop = UCD::linkAndResolve(CCC0_Prop);
-        re::Name * CCC0_Name = re::makeName("CCC", "NR");
-        CCC0_Name->setDefinition(CCC0_Prop);
+        re::PropertyExpression * CCC0_Prop = re::makePropertyExpression("CCC", "NR");
+        CCC0_Prop = cast<re::PropertyExpression>(UCD::linkAndResolve(CCC0_Prop));
         StreamSet * const CCC_0 = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Name, U8_Basis, CCC_0);//, BitMovementMode::LookAhead);
+        P.CreateKernelCall<UnicodePropertyKernelBuilder>(CCC0_Prop, U8_Basis, CCC_0);//, BitMovementMode::LookAhead);
         SHOW_STREAM(CCC_0);
 
         P.CreateKernelCall<NFD_Focus>(u8index, DT_Can, CCC_0, NFD_WorkItems);

@@ -1070,9 +1070,9 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
         writable = b.CreateSaturatingSub(avail, produced);
     } else {
 
-        assert (mConsumerGraph[streamSet] != 0);
+        assert (mConsumerGraph[src] != 0);
 
-        Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
+        Value * const consumed = readConsumedItemCount(b, src); assert (consumed);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_consumed%" PRIu64 " = %" PRIu64, b.getSize(src), consumed);
@@ -1088,24 +1088,6 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
                             b.GetString(output.getName()),
                             consumed, produced);
         }
-
-//        ConstantInt * overflow = nullptr;
-//        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
-//            overflow = b.getSize(port.EmptyOverflow);
-//            #ifdef PRINT_DEBUG_MESSAGES
-//            debugPrint(b, prefix + "_overflow%" PRIu64 " = %" PRIu64, b.getSize(src), overflow);
-//            #endif
-//        }
-
-
-//        Value * c = consumed;
-//        if (bn.hasNonFixedRateConsumer() || !port.isFixed()) {
-//            c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
-//            #ifdef PRINT_DEBUG_MESSAGES
-//            debugPrint(b, prefix + "_c%" PRIu64 " = %" PRIu64, b.getSize(src), c);
-//            #endif
-//        }
-//        writable = buffer->getLinearlyWritableItems(b, produced, c, overflow);
 
         Value * p = produced;
         if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {

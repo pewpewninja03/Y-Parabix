@@ -983,12 +983,10 @@ void kernel::GraphemeClusterLogic(PipelineBuilder & P, StreamSet * Source, Strea
 }
 
 void kernel::SimpleWordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
-    re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
-    wordProp = UCD::linkAndResolve(wordProp);
-    re::Name * word = re::makeName("word");
-    word->setDefinition(wordProp);
+    re::PropertyExpression * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
+    wordProp = cast<re::PropertyExpression>(UCD::linkAndResolve(wordProp));
     StreamSet * WordStream = P.CreateStreamSet(1);
-    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(wordProp, Source, WordStream);
     P.CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
 
