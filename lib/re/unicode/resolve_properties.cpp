@@ -127,6 +127,8 @@ RE * resolveProperties(RE * r, GrepLinesFunctionType grep) {
 struct PropertyLinker : public RE_Transformer {
     PropertyLinker() : RE_Transformer("PropertyLinker") {}
     RE * transformPropertyExpression (PropertyExpression * exp) override {
+        // If already linked, simply return.
+        if (exp->getPropertyCode() >= 0) return exp;
         std::string id = exp->getPropertyIdentifier();
         std::string canon = UCD::canonicalize_value_name(id);
         // In the case of a property expression without a value,

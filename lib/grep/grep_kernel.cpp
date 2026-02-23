@@ -38,6 +38,7 @@
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/re_multiplex.h>
 #include <kernel/basis/s2p_kernel.h>
+#include <kernel/re/regexp_kernel.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/stream_select.h>
@@ -727,98 +728,6 @@ PopcountKernel::PopcountKernel (LLVMTypeSystemInterface & ts, StreamSet * const 
 {},
 {Binding{"countResult", countResult}}) {
 
-}
-
-PabloAST * matchDistanceCheck(PabloBuilder & b, unsigned distance, std::vector<PabloAST *> basis1, std::vector<PabloAST *> basis2) {
-    PabloAST * differ = b.createZeroes();
-    for (unsigned i = 0; i < basis1.size(); i++) {
-        PabloAST * advanced = b.createAdvance(basis1[i], distance);
-        differ = b.createOr(differ, b.createXor(advanced, basis2[i]));
-    }
-    return differ;
-}
-
-void FixedDistanceMatchesKernel::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    auto basis = getInputStreamSet("Basis");
-    Var * mismatch = pb.createVar("mismatch", pb.createZeroes());
-    if (mHasCheckStream) {
-        auto ToCheck = getInputStreamSet("ToCheck")[0];
-        auto it = pb.createScope();
-        pb.createIf(ToCheck, it);
-        PabloAST * differ = matchDistanceCheck(it, mMatchDistance, basis, basis);
-        it.createAssign(mismatch, it.createAnd(ToCheck, differ));
-    } else {
-        pb.createAssign(mismatch, matchDistanceCheck(pb, mMatchDistance, basis, basis));
-    }
-    Var * const MatchVar = getOutputStreamVar("Matches");
-    pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), pb.createNot(mismatch, "matches"));
-}
-
-FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (LLVMTypeSystemInterface & ts, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
-: PabloKernel(ts, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
-// inputs
-{Binding{"Basis", Basis}},
-// output
-{Binding{"Matches", Matches}}), mMatchDistance(distance), mHasCheckStream(ToCheck != nullptr) {
-    if (mHasCheckStream) {
-        mInputStreamSets.push_back({"ToCheck", ToCheck});
-    }
-}
-
-void CodePointMatchKernel::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
-    if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
-        const UCD::UnicodeSet & nullSet = p->GetNullSet();
-        std::vector<UCD::UnicodeSet> & xfrm_ccs = p->GetBitTransformSets();
-        UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-        std::vector<Var *> xfrm_vars;
-        for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
-            xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
-        }
-        Var * nullVar = nullptr;
-        if (!nullSet.empty()) {
-            xfrm_ccs.push_back(nullSet);
-            nullVar = pb.createVar("null_set", pb.createZeroes());
-            xfrm_vars.push_back(nullVar);
-        }
-        unicodeCompiler.compile(xfrm_vars, xfrm_ccs);
-        std::vector<PabloAST *> basis = getInputStreamSet("Basis");
-        std::vector<PabloAST *> transformed(basis.size());
-        for (unsigned i = 0; i < basis.size(); i++) {
-            if (i < xfrm_vars.size()) {
-                transformed[i] = pb.createXor(xfrm_vars[i], basis[i]);
-            } else {
-                transformed[i] = basis[i];
-            }
-        }
-        PabloAST * mismatch;
-        bool involution = ((mProperty == UCD::bpb) || (mProperty == UCD::bmg));
-        if (involution) {
-            mismatch = matchDistanceCheck(pb, mMatchDistance, transformed, basis);
-        } else {
-            mismatch = matchDistanceCheck(pb, mMatchDistance, transformed, transformed);
-        }
-        if (!nullSet.empty()) {
-            mismatch = pb.createOr(mismatch, nullVar);
-        }
-        PabloAST * matches = pb.createInFile(pb.createNot(mismatch));
-        Var * const MatchVar = getOutputStreamVar("Matches");
-        pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), matches);
-    } else {
-        llvm::report_fatal_error("Expecting codepoint property");
-    }
-}
-
-CodePointMatchKernel::CodePointMatchKernel (LLVMTypeSystemInterface & ts, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
-: PabloKernel(ts, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
-// inputs
-{Binding{"Basis", Basis}},
-// output
-{Binding{"Matches", Matches}}),
-    mMatchDistance(distance),
-    mProperty(prop) {
 }
 
 void AbortOnNull::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {

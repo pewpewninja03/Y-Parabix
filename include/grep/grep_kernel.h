@@ -525,26 +525,6 @@ protected:
     void generatePabloMethod() override;
 };
 
-class FixedDistanceMatchesKernel : public pablo::PabloKernel {
-public:
-    FixedDistanceMatchesKernel(LLVMTypeSystemInterface & ts, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck  = nullptr);
-protected:
-    void generatePabloMethod() override;
-private:
-    unsigned mMatchDistance;
-    bool mHasCheckStream;
-};
-
-class CodePointMatchKernel : public pablo::PabloKernel {
-public:
-    CodePointMatchKernel(LLVMTypeSystemInterface & ts, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
-protected:
-    void generatePabloMethod() override;
-private:
-    unsigned mMatchDistance;
-    UCD::property_t mProperty;
-};
-
 class AbortOnNull final : public MultiBlockKernel {
 public:
     AbortOnNull(LLVMTypeSystemInterface & ts, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);

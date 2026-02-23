@@ -70,33 +70,6 @@ private:
     re::RE * mRE;
 };
 
-class RE_PipelineBuilder {
-public:
-    RE_PipelineBuilder(kernel::PipelineBuilder & P, RE_CompilerContext & ctxt) :
-        mPB(P), mCtxt(ctxt), mCaseInsensitive(false), mMatchSpans(false) {}
-    void setCaseInsensitive(bool caseless) {mCaseInsensitive = caseless;}
-    void setMatchSpans(bool wantspans) {mMatchSpans = wantspans;}
-
-    void createRE_Pipeline(re::RE * re, kernel::StreamSet * results);
-
-protected:
-    // Internal methods.
-    re::RE * prepareRE(re::RE * re);
-
-    re::RE * processReferences(re::RE * re);
-
-    void prepareExternals(re::RE * re);
-
-    void compileExternal(re::Name * name);
-
-private:
-    kernel::PipelineBuilder & mPB;
-    RE_CompilerContext mCtxt;
-    bool mCaseInsensitive;
-    bool mMatchSpans;
-
-};
-
 class FixedDistanceMatchesKernel : public pablo::PabloKernel {
 public:
     FixedDistanceMatchesKernel(LLVMTypeSystemInterface & ts, unsigned distance, 
@@ -118,5 +91,33 @@ protected:
 private:
     unsigned mMatchDistance;
     UCD::property_t mProperty;
+};
+
+class RE_PipelineBuilder {
+public:
+    RE_PipelineBuilder(kernel::PipelineBuilder & P, RE_CompilerContext & ctxt) :
+        mPB(P), mCtxt(ctxt), mCaseInsensitive(false), mMatchSpans(false) {}
+    void setCaseInsensitive(bool caseless) {mCaseInsensitive = caseless;}
+    void setMatchSpans(bool wantspans) {mMatchSpans = wantspans;}
+
+    void createRE_Pipeline(re::RE * re, kernel::StreamSet * results);
+
+protected:
+    // Internal methods.
+    re::RE * prepareRE(re::RE * re);
+
+    re::RE * processReferences(re::RE * re);
+
+    void prepareExternals(re::RE * re);
+
+    void compileExternal(re::Name * name);
+
+    void compileProperty(re::PropertyExpression * pe);
+
+private:
+    kernel::PipelineBuilder & mPB;
+    RE_CompilerContext mCtxt;
+    bool mCaseInsensitive;
+    bool mMatchSpans;
 };
 
