@@ -172,6 +172,7 @@ GrepEngine::~GrepEngine() { }
 QuietModeEngine::QuietModeEngine(BaseDriver &driver) : GrepEngine(driver) {
     mEngineKind = EngineKind::QuietMode;
     mMaxCount = 1;
+    mColoring = false;
 }
 
 MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, bool useNullSeparators) :
@@ -180,17 +181,22 @@ MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, b
     mFileSuffix = useNullSeparators ? std::string("\0", 1) : "\n";
     mMaxCount = 1;
     mShowFileNames = true;
+    mColoring = false;
 }
 
 CountOnlyEngine::CountOnlyEngine(BaseDriver &driver, bool countall) : GrepEngine(driver) {
     mEngineKind = countall ? EngineKind::CountAll : EngineKind::CountOnly;
     mFileSuffix = ":";
+    mColoring = false;
 }
 
 EmitMatchesEngine::EmitMatchesEngine(BaseDriver &driver)
 : GrepEngine(driver) {
     mEngineKind = EngineKind::EmitMatches;
     mFileSuffix = mInitialTab ? "\t:" : ":";
+    if (mInvertMatches) {
+        mColoring = false;
+    }
 }
 
 bool GrepEngine::hasComponent(Component compon_set, Component c) {
@@ -269,9 +275,6 @@ bool GrepEngine::matchesToEOLrequired () {
 }
 
 void GrepEngine::initRE(re::RE * re) {
-    if ((mEngineKind != EngineKind::EmitMatches) || mInvertMatches) {
-        mColoring = false;
-    }
     mRE = expandPermutes(re);
     mRE = resolveModesAndExternalSymbols(mRE, mCaseInsensitive);
     if (isEmptySet(mRE)) {
@@ -365,7 +368,6 @@ void GrepEngine::initRE(re::RE * re) {
         }
     }
     auto indexCode = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
-    /*
     if (hasGraphemeClusterBoundary(mRE)) {
         auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
         mExternalTable.declareExternal(u8, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
@@ -391,37 +393,13 @@ void GrepEngine::initRE(re::RE * re) {
         auto WB = new Level2WordBoundaryExternal(this, &cc::Unicode);
         mExternalTable.declareExternal(Unicode, "\\b{w}", WB);
     }
-    */
     for (auto m : PE.mNameMap) {
         if (re::PropertyExpression * pe = dyn_cast<re::PropertyExpression>(m.second)) {
             if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
                 mExternalTable.declareExternal(indexCode, m.first, new PropertyExternal(re::makeName(m.first, m.second)));
             } else { //PropertyExpression::Kind::Boundary
                 UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
-                if (prop == UCD::g) {
-                    auto GCB_basis = new PropertyBasisExternal(UCD::GCB);
-                    mExternalTable.declareExternal(u8, "UCD:" + getPropertyFullName(UCD::GCB) + "_basis", GCB_basis);
-                    re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
-                    re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
-                    mExternalTable.declareExternal(u8, epict->getFullName(), new PropertyExternal(epict));
-                    auto u8_GCB = new GraphemeClusterBreak(this, &cc::UTF8);
-                    mExternalTable.declareExternal(u8, "\\b{g}", u8_GCB);
-                    if (indexCode == Unicode) {
-                        mExternalTable.declareExternal(Unicode, "\\b{g}", new FilterByMaskExternal(u8, {"u8index","\\b{g}"}, u8_GCB));
-                    }
-                } else if (prop == UCD::w) {
-                    auto WB_basis = new PropertyBasisExternal(UCD::WB);
-                    std::string WB_basis_name = "UCD:" + getPropertyFullName(UCD::WB) + "_basis";
-                    mExternalTable.declareExternal(u8, WB_basis_name, WB_basis);
-                    mExternalTable.declareExternal(Unicode, WB_basis_name, new FilterByMaskExternal(u8, {"u8index", WB_basis_name}));
-                    re::RE * epict_pe = UCD::linkAndResolve(re::makePropertyExpression("Extended_Pictographic"));
-                    re::Name * epict = cast<re::Name>(UCD::externalizeProperties(epict_pe));
-                    auto u8_epict = new PropertyExternal(epict);
-                    mExternalTable.declareExternal(u8, epict->getFullName(), u8_epict);
-                    mExternalTable.declareExternal(Unicode, epict->getFullName(), new FilterByMaskExternal(u8, {"u8index", epict->getFullName()}, u8_epict));
-                    auto WB = new Level2WordBoundaryExternal(this, &cc::Unicode);
-                    mExternalTable.declareExternal(Unicode, "\\b{w}", WB);
-                } else {  // Boundary expressions, except GCB.
+                if ((prop != UCD::g) && (prop != UCD::w)) {  // Boundary expressions, except GCB.
                     auto prop_basis = new PropertyBasisExternal(prop);
                     mExternalTable.declareExternal(indexCode, getPropertyFullName(prop) + "_basis", prop_basis);
                     auto boundary = new PropertyBoundaryExternal(prop);
@@ -436,7 +414,7 @@ void GrepEngine::initRE(re::RE * re) {
         bool useInternalNaming = mLengthAlphabet == &cc::Unicode;
         mRE = toUTF8(mRE, useInternalNaming);
     }
-    re::LookAheadNamer LA(*mLengthAlphabet);
+    re::LookAheadNamer LA;
     mRE = LA.transformRE(mRE);
     for (auto m : LA.mNameMap) {
         mExternalTable.declareExternal(indexCode, m.first, new RE_External(this, m.second, mLengthAlphabet));
@@ -448,25 +426,6 @@ void GrepEngine::initRE(re::RE * re) {
     }
     if (hasSimpleWordBoundary(mRE)) {
         mExternalTable.declareExternal(indexCode, "\\b", new SimpleWordBoundaryExternal());
-    }
-    if ((mEngineKind == EngineKind::EmitMatches) && mColoring && !mInvertMatches) {
-        setComponent(mExternalComponents, Component::MatchSpans);
-    }
-    if (matchesToEOLrequired()) {
-        // Move matches to EOL.   This may be achieved internally by modifying
-        // the regular expression or externally.   The internal approach is more
-        // generally more efficient, but cannot be used if colorization is needed
-        // or in UnicodeLines mode.
-        if ((mGrepRecordBreak == GrepRecordBreakKind::Unicode) || (mEngineKind == EngineKind::EmitMatches) || mInvertMatches || UnicodeIndexing) {
-            setComponent(mExternalComponents, Component::MoveMatchesToEOL);
-        } else {
-            setComponent(mInternalComponents, Component::MoveMatchesToEOL);
-        }
-    }
-    if (hasComponent(mInternalComponents, Component::MoveMatchesToEOL)) {
-        if (!hasEndAnchor(mRE)) {
-            mRE = re::makeSeq({mRE, re::makeRep(re::makeAny(mLengthAlphabet), 0, re::Rep::UNBOUNDED_REP), re::makeEnd()});
-        }
     }
     if (mColoring) {
         auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
@@ -535,7 +494,7 @@ StreamSet * GrepEngine::getBasis(kernel::PipelineBuilder & P, StreamSet * ByteSt
         P.captureByteData("Source", ByteStream);
     }
     auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
-    if (hasComponent(mExternalComponents, Component::S2P)) {
+    if ((mLengthAlphabet == &cc::Unicode) || !byteTestsWithinLimit(mRE, ByteCClimit)) {
         StreamSet * BasisBits = P.CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
         Source = BasisBits;
@@ -722,7 +681,7 @@ StreamSet * GrepEngine::initialMatches(kernel::PipelineBuilder & P, StreamSet * 
 
 StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * initialMatches) {
     StreamSet * MatchedLineEnds = nullptr;
-    if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
+    if (matchesToEOLrequired()) {
         StreamSet * const MovedMatches = P.CreateStreamSet();
         P.CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
@@ -977,9 +936,8 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
     StreamSet * MatchedLineEnds = matchedLines(E, Matches);
 
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
-    bool needsColoring = mColoring && !mInvertMatches;
     StreamSet * MatchesByLine = nullptr;
-    if (needsColoring | hasContext) {
+    if (mColoring | hasContext) {
         MatchesByLine = E.CreateStreamSet(1, 1);
         FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
@@ -995,7 +953,7 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
         MatchesByLine = ContextByLine;
     }
 
-    if (needsColoring) {
+    if (mColoring) {
         StreamSet * SourceCoords = E.CreateStreamSet(1, sizeof(size_t) * 8);
         Scalar * const callbackObject = E.getInputScalar("callbackObject");
         Kernel * const batchK = E.CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
