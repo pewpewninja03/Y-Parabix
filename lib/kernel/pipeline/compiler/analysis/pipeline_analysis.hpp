@@ -300,7 +300,7 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
-
+    std::vector<unsigned>           TerminalPhaseSet;
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;

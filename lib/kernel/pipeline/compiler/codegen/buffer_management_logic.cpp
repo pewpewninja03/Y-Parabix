@@ -498,7 +498,15 @@ Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t
     } else if (LLVM_UNLIKELY(bn.ProducedPhaseId < mCurrentPipelinePhase)) {
         const BufferPort & br = mBufferGraph[f];
         const auto prefix = makeBufferName(producer, br.Port);
+        #ifdef PHASES_RUN_TO_COMPLETION
         produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
+        #else
+        if (LLVM_UNLIKELY(br.isDeferred())) {
+            produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+        } else {
+            produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
+        }
+        #endif
     } else {
         assert (bn.ProducedPhaseId == mCurrentPipelinePhase);
         produced = mLocallyAvailableItems[streamSet]; assert (produced);

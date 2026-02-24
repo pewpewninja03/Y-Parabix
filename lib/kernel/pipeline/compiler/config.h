@@ -60,6 +60,8 @@
 
 #define ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
 
+// #define PHASES_RUN_TO_COMPLETION
+
 // #define PIN_THREADS_TO_INDIVIDUAL_CORES
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h

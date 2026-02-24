@@ -24,6 +24,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
+    mKernelMustTerminateExplicitly = mKernel->hasAttribute(AttrId::MustExplicitlyTerminate);
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mRecordHistogramData = recordsAnyHistogramData();
     mHasPipelineIllustratedStreamSet = kernelHasAnyPipelineIllustratedStreamSet(mKernelId);
@@ -289,7 +290,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         assert (isFromCurrentFunction(b, mFinalPartitionSegmentAtExitPhi, false));
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
     }
-
     if (LLVM_UNLIKELY(CheckAssertions())) {
         verifyPostInvocationTerminationSignal(b);
     }
@@ -356,14 +356,8 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
 
     b.SetInsertPoint(isFinalCheck);
     Value * terminationSignal = nullptr;
-    if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-        if (mIsPartitionRoot) {
-            terminationSignal = getTerminationSignal(b, TerminationSignal::None);
-        } else {
-            const auto root = getTerminationSignalIndex(mKernelId);
-            assert (KernelPartitionId[root] == mCurrentPartitionId);
-            terminationSignal = mKernelTerminationSignal[root];
-        }
+    if (LLVM_UNLIKELY(mKernelMustTerminateExplicitly)) {
+        terminationSignal = mTerminatedExplicitly;
     } else {
         terminationSignal = mIsFinalInvocationPhi; assert (terminationSignal);
         if (!mIsPartitionRoot) {

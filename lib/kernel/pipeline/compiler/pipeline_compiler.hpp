@@ -688,6 +688,7 @@ protected:
     const ConsumerGraph                         mConsumerGraph;
     const PartialSumStepFactorGraph             mPartialSumStepFactorGraph;
     const TerminationChecks                     mTerminationCheck;
+    const std::vector<unsigned>                 TerminalPhaseSet;
     const TerminationPropagationGraph           mTerminationPropagationGraph;
     const InternallyGeneratedStreamSetGraph     mInternallyGeneratedStreamSetGraph;
     const BitVector                             HasTerminationSignal;
@@ -708,7 +709,6 @@ protected:
     Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
-    PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
@@ -725,8 +725,6 @@ protected:
     BasicBlock *                                mKernelLoopExitPhiCatch = nullptr;
     BasicBlock *                                mKernelExit = nullptr;
     BasicBlock *                                mRethrowException = nullptr;
-
-    Value *                                     mPhaseSegmentLimit = nullptr;
 
     Value *                                     mThreadLocalStreamSetBaseAddress = nullptr;
     Value *                                     mExpectedNumOfStridesMultiplier = nullptr;
@@ -818,6 +816,7 @@ protected:
 
     bool                                        mKernelIsInternallySynchronized = false;
     bool                                        mKernelCanTerminateEarly = false;
+    bool                                        mKernelMustTerminateExplicitly = false;
     bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
@@ -1001,6 +1000,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mPartialSumStepFactorGraph(std::move(P.mPartialSumStepFactorGraph))
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
+, TerminalPhaseSet(std::move(P.TerminalPhaseSet))
 , mInternallyGeneratedStreamSetGraph(std::move(P.mInternallyGeneratedStreamSetGraph))
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))

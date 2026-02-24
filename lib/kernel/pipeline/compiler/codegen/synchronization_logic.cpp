@@ -37,21 +37,8 @@ namespace kernel {
  * @brief obtainFirstSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainFirstSegmentNumber(KernelBuilder & b) {
-    const auto numOfPhases = PartitionPhaseBoundaries.size();
-    assert (mCurrentPipelinePhase > 0);
-    assert (mCurrentPipelinePhase < numOfPhases);
-//    Value * const segNoPtr = b.getScalarFieldPtr(PHASE_NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(mCurrentPipelinePhase)).first;
-//    // NOTE: this must be atomic or the pipeline will deadlock when some thread
-//    // fetches a number before the prior one to fetch the same number updates it.
-//    mSegNo = b.CreateAtomicFetchAndAdd(b.getSize(1), segNoPtr);
-    if ((mCurrentPipelinePhase + 1) == numOfPhases || mIsNestedPipeline) {
-        mPhaseSegmentLimit = nullptr;
-    } else {
-        Value * stepSize = b.getScalarField(PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(mCurrentPipelinePhase));
-        mPhaseSegmentLimit = b.CreateAdd(mSegNo, stepSize);
-    }
-}
 
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief obtainCurrentSegmentNumber
@@ -66,8 +53,6 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b) {
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
         // fetches a number before the prior one to fetch the same number updates it.
         mSegNo = b.CreateAtomicFetchAndAdd(b.getSize(1), segNoPtr);
-//    } else {
-//        assert (mSegNo);
     }
 }
 

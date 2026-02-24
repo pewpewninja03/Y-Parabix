@@ -277,8 +277,8 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     if (LLVM_LIKELY(!mAllowDataParallelExecution || mKernelIsInternallySynchronized)) {
         Value * rejectedTermSignal = nullptr;
-        if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-            rejectedTermSignal = b.CreateAnd(b.CreateIsNull(mCurrentNumOfLinearStrides), b.CreateIsNull(mTerminatedExplicitly));
+        if (LLVM_UNLIKELY(mKernelMustTerminateExplicitly)) {
+            rejectedTermSignal = b.CreateAnd(b.CreateIsNotNull(mIsFinalInvocation), b.CreateIsNull(mTerminatedExplicitly));
         }
         updateProcessedAndProducedItemCounts(b, rejectedTermSignal);
         readReturnedOutputVirtualBaseAddresses(b);

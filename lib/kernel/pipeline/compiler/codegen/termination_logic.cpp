@@ -41,9 +41,15 @@ Value * PipelineCompiler::hasKernelTerminated(KernelBuilder & b, const size_t ke
     Value * signal = mKernelIsClosed[kernel];
     if (signal == nullptr) {
         const auto idx = getTerminationSignalIndex(kernel);
-        signal = mKernelTerminationSignal[idx];
-        assert (isFromCurrentFunction(b, signal, false));
+        assert (mBufferGraph[kernel].ProducedPhaseId == mBufferGraph[idx].ProducedPhaseId);
+        assert (mBufferGraph[idx].ProducedPhaseId <= mCurrentPipelinePhase);
+        if (LLVM_UNLIKELY(mBufferGraph[idx].ProducedPhaseId != mCurrentPipelinePhase)) {
+            signal = readTerminationSignal(b, idx);
+        } else {
+            signal = mKernelTerminationSignal[idx];
+        }
     }
+    assert (isFromCurrentFunction(b, signal, false));
     if (normally) {
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
         return b.CreateICmpEQ(signal, completed);
@@ -71,6 +77,7 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
     const auto firstPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1];
     const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
 
+
     for (auto partitionId = firstPartition; partitionId < oneAfterLastPartition; ++partitionId) {
         if (const auto type = mTerminationCheck[partitionId]) {
             const auto root = FirstKernelInPartition[partitionId];
@@ -94,14 +101,13 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
             }
         }
     }
+    assert (soft || hard);
     Value * signal = aborted;
     if (soft) {
         signal = b.CreateSelect(soft, aborted, unterminated);
-        if (hard) {
-            signal = b.CreateSelect(hard, fatal, signal);
-        }
-    } else {
-        assert (hard == nullptr);
+    }
+    if (hard) {
+        signal = b.CreateSelect(hard, fatal, signal);
     }
     return signal;
 
@@ -140,9 +146,11 @@ Value * PipelineCompiler::isClosed(KernelBuilder & b, const StreamSetPort inputP
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally) {
     const BufferNode & bn = mBufferGraph[streamSet];
+    #ifdef PHASES_RUN_TO_COMPLETION
     if (LLVM_UNLIKELY(bn.ProducedPhaseId < mCurrentPipelinePhase)) {
         return b.getTrue();
     }
+    #endif
     if (LLVM_UNLIKELY(bn.isConstant())) {
         return b.getFalse();
     } else {
@@ -250,6 +258,7 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
  * @brief readTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigned kernelId) const {
+    #ifdef PHASES_RUN_TO_COMPLETION
     const auto initialPartId = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1U];
     const auto firstKernelInPhase = FirstKernelInPartition[initialPartId];
     if (kernelId < firstKernelInPhase) {
@@ -257,6 +266,7 @@ Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigne
         // phase execution.
         return getTerminationSignal(b, TerminationSignal::Completed);
     }
+    #endif
     assert (HasTerminationSignal.test(kernelId));
     const auto name = TERMINATION_PREFIX + std::to_string(kernelId);
     auto ref = b.getScalarFieldPtr(name);

@@ -81,7 +81,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
         mTarget->addInternalScalar(sizeTy, PHASE_NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
 
-        if ((phase + 1) < numOfPhases) {
+        if (numOfPhases != 2) {
             mTarget->addThreadLocalScalar(sizeTy, PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
         }
 
@@ -479,14 +479,32 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
     }
     getABIAlignments(b);
     assert (mTarget->hasThreadLocal());
-    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-        const Kernel * const kernel = getKernel(i);
-        if (kernel->hasThreadLocal()) {
-            setActiveKernel(b, i, true);
-            assert (mKernel == kernel);
-            callKernelInitializeThreadLocalFunction(b);
+
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
+
+    for (size_t phase = 1; phase < numOfPhases; ++phase) {
+
+        const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[phase];
+        const auto firstKernelInCurrentPhase = std::max(FirstKernelInPartition[firstPartition], FirstKernel);
+        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
+
+        if (numOfPhases != 2) {
+            // TODO: is there a way to predict better initial phase segment limits?
+            b.setScalarField(PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), b.getSize(100));
+        }
+
+        for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
+            const Kernel * const kernel = getKernel(i);
+            if (kernel->hasThreadLocal()) {
+                setActiveKernel(b, i, true);
+                assert (mKernel == kernel);
+                callKernelInitializeThreadLocalFunction(b);
+            }
         }
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
