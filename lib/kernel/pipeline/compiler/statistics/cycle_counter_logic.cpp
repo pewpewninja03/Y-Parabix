@@ -9,7 +9,7 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelCycleCountProperties
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsigned kernelId, const bool isRoot, const unsigned groupId) {
+void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsigned kernelId, const bool jumpTarget, const bool isRoot, const unsigned groupId) {
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         // TODO: make these thread local to prevent false sharing and enable
@@ -19,14 +19,14 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
 
         Type * const int64Ty = b.getInt64Ty();
         Type * const emptyTy = StructType::get(C);
-        Type * const jumpPropertyIntTy = isRoot ? int64Ty : emptyTy;
+        Type * const jumpPropertyIntTy = jumpTarget ? int64Ty : emptyTy;
         Type * const otherPropertyTy = (kernelId == PipelineOutput) ? emptyTy : int64Ty;
         Type * const numInvokePropertyTy = isRoot ? otherPropertyTy : emptyTy;
         Type * copyPropertyTy = emptyTy;
         for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
             const auto streamSet = target(e, mBufferGraph);
             const auto & bn = mBufferGraph[streamSet];
-            if (bn.Buffer->isLinear()) {
+            if (isa<ManagedDynamicBuffer>(bn.Buffer)) {
                 copyPropertyTy = otherPropertyTy;
                 break;
             }

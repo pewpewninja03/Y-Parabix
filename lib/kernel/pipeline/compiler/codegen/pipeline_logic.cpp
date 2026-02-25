@@ -95,23 +95,14 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
             #endif
             addProducedItemCountDeltaProperties(b, i);
             addUnconsumedItemCountProperties(b, i);
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
+                addCycleCounterProperties(b, i, ((i + 1) == oneAfterLastKernelInCurrentPhase) | isRoot, isRoot, i);
+            }
         }
-
-
     }
 
-
-
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        auto currentPartitionId = -1U;
-        constexpr auto L = 0U;
-        for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            const auto partitionId = KernelPartitionId[i];
-            const bool isRoot = (partitionId != currentPartitionId);
-            currentPartitionId = partitionId;
-            addCycleCounterProperties(b, i, isRoot, L + i);
-        }
-        addCycleCounterProperties(b, PipelineOutput, true, L + PipelineOutput);
+        addCycleCounterProperties(b, PipelineOutput, true, false, PipelineOutput);
         mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }

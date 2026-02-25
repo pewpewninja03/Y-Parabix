@@ -10,7 +10,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     IntegerType * const boolTy = b.getInt1Ty();
     IntegerType * const sizeTy = b.getInt64Ty();
 
-    BasicBlock * const pipelineEnd =  b.CreateBasicBlock("PipelineEnd");
+
     assert (mCurrentPipelinePhase < PartitionPhaseBoundaries.size());
     const auto firstPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase - 1];
     assert (PartitionPhaseBoundaries[mCurrentPipelinePhase] > 0);
@@ -20,15 +20,18 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     const auto count = oneAfterLastPartition - firstPartition + 1;
 
     for (unsigned i = firstPartition; i < oneAfterLastPartition; ++i) {
-        mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), pipelineEnd);
+        mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i));
     }
-    mPartitionEntryPoint[oneAfterLastPartition] = pipelineEnd;
+    mPartitionEntryPoint[oneAfterLastPartition] = b.CreateBasicBlock("PipelineEnd");
     for (unsigned i = firstPartition + 1; i <= oneAfterLastPartition; ++i) {
         mPartitionPipelineProgressPhi[i] =
             PHINode::Create(boolTy, count, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
     }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        #ifndef NDEBUG
+        mPartitionStartTimePhi.reset(0U, PartitionCount - 1U);
+        #endif
         for (unsigned i = firstPartition + 1; i < oneAfterLastPartition; ++i) {
             mPartitionStartTimePhi[i] =
                 PHINode::Create(sizeTy, count, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
@@ -112,7 +115,6 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             const auto firstKernelInPartition = FirstKernelInPartition[partitionId];
             toCheck.reset();
 
-            const auto final = std::min<size_t>(partitionId, oneAfterLastPartition);
             for (auto p = firstPartition; p < partitionId; ++p) {
                 if (mTerminationCheck[p]) {
                     toCheck.set(FirstKernelInPartition[p]);
@@ -430,15 +432,15 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
 void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, const unsigned firstKernelInTargetPartition, Value * const segNo) {
 
     const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
-    const auto afterLastComputeKernel = FirstKernelInPartition[oneAfterLastPartition];
+    const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+    assert (firstKernelInTargetPartition <= oneAfterLastKernelInCurrentPhase);
 
-    if (firstKernelInTargetPartition >= afterLastComputeKernel) {
-        const auto lastComputeKernel = afterLastComputeKernel - 1U;
-        const auto type = isDataParallel(lastComputeKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+    if (firstKernelInTargetPartition == oneAfterLastKernelInCurrentPhase) {
+        const auto lastKernelInCurrentPhase = oneAfterLastKernelInCurrentPhase - 1U;
+        assert (mKernelId <= lastKernelInCurrentPhase);
+        const auto type = isDataParallel(lastKernelInCurrentPhase) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
 
-        assert (firstKernelInTargetPartition <= PipelineOutput);
-
-        if (LLVM_LIKELY(mKernelId != lastComputeKernel)) {
+        if (LLVM_LIKELY(mKernelId != lastKernelInCurrentPhase)) {
             #ifdef ENABLE_PAPI
             if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
                 accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
@@ -449,8 +451,8 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
             }
         }
 
-        if (LLVM_LIKELY(mKernelId != lastComputeKernel || type == SYNC_LOCK_POST_INVOCATION)) {
-            assert (mKernelId <= lastComputeKernel);
+        if (LLVM_LIKELY(mKernelId != lastKernelInCurrentPhase || type == SYNC_LOCK_POST_INVOCATION)) {
+
 
             #ifdef ENABLE_PAPI
             if (NumOfPAPIEvents) {
@@ -460,7 +462,7 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
             if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
                 startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
             }
-            acquireSynchronizationLock(b, lastComputeKernel, type, segNo);
+            acquireSynchronizationLock(b, lastKernelInCurrentPhase, type, segNo);
             if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
                 updateCycleCounter(b, firstKernelInTargetPartition, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
             }
@@ -471,7 +473,7 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
             #endif
         }
 
-        if (LLVM_UNLIKELY(mKernelId == lastComputeKernel)) {
+        if (LLVM_UNLIKELY(mKernelId == lastKernelInCurrentPhase)) {
             #ifdef ENABLE_PAPI
             if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
                 accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
@@ -485,7 +487,7 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
     } else {
 
         assert (firstKernelInTargetPartition > mKernelId);
-        assert (firstKernelInTargetPartition < PipelineOutput);
+        assert (firstKernelInTargetPartition < oneAfterLastKernelInCurrentPhase);
 
         #ifdef ENABLE_PAPI
         if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
@@ -506,10 +508,9 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
         if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
             if (EnableCycleCounter) {
                 const auto partId = KernelPartitionId[firstKernelInTargetPartition];
-                assert (partId < (PartitionCount - 1));
-                BasicBlock * const exitBlock = b.GetInsertBlock();
+                assert (partId < PartitionPhaseBoundaries[mCurrentPipelinePhase]);
                 Value * const startTime = mCycleCounters[CycleCounter::PARTITION_JUMP_SYNCHRONIZATION];
-                mPartitionStartTimePhi[partId]->addIncoming(startTime, exitBlock);
+                mPartitionStartTimePhi[partId]->addIncoming(startTime, b.GetInsertBlock());
             }
             // TODO: this fails because it could be summing the pipeline output but there isn't a slot for it
             updateCycleCounter(b, firstKernelInTargetPartition, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
@@ -553,15 +554,12 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 
     // NOTE: this branches to the next partition regardless of the jump target destination.
 
-    auto nextPartitionId = mCurrentPartitionId + 1U;
-
+    const auto nextPartitionId = mCurrentPartitionId + 1U;
     const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
-    const auto afterLastComputeKernel = FirstKernelInPartition[oneAfterLastPartition];
-    if (nextPartitionId > oneAfterLastPartition) {
-        nextPartitionId = oneAfterLastPartition;
-    }
+    assert (nextPartitionId <= oneAfterLastPartition);
     const auto jumpTargetId = PartitionJumpTargetId[mCurrentPartitionId];
     assert (nextPartitionId <= jumpTargetId);
+    assert (jumpTargetId <= oneAfterLastPartition);
 
     if (LLVM_LIKELY((nextPartitionId != jumpTargetId) && mIsPartitionRoot)) {
 
@@ -649,7 +647,7 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
         }
         if ((mKernelId + 1U) < targetKernelId) {
-            acquirePartitionSynchronizationLock(b, targetKernelId - 1U, mSegNo);
+            acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);
         }
         const auto type = mAllowDataParallelExecution ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
         releaseSynchronizationLock(b, mKernelId, type, mSegNo);
@@ -678,19 +676,17 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
-    assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
-
-
     // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
     // and combine them at the end?
 
-    auto nextKernel = mKernelId + 1U;
+    const auto nextKernel = mKernelId + 1U;
 
     updateLocalDynamicBufferStructsUntil(b, nextKernel);
 
     const auto type = mAllowDataParallelExecution ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
     releaseSynchronizationLock(b, mKernelId, type, mSegNo);
-    const auto firstKernelInNextPhase = FirstKernelInPartition[PartitionPhaseBoundaries[mCurrentPipelinePhase]];
+    const auto oneAfterLastPartition = PartitionPhaseBoundaries[mCurrentPipelinePhase];
+    const auto firstKernelInNextPhase = FirstKernelInPartition[oneAfterLastPartition];
     assert (nextKernel <= firstKernelInNextPhase);
     assert (firstKernelInNextPhase <= PipelineOutput);
 
@@ -729,11 +725,11 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
     }
 
     const auto nextPartitionId = KernelPartitionId[nextKernel];
-    assert (nextKernel != firstKernelInNextPhase || (nextPartitionId != mCurrentPartitionId));
+    assert (mCurrentPartitionId <= nextPartitionId);
+    assert (nextPartitionId <= oneAfterLastPartition);
 
     if (nextPartitionId != mCurrentPartitionId) {
-        assert (mCurrentPartitionId < nextPartitionId);
-        assert (nextPartitionId <= PartitionCount);
+
         BasicBlock * const exitBlock = b.GetInsertBlock();
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "  *** exiting partition %" PRIu64, b.getSize(mCurrentPartitionId));
@@ -748,7 +744,7 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
         // Since there may be multiple paths into this kernel, phi out the start time
         // for each path.
-        if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId != PartitionPhaseBoundaries[mCurrentPipelinePhase])) {
+        if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId != oneAfterLastPartition)) {
             assert (mPartitionStartTimePhi[nextPartitionId]);
             assert (mCycleCounters[TOTAL_TIME]);
             mPartitionStartTimePhi[nextPartitionId]->addIncoming(mCycleCounters[TOTAL_TIME], exitBlock);

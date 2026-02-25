@@ -432,7 +432,7 @@ public:
 
 // cycle counter functions
 
-    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot, const unsigned groupId);
+    void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool jumpTarget, const bool isRoot, const unsigned groupId);
     void startCycleCounter(KernelBuilder & b, const CycleCounter type);
     void startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types);
     void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type);
