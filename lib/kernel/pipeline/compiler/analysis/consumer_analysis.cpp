@@ -55,7 +55,12 @@ restart:    auto & sn = mBufferGraph[id];
                     assert (producer < consumer && consumer <= PipelineOutput);
                     const auto consPhaseId = mBufferGraph[consumer].ProducedPhaseId;
                     if (LLVM_UNLIKELY(consPhaseId != prodPhaseId)) {
-                        sn.Type |= BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
+                        #ifdef DISABLE_FD_BACKED_BUFFERS
+                        constexpr auto flags = BufferType::CrossesPhaseBoundary;
+                        #else
+                        constexpr auto flags = BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
+                        #endif
+                        sn.Type |= flags;
                         break;
                     }
                 }
@@ -120,7 +125,7 @@ skip_phase_check:
             const BufferPort & I = mBufferGraph[input];
             const unsigned index = out_degree(id, mConsumerGraph);
             allConsumersFixedRate &= I.isFixed();
-            add_edge(id, consumer, ConsumerEdge{I.Port, index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+            add_edge(id, consumer, ConsumerEdge{I.Port, index + 1, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
         }
 
         sn.Type |= allConsumersFixedRate ? 0U : BufferType::HasNonFixedRateConsumer;
@@ -140,7 +145,7 @@ skip_phase_check:
                         if (consumer == lc) {
                             const unsigned index = out_degree(streamSet, mConsumerGraph);
                             const BufferPort & input = mBufferGraph[ce];
-                            add_edge(streamSet, consumer, ConsumerEdge{input.Port, index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+                            add_edge(streamSet, consumer, ConsumerEdge{input.Port, index + 1, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
                         }
                     }
                 }
@@ -251,6 +256,9 @@ skip_phase_check:
         }
         if (c.Flags & ConsumerEdge::UpdateExternalCount) {
             out << 'E';
+        }
+        if (c.Index > 0) {
+            out << ':' << c.Index;
         }
         out << "\"];\n";
     }

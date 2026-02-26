@@ -441,6 +441,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             BasicBlock * const pipelineEnd = b.CreateBasicBlock("PipelineEnd");
             BasicBlock * const entryBlock = b.GetInsertBlock();
 
+            PHINode * madeProgressInLastSegment = nullptr;
             Value * mInitialPhaseSegNo = nullptr;
             #ifndef PHASES_RUN_TO_COMPLETION
             Value * mPhaseSegmentLimit = nullptr;
@@ -449,6 +450,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 b.CreateBr(pipelineLoop);
 
                 b.SetInsertPoint(pipelineLoop);
+                if (LLVM_UNLIKELY(CheckAssertions())) {
+                    madeProgressInLastSegment = b.CreatePHI(b.getInt1Ty(), 2, "madeProgressInLastSegment");
+                    madeProgressInLastSegment->addIncoming(b.getTrue(), entryBlock);
+                }
             } else {
                 pipelineStart = b.CreateBasicBlock("PipelineStart", pipelineEnd);
                 obtainCurrentSegmentNumber(b);
@@ -461,8 +466,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
                 b.SetInsertPoint(pipelineLoop);
             }
-
-
             obtainCurrentSegmentNumber(b);
             if (pipelineStart) {
                 b.CreateBr(pipelineStart);
@@ -472,11 +475,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 segNoPhi->addIncoming(mInitialPhaseSegNo, entryBlock); assert (mInitialPhaseSegNo);
                 segNoPhi->addIncoming(mSegNo, pipelineLoop); assert (mSegNo);
                 mSegNo = segNoPhi;
-            }
-            PHINode * mMadeProgressInLastSegment = nullptr;
-            if (LLVM_UNLIKELY(CheckAssertions())) {
-                mMadeProgressInLastSegment = b.CreatePHI(b.getInt1Ty(), 2, "madeProgressInLastSegment");
-                mMadeProgressInLastSegment->addIncoming(b.getTrue(), entryBlock);
+                if (LLVM_UNLIKELY(CheckAssertions())) {
+                    madeProgressInLastSegment = b.CreatePHI(b.getInt1Ty(), 2, "madeProgressInLastSegment");
+                    madeProgressInLastSegment->addIncoming(b.getTrue(), entryBlock);
+                }
             }
             PHINode * nextCheckSegmentPhi = nullptr;
             PHINode * activeThreadsPhi = nullptr;
@@ -516,8 +518,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 madeProgress = b.CreateExtractValue(csRetVal, {1});
                 madeProgress = b.CreateOr(madeProgress, done);
                 if (LLVM_UNLIKELY(CheckAssertions())) {
-                    assert (mMadeProgressInLastSegment);
-                    Value * const live = b.CreateOr(mMadeProgressInLastSegment, madeProgress);
+                    assert (madeProgressInLastSegment);
+                    Value * const live = b.CreateOr(madeProgressInLastSegment, madeProgress);
                     b.CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
                 }
             }
@@ -705,9 +707,8 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             } else {
                 BasicBlock * const exitBlock = b.GetInsertBlock();
                 if (LLVM_UNLIKELY(CheckAssertions())) {
-                    mMadeProgressInLastSegment->addIncoming(madeProgress, pipelineStart ? pipelineLoop : exitBlock);
+                    madeProgressInLastSegment->addIncoming(madeProgress, pipelineStart ? pipelineLoop : exitBlock);
                 }
-
                 if (mUseDynamicMultithreading && generateProcessThread) {
                     nextCheckSegmentPhi->addIncoming(startOfNextPeriodPhi, exitBlock);
                     activeThreadsPhi->addIncoming(currentNumOfThreadsPhi, exitBlock);

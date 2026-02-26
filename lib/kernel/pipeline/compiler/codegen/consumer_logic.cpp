@@ -139,7 +139,6 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     if (bn.Type & BufferType::PreserveEntireStreamSet) {
         return b.getSize(0);
     }
-    assert ((bn.Type & BufferType::CrossesPhaseBoundary) == 0);
 
     Value * itemCount = nullptr;
     if (out_degree(id, mConsumerGraph) == 0) {
@@ -220,6 +219,7 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(KernelBuilder & b) {
 
             if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
                 const ConsumerEdge & c = mConsumerGraph[e];
+                assert (c.Index > 0);
                 setConsumedItemCount(b, streamSet, processed, c.Index);
             }
 

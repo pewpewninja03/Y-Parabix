@@ -140,10 +140,11 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
            "%s: expected number of strides for internally allocated buffers is 0",
            b.GetString(mTarget->getName()));
     }
-    b.CreateAssert(allocScale, "allocScale cannot be 0");
 
     // recursively allocate any internal buffers for the nested kernels, giving them the correct
     // num of strides it should expect to perform
+
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
 
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernelObj = getKernel(i);
@@ -165,7 +166,20 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                     params.push_back(mKernelThreadLocalHandle);
                 }
 
-                const Rational factor {mTarget->getStride() * MaximumNumOfStrides[i], kernelObj->getStride()};
+                size_t multiplier = 1U;
+                if (numOfPhases != 2) {
+                    for (const auto output : make_iterator_range(out_edges(i, mBufferGraph))) {
+                        const auto streamSet = target(output, mBufferGraph);
+                        const BufferNode & bn = mBufferGraph[streamSet];
+                        if (bn.crossesPhaseBoundary()) {
+                            // TODO: should output scale be per output streamset?
+                            multiplier = DEFAULT_INITIAL_PHASE_SEGMENT_LIMIT;
+                            break;
+                        }
+                    }
+                }
+
+                const Rational factor {mTarget->getStride() * MaximumNumOfStrides[i] * multiplier, kernelObj->getStride()};
                 assert (factor.numerator() > 0);
                 params.push_back(b.CreateMulRational(allocScale, factor));
                 if (LLVM_UNLIKELY(mTraceDynamicBuffers && (kernelObj->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet) && nonLocal)) {
@@ -183,83 +197,99 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
 
     // and allocate any output buffers
 
-    for (auto kernel = PipelineInput; kernel <= LastKernel; ++kernel) {
+    for (size_t phase = 1; phase < numOfPhases; ++phase) {
 
-        Value * reportCallback = nullptr;
-        Value * sharedHandle = nullptr;
+        const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[phase];
+        const auto firstKernelInCurrentPhase = std::max(FirstKernelInPartition[firstPartition], FirstKernel);
+        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
 
-        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            const auto streamSet = target(output, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-            assert (bn.isNonThreadLocal() || bn.isOwned());
-            if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
-                StreamSetBuffer * const buffer = bn.Buffer;
+        for (auto kernel = firstKernelInCurrentPhase; kernel < oneAfterLastKernelInCurrentPhase; ++kernel) {
 
-                if (LLVM_UNLIKELY(bn.isConstant())) {
-                    generateGlobalDataForRepeatingStreamSet(b, streamSet);
-                } else {
-                    if (LLVM_LIKELY(bn.isInternal())) {
-                        const BufferPort & bp = mBufferGraph[output];
-                        const auto handleName = makeBufferName(kernel, bp.Port);
-                        buffer->setHandle(b.getScalarFieldPtr(handleName));
+            Value * reportCallback = nullptr;
+            Value * sharedHandle = nullptr;
+
+            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) {
+                    continue;
+                }
+                assert (bn.isNonThreadLocal() || bn.isOwned());
+                if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
+                    StreamSetBuffer * const buffer = bn.Buffer;
+
+                    if (LLVM_UNLIKELY(bn.isConstant())) {
+                        generateGlobalDataForRepeatingStreamSet(b, streamSet);
                     } else {
-                        assert (isFromCurrentFunction(b, buffer->getHandle(), false));
-                    }
-                    if (nonLocal) {
-                        Value * maxStrides = allocScale;
-    //                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
-    //                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
-    //                    }
-                        const auto & R = bn.RelativeIORate;
-                        assert (R.numerator() > 0);
-                        Value * multiplier = b.CreateCeilUMulRational(maxStrides, R);
-
-                        if (LLVM_UNLIKELY(bn.isReturned() || bn.crossesPhaseBoundary())) {
-                            Value * expectedBufferSize = expectedSourceOutputSize;
-                            if (bn.isReturned()) {
+                        if (LLVM_LIKELY(bn.isInternal())) {
+                            const BufferPort & bp = mBufferGraph[output];
+                            const auto handleName = makeBufferName(kernel, bp.Port);
+                            buffer->setHandle(b.getScalarFieldPtr(handleName));
+                        } else {
+                            assert (isFromCurrentFunction(b, buffer->getHandle(), false));
+                        }
+                        if (nonLocal) {
+                            Value * maxStrides = allocScale;
+                            b.CallPrintInt(std::to_string(streamSet) + ".maxStrides", maxStrides);
+        //                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
+        //                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
+        //                    }
+                            const auto & R = bn.RelativeIORate;
+                            assert (R.numerator() > 0);
+                            Value * multiplier = nullptr;
+                            if (LLVM_UNLIKELY(bn.isReturned())) {
                                 auto scaleFactor = getReturnedBufferScaleFactor(streamSet);
                                 if (scaleFactor.numerator() == 0) {
                                     scaleFactor = R;
                                 }
                                 assert (expectedSourceOutputSize);
-                                expectedBufferSize = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
+                                multiplier = b.CreateMulRational(expectedSourceOutputSize, scaleFactor);
+                            } else if (LLVM_UNLIKELY(bn.crossesPhaseBoundary())) {
+                                multiplier = b.CreateCeilUMulRational(maxStrides, (R * Rational{DEFAULT_INITIAL_PHASE_SEGMENT_LIMIT}));
+                            } else {
+                                multiplier = b.CreateCeilUMulRational(maxStrides, R);
                             }
-                            multiplier = b.CreateUMax(multiplier, expectedBufferSize);
-                        }
 
-                        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-                            if (reportCallback == nullptr) {
-                                reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel); assert (reportCallback);
-                                assert (getHandle());
-                                sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
+                            b.CallPrintInt(std::to_string(streamSet) + ".multiplier", multiplier);
+
+                            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+                                if (reportCallback == nullptr) {
+                                    reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel); assert (reportCallback);
+                                    b.CallPrintInt("reportCallback", reportCallback);
+                                    assert (getHandle());
+                                    sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
+                                }
+                                const BufferPort & bp = mBufferGraph[output];
+                                assert (getKernel(kernel)->getOutputStreamSet(bp.Port.Number));
+                                buffer->allocateBuffer(b, multiplier, reportCallback, sharedHandle, b.getSize(bp.Port.Number));
+                            } else {
+                                buffer->allocateBuffer(b, multiplier, nullptr, nullptr, nullptr);
                             }
-                            const BufferPort & bp = mBufferGraph[output];
-                            buffer->allocateBuffer(b, multiplier, reportCallback, sharedHandle, b.getSize(bp.Port.Number));
-                        } else {
-                            buffer->allocateBuffer(b, multiplier, nullptr, nullptr, nullptr);
+
+                            #ifdef PRINT_DEBUG_MESSAGES
+                            const auto pe = in_edge(streamSet, mBufferGraph);
+                            const auto producer = source(pe, mBufferGraph);
+                            const BufferPort & rd = mBufferGraph[pe];
+                            const auto prefix = makeBufferName(producer, rd.Port);
+                            Value * start = buffer->getMallocAddress(b);
+                            const auto byteSize = b.getTypeSize(dl, buffer->getType());
+                            Value * length = b.CreateMulRational(buffer->getInternalCapacity(b), Rational{byteSize, b.getBitBlockWidth()});
+                            Constant * ts = b.getSize(byteSize);
+                            Value * end = b.CreateGEP(b.getInt8Ty(), b.CreatePointerCast(start, b.getInt8PtrTy()), length);
+                            debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ") [typeSize=%" PRIu64 "]", start, end, ts);
+                            #endif
+
                         }
-
-                        #ifdef PRINT_DEBUG_MESSAGES
-                        const auto pe = in_edge(streamSet, mBufferGraph);
-                        const auto producer = source(pe, mBufferGraph);
-                        const BufferPort & rd = mBufferGraph[pe];
-                        const auto prefix = makeBufferName(producer, rd.Port);
-                        Value * start = buffer->getMallocAddress(b);
-                        const auto byteSize = b.getTypeSize(dl, buffer->getType());
-                        Value * length = b.CreateMulRational(buffer->getInternalCapacity(b), Rational{byteSize, b.getBitBlockWidth()});
-                        Constant * ts = b.getSize(byteSize);
-                        Value * end = b.CreateGEP(b.getInt8Ty(), b.CreatePointerCast(start, b.getInt8PtrTy()), length);
-                        debugPrint(b, prefix + ".inital malloc range = [%" PRIx64 ",%" PRIx64 ") [typeSize=%" PRIu64 "]", start, end, ts);
-                        #endif
-
                     }
                 }
             }
         }
+
     }
+
+
 
 }
 

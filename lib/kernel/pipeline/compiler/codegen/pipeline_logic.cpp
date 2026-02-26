@@ -483,7 +483,7 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
 
         if (numOfPhases != 2) {
             // TODO: is there a way to predict better initial phase segment limits?
-            b.setScalarField(PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), b.getSize(100));
+            b.setScalarField(PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), b.getSize(DEFAULT_INITIAL_PHASE_SEGMENT_LIMIT));
         }
 
         for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {

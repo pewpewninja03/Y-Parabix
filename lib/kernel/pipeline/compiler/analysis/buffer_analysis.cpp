@@ -26,8 +26,6 @@
 // TODO: if an external buffer is marked as managed, have it allocate and manage the
 // buffer but not deallocate it.
 
-// #define DISABLE_FD_BACKED_BUFFERS
-
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
