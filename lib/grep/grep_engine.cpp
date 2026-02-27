@@ -306,7 +306,6 @@ void GrepEngine::initRE(re::RE * re) {
     if (isEmptySet(mRE)) {
         mColoring = false;
     }
-    mColoring = false;
 }
 
 void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStream) {
@@ -399,6 +398,7 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
 }
 
 StreamSet * GrepEngine::getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, StreamSet * MatchResults) {
+
     auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (mSpanNames.empty() == false) {
         std::vector<StreamSet *> allSpans;
@@ -436,6 +436,7 @@ StreamSet * GrepEngine::getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, St
 
 unsigned GrepEngine::RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     RE_PipelineBuilder RE_PB(P, mCtxt);
+    RE_PB.setMatchSpans(mColoring);
     RE_PB.createRE_Pipeline(re, Results);
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         P.captureBitstream("RunGrep", Results);
@@ -715,7 +716,7 @@ void GrepEngine::applyColorization(PipelineBuilder & P,
 void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * ByteStream) {
     StreamSet * Matches = initialMatches(E, ByteStream);
     StreamSet * MatchedLineEnds = matchedLines(E, Matches);
-
+    mColoring = false;
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
     StreamSet * MatchesByLine = nullptr;
     if (mColoring | hasContext) {

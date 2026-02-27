@@ -435,9 +435,44 @@ void RE_PipelineBuilder::createRE_Pipeline(RE * re, StreamSet * results) {
     RE * xfrmdRE = prepareRE(re);
     //llvm::errs() << "After prepareRE:" << Printer_RE::PrintRE(xfrmdRE) << "\n";
     xfrmdRE = processReferences(xfrmdRE);
+    if (mMatchSpans) {
+        xfrmdRE = spanFactoring(xfrmdRE);
+    }
     prepareExternals(xfrmdRE);
     mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, xfrmdRE, results);
 }
+
+RE * RE_PipelineBuilder::spanFactoring(RE * re) {
+
+    re::FixedSpanNamer FLnamer(mCtxt.mCodeUnitAlphabet);
+    RE * xfrmedRE = FLnamer.transformRE(re);
+    auto lgth = getLengthRange(xfrmedRE, mCtxt.mCodeUnitAlphabet).first;
+    for (auto m : FLnamer.mNameMap) {
+        if (lgth > 0) {
+            auto spanName = m.first + "Span";
+            mCtxt.mSpanNames.push_back(spanName);
+        }
+    }
+    re::UniquePrefixNamer UPnamer;
+    xfrmedRE = UPnamer.transformRE(xfrmedRE);
+    for (auto m : UPnamer.mNameMap) {
+        std::string nameStr = m.first;
+        auto spanName = nameStr + "Span";
+        mCtxt.mSpanNames.push_back(spanName);
+    }
+    re::Repeated_CC_Seq_Namer RCCSnamer;
+    xfrmedRE = RCCSnamer.transformRE(xfrmedRE);
+    for (auto m : RCCSnamer.mNameMap) {
+        std::string nameStr = m.first;
+        auto f = RCCSnamer.mInfoMap.find(nameStr);
+        if (f != RCCSnamer.mInfoMap.end()) {
+            auto spanName = nameStr + "Span";
+            mCtxt.mSpanNames.push_back(spanName);
+        }
+    }
+    return xfrmedRE;
+}
+
 
 RE * RE_PipelineBuilder::prepareRE(RE * re) {
     const cc::Alphabet * lengthAlphabet = mCtxt.mIndexingAlphabet ? mCtxt.mIndexingAlphabet : mCtxt.mCodeUnitAlphabet;

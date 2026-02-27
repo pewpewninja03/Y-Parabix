@@ -54,6 +54,7 @@ private:
     kernel::StreamSet * mCombiningStream;
     Alphabets mAlphabets;
     ExternalNameMap mExternals;
+    std::vector<std::string> mSpanNames;
 };
 
 class RE_Kernel : public pablo::PabloKernel {
@@ -108,6 +109,8 @@ protected:
     void addExternal(std::string extName, ExternalStream s);
 
     re::RE * prepareRE(re::RE * re);
+
+    re::RE * spanFactoring(re::RE * re);
 
     re::RE * processReferences(re::RE * re);
 
