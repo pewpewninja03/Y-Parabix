@@ -50,8 +50,8 @@ void RE_Inspector::inspectName(Name * nm) {
     if (mNameMode == NameProcessingMode::None) return;
     RE * const d = nm->getDefinition();
     if (d == nullptr) {
-        if (mNameMode == NameProcessingMode::ProcessDefinition) return;
-        UndefinedNameError(nm);
+        return;
+        //UndefinedNameError(nm);
     }
     inspect(d);
 }

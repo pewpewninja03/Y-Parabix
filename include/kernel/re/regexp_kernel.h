@@ -20,6 +20,7 @@ enum ExternalStreamKind {ZeroWidth, FixedLength, StartIndexed, EndIndexed};
 struct ExternalStream {
     ExternalStreamKind kind;
     unsigned offset;
+    std::pair<int, int> lgthRange;
     kernel::StreamSet * extStream;
 };
 

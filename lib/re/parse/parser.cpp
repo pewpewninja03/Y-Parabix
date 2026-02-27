@@ -354,7 +354,7 @@ RE * RE_Parser::parseEscapedSet() {
                 re = parsePropertyExpression(PropertyExpression::Kind::Boundary);
                 require('}');
             } else {
-                re = makeZeroWidth("\\b");
+                re = makePropertyExpression(PropertyExpression::Kind::Boundary, "word");
             }
             return complemented ? makeZerowidthComplement(re) : re;
         case 'd':

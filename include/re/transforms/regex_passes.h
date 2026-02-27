@@ -4,12 +4,16 @@
  */
 
 #pragma once
+#include <vector>
+#include <cstdint>
 
 namespace re {
 
 class RE;
 
-RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive = false);
+typedef std::vector<uint64_t> (*GrepLinesFunctionType)(re::RE *, const char * buf, size_t bufSize);
+
+RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive = false, GrepLinesFunctionType grep = nullptr);
 
 RE * excludeUnicodeLineBreak(RE * r);
 

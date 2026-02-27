@@ -15,6 +15,10 @@ bool UnicodeIndexing;
 static cl::opt<bool, true> OptUnicodeIndexing("UnicodeIndexing", cl::location(UnicodeIndexing),
                                               cl::desc("Enable CC multiplexing and Unicode indexing."), cl::init(false));
 
+bool UnicodeBasisMode;
+static cl::opt<bool, true> OptUnicodeBasis("UnicodeBasisMode", cl::location(UnicodeBasisMode),
+                                              cl::desc("Require full Unioode basis."), cl::init(false));
+
 bool PropertyKernels;
 static cl::opt<bool, true> OptPropertyKernels("enable-property-kernels", cl::location(PropertyKernels),
                                               cl::desc("Enable Unicode property kernels."), cl::init(true));

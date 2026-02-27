@@ -5,7 +5,6 @@
 
 #include <re/transforms/regex_passes.h>
 
-//#include <grep/grep_engine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
 #include <re/analysis/validation.h>
@@ -33,14 +32,13 @@ using namespace re;
 
 namespace re {
 
-RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive) {
+RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive, GrepLinesFunctionType grep) {
     if (PrintOptionIsSet(ShowAllREs) || PrintOptionIsSet(ShowREs)) {
         errs() << "Parser:\n" << Printer_RE::PrintRE(r) << '\n';
     }
     r = resolveEscapeNames(r);
     r = resolveGraphemeMode(r, false /* not in grapheme mode at top level*/);
-    //r = UCD::linkAndResolve(r, grep::lineNumGrep);
-    r = UCD::linkAndResolve(r);
+    r = UCD::linkAndResolve(r, grep);
     r = removeUnneededCaptures(r);
     r = UCD::inlineSimpleProperties(r);
     //r = resolveBoundaryProperties(r);
@@ -83,10 +81,6 @@ RE * regular_expression_passes(RE * re) {
     }
     r = resolveDiffs(r);
     r = resolveAnchors(r, makeAlt());
-    //r = name_lookaheads(r);
-    if (!DefiniteLengthBackReferencesOnly(r)) {
-        llvm::report_fatal_error("Future back reference support: references must be within a fixed distance from a fixed-length capture.");
-    }
     return r;
 }
 

@@ -17,6 +17,7 @@
 #include <re/parse/GLOB_parser.h>
 #include <kernel/core/callback.h>
 #include <kernel/util/linebreak_kernel.h>
+#include <kernel/re/regexp_kernel.h>
 #include <grep/grep_kernel.h>
 
 namespace re { class CC; class Name; class RE; }
@@ -127,12 +128,9 @@ protected:
     void setComponent(Component & compon_set, Component c);
     bool matchesToEOLrequired();
 
-    // Transpose to basis bit streams, if required otherwise return the source byte stream.
-    kernel::StreamSet * getBasis(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
-
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
-    // line break stream and the U8 index stream (if required).
+    // basis streams, line break stream and the U8 index stream (if required).
     void grepPrologue(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
     void prepareExternalStreams(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
@@ -167,6 +165,7 @@ protected:
     int mMaxCount;
     bool mGrepStdIn;
     NullCharMode mNullMode;
+    RE_CompilerContext mCtxt;
     BaseDriver & mGrepDriver;
     GrepFunctionType mMainMethod;
     size_t mBatchSize;

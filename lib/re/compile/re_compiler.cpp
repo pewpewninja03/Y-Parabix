@@ -213,6 +213,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     auto ext = f->second;
     auto externalLength = ext.minLength();
     auto extMarker = ext.marker();
+    //llvm::errs() << "External: " << nameString << ", lgth " << externalLength << ", offset " << extMarker.offset() << "\n"; 
     if (ext.fromFirst() && (externalLength == ext.maxLength())) {
         // We have an external marker whose offset is from the
         // start of the external matched string; adjust to final position.
@@ -873,7 +874,7 @@ RE_Compiler::RE_Compiler(PabloBlock * scope,
     PabloBuilder pb(mEntryScope);
     mIndexStream = pb.createOnes();
     if (barrierStream != nullptr) {
-        mMatchable = pb.createNot(barrierStream);
+        mMatchable = pb.createNot(barrierStream, "mMatchable");
     } else {
         mMatchable = pb.createOnes();
     }
