@@ -318,6 +318,9 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         StreamSet * BasisBits = P.CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
         Source = BasisBits;
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBixNum("basis", BasisBits);
+        }
     }
 
     mLineBreakStream = nullptr;
@@ -392,50 +395,6 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         StreamSet * U21_LB = P.CreateStreamSet(1);
         FilterByMask(P, mU8index, mLineBreakStream, U21_LB);
         mCtxt.setBarrier(U21_LB);
-    }
-}
-
-void GrepEngine::prepareExternalStreams(PipelineBuilder & P, StreamSet * SourceStream) {
-    mExternalTable.resolveExternals(P);
-}
-
-void GrepEngine::addExternalStreams(PipelineBuilder & P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
-    auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
-    re::Alphabet_Set alphas;
-    re::collectAlphabets(regexp, alphas);
-    std::set<re::Name *> externals;
-    re::gatherNames(regexp, externals);
-    // We may end up with multiple instances of a Name, but we should
-    // only add the external once.
-    std::set<std::string> extNames;
-    for (const auto & e : externals) {
-        auto name = e->getFullName();
-        if ((extNames.count(name) == 0) && mExternalTable.isDeclared(indexing, name)) {
-            extNames.insert(name);
-            const auto & ext = mExternalTable.lookup(indexing, name);
-            StreamSet * extStream = mExternalTable.getStreamSet(P, indexing, name);
-            const auto offset = ext->getOffset();
-            std::pair<int, int> lengthRange = ext->getLengthRange();
-            options->addExternal(name, extStream, offset, lengthRange);
-        } else {
-            // We have a name that has not been set up as an external.
-            // Its definition will need to be processed.
-            re::RE * defn = e->getDefinition();
-            if (defn) re::collectAlphabets(defn, alphas);
-        }
-    }
-    for (auto & a : alphas) {
-        if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
-            std::string basisName = a->getName() + "_basis";
-            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                P.captureBixNum(basisName, alphabetBasis);
-            }
-            options->addAlphabet(mpx, alphabetBasis);
-        } else {
-            StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, "basis");
-            options->addAlphabet(a, alphabetBasis);
-        }
     }
 }
 

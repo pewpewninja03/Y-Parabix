@@ -288,16 +288,19 @@ CodePointMatchKernel::CodePointMatchKernel (LLVMTypeSystemInterface & ts, UCD::p
     mProperty(prop) {
 }
 
+void RE_PipelineBuilder::addExternal(std::string extName, ExternalStream s) {
+    mCtxt.mExternals.emplace(extName, s);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        mPB.captureBitstream(extName, s.extStream);
+    }
+}
 
 void RE_PipelineBuilder::compileProperty(PropertyExpression * pe) {
     std::string propName = pe->getFullName();
     if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
         StreamSet * pStrm  = mPB.CreateStreamSet(1);
         mPB.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(pe, mCtxt.mCodeUnitStream, pStrm);
-        mCtxt.mExternals.emplace(propName, ExternalStream{ExternalStreamKind::FixedLength, 0, {1, 1}, pStrm});
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            mPB.captureBitstream(propName, pStrm);
-        }
+        addExternal(propName, ExternalStream{ExternalStreamKind::FixedLength, 0, {1, 1}, pStrm});
     } else { //PropertyExpression::Kind::Boundary
         UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
         if (prop == UCD::g) {
@@ -312,10 +315,7 @@ void RE_PipelineBuilder::compileProperty(PropertyExpression * pe) {
             mCtxt.addAlphabet(GCB_mpx, GCB_Classes);
             StreamSet * GCB_strm = mPB.CreateStreamSet(1);
             mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, GCB_RE, GCB_strm);
-            mCtxt.mExternals.emplace("\\b{g}", ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, GCB_strm});
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                mPB.captureBitstream("\\b{g}", GCB_strm);
-            }
+            addExternal("\\b{g}", ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, GCB_strm});
         } else if (prop == UCD::w) {
             re::RE * WB_RE = re::generateWordBoundaryRule();
             const auto WB_Sets = re::collectCCs(WB_RE, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
@@ -329,10 +329,7 @@ void RE_PipelineBuilder::compileProperty(PropertyExpression * pe) {
             // TODO: Deal with lookahead 2 ???  --- use a RE_Pipeline call??
             StreamSet * WB_strm = mPB.CreateStreamSet(1);
             mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, WB_RE, WB_strm);
-            mCtxt.mExternals.emplace("\\b{w}", ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, WB_strm});
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                mPB.captureBitstream("\\b{w}", WB_strm);
-            }
+            addExternal("\\b{w}", ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, WB_strm});
         } else {  // Boundary expressions, except GCB, level 2 WB.
             UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
             if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
@@ -343,20 +340,14 @@ void RE_PipelineBuilder::compileProperty(PropertyExpression * pe) {
                 mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, basis);
                 StreamSet * bStrm  = mPB.CreateStreamSet(1);
                 mPB.CreateKernelCall<BoundaryKernel>(basis, mCtxt.mIndexStream, bStrm);
-                mCtxt.mExternals.emplace(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, bStrm});
-                if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                    mPB.captureBitstream(propName, bStrm);
-                }
+                addExternal(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, bStrm});
             } else if (auto * obj = dyn_cast<UCD::BinaryPropertyObject>(propObj)) {
                 std::vector<re::CC *> ccs = {makeCC(obj->GetCodepointSet("Y"), &cc::Unicode)};
                 StreamSet * pStrm = mPB.CreateStreamSet(1);
                 mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, pStrm);
                 StreamSet * bStrm  = mPB.CreateStreamSet(1);
                 mPB.CreateKernelCall<BoundaryKernel>(pStrm, mCtxt.mIndexStream, bStrm);
-                mCtxt.mExternals.emplace(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, bStrm});
-                if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                    mPB.captureBitstream(propName, bStrm);
-                }
+                addExternal(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, bStrm});
             } else {
                 llvm::report_fatal_error("Expected enumerated property for boundary expression");
             }
@@ -402,11 +393,11 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
         mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, defn, extStrm);
         auto r = getLengthRange(defn, mCtxt.mCodeUnitAlphabet);
         if (r.second == 0) {
-            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::ZeroWidth, 1, r, extStrm});
+            addExternal(name, ExternalStream{ExternalStreamKind::ZeroWidth, 1, r, extStrm});
         } else if (r.first == r.second) {
-            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::FixedLength, offset, r, extStrm});
+            addExternal(name, ExternalStream{ExternalStreamKind::FixedLength, offset, r, extStrm});
         } else {
-            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::EndIndexed, offset, r, extStrm});
+            addExternal(name, ExternalStream{ExternalStreamKind::EndIndexed, offset, r, extStrm});
         }
     } else {
         RE * asserted = llvm::cast<Assertion>(defn)->getAsserted();
@@ -415,7 +406,7 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
         auto r = getLengthRange(asserted, mCtxt.mCodeUnitAlphabet);
         if (r.first == r.second) {
             // Fixed length lookaheads can be stored directly.
-            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::StartIndexed, r.second, r, assertedStrm});
+            addExternal(name, ExternalStream{ExternalStreamKind::StartIndexed, r.second, r, assertedStrm});
         } else {
             // Apply the logic of matching a lookahead with a unique prefix.  
             // Match positions for the lookahead (assertedStrm) are shifted back to the 
@@ -435,7 +426,7 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
             mPB.CreateKernelCall<IndexedShiftBack>(maskStrm, assertedStrm, assertedBack);
             StreamSet * extStrm = mPB.CreateStreamSet(1);
             AndCombine(mPB, prefStrm, assertedBack, extStrm);
-            mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::StartIndexed, amt, r, extStrm});
+            addExternal(name, ExternalStream{ExternalStreamKind::StartIndexed, amt, r, extStrm});
         }
     }
 }
@@ -467,7 +458,7 @@ RE * RE_PipelineBuilder::prepareRE(RE * re) {
         std::vector<re::CC *> ccs = {cast<re::CC>(m.second)};
         StreamSet * ccStrm = mPB.CreateStreamSet(1);
         mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, ccStrm);
-        mCtxt.mExternals.emplace(m.first, ExternalStream{ExternalStreamKind::FixedLength, 0, {1, 1}, ccStrm});
+        addExternal(m.first, ExternalStream{ExternalStreamKind::FixedLength, 0, {1, 1}, ccStrm});
     }
 
     if (mMatchSpans) {
@@ -512,12 +503,12 @@ RE * RE_PipelineBuilder::processReferences(RE * re) {
                 mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, propertyBasis);
                 StreamSet * distStrm = mPB.CreateStreamSet(1);
                 mPB.CreateKernelCall<FixedDistanceMatchesKernel>(dist, propertyBasis, distStrm);
-                mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::FixedLength, 0u, {1, 1}, distStrm});
+                addExternal(name, ExternalStream{ExternalStreamKind::FixedLength, 0u, {1, 1}, distStrm});
             } else if (isa<UCD::CodePointPropertyObject>(propObj)) {
                 // Identity or other codepoint properties
                 StreamSet * distStrm = mPB.CreateStreamSet(1);
                 mPB.CreateKernelCall<CodePointMatchKernel>(p, dist, mCtxt.mCodeUnitStream, distStrm);
-                mCtxt.mExternals.emplace(name, ExternalStream{ExternalStreamKind::FixedLength, 0u, {1, 1}, distStrm});
+                addExternal(name, ExternalStream{ExternalStreamKind::FixedLength, 0u, {1, 1}, distStrm});
             } else {
                 llvm::report_fatal_error("Property reference must be an enumerated or codepoint property.");
             }

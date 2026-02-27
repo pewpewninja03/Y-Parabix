@@ -105,6 +105,8 @@ public:
 
 protected:
     // Internal methods.
+    void addExternal(std::string extName, ExternalStream s);
+
     re::RE * prepareRE(re::RE * re);
 
     re::RE * processReferences(re::RE * re);

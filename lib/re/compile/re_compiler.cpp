@@ -222,7 +222,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
         if (adv > 0) {
             extFinal = mPB.createIndexedAdvance(extFinal, mMain.mIndexStream, adv);
         }
-        return Marker(mPB.createAnd(extFinal, marker.stream(), nameString), marker.offset());
+        return Marker(mPB.createAnd(extFinal, marker.stream(), "la_" + nameString), marker.offset());
     }
     if (marker.stream() == mMain.mIndexStream) {
         // We are at the beginning of a regular expression;
@@ -249,7 +249,7 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (extMarker.offset() == 0) {
         extStream = mPB.createAnd(mMain.mMatchable, extStream);
     }
-    return Marker(mPB.createAnd(nextPos, extStream, nameString), extMarker.offset());
+    return Marker(mPB.createAnd(nextPos, extStream, "m_" + nameString), extMarker.offset());
 }
 
 Marker RE_Block_Compiler::compileSeq(Seq * const seq, Marker marker) {

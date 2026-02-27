@@ -132,10 +132,7 @@ protected:
     // Implement any required checking/processing of null characters, determine the
     // basis streams, line break stream and the U8 index stream (if required).
     void grepPrologue(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
-    // Prepare external property and GCB streams, if required.
-    void prepareExternalStreams(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
     kernel::StreamSet * getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, kernel::StreamSet * MatchResults);
-    void addExternalStreams(kernel::PipelineBuilder & P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
     kernel::StreamSet * initialMatches(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * matchedLines(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
