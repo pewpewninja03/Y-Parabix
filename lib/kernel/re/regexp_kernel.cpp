@@ -21,7 +21,7 @@
 #include <re/analysis/capture-ref.h>
 #include <re/printer/re_printer.h>
 #include <re/toolchain/toolchain.h>
-#include <re/transforms/regex_passes.h>
+#include <re/unicode/regex_passes.h>
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/expand_permutes.h>
@@ -70,6 +70,11 @@ void RE_CompilerContext::addAlphabet(const cc::Alphabet * a, StreamSet * basis) 
 
 void RE_CompilerContext::addExternal(std::string extName, ExternalStream s) {
     mExternals.emplace(extName, s);
+}
+
+void RE_CompilerContext::setCombiningStream(kernel::StreamSet * s, RE_CombiningType k) {
+    mCombiningStream = s;
+    mCombiningType = k;
 }
 
 RE_Kernel::RE_Kernel(LLVMTypeSystemInterface & ts, RE_CompilerContext & ctxt, RE * re, StreamSet * results)
@@ -463,7 +468,8 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
         auto r = getLengthRange(asserted, mCtxt.mCodeUnitAlphabet);
         if (r.first == r.second) {
             // Fixed length lookaheads can be stored directly.
-            addExternal(name, ExternalStream{ExternalStreamKind::StartIndexed, r.second, r, assertedStrm});
+            unsigned lgth = static_cast<unsigned>(r.second);
+            addExternal(name, ExternalStream{ExternalStreamKind::StartIndexed, lgth, r, assertedStrm});
         } else {
             // Apply the logic of matching a lookahead with a unique prefix.  
             // Match positions for the lookahead (assertedStrm) are shifted back to the 
@@ -537,7 +543,7 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
             OrCombine(mPB, pfxStrm, matchEnd, maskStrm);
             StreamSet * endBack = mPB.CreateStreamSet(1);
             mPB.CreateKernelCall<IndexedShiftBack>(maskStrm, matchEnd, endBack);
-            mPB.CreateKernelCall<LongestSpan>(pfxLgth + pfxOffset, endOffset, pfxStrm, endBack, matchEnd, spans);
+            mPB.CreateKernelCall<LongestSpan>(pfxLgth + pfxOffset - 1, endOffset, pfxStrm, endBack, matchEnd, spans);
         } else {
             mPB.CreateKernelFamilyCall<FixedMatchSpansKernel>(minlgth, endOffset, matchEnd, spans);
         }

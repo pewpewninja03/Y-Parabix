@@ -112,27 +112,11 @@ public:
     unsigned RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Matches);
 
 protected:
-    // Functional components that may be required for grep searches,
-    // depending on search pattern, mode flags, external parameters and
-    // implementation strategy.
-    typedef uint32_t component_t;
-    enum class Component : component_t {
-        NoComponents = 0,
-        S2P = 1,
-        UTF8index = 2,
-        MoveMatchesToEOL = 4,
-        MatchSpans = 8,
-        U21 = 64
-    };
-    bool hasComponent(Component compon_set, Component c);
-    void setComponent(Component & compon_set, Component c);
     bool matchesToEOLrequired();
-
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
     // basis streams, line break stream and the U8 index stream (if required).
     void grepPrologue(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
-    kernel::StreamSet * getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, kernel::StreamSet * MatchResults);
     kernel::StreamSet * initialMatches(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * matchedLines(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
@@ -180,8 +164,6 @@ protected:
     re:: RE * mRE;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
-    Component mExternalComponents;
-    Component mInternalComponents;
     const cc::Alphabet * mIndexAlphabet;
     const cc::Alphabet * mLengthAlphabet;
     kernel::ExternalStreamTable mExternalTable;

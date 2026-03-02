@@ -3,7 +3,7 @@
  *  SPDX-License-Identifier: OSL-3.0
  */
 
-#include <re/transforms/regex_passes.h>
+#include <re/unicode/regex_passes.h>
 
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>

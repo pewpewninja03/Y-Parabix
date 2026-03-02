@@ -18,7 +18,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/Casting.h>
-#include <re/transforms/regex_passes.h>
+#include <re/unicode/regex_passes.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/core/idisa_target.h>
@@ -158,8 +158,6 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mNextFileToPrint(0),
     grepMatchFound(false),
     mGrepRecordBreak(GrepRecordBreakKind::LF),
-    mExternalComponents(static_cast<Component>(0)),
-    mInternalComponents(static_cast<Component>(0)),
     mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
     mU8index(nullptr),
@@ -197,14 +195,6 @@ EmitMatchesEngine::EmitMatchesEngine(BaseDriver &driver)
     if (mInvertMatches) {
         mColoring = false;
     }
-}
-
-bool GrepEngine::hasComponent(Component compon_set, Component c) {
-    return (static_cast<component_t>(compon_set) & static_cast<component_t>(c)) != 0;
-}
-
-void GrepEngine::GrepEngine::setComponent(Component & compon_set, Component c) {
-    compon_set = static_cast<Component>(static_cast<component_t>(compon_set) | static_cast<component_t>(c));
 }
 
 void GrepEngine::setRecordBreak(GrepRecordBreakKind b) {
@@ -302,8 +292,8 @@ void GrepEngine::initRE(re::RE * re) {
             mIndexAlphabet = &cc::Unicode;
         }
     }
-    // Don't attempt colorization with an RE that always fails.
-    if (isEmptySet(mRE)) {
+    // Don't attempt colorization with a zero-width RE.
+    if (getLengthRange(mRE, mLengthAlphabet).second == 0) {
         mColoring = false;
     }
 }
@@ -394,43 +384,6 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         StreamSet * U21_LB = P.CreateStreamSet(1);
         FilterByMask(P, mU8index, mLineBreakStream, U21_LB);
         mCtxt.setBarrier(U21_LB);
-    }
-}
-
-StreamSet * GrepEngine::getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, StreamSet * MatchResults) {
-
-    auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
-    if (mSpanNames.empty() == false) {
-        std::vector<StreamSet *> allSpans;
-        for (unsigned i = 0; i < mSpanNames.size(); i++) {
-            allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
-        }
-        if (allSpans.size() == 1) return allSpans[0];
-        StreamSet * mergedSpans = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
-        return mergedSpans;
-    }
-    if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
-        std::vector<StreamSet *> allSpans;
-        int i = 0;
-        if (alt->empty()) return MatchResults;
-        for (auto & e : *alt) {
-            auto a = getMatchSpan(P, e, MatchResults);
-            std::string ct = std::to_string(i);
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                P.captureBitstream(ct, a);
-            }
-            allSpans.push_back(a);
-            i++;
-        }
-        StreamSet * mergedSpans = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
-        return mergedSpans;
-    } else {
-        int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
-        StreamSet * spans = P.CreateStreamSet(1, 1);
-        P.CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
-        return spans;
     }
 }
 
@@ -1141,7 +1094,6 @@ mGrepRecordBreak(GrepRecordBreakKind::LF),
 mCaseInsensitive(false),
 mGrepDriver(driver),
 mMainMethod(nullptr) {
-    mColoring = false;
 }
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
@@ -1178,13 +1130,11 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
 
     StreamSet * MatchResults = E.CreateStreamSet();
-    auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
-    options->setBarrier(RecordBreakStream);
-    options->setRE(matchingRE);
-    options->addAlphabet(&cc::UTF8, BasisBits);
-    options->setResults(MatchResults);
-    options->addExternal("UTF8_index", u8index);
-    E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    RE_CompilerContext ctxt;
+    ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
+    ctxt.setIndexingContext(&cc::Unicode, u8index);
+    RE_PipelineBuilder RE_PB(E, ctxt);
+    RE_PB.matchSearchPipeline(matchingRE, MatchResults);
     StreamSet * MatchingRecords = E.CreateStreamSet();
     E.CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
 
@@ -1219,7 +1169,6 @@ mGrepRecordBreak(GrepRecordBreakKind::LF),
 mCaseInsensitive(false),
 mGrepDriver(driver),
 mMainMethod(nullptr) {
-    mColoring = false;
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine) :
@@ -1256,6 +1205,12 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
 
     const auto n = patterns.size();
 
+    RE_CompilerContext ctxt;
+    ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
+    ctxt.setIndexingContext(&cc::Unicode, u8index);
+    ctxt.setBarrier(RecordBreakStream);
+    RE_PipelineBuilder RE_PB(E, ctxt);
+
     for (unsigned i = 0; i < n; i++) {
         StreamSet * const MatchResults = E.CreateStreamSet();
 
@@ -1267,16 +1222,10 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         r = regular_expression_passes(r);
         r = toUTF8(r);
 
-        options->setBarrier(RecordBreakStream);
-        options->setRE(r);
-        options->addAlphabet(&cc::UTF8, BasisBits);
-        options->setResults(MatchResults);
+        RE_PB.matchSearchPipeline(r, MatchResults);
         const auto isExclude = patterns[i].first == re::PatternKind::Exclude;
-        if (i != 0 || !isExclude) {
-            options->setCombiningStream(isExclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultsSoFar);
-        }
-        options->addExternal("UTF8_index", u8index);
-        E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+        ctxt.setCombiningStream(resultsSoFar, isExclude ? RE_CombiningType::Exclude : RE_CombiningType::Include);
+        RE_PB.matchSearchPipeline(r, MatchResults);
         resultsSoFar = MatchResults;
     }
 

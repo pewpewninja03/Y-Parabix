@@ -44,6 +44,8 @@ public:
     void addAlphabet(const cc::Alphabet * a, kernel::StreamSet * basis);
 
     void addExternal(std::string extName, ExternalStream s);
+    
+    void setCombiningStream(kernel::StreamSet * combiningStream, RE_CombiningType k);
 
 private:
     const cc::Alphabet * mCodeUnitAlphabet;
