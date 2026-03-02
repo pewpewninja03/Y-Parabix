@@ -11,6 +11,7 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/pipeline/program_builder.h>
 #include <pablo/pablo_kernel.h>
+#include <re/transforms/name_intro.h>
 #include <map>
 
 using Alphabets = std::vector<std::pair<const cc::Alphabet *, kernel::StreamSet *>>;
@@ -48,7 +49,7 @@ private:
     const cc::Alphabet * mCodeUnitAlphabet;
     kernel::StreamSet * mCodeUnitStream;
     kernel::StreamSet * mBarrierStream;
-    const cc::Alphabet * mIndexingAlphabet;
+    const cc::Alphabet * mLengthAlphabet;
     kernel::StreamSet * mIndexStream;
     RE_CombiningType mCombiningType;
     kernel::StreamSet * mCombiningStream;
@@ -95,14 +96,35 @@ private:
     UCD::property_t mProperty;
 };
 
+class FixedMatchSpansKernel : public pablo::PabloKernel {
+public:
+    FixedMatchSpansKernel(LLVMTypeSystemInterface & ts, unsigned length, unsigned offset, kernel::StreamSet * MatchMarks, kernel::StreamSet * MatchSpans);
+protected:
+    void generatePabloMethod() override;
+    unsigned mMatchLength;
+    unsigned mOffset;
+};
+
+class LongestSpan : public pablo::PabloKernel {
+public:
+    LongestSpan(LLVMTypeSystemInterface & ts, unsigned pfxOffset, unsigned endOffset, 
+                kernel::StreamSet * pfxStrm, kernel:: StreamSet * endBack, kernel::StreamSet * matchEnd,
+                kernel::StreamSet * spans);
+protected:
+    void generatePabloMethod() override;
+private:
+    unsigned mPfxOffset;
+    unsigned mEndOffset;
+};
+
 class RE_PipelineBuilder {
 public:
     RE_PipelineBuilder(kernel::PipelineBuilder & P, RE_CompilerContext & ctxt) :
         mPB(P), mCtxt(ctxt), mCaseInsensitive(false), mMatchSpans(false) {}
     void setCaseInsensitive(bool caseless) {mCaseInsensitive = caseless;}
-    void setMatchSpans(bool wantspans) {mMatchSpans = wantspans;}
 
-    void createRE_Pipeline(re::RE * re, kernel::StreamSet * results);
+    void matchSearchPipeline(re::RE * re, kernel::StreamSet * results);
+    void matchSpanPipeline(re::RE * re, kernel::StreamSet * spans);
 
 protected:
     // Internal methods.
@@ -120,10 +142,14 @@ protected:
 
     void compileProperty(re::PropertyExpression * pe);
 
+    void getSpan(re::RE * re, kernel::StreamSet * spans);
+
 private:
     kernel::PipelineBuilder & mPB;
     RE_CompilerContext mCtxt;
     bool mCaseInsensitive;
     bool mMatchSpans;
+    re::RE * mRE;
+    re::UniquePrefixNamer mUPnamer;
 };
 

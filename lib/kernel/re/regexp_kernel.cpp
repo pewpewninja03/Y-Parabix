@@ -5,6 +5,7 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/bitwise/bixlogic.h>
 #include <kernel/streamutils/stream_shift.h>
+#include <kernel/streamutils/streams_merge.h>
 #include <kernel/unicode/boundary_kernels.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/UCD_property_kernel.h>
@@ -24,7 +25,6 @@
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/re_multiplex.h>
 #include <re/transforms/expand_permutes.h>
-#include <re/transforms/name_intro.h>
 #include <re/transforms/name_lookaheads.h>
 #include <re/transforms/reference_transform.h>
 #include <re/transforms/remove_nullable.h>
@@ -45,11 +45,12 @@ using namespace kernel;
 using namespace llvm;
 
 RE_CompilerContext::RE_CompilerContext() : mCodeUnitAlphabet(nullptr), mCodeUnitStream(nullptr),
-    mBarrierStream(nullptr), mIndexingAlphabet(nullptr), mIndexStream(nullptr),
+    mBarrierStream(nullptr), mLengthAlphabet(nullptr), mIndexStream(nullptr),
     mCombiningType(RE_CombiningType::None), mCombiningStream(nullptr) {}
 
 void RE_CompilerContext::setCodeUnitContext(const cc::Alphabet * a, StreamSet * basis) {
     mCodeUnitAlphabet = a;
+    mLengthAlphabet = a; // default
     mCodeUnitStream = basis;
     addAlphabet(a, basis);
 }
@@ -59,7 +60,7 @@ void RE_CompilerContext::setBarrier(kernel::StreamSet * s) {
 }
 
 void RE_CompilerContext::setIndexingContext(const cc::Alphabet * a, StreamSet * s) {
-    mIndexingAlphabet = a;
+    mLengthAlphabet = a;
     mIndexStream = s;
 }
 
@@ -288,6 +289,62 @@ CodePointMatchKernel::CodePointMatchKernel (LLVMTypeSystemInterface & ts, UCD::p
     mProperty(prop) {
 }
 
+FixedMatchSpansKernel::FixedMatchSpansKernel(LLVMTypeSystemInterface & ts, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
+: PabloKernel(ts, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
+{Binding{"MatchMarks", MatchMarks, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
+mMatchLength(length), mOffset(offset) {
+}
+
+void FixedMatchSpansKernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * marks = pb.createExtract(getInputStreamVar("MatchMarks"), pb.getInteger(0));
+    Var * matchSpansVar = getOutputStreamVar("MatchSpans");
+    // starts of all the matches
+    PabloAST * starts = pb.createLookahead(marks, mMatchLength + mOffset - 1);
+    // now find all consecutive positions within mMatchLength of any start.
+    unsigned consecutiveCount = 1;
+    PabloAST * consecutive = starts;
+    for (unsigned i = 1; i <= mMatchLength/2; i *= 2) {
+        consecutiveCount += i;
+        consecutive = pb.createOr(consecutive,
+                                  pb.createAdvance(consecutive, i),
+                                  "consecutive" + std::to_string(consecutiveCount));
+    }
+    if (consecutiveCount < mMatchLength) {
+        consecutive = pb.createOr(consecutive,
+                                  pb.createAdvance(consecutive, mMatchLength - consecutiveCount),
+                                  "consecutive" + std::to_string(mMatchLength));
+    }
+    pb.createAssign(pb.createExtract(matchSpansVar, 0), consecutive);
+}
+
+void LongestSpan::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * pfxStrm = getInputStreamSet("pfxStrm")[0];
+    PabloAST * endBack = getInputStreamSet("endBack")[0];
+    PabloAST * matchEnd = getInputStreamSet("matchEnd")[0];
+    PabloAST * pfxStart = pb.createAnd(pb.createLookahead(pfxStrm, mPfxOffset), pb.createLookahead(endBack, mPfxOffset));
+    PabloAST * longestEnd = pb.createAnd(matchEnd, pb.createNot(endBack));
+    if (mEndOffset != 0) {
+        longestEnd = pb.createAdvance(longestEnd, 1);
+    }
+    PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {pfxStart, longestEnd});
+    writeOutputStreamSet("spans", std::vector<PabloAST*>{spans});
+}
+
+LongestSpan::LongestSpan (LLVMTypeSystemInterface & ts, unsigned pfxOffset, unsigned endOffset, 
+    StreamSet * pfxStrm, StreamSet * endBack, StreamSet * matchEnd, StreamSet * spans)
+: PabloKernel(ts, "LongestSpan_" + std::to_string(pfxOffset) + ":" + std::to_string(endOffset),
+// inputs
+{Binding{"pfxStrm", pfxStrm, FixedRate(1), LookAhead(pfxOffset)},
+ Binding{"endBack", endBack, FixedRate(1), LookAhead(pfxOffset)},
+ Binding{"matchEnd", matchEnd}},
+// output
+{Binding{"spans", spans}}), mPfxOffset(pfxOffset),  mEndOffset(endOffset) {
+    
+}
+
+
 void RE_PipelineBuilder::addExternal(std::string extName, ExternalStream s) {
     mCtxt.mExternals.emplace(extName, s);
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
@@ -431,51 +488,87 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
     }
 }
 
-void RE_PipelineBuilder::createRE_Pipeline(RE * re, StreamSet * results) {
-    RE * xfrmdRE = prepareRE(re);
-    //llvm::errs() << "After prepareRE:" << Printer_RE::PrintRE(xfrmdRE) << "\n";
-    xfrmdRE = processReferences(xfrmdRE);
-    if (mMatchSpans) {
-        xfrmdRE = spanFactoring(xfrmdRE);
+void RE_PipelineBuilder::matchSearchPipeline(RE * re, StreamSet * results) {
+    mRE = prepareRE(re);
+    mRE = processReferences(mRE);
+    prepareExternals(mRE);
+    mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, mRE, results);
+}
+
+void RE_PipelineBuilder::matchSpanPipeline(RE * re, StreamSet * spans) {
+    mRE = prepareRE(re);
+    mRE = processReferences(mRE);
+    mRE = spanFactoring(mRE);
+    prepareExternals(mRE);
+    getSpan(mRE, spans);
+}
+
+void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
+    if (Alt * a = dyn_cast<Alt>(re)) {
+        if (a->size() == 1) {
+            getSpan(a->front(), spans);
+        } else {
+            std::vector<StreamSet *> allSpans;
+            for (auto & e : *a) {
+                StreamSet * span = mPB.CreateStreamSet(1);
+                getSpan(e, span);
+                allSpans.push_back(span);
+            }
+            mPB.CreateKernelCall<StreamsMerge>(allSpans, spans);
+        }
+    } else if (Name * n = dyn_cast<Name>(re)) {
+        auto name = n->getFullName();
+        auto f = mCtxt.mExternals.find(name);
+        assert(f != mCtxt.Externals.end());
+        auto matchEnd = f->second.extStream;
+        auto minlgth = f->second.lgthRange.first;
+        auto endOffset = f->second.offset;
+        auto f2 = mUPnamer.mNameMap.find(name);
+        if (f2 != mUPnamer.mNameMap.end()) {
+            auto namedRE = f2->second;
+            re::Name * prefixName = cast<re::Name>(cast<re::Seq>(namedRE)->front());
+            std::string prefixStr = prefixName->getFullName();
+            auto fp = mCtxt.mExternals.find(prefixStr);
+            assert(fp != mCtxt.mExternals.end());
+            auto pfxStrm = fp->second.extStream;
+            auto pfxLgth = fp->second.lgthRange.first;
+            auto pfxOffset = fp->second.offset;
+            StreamSet * maskStrm = mPB.CreateStreamSet(1);
+            OrCombine(mPB, pfxStrm, matchEnd, maskStrm);
+            StreamSet * endBack = mPB.CreateStreamSet(1);
+            mPB.CreateKernelCall<IndexedShiftBack>(maskStrm, matchEnd, endBack);
+            mPB.CreateKernelCall<LongestSpan>(pfxLgth + pfxOffset, endOffset, pfxStrm, endBack, matchEnd, spans);
+        } else {
+            mPB.CreateKernelFamilyCall<FixedMatchSpansKernel>(minlgth, endOffset, matchEnd, spans);
+        }
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            auto spanName = name + "Span";
+            mPB.captureBitstream(spanName, spans);
+        }
+    } else {
+        StreamSet * matchEnd = mPB.CreateStreamSet(1);
+        mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, re, matchEnd);
+        auto minlgth = getLengthRange(re, mCtxt.mLengthAlphabet).first;
+        auto offset = grepOffset(re);
+        mPB.CreateKernelFamilyCall<FixedMatchSpansKernel>(minlgth, offset, matchEnd, spans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            auto spanName = "minlen" + std::to_string(minlgth + offset);
+            mPB.captureBitstream(spanName, spans);
+        }
     }
-    prepareExternals(xfrmdRE);
-    mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, xfrmdRE, results);
 }
 
 RE * RE_PipelineBuilder::spanFactoring(RE * re) {
-
     re::FixedSpanNamer FLnamer(mCtxt.mCodeUnitAlphabet);
     RE * xfrmedRE = FLnamer.transformRE(re);
-    auto lgth = getLengthRange(xfrmedRE, mCtxt.mCodeUnitAlphabet).first;
-    for (auto m : FLnamer.mNameMap) {
-        if (lgth > 0) {
-            auto spanName = m.first + "Span";
-            mCtxt.mSpanNames.push_back(spanName);
-        }
-    }
-    re::UniquePrefixNamer UPnamer;
-    xfrmedRE = UPnamer.transformRE(xfrmedRE);
-    for (auto m : UPnamer.mNameMap) {
-        std::string nameStr = m.first;
-        auto spanName = nameStr + "Span";
-        mCtxt.mSpanNames.push_back(spanName);
-    }
-    re::Repeated_CC_Seq_Namer RCCSnamer;
-    xfrmedRE = RCCSnamer.transformRE(xfrmedRE);
-    for (auto m : RCCSnamer.mNameMap) {
-        std::string nameStr = m.first;
-        auto f = RCCSnamer.mInfoMap.find(nameStr);
-        if (f != RCCSnamer.mInfoMap.end()) {
-            auto spanName = nameStr + "Span";
-            mCtxt.mSpanNames.push_back(spanName);
-        }
-    }
+    xfrmedRE = mUPnamer.transformRE(xfrmedRE);
+    //re::Repeated_CC_Seq_Namer RCCSnamer;
+    //xfrmedRE = mRCCSnamer.transformRE(xfrmedRE);
     return xfrmedRE;
 }
 
-
 RE * RE_PipelineBuilder::prepareRE(RE * re) {
-    const cc::Alphabet * lengthAlphabet = mCtxt.mIndexingAlphabet ? mCtxt.mIndexingAlphabet : mCtxt.mCodeUnitAlphabet;
+    const cc::Alphabet * lengthAlphabet = mCtxt.mLengthAlphabet;
     RE * xfrmedRE = expandPermutes(re);
     xfrmedRE = regular_expression_passes(xfrmedRE);
 
@@ -502,7 +595,7 @@ RE * RE_PipelineBuilder::prepareRE(RE * re) {
     }
 
     if (mCtxt.mCodeUnitAlphabet == &cc::UTF8) {
-        if (mCtxt.mIndexingAlphabet == nullptr) {
+        if (mCtxt.mLengthAlphabet == &cc::UTF8) {
             xfrmedRE = toUTF8(xfrmedRE);
         } else {
             xfrmedRE = toUTF8(xfrmedRE, /* useInternalNaming = */ true);

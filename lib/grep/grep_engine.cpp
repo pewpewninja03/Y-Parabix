@@ -436,12 +436,16 @@ StreamSet * GrepEngine::getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, St
 
 unsigned GrepEngine::RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     RE_PipelineBuilder RE_PB(P, mCtxt);
-    RE_PB.setMatchSpans(mColoring);
-    RE_PB.createRE_Pipeline(re, Results);
+
+    if (mColoring) {
+        RE_PB.matchSpanPipeline(re, Results);
+    } else {
+        RE_PB.matchSearchPipeline(re, Results);
+    }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         P.captureBitstream("RunGrep", Results);
     }
-    return grepOffset(re);
+    return mColoring ? 0 : grepOffset(re);
 }
 
 StreamSet * GrepEngine::initialMatches(kernel::PipelineBuilder & P, StreamSet * InputStream) {
@@ -463,7 +467,7 @@ StreamSet * GrepEngine::initialMatches(kernel::PipelineBuilder & P, StreamSet * 
 
 StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * initialMatches) {
     StreamSet * MatchedLineEnds = nullptr;
-    if (matchesToEOLrequired()) {
+    if (matchesToEOLrequired() || mColoring) {
         StreamSet * const MovedMatches = P.CreateStreamSet();
         P.CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
@@ -716,7 +720,6 @@ void GrepEngine::applyColorization(PipelineBuilder & P,
 void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * ByteStream) {
     StreamSet * Matches = initialMatches(E, ByteStream);
     StreamSet * MatchedLineEnds = matchedLines(E, Matches);
-    mColoring = false;
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
     StreamSet * MatchesByLine = nullptr;
     if (mColoring | hasContext) {
@@ -762,12 +765,12 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             E.captureByteData("Filtered", Filtered);
         }
-        StreamSet * MatchSpans;
-        MatchSpans = getMatchSpan(E, mRE, Matches);
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            E.captureBitstream("Matches", Matches);
-            E.captureBitstream("MatchSpans", MatchSpans);
-        }
+        StreamSet * MatchSpans = Matches;
+        //MatchSpans = getMatchSpan(E, mRE, Matches);
+        //if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        //    E.captureBitstream("Matches", Matches);
+        //   E.captureBitstream("MatchSpans", MatchSpans);
+        //}
         if (UnicodeIndexing) {
             StreamSet * u8index1 = E.CreateStreamSet(1, 1);
             E.CreateKernelCall<AddSentinel>(mU8index, u8index1);
@@ -1138,7 +1141,7 @@ mGrepRecordBreak(GrepRecordBreakKind::LF),
 mCaseInsensitive(false),
 mGrepDriver(driver),
 mMainMethod(nullptr) {
-
+    mColoring = false;
 }
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
@@ -1216,7 +1219,7 @@ mGrepRecordBreak(GrepRecordBreakKind::LF),
 mCaseInsensitive(false),
 mGrepDriver(driver),
 mMainMethod(nullptr) {
-
+    mColoring = false;
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine) :

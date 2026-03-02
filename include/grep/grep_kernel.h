@@ -494,15 +494,6 @@ private:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
-class FixedMatchSpansKernel : public pablo::PabloKernel {
-public:
-    FixedMatchSpansKernel(LLVMTypeSystemInterface & ts, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
-protected:
-    void generatePabloMethod() override;
-    unsigned mMatchLength;
-    unsigned mOffset;
-};
-
 //
 //  Given an input stream consisting of spans of 1s, return a pair of
 //  streams marking the starts of each span as well as the follows.

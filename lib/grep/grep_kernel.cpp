@@ -670,35 +670,6 @@ InvertMatchesKernel::InvertMatchesKernel(LLVMTypeSystemInterface & ts, StreamSet
 
 }
 
-FixedMatchSpansKernel::FixedMatchSpansKernel(LLVMTypeSystemInterface & ts, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
-: PabloKernel(ts, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
-{Binding{"MatchMarks", MatchMarks, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
-mMatchLength(length), mOffset(offset) {
-}
-
-void FixedMatchSpansKernel::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    PabloAST * marks = pb.createExtract(getInputStreamVar("MatchMarks"), pb.getInteger(0));
-    Var * matchSpansVar = getOutputStreamVar("MatchSpans");
-    // starts of all the matches
-    PabloAST * starts = pb.createLookahead(marks, mMatchLength + mOffset - 1);
-    // now find all consecutive positions within mMatchLength of any start.
-    unsigned consecutiveCount = 1;
-    PabloAST * consecutive = starts;
-    for (unsigned i = 1; i <= mMatchLength/2; i *= 2) {
-        consecutiveCount += i;
-        consecutive = pb.createOr(consecutive,
-                                  pb.createAdvance(consecutive, i),
-                                  "consecutive" + std::to_string(consecutiveCount));
-    }
-    if (consecutiveCount < mMatchLength) {
-        consecutive = pb.createOr(consecutive,
-                                  pb.createAdvance(consecutive, mMatchLength - consecutiveCount),
-                                  "consecutive" + std::to_string(mMatchLength));
-    }
-    pb.createAssign(pb.createExtract(matchSpansVar, 0), consecutive);
-}
-
 SpansToMarksKernel::SpansToMarksKernel(LLVMTypeSystemInterface & ts, StreamSet * Spans, StreamSet * Marks)
 : PabloKernel(ts, "SpansToMarksKernel",
 {Binding{"Spans", Spans}}, {Binding{"Marks", Marks}}) {}
