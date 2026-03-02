@@ -199,7 +199,19 @@ void RE_Kernel::generatePabloMethod() {
     //}
     pb.createAssign(final_matches, matchResult);
     Var * const output = pb.createExtract(getOutputStreamVar("matches"), pb.getInteger(0));
-    pb.createAssign(output, final_matches);
+
+    PabloAST * value = nullptr;
+    if (mContext.mCombiningType == RE_CombiningType::None) {
+        value = final_matches;
+    } else {
+        PabloAST * toCombine = pb.createExtract(getInputStreamVar("toCombine"), pb.getInteger(0));
+        if (mContext.mCombiningType == RE_CombiningType::Exclude) {
+            value = pb.createAnd(toCombine, pb.createNot(final_matches), "toCombine");
+        } else {
+            value = pb.createOr(toCombine, final_matches, "toCombine");
+        }
+    }
+    pb.createAssign(output, value);
 }
 
 PabloAST * matchDistanceCheck(PabloBuilder & b, unsigned distance, std::vector<PabloAST *> basis1, std::vector<PabloAST *> basis2) {

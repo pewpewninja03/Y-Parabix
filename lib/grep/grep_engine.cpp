@@ -285,7 +285,8 @@ void GrepEngine::initRE(re::RE * re) {
         bool useIndexedUTF8 = !UnicodeIndexing
                                     && !hasReference(mRE) 
                                     && !hasGraphemeClusterBoundary(mRE)
-                                    && (maxLookaheadLength(re, &cc::Unicode) <= 1);
+                                    && (maxLookaheadLength(re, &cc::Unicode) <= 1)
+                                    && !mColoring;
         if (useIndexedUTF8) {
             mIndexAlphabet = &cc::UTF8;
         } else {
@@ -411,9 +412,14 @@ StreamSet * GrepEngine::initialMatches(kernel::PipelineBuilder & P, StreamSet * 
         StreamSet * Results = P.CreateStreamSet(1, 1);
         SpreadByMask(P, u8index1, Matches, Results);
         Matches = Results;
+        if (mColoring) {
+            StreamSet * ResultSpans = P.CreateStreamSet(1, 1);
+            P.CreateKernelCall<U8Spans>(Results, u8index1, ResultSpans);
+            Matches = ResultSpans;
+        }
     }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        P.captureBitstream("ICgrep kernel matches", Matches);
+        P.captureBitstream("ICgrep matches", Matches);
     }
     return Matches;
 }
@@ -719,26 +725,6 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
             E.captureByteData("Filtered", Filtered);
         }
         StreamSet * MatchSpans = Matches;
-        //MatchSpans = getMatchSpan(E, mRE, Matches);
-        //if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        //    E.captureBitstream("Matches", Matches);
-        //   E.captureBitstream("MatchSpans", MatchSpans);
-        //}
-        if (UnicodeIndexing) {
-            StreamSet * u8index1 = E.CreateStreamSet(1, 1);
-            E.CreateKernelCall<AddSentinel>(mU8index, u8index1);
-            StreamSet * ExpandedSpans = E.CreateStreamSet(1, 1);
-            SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                E.captureBitstream("ExpandedSpans", ExpandedSpans);
-            }
-            StreamSet * FilledSpans = E.CreateStreamSet(1, 1);
-            E.CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
-            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                E.captureBitstream("FilledSpans", FilledSpans);
-            }
-            MatchSpans = FilledSpans;
-        }
 
         StreamSet * FilteredMatchSpans = E.CreateStreamSet(1, 1);
         FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
