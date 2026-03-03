@@ -164,8 +164,6 @@ struct LookaheadLengthInspector : public RE_Inspector {
         if (a->getKind() == Assertion::Kind::LookAhead) {
             auto r = getLengthRange(a->getAsserted(), mLengthAlphabet);
             mMaxLA = std::max(mMaxLA, static_cast<unsigned>(r.second));
-        } else if (a->getKind() == Assertion::Kind::Boundary) {
-            mMaxLA = std::max(mMaxLA, 1U);
         }
     }
 

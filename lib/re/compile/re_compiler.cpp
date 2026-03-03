@@ -317,18 +317,6 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
             lb = mPB.createAnd(mPB.createNot(lb), mMain.mIndexStream);
         }
         return Marker(mPB.createAnd(marker.stream(), lb, "lookback"), marker.offset());
-    } else if (a->getKind() == Assertion::Kind::Boundary) {
-        Marker cond = compile(asserted);
-        if (LLVM_LIKELY(cond.offset() == 0)) {
-            Marker postCond = AdvanceMarker(cond, 1);
-            PabloAST * boundaryCond = mPB.createXor(cond.stream(), postCond.stream());
-            if (a->getSense() == Assertion::Sense::Negative) {
-                boundaryCond = mPB.createNot(boundaryCond);
-            }
-            Marker fbyte = AdvanceMarker(marker, 1);
-            return Marker(mPB.createAnd(fbyte.stream(), boundaryCond, "boundary"), 1);
-        }
-        else UnsupportedRE("Unsupported boundary assertion");
     }
     // Lookahead assertions.
     auto lengths = lengthRange(asserted);
