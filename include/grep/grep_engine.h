@@ -24,7 +24,6 @@ namespace re { class CC; class Name; class RE; }
 namespace llvm { namespace cl { class OptionCategory; } }
 namespace kernel { class PipelineBuilder; }
 namespace kernel { class StreamSet; }
-namespace kernel { class ExternalStreamObject; }
 class BaseDriver;
 
 namespace grep {
@@ -166,7 +165,6 @@ protected:
     std::string mFileSuffix;
     const cc::Alphabet * mIndexAlphabet;
     const cc::Alphabet * mLengthAlphabet;
-    kernel::ExternalStreamTable mExternalTable;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
