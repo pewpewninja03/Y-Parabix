@@ -327,6 +327,10 @@ private:
     const std::vector<codepoint_t> mExplicitCps;
 };
 
+PropertyObject * get_G_PropertyObject();
+
+PropertyObject * get_W_PropertyObject();
+
 class BoundaryPropertyObject final : public PropertyObject {
 public:
     static inline bool classof(const PropertyObject * p) {
@@ -336,11 +340,15 @@ public:
         return false;
     }
 
+    re::RE * GetBoundaryExpression();
+    void SetBoundaryExpression(re::RE * e);
     BoundaryPropertyObject(UCD::property_t p)
-    : PropertyObject(p, ClassTypeId::BoundaryProperty)
-    {
-
-    }
+        : PropertyObject(p, ClassTypeId::BoundaryProperty)
+        , mBoundaryExpression(nullptr)
+        {
+        }
+private:
+    re::RE * mBoundaryExpression;
 };
 
 class ObsoletePropertyObject final : public PropertyObject {

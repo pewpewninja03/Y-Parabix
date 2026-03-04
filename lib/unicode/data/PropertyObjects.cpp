@@ -641,6 +641,27 @@ const UnicodeSet StringOverridePropertyObject::GetCodepointSetMatchingPattern(re
     return s;
 }
 
+
+re::RE * BoundaryPropertyObject::GetBoundaryExpression() {
+    return mBoundaryExpression;
+}
+
+namespace G_ns {
+    static BoundaryPropertyObject property_object{g};
+}
+
+PropertyObject * get_G_PropertyObject() {  return & G_ns::property_object; }
+
+namespace W_ns {
+    static BoundaryPropertyObject property_object{w};
+}
+
+PropertyObject * get_W_PropertyObject() {  return & W_ns::property_object; }
+
+void BoundaryPropertyObject::SetBoundaryExpression(re::RE * e) {
+    mBoundaryExpression = e;
+}
+
 const std::string & ObsoletePropertyObject::GetPropertyValueGrepString() {
     report_fatal_error(Twine("Property ") + UCD::getPropertyFullName(the_property) + " is obsolete.");
 }

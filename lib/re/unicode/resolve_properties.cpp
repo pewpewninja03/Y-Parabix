@@ -67,13 +67,16 @@ RE * PropertyResolver::resolveCC (std::string value, bool is_negated) {
 
 RE * PropertyResolver::resolveBoundary (std::string val, bool is_negated) {
     RE * resolved = nullptr;
-    if (mPropCode == UCD::g) { // Grapheme cluster boundary
-        resolved = generateGraphemeClusterBoundaryRule();
-        if (is_negated) {
-            resolved = makeDiff(makeAny(), resolved);
+    if (BoundaryPropertyObject * b = dyn_cast<BoundaryPropertyObject>(mPropObj)) {
+        resolved = b->GetBoundaryExpression();
+        if (resolved  == nullptr) {
+            if (mPropCode == UCD::g) { // Grapheme cluster boundary
+                resolved = generateGraphemeClusterBoundaryRule();
+            } else if (mPropCode == UCD::w) { // Unicode word boundary
+                resolved = generateWordBoundaryRule();
+            }
+            b->SetBoundaryExpression(resolved);
         }
-    } else if (mPropCode == UCD::w) { // Unicode word boundary
-        resolved = generateWordBoundaryRule();
         if (is_negated) {
             resolved = makeDiff(makeAny(), resolved);
         }
