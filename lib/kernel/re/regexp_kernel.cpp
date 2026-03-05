@@ -643,6 +643,8 @@ void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
             auto b_basis = b_mpx->getMultiplexedCCs();
             StreamSet * b_Classes = P.CreateStreamSet(b_basis.size());
             P.CreateKernelFamilyCall<CharClassesKernel>(b_basis, BasisBits, b_Classes);
+            re::LookAheadNamer LA;
+            bRE = LA.transformRE(bRE);
             //
             RE_CompilerContext ctxt;
 
@@ -652,7 +654,8 @@ void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
                 FilterByMask(P, IndexStream, b_Classes, b_Classes_Uindexed);
                 ctxt.setCodeUnitContext(b_mpx, b_Classes_Uindexed);
                 StreamSet * U_property = P.CreateStreamSet(1);
-                P.CreateKernelFamilyCall<RE_Kernel>(ctxt, bRE, U_property);
+                RE_PipelineBuilder RE_PB(P, ctxt);
+                RE_PB.matchSearchPipeline(bRE, U_property);
                 SpreadByMask(P, IndexStream, U_property, PropertyStream);
             } else {
                 if (BasisBits->getNumElements() < 21) {
@@ -664,7 +667,8 @@ void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
                 if (IndexStream) {
                     ctxt.setIndexingContext(&cc::Unicode, IndexStream);
                 }
-                P.CreateKernelFamilyCall<RE_Kernel>(ctxt, bRE, PropertyStream);
+                RE_PipelineBuilder RE_PB(P, ctxt);
+                RE_PB.matchSearchPipeline(bRE, PropertyStream);
             }
         } else if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
             std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
