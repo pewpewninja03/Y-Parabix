@@ -4,6 +4,8 @@
 #include <kernel/core/streamset.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/bitwise/bixlogic.h>
+#include <kernel/streamutils/deletion.h>
+#include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/streams_merge.h>
 #include <kernel/unicode/boundary_kernels.h>
@@ -370,62 +372,16 @@ void RE_PipelineBuilder::addExternal(std::string extName, ExternalStream s) {
 }
 
 void RE_PipelineBuilder::compileProperty(PropertyExpression * pe) {
+    StreamSet * pStrm  = mPB.CreateStreamSet(1);
+    UnicodePropertyLogic(mPB, pe, mCtxt.mCodeUnitStream, mCtxt.mIndexStream, pStrm);
     std::string propName = pe->getFullName();
     if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
-        StreamSet * pStrm  = mPB.CreateStreamSet(1);
-        mPB.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(pe, mCtxt.mCodeUnitStream, pStrm);
         addExternal(propName, ExternalStream{ExternalStreamKind::FixedLength, 0, {1, 1}, pStrm});
     } else { //PropertyExpression::Kind::Boundary
         UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
-        if (prop == UCD::g) {
-            re::RE * GCB_RE = re::generateGraphemeClusterBoundaryRule();
-            const auto GCB_Sets = re::collectCCs(GCB_RE, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
-            auto GCB_mpx = cc::makeMultiplexedAlphabet("GCB_mpx", GCB_Sets);
-            GCB_RE = transformCCs(GCB_mpx, GCB_RE, re::NameTransformationMode::TransformDefinition);
-            auto GCB_basis = GCB_mpx->getMultiplexedCCs();
-            StreamSet * const GCB_Classes = mPB.CreateStreamSet(GCB_basis.size());
-            mPB.CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, mCtxt.mCodeUnitStream, GCB_Classes);
-            // TO DO:  Consider setting up a local RE_CompilerContext 
-            mCtxt.addAlphabet(GCB_mpx, GCB_Classes);
-            StreamSet * GCB_strm = mPB.CreateStreamSet(1);
-            mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, GCB_RE, GCB_strm);
-            addExternal("\\b{g}", ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, GCB_strm});
-        } else if (prop == UCD::w) {
-            re::RE * WB_RE = re::generateWordBoundaryRule();
-            const auto WB_Sets = re::collectCCs(WB_RE, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
-            auto WB_mpx = cc::makeMultiplexedAlphabet("WB_mpx", WB_Sets);
-            WB_RE = transformCCs(WB_mpx, WB_RE, re::NameTransformationMode::TransformDefinition);
-            auto WB_basis = WB_mpx->getMultiplexedCCs();
-            StreamSet * const WB_Classes = mPB.CreateStreamSet(WB_basis.size());
-            // TO DO:  Consider setting up a local RE_CompilerContext 
-            mCtxt.addAlphabet(WB_mpx, WB_Classes);
-            mPB.CreateKernelFamilyCall<CharClassesKernel>(WB_basis, mCtxt.mCodeUnitStream, WB_Classes);
-            // TODO: Deal with lookahead 2 ???  --- use a RE_Pipeline call??
-            StreamSet * WB_strm = mPB.CreateStreamSet(1);
-            mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, WB_RE, WB_strm);
-            addExternal("\\b{w}", ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, WB_strm});
-        } else {  // Boundary expressions, except GCB, level 2 WB.
-            UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
-            if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
-                std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
-                std::vector<re::CC *> ccs;
-                for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
-                StreamSet * basis = mPB.CreateStreamSet(ccs.size());
-                mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, basis);
-                StreamSet * bStrm  = mPB.CreateStreamSet(1);
-                mPB.CreateKernelCall<BoundaryKernel>(basis, mCtxt.mIndexStream, bStrm);
-                addExternal(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, bStrm});
-            } else if (auto * obj = dyn_cast<UCD::BinaryPropertyObject>(propObj)) {
-                std::vector<re::CC *> ccs = {makeCC(obj->GetCodepointSet("Y"), &cc::Unicode)};
-                StreamSet * pStrm = mPB.CreateStreamSet(1);
-                mPB.CreateKernelFamilyCall<CharClassesKernel>(ccs, mCtxt.mCodeUnitStream, pStrm);
-                StreamSet * bStrm  = mPB.CreateStreamSet(1);
-                mPB.CreateKernelCall<BoundaryKernel>(pStrm, mCtxt.mIndexStream, bStrm);
-                addExternal(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, bStrm});
-            } else {
-                llvm::report_fatal_error("Expected enumerated property for boundary expression");
-            }
-        }
+        if (prop == UCD::g) propName = "\\b{g}";
+        else if (prop == UCD::w) propName = "\\b{w}";
+        addExternal(propName, ExternalStream{ExternalStreamKind::ZeroWidth, 1, {0, 0}, pStrm});
     }
 }
 
@@ -664,3 +620,67 @@ RE * RE_PipelineBuilder::processReferences(RE * re) {
     return re;
 }
 
+
+void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
+                          StreamSet * BasisBits, StreamSet * IndexStream, StreamSet * PropertyStream) {
+    std::string propName = pe->getFullName();
+    if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
+        P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(pe, BasisBits, PropertyStream);
+    } else { //PropertyExpression::Kind::Boundary
+        if (BasisBits->getNumElements() < 21) {
+            if (IndexStream == nullptr) {
+                llvm::report_fatal_error("index stream required for boundary properties without full Unicode basis");
+            }
+        }
+        UCD::property_t prop = static_cast<UCD::property_t>(pe->getPropertyCode());
+        UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
+        if (UCD::BoundaryPropertyObject * bObj = dyn_cast<UCD::BoundaryPropertyObject>(propObj)) {
+            // Grapheme Cluster and level 2 word boundaries \b{g}, \b{w} 
+            re::RE * bRE = bObj->GetBoundaryExpression();
+            const auto b_Sets = re::collectCCs(bRE, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
+            auto b_mpx = cc::makeMultiplexedAlphabet("b_mpx", b_Sets);
+            bRE = transformCCs(b_mpx, bRE, re::NameTransformationMode::TransformDefinition);
+            auto b_basis = b_mpx->getMultiplexedCCs();
+            StreamSet * b_Classes = P.CreateStreamSet(b_basis.size());
+            P.CreateKernelFamilyCall<CharClassesKernel>(b_basis, BasisBits, b_Classes);
+            //
+            RE_CompilerContext ctxt;
+
+            if (IndexStream && (prop == UCD::w)) {
+                // Must switch to Unicode indexing for word boundaries.
+                StreamSet * b_Classes_Uindexed = P.CreateStreamSet(b_basis.size());
+                FilterByMask(P, IndexStream, b_Classes, b_Classes_Uindexed);
+                ctxt.setCodeUnitContext(b_mpx, b_Classes_Uindexed);
+                StreamSet * U_property = P.CreateStreamSet(1);
+                P.CreateKernelFamilyCall<RE_Kernel>(ctxt, bRE, U_property);
+                SpreadByMask(P, IndexStream, U_property, PropertyStream);
+            } else {
+                if (BasisBits->getNumElements() < 21) {
+                    ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
+                } else {
+                    ctxt.setCodeUnitContext(&cc::Unicode, BasisBits);
+                }
+                ctxt.addAlphabet(b_mpx, b_Classes);
+                if (IndexStream) {
+                    ctxt.setIndexingContext(&cc::Unicode, IndexStream);
+                }
+                P.CreateKernelFamilyCall<RE_Kernel>(ctxt, bRE, PropertyStream);
+            }
+        } else if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
+            std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
+            std::vector<re::CC *> ccs;
+            for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
+            StreamSet * enumBasis = P.CreateStreamSet(ccs.size());
+            P.CreateKernelFamilyCall<CharClassesKernel>(ccs, BasisBits, enumBasis);
+            P.CreateKernelCall<BoundaryKernel>(enumBasis, IndexStream, PropertyStream);
+        } else if (auto * obj = dyn_cast<UCD::BinaryPropertyObject>(propObj)) {
+            std::vector<re::CC *> ccs = {makeCC(obj->GetCodepointSet("Y"), &cc::Unicode)};
+            StreamSet * pStrm = P.CreateStreamSet(1);
+            P.CreateKernelFamilyCall<CharClassesKernel>(ccs, BasisBits, pStrm);
+            StreamSet * bStrm  = P.CreateStreamSet(1);
+            P.CreateKernelCall<BoundaryKernel>(pStrm, IndexStream, bStrm);
+        } else {
+            llvm::report_fatal_error("Unsupported property for boundary expression");
+        }
+    }
+}

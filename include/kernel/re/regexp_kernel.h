@@ -155,3 +155,11 @@ private:
     re::UniquePrefixNamer mUPnamer;
 };
 
+//
+// Create the kernels and pipeline necessary for any Unicode boundary or codepoint property.
+// BasisBits may either be 8 basis streams for UTF-8 or 21 streams for Unicode.
+// In the case of UTF-8, u8index is required as the IndexStream (otherwise provide nullptr)
+// .
+void UnicodePropertyLogic(kernel::PipelineBuilder & P, re::PropertyExpression * pe,
+                          kernel::StreamSet * BasisBits, kernel::StreamSet * IndexStream,
+                          kernel::StreamSet * PropertyStream);
