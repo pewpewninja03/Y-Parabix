@@ -161,8 +161,6 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
                 MatchResults = E.CreateStreamSet();
             }
 
-            auto options = std::make_unique<GrepKernelOptions>();
-
             auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
             r = regular_expression_passes(r);
             r = re::exclude_CC(r, breakCC);

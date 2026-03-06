@@ -29,7 +29,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <grep/grep_kernel.h>
+#include <kernel/re/regexp_kernel.h>
 #include <toolchain/toolchain.h>
 #include <fcntl.h>
 #include <iomanip>
@@ -113,7 +113,8 @@ TokenizerFunctionType tokenizerPipeline(CPUDriver & driver) {
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     
     StreamSet * GCB = P.CreateStreamSet(1, 1);
-    GraphemeClusterLogic(P, BasisBits, u8index, GCB);
+    auto GCB_PE = re::makePropertyExpression(re::PropertyExpression::Kind::Boundary, "g");
+    UnicodePropertyLogic(P, GCB_PE, BasisBits, u8index, GCB);
     SHOW_STREAM(GCB);
 
     StreamSet * tokenInsertMask = P.CreateStreamSet(1, 1);

@@ -22,66 +22,6 @@ namespace grep { class GrepEngine; }
 
 namespace kernel {
 
-
-enum class GrepCombiningType {None, Exclude, Include};
-class GrepKernelOptions {
-    friend class ICGrepKernel;
-public:
-    using Alphabets = std::vector<std::pair<const cc::Alphabet *, StreamSet *>>;
-    GrepKernelOptions(const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
-    void setBarrier(StreamSet * barrierStream);
-    void setIndexing(StreamSet * indexStream);
-    void setCombiningStream(GrepCombiningType t, StreamSet * toCombine);
-    void setResults(StreamSet * r);
-    void addExternal(std::string name,
-                     StreamSet * strm,
-                     unsigned offset = 0,
-                     std::pair<int, int> lengthRange = std::make_pair<int,int>(1, 1));
-    void addAlphabet(const cc::Alphabet * a, StreamSet * basis);
-    void setRE(re::RE * re);
-
-protected:
-    Bindings makeStreamSetInputBindings();
-    Bindings makeStreamSetOutputBindings();
-    std::string makeSignature();
-
-private:
-
-    const cc::Alphabet *        mCodeUnitAlphabet = nullptr;
-    StreamSet *                 mBarrierStream = nullptr;
-    StreamSet *                 mIndexStream = nullptr;
-    GrepCombiningType           mCombiningType = GrepCombiningType::None;
-    StreamSet *                 mCombiningStream = nullptr;
-    StreamSet *                 mResults = nullptr;
-    Bindings                    mExternalBindings;
-    std::vector<unsigned>       mExternalOffsets;
-    std::vector<std::pair<int, int>>       mExternalLengths;
-    Alphabets                   mAlphabets;
-    re::RE *                    mRE = nullptr;
-};
-
-
-class ICGrepKernel : public pablo::PabloKernel {
-public:
-    ICGrepKernel(LLVMTypeSystemInterface & ts,
-                 std::unique_ptr<GrepKernelOptions> && options);
-    llvm::StringRef getSignature() const override;
-    bool hasSignature() const override { return true; }
-    unsigned getOffset() {return mOffset;}
-protected:
-    void generatePabloMethod() override;
-private:
-    ICGrepKernel(LLVMTypeSystemInterface & ts,
-                 std::string && optionsSignature,
-                 Bindings && inputStreamSetBindings,
-                 Bindings && outputStreamSetBindings,
-                 std::unique_ptr<GrepKernelOptions> && options);
-private:
-    const std::unique_ptr<GrepKernelOptions>  mOptions;
-    const std::string                         mSignature;
-    const unsigned                            mOffset;
-};
-
 class MatchedLinesKernel : public pablo::PabloKernel {
 public:
     MatchedLinesKernel(LLVMTypeSystemInterface & ts, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);

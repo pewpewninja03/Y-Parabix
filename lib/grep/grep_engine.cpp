@@ -1200,11 +1200,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     for (unsigned i = 0; i < n; i++) {
         StreamSet * const MatchResults = E.CreateStreamSet();
 
-        auto options = std::make_unique<GrepKernelOptions>();
-
         auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
-        //r = re::exclude_CC(r, breakCC);
-        //r = resolveAnchors(r, breakCC);
         r = regular_expression_passes(r);
         r = toUTF8(r);
 
