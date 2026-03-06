@@ -363,6 +363,9 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
                 }
                 auto ahead = extMarker.offset() - marker.offset() + 1;
                 PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
+                if (a->getSense() == Assertion::Sense::Negative) {
+                    extLookahead = mPB.createNot(extLookahead);
+                }
                 return Marker(mPB.createAnd(marker.stream(), extLookahead), marker.offset());
             } else {
                 Marker following = AdvanceMarker(marker, 1);
@@ -370,6 +373,9 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
                 if (extLength == ext.maxLength()) {
                     auto ahead = extLength + extMarker.offset() - 1;
                     PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
+                    if (a->getSense() == Assertion::Sense::Negative) {
+                        extLookahead = mPB.createNot(extLookahead);
+                    }
                     return Marker(mPB.createAnd(following.stream(), extLookahead), 1);
                 }
             }

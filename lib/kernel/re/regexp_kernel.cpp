@@ -430,9 +430,15 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
             addExternal(name, ExternalStream{ExternalStreamKind::EndIndexed, offset, r, extStrm});
         }
     } else {
-        RE * asserted = llvm::cast<Assertion>(defn)->getAsserted();
+        Assertion * a = llvm::cast<Assertion>(defn);
+        RE * asserted = a->getAsserted();
         StreamSet * assertedStrm = mPB.CreateStreamSet(1);
         mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, asserted, assertedStrm);
+        if (a->getSense() == Assertion::Sense::Negative) {
+            StreamSet * negatedStrm = mPB.CreateStreamSet(1);
+            Invert(mPB, assertedStrm, negatedStrm);
+            assertedStrm = negatedStrm;
+        }
         auto r = getLengthRange(asserted, mCtxt.mCodeUnitAlphabet);
         if (r.first == r.second) {
             // Fixed length lookaheads can be stored directly.
