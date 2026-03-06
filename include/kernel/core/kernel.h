@@ -286,7 +286,9 @@ public:
         return mThreadLocalStateType != nullptr;
     }
 
-    LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
+    LLVM_READNONE bool allocatesInternalStreamSets() const {
+        return (mFlags & Kernel::KernelFlags::HasInternallyManagedStreamSet) != 0;
+    }
 
     virtual bool requiresExplicitPartialFinalStride() const;
 

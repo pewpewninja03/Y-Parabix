@@ -97,8 +97,6 @@ public:
 
     bool isCachable() const override;
 
-    LLVM_READNONE bool allocatesInternalStreamSets() const final;
-
     void setInputStreamSetAt(const unsigned i, StreamSet * const value) final;
 
     void setOutputStreamSetAt(const unsigned i, StreamSet * const value) final;

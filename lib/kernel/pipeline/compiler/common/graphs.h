@@ -281,6 +281,8 @@ enum BufferType : unsigned {
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
     , CrossesPhaseBoundary = 8192
+    // ------------------
+    , CanTrackBufferExpansionData = 16384
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -404,6 +406,10 @@ struct BufferNode {
 
     bool hasZeroElementsOrWidth() const {
         return (Locality == BufferLocality::ZeroElementsOrWidth);
+    }
+
+    bool canTrackBufferExpansionData() const {
+        return (Type & BufferType::CanTrackBufferExpansionData) != 0;
     }
 
     bool isDeallocatable() const {

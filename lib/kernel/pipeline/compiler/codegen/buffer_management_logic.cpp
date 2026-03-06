@@ -8,15 +8,15 @@ namespace kernel {
 void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const unsigned kernelId, const unsigned groupId) {
 
     bool hasAnyInternalStreamSets = false;
-    for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
+    for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+        const auto streamSet = target(output, mBufferGraph);
 
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth() || bn.isConstant())) {
             continue;
         }
 
-        const BufferPort & rd = mBufferGraph[e];
+        const BufferPort & rd = mBufferGraph[output];
         const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
 
@@ -48,6 +48,28 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         if (requiresLGVBA) {
             mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
+
+        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+            if (rd.isManaged() || bn.Buffer->isDynamic()) {
+                if (LLVM_UNLIKELY(mConsumerGraph[streamSet] != streamSet)) {
+                    continue;
+                }
+                const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
+
+                // segment num  0
+                // new capacity 1
+                // produced item count 2
+                // consumer processed item count [3,n)
+                IntegerType * const sizeTy = b.getSizeTy();
+                Type * const traceStructTy = ArrayType::get(sizeTy, numOfConsumers + 3);
+                FixedArray<Type *, 2> traceStruct;
+                traceStruct[0] = traceStructTy->getPointerTo(); // pointer to trace log
+                traceStruct[1] = sizeTy; // length of trace log
+                mTarget->addInternalScalar(StructType::get(b.getContext(), traceStruct),
+                                                   prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX, groupId);
+            }
+        }
+
 
     }
 
@@ -197,18 +219,26 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
 
     // and allocate any output buffers
 
+    Value * sharedHandle = nullptr;
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+        sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
+    }
+
     for (size_t phase = 1; phase < numOfPhases; ++phase) {
 
         const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
         const auto oneAfterLastPartition = PartitionPhaseBoundaries[phase];
         const auto firstKernelInCurrentPhase = std::max(FirstKernelInPartition[firstPartition], FirstKernel);
         const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (firstKernelInCurrentPhase <= oneAfterLastKernelInCurrentPhase);
         assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
 
         for (auto kernel = firstKernelInCurrentPhase; kernel < oneAfterLastKernelInCurrentPhase; ++kernel) {
 
             Value * reportCallback = nullptr;
-            Value * sharedHandle = nullptr;
+            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+                reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel);
+            }
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
@@ -232,7 +262,6 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                         }
                         if (nonLocal) {
                             Value * maxStrides = allocScale;
-                            b.CallPrintInt(std::to_string(streamSet) + ".maxStrides", maxStrides);
         //                    if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
         //                        maxStrides = b.CreateAdd(maxStrides, b.getSize(1));
         //                    }
@@ -252,17 +281,8 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                                 multiplier = b.CreateCeilUMulRational(maxStrides, R);
                             }
 
-                            b.CallPrintInt(std::to_string(streamSet) + ".multiplier", multiplier);
-
-                            if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-                                if (reportCallback == nullptr) {
-                                    reportCallback = generateBufferExpansionFunctionForCurrentKernel(b, kernel); assert (reportCallback);
-                                    b.CallPrintInt("reportCallback", reportCallback);
-                                    assert (getHandle());
-                                    sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
-                                }
+                            if (LLVM_UNLIKELY(bn.canTrackBufferExpansionData())) {
                                 const BufferPort & bp = mBufferGraph[output];
-                                assert (getKernel(kernel)->getOutputStreamSet(bp.Port.Number));
                                 buffer->allocateBuffer(b, multiplier, reportCallback, sharedHandle, b.getSize(bp.Port.Number));
                             } else {
                                 buffer->allocateBuffer(b, multiplier, nullptr, nullptr, nullptr);

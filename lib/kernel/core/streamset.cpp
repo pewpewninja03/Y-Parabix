@@ -605,7 +605,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     assert ("unspecified module" && b.getModule());
 
-    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+    const auto traceDynamicBuffer = (reportCallback != nullptr);
 
     name << "__ManagedDynamicBuffer";
     if (mLinear) {
@@ -619,9 +619,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
     Module * const m = b.getModule();
 
     auto & DL = m->getDataLayout();
-
     Function * f = m->getFunction(name.str());
-
     Type * const voidPtrTy = b.getVoidPtrTy();
 
     if (f == nullptr) {
@@ -816,6 +814,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         args[4] = pipelineHandle;
         args[5] = portNum;
     }
+
     b.CreateCall(f, args);
 }
 
@@ -1532,7 +1531,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
     Module * const m = b.getModule();
     auto & DL = m->getDataLayout();
 
-    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+    const auto traceDynamicBuffer = (reportCallback != nullptr);
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
@@ -1916,7 +1915,7 @@ void FdBackedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capa
     assert ("unspecified module" && b.getModule());
     assert (mLinear);
 
-    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+    const auto traceDynamicBuffer = (reportCallback != nullptr);
 
     name << "__FdBackedDynamicBuffer_initial_alloc" << mAddressSpace;
     if (LLVM_UNLIKELY(traceDynamicBuffer)) {
@@ -2157,7 +2156,7 @@ Value * FdBackedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produc
     Module * const m = b.getModule();
     auto & DL = m->getDataLayout();
 
-    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+    const auto traceDynamicBuffer = (reportCallback != nullptr);
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);

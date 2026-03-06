@@ -329,6 +329,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
             Value * const startOffset = mThreadLocalStartOffset[streamSet]; assert (startOffset);
             Value * const virtualBaseOffset = b.CreateSub(startOffset, offsetBytes);
             Value * const ba = b.CreateGEP(b.getInt8Ty(), mThreadLocalStreamSetBaseAddress, virtualBaseOffset);
+
             buffer->setBaseAddress(b, b.CreatePointerCast(ba, ptrTy));
             if (LLVM_UNLIKELY(CheckAssertions())) {
                 Value * size = b.CreateSub(mThreadLocalEndOffset[streamSet], mThreadLocalStartOffset[streamSet]);

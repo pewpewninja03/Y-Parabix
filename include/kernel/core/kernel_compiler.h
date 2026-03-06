@@ -348,7 +348,7 @@ protected:
 
     virtual void addBaseInternalProperties(KernelBuilder & b);
 
-    ScalarRef getThreadLocalScalarFieldPtr(KernelBuilder & b, llvm::Value * handle, const llvm::StringRef name) const;
+    ScalarRef getScalarFieldPtr(KernelBuilder & b, llvm::Value * handle,  const ScalarType type, const llvm::StringRef name) const;
 
 private:
 

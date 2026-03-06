@@ -152,7 +152,7 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(KernelBuilder & b, const unsig
     Value * handle = nullptr;
     if (LLVM_UNLIKELY(commonThreadLocal)) {
         assert (mCommonThreadLocalHandle);
-        handle = getThreadLocalScalarFieldPtr(b, mCommonThreadLocalHandle, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+        handle = getScalarFieldPtr(b, mCommonThreadLocalHandle, ScalarType::ThreadLocal, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
         assert (handle);
     } else {
         handle = getScalarFieldPtr(b, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;

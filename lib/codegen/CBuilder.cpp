@@ -471,7 +471,7 @@ Value * CBuilder::CreateMalloc(Value * size) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         __CreateAssert(CreateIsNotNull(ptr), "CreateMalloc: returned null pointer", {});
     }
-    CreateMemZero(ptr, size, 1);
+    // CreateMemZero(ptr, size, 1);
     return ptr;
 }
 
@@ -537,7 +537,7 @@ Value * CBuilder::CreateAlignedMalloc(Value * size, const unsigned alignment) {
                                              "to allocate %" PRIu64 " bytes at %" PRIu64 " alignment (out of memory?)",
                                              {size, align});
     }
-    CreateMemZero(ptr, size, alignment);
+    // CreateMemZero(ptr, size, alignment);
     return ptr;
 }
 
@@ -788,7 +788,7 @@ Value * CBuilder::CreateMUnmap(Value * addr, Value * len) {
     len = CreateZExtOrTrunc(len, sizeTy);
     addr = CreatePointerCast(addr, voidPtrTy);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = getIntPtrTy(DL);
         CreateAssert(len, "CreateMUnmap: length cannot be 0");
         Value * const addrValue = CreatePtrToInt(addr, intPtrTy);
@@ -815,7 +815,7 @@ Value * CBuilder::CreateMProtect(Value * addr, Value * size, const Protect prote
         // In particular, it can be used to change existing code mappings to be
         // writable. (NOTE: does not appear to be true on UBUNTU 16.04, 16.10 or 18.04)
 
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = getIntPtrTy(DL);
         Constant * const pageSize = ConstantInt::get(intPtrTy, getPageSize());
         CreateAssertZero(CreateURem(CreatePtrToInt(addr, intPtrTy), pageSize), "CreateMProtect: addr must be aligned to page boundary");
@@ -1529,6 +1529,9 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     Val = IRBuilder<>::CreateBitCast(Val, Ptr->getType()->getPointerElementType());
     #endif
+    auto & DL = getModule()->getDataLayout();
+    const auto len = getTypeSize(DL, Val->getType());
+    // CallPrintInt("u.store:ptr+" + std::to_string(len), Ptr);
     return IRBuilder<>::CreateStore(Val, Ptr, isVolatile);
 }
 
@@ -1539,7 +1542,7 @@ inline bool CBuilder::hasAddressSanitizer() const {
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, const char * Name) {
     assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
         Value * alignmentOffset = CreateURem(CreatePtrToInt(Ptr, intPtrTy), align);
@@ -1553,7 +1556,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, const Twine Name) {
     assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
         Value * alignmentOffset = CreateURem(CreatePtrToInt(Ptr, intPtrTy), align);
@@ -1567,7 +1570,7 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned Align, bool isVolatile, const Twine Name) {
     assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
         Value * alignmentOffset = CreateURem(CreatePtrToInt(Ptr, intPtrTy), align);
@@ -1581,12 +1584,15 @@ LoadInst * CBuilder::CreateAlignedLoad(Type * type, Value * Ptr, const unsigned 
 StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigned Align, bool isVolatile) {
     assert (Align > 0);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         ConstantInt * align = ConstantInt::get(intPtrTy, Align);
         Value * alignmentOffset = CreateURem(CreatePtrToInt(Ptr, intPtrTy), align);
         CreateAssertZero(alignmentOffset, "CreateAlignedStore: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
+    auto & DL = getModule()->getDataLayout();
+    const auto len = getTypeSize(DL, Val->getType());
+    // CallPrintInt("a.storeptr+" + std::to_string(len), Ptr);
     StoreInst * SI = CreateStore(Val, Ptr, isVolatile);
     SI->setAlignment(AlignType{Align});
     return SI;
@@ -1616,7 +1622,7 @@ CallInst * CBuilder::CreateMemMove(Value * Dst, Value * Src, Value *Size, const 
         // If the call to this intrinisic has an alignment value that is not 0 or 1, then the caller
         // guarantees that both the source and destination pointers are aligned to that boundary.
         if (Align > 1) {
-            DataLayout DL(getModule());
+            auto & DL = getModule()->getDataLayout();
             IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
             Value * intSrc = CreatePtrToInt(Src, intPtrTy);
             Value * intDst = CreatePtrToInt(Dst, intPtrTy);
@@ -1638,7 +1644,7 @@ CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, const uns
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Src, Size, "CreateMemCpy: Src");
         CheckAddress(Dst, Size, "CreateMemCpy: Dst");
-        DataLayout DL(getModule());
+        auto & DL = getModule()->getDataLayout();
         IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
         Value * const intSrc = CreatePtrToInt(Src, intPtrTy);
         Value * const intDst = CreatePtrToInt(Dst, intPtrTy);
@@ -1655,6 +1661,10 @@ CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, const uns
         Value * const nonOverlapping = CreateOr(srcEndsBeforeDst, dstEndsBeforeSrc);
         CreateAssert(nonOverlapping, "CreateMemCpy: overlapping ranges is undefined");
     }
+    auto & DL = getModule()->getDataLayout();
+    Value * const intDst = CreatePtrToInt(Dst, Size->getType());
+//    CallPrintInt("memcpystart", intDst);
+//    CallPrintInt("memcpyend", CreateAdd(intDst, Size));
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
     return IRBuilder<>::CreateMemCpy(Dst, AlignType{Align}, Src, AlignType{Align}, Size, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
 #else
@@ -1667,7 +1677,7 @@ CallInst * CBuilder::CreateMemSet(Value * Ptr, Value * Val, Value * Size, const 
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         CheckAddress(Ptr, Size, "CreateMemSet");
         if (Align > 1) {
-            DataLayout DL(getModule());
+            auto & DL = getModule()->getDataLayout();
             IntegerType * const intPtrTy = DL.getIntPtrType(getContext());
             Value * intPtr = CreatePtrToInt(Ptr, intPtrTy);
             ConstantInt * align = ConstantInt::get(intPtrTy, Align);

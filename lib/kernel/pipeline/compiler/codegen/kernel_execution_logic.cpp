@@ -683,7 +683,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers && hasManagedOutput)) {
-        addNextArg(mBufferExpansionFunction);
+        addNextArg(mBufferExpansionFunction); assert (mBufferExpansionFunction);
         addNextArg(b.CreatePointerCast(getHandle(), voidPtrTy));
     }
 

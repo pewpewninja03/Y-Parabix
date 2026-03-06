@@ -183,10 +183,12 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         break;
                     case AttrId::SharedManagedBuffer:
                         bp.Flags |= BufferPortType::IsShared;
+                        bn.Type |= BufferType::CanTrackBufferExpansionData;
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ManagedBuffer:
                         bp.Flags |= BufferPortType::IsManaged;
+                        bn.Type |= BufferType::CanTrackBufferExpansionData;
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ReturnedBuffer:
@@ -935,37 +937,45 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
         }
 
         StreamSetBuffer * outputBuffer = nullptr;
+
+        const auto src = mConsumerGraph[streamSet];
+
+        assert (src == 0 || (FirstStreamSet <= src && src <= streamSet));
         if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) > 0)) {
             const auto src = parent(streamSet, InOutStreamSetReplacement);
             assert (FirstStreamSet <= src && src < streamSet);
             const auto & srcNode = mBufferGraph[src];
-            bn.Buffer = srcNode.Buffer;
-            continue;
-        } else if (LLVM_UNLIKELY(bn.isTruncated())) {
-            continue;
-        } else if (LLVM_UNLIKELY(bn.isConstant())) {
-            const auto ss = cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
-            outputBuffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
-        } else {
-            assert (!isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
-            const auto producerOutput = in_edge(streamSet, mBufferGraph);
-            const BufferPort & producerRate = mBufferGraph[producerOutput];
-            const Binding & output = producerRate.Binding;
-
-            if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
-                assert (!bn.isManagedOutput());
-                outputBuffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
-            #ifndef DISABLE_FD_BACKED_BUFFERS
-            } else if (bn.crossesPhaseBoundary()) {
-                outputBuffer = new FdBackedDynamicBuffer(streamSet, b, output.getType(), 0U);
-            #endif
-            } else { // is internal buffer
-                assert (bn.IsLinear || !bn.isReturned());
-                outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
+            outputBuffer = srcNode.Buffer;
+        } else if (LLVM_UNLIKELY(src && src != streamSet)) {
+            assert (src < streamSet);
+            const auto & srcNode = mBufferGraph[src];
+            outputBuffer = srcNode.Buffer;
+        } else if (LLVM_LIKELY(!bn.isTruncated())) {
+            if (LLVM_UNLIKELY(bn.isConstant())) {
+                const auto ss = cast<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship);
+                outputBuffer = new RepeatingBuffer(streamSet, b, ss->getType(), ss->isUnaligned());
+            } else {
+                assert (!isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
+                const auto producerOutput = in_edge(streamSet, mBufferGraph);
+                const BufferPort & producerRate = mBufferGraph[producerOutput];
+                const Binding & output = producerRate.Binding;
+                if (bn.isUnowned() || bn.isThreadLocal() || bn.hasZeroElementsOrWidth()) {
+                    assert (!bn.isManagedOutput());
+                    outputBuffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
+                #ifndef DISABLE_FD_BACKED_BUFFERS
+                } else if (bn.crossesPhaseBoundary()) {
+                    bn.Type |= BufferType::CanTrackBufferExpansionData;
+                    outputBuffer = new FdBackedDynamicBuffer(streamSet, b, output.getType(), 0U);
+                #endif
+                } else { // is internal buffer
+                    assert (bn.IsLinear || !bn.isReturned());
+                    bn.Type |= BufferType::CanTrackBufferExpansionData;
+                    outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
+                }
             }
+            assert ("missing buffer?" && outputBuffer);
+            mInternalBuffers.emplace_back(outputBuffer);
         }
-        assert ("missing buffer?" && outputBuffer);
-        mInternalBuffers.emplace_back(outputBuffer);
         bn.Buffer = outputBuffer;
     }
 

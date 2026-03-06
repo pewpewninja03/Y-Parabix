@@ -135,8 +135,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     readExternalConsumerItemCounts(b);
 
-    Value * const threadStateArray = b.CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b.getCacheAlignment());
-    assert (threadStateArray->getType() == threadStructTy->getPointerTo());
+    Constant * const threadStateTySize = b.getSize(b.getTypeSize(DL, threadStructTy));
+    Value * const threadStateArraySize = b.CreateMul(threadStateTySize, maximumNumOfThreads);
+
+    Value * threadStateArray = b.CreateAlignedMalloc(threadStateArraySize, b.getCacheAlignment());
+    b.CreateMemZero(threadStateArray, threadStateArraySize, b.getCacheAlignment());
+    threadStateArray = b.CreatePointerCast(threadStateArray, threadStructTy->getPointerTo());
+
     IntegerType * const intPtrTy = b.getIntPtrTy(DL);
 
     BasicBlock * const constructThread = b.CreateBasicBlock("constructThread");
