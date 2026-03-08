@@ -415,7 +415,7 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
     // The defining expression can now be compiled.  In most cases,
     // a single RE_Kernel can be used.   However, for lookahead
     // assertions, special treatment is required.
-    unsigned amt = NamedLookAheadAmount(n, *mCtxt.mCodeUnitAlphabet);
+    unsigned amt = NamedLookAheadAmount(n, *mCtxt.mLengthAlphabet);
     unsigned offset = grepOffset(defn);
     if (amt == 0) {
         // Not a lookahead; compile using a single kernel call.
@@ -439,7 +439,7 @@ void RE_PipelineBuilder::compileExternal(Name * n) {
             Invert(mPB, assertedStrm, negatedStrm);
             assertedStrm = negatedStrm;
         }
-        auto r = getLengthRange(asserted, mCtxt.mCodeUnitAlphabet);
+        auto r = getLengthRange(asserted, mCtxt.mLengthAlphabet);
         if (r.first == r.second) {
             // Fixed length lookaheads can be stored directly.
             unsigned lgth = static_cast<unsigned>(r.second);

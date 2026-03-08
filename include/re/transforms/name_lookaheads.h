@@ -12,15 +12,16 @@
 namespace re {
 
 /* Transform a regular expression r so that all lookahead
-   assertions of length more than 1 are transformed into
+   assertions of length more than maxLookahead are transformed into
    names to be externally defined. */
 class LookAheadNamer final : public NameIntroduction {
 public:
-    LookAheadNamer(const cc::Alphabet & alpha = cc::Unicode) : 
-         NameIntroduction("LookAheadNamer"), mAlphabet(alpha) {}
+    LookAheadNamer(const cc::Alphabet & alpha = cc::Unicode, unsigned maxLookahead = 1) : 
+         NameIntroduction("LookAheadNamer"), mAlphabet(alpha), mMaxLookahead(maxLookahead) {}
     RE * transformAssertion (Assertion * a) override;
 private:
    const cc::Alphabet & mAlphabet;
+   const unsigned mMaxLookahead;
 };
 
 /*  Given any Name, retrieves the lookahead amount associated

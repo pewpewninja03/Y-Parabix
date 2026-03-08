@@ -28,8 +28,8 @@ RE * LookAheadNamer::transformAssertion (Assertion * a) {
             Name * pfx = makeName(prefixName, prefix);
             RE * xfrmd = makeSeq({pfx, suffix});
             return createName(Printer_RE::PrintRE(xfrmd), xfrmd);
-        } else {
-            // Fixed length RE
+        } else if (a_range.first > mMaxLookahead) {
+            // Fixed length RE 
             RE * a1 = a;
             if (x != x0) {
                 a1 = makeAssertion(x, a->getKind(), a->getSense());
