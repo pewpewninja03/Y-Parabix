@@ -212,13 +212,12 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     }
     auto ext = f->second;
     auto externalLength = ext.minLength();
-    auto extMarker = ext.marker();
-    //llvm::errs() << "External: " << nameString << ", lgth " << externalLength << ", offset " << extMarker.offset() << "\n"; 
+    //llvm::errs() << "External: " << nameString << ", lgth " << externalLength << ", offset " << ext.offset() << "\n"; 
     if (ext.fromFirst() && (externalLength == ext.maxLength())) {
         // We have an external marker whose offset is from the
         // start of the external matched string; adjust to final position.
-        auto adv = externalLength - 1 - extMarker.offset() + marker.offset();
-        PabloAST * extFinal = extMarker.stream();
+        auto adv = externalLength - 1 - ext.offset() + marker.offset();
+        PabloAST * extFinal = ext.stream();
         if (adv > 0) {
             extFinal = mPB.createIndexedAdvance(extFinal, mMain.mIndexStream, adv);
         }
@@ -228,15 +227,15 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
         // We are at the beginning of a regular expression;
         // the external marker should become the new marker,
         // if it is at a matchable position.
-        if (extMarker.offset() > 0) {
-            return extMarker;
+        if (ext.offset() > 0) {
+            return Marker(ext.stream(), ext.offset());
         }
-        return Marker(mPB.createAnd(mMain.mMatchable, extMarker.stream()), extMarker.offset());
+        return Marker(mPB.createAnd(mMain.mMatchable, ext.stream()), ext.offset());
     }
     if (externalLength != ext.maxLength()) {
         llvm::report_fatal_error(llvm::StringRef("Variable length external not in initial position:  ")  + nameString);
     }
-    auto external_adv = externalLength + extMarker.offset();
+    auto external_adv = externalLength + ext.offset();
     if (external_adv < marker.offset()) {
         llvm::report_fatal_error(llvm::StringRef("Negative advance amount in processing ")  + nameString);
     }
@@ -245,11 +244,11 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (adv > 0) {
         nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, adv);
     }
-    PabloAST * extStream = extMarker.stream();
-    if (extMarker.offset() == 0) {
+    PabloAST * extStream = ext.stream();
+    if (ext.offset() == 0) {
         extStream = mPB.createAnd(mMain.mMatchable, extStream);
     }
-    return Marker(mPB.createAnd(nextPos, extStream, "m_" + nameString), extMarker.offset());
+    return Marker(mPB.createAnd(nextPos, extStream, "m_" + nameString), ext.offset());
 }
 
 Marker RE_Block_Compiler::compileSeq(Seq * const seq, Marker marker) {
@@ -351,17 +350,16 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
         auto f = mMain.mExternalNameMap.find(nameString);
         if (f != mMain.mExternalNameMap.end()) {
             auto ext = f->second;
-            auto extMarker = ext.marker();
-            auto extStream = extMarker.stream();
+            auto extStream = ext.stream();
             if (ext.fromFirst()) {
                 // We have an external marker whose offset is from the
                 // start of the external matched string, enabling lookahead.
-                if ((marker.offset() == 1) && (extMarker.offset() == 0)) {
+                if ((marker.offset() == 1) && (ext.offset() == 0)) {
                     // The current marker is already aligned with the
                     // external marker.
                     return Marker(mPB.createAnd(marker.stream(), extStream), marker.offset());
                 }
-                auto ahead = extMarker.offset() - marker.offset() + 1;
+                auto ahead = ext.offset() - marker.offset() + 1;
                 PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
                 if (a->getSense() == Assertion::Sense::Negative) {
                     extLookahead = mPB.createNot(extLookahead);
@@ -371,7 +369,7 @@ Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
                 Marker following = AdvanceMarker(marker, 1);
                 auto extLength = ext.minLength();
                 if (extLength == ext.maxLength()) {
-                    auto ahead = extLength + extMarker.offset() - 1;
+                    auto ahead = extLength + ext.offset() - 1;
                     PabloAST * extLookahead = mPB.createLookahead(extStream, ahead);
                     if (a->getSense() == Assertion::Sense::Negative) {
                         extLookahead = mPB.createNot(extLookahead);

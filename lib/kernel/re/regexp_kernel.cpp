@@ -190,7 +190,7 @@ void RE_Kernel::generatePabloMethod() {
         if (ext.kind == ExternalStreamKind::StartIndexed) {
             fromFirst = true;
         }
-        re_compiler.addPrecompiled(name, RE_Compiler::ExternalStream(RE_Compiler::Marker(extStrm, offset), ext.lgthRange, fromFirst));
+        re_compiler.addPrecompiled(name, RE_Compiler::ExternalStream(extStrm, offset, ext.lgthRange, fromFirst));
     }
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());
     RE_Compiler::Marker matches = re_compiler.compileRE(mRE);

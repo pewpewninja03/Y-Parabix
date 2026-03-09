@@ -104,16 +104,18 @@ class RE_Compiler {
     //
     class ExternalStream {
     public:
-        ExternalStream(Marker m, std::pair<int, int> lgthRange, bool from_first = false) :
-            mMarker(m), mLengthRange(lgthRange), mFromFirst(from_first) {}
+        ExternalStream(pablo::PabloAST * s, unsigned offset, std::pair<int, int> lgthRange, bool from_first = false) :
+            mStream(s), mOffset(offset), mLengthRange(lgthRange), mFromFirst(from_first) {}
         ExternalStream & operator = (const ExternalStream &) = default;
+        pablo::PabloAST * stream() {return mStream;}
+        unsigned offset() {return mOffset;}
         std::pair<int, int> lengthRange() {return mLengthRange;}
         unsigned minLength() {return mLengthRange.first;}
         unsigned maxLength() {return mLengthRange.second;}
         bool fromFirst() {return mFromFirst;}
-        Marker & marker() {return mMarker;}
     private:
-        Marker mMarker;
+        pablo::PabloAST * mStream;
+        unsigned mOffset;
         std::pair<int, int> mLengthRange;
         bool mFromFirst;
     };
