@@ -78,12 +78,13 @@ class RE_Compiler {
 
     class Marker {
     public:
-        Marker(pablo::PabloAST * strm, unsigned offset = 0) : mOffset(offset), mStream(strm) {}
+        enum class Position : unsigned {AtEnd, AtNextChar};
+        Marker(pablo::PabloAST * strm, Position p = Position::AtEnd) : mPosition(p), mStream(strm) {}
         Marker & operator =(const Marker &) = default;
-        unsigned offset() {return mOffset;}
+        Position position() {return mPosition;}
         pablo::PabloAST * stream() {return mStream;}
     private:
-        unsigned mOffset;
+        Position mPosition;
         pablo::PabloAST * mStream;
     };
 
