@@ -78,7 +78,7 @@ class RE_Compiler {
 
     class Marker {
     public:
-        enum class Position : unsigned {AtEnd, AtNextChar};
+        enum class Position : unsigned {AtEnd, AtNextCodeUnit, AtNextChar};
         Marker(pablo::PabloAST * strm, Position p = Position::AtEnd) : mPosition(p), mStream(strm) {}
         Marker & operator =(const Marker &) = default;
         Position position() {return mPosition;}

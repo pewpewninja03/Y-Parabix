@@ -71,6 +71,7 @@ private:
     PabloAST * getCompiledCC(CC * cc);
 
     PabloAST * NextCharacter(Marker marker, PabloBuilder & pb);
+    PabloAST * NextCodeUnitStream(Marker marker, PabloBuilder & pb);
     void AlignMarkers(Marker & m1, Marker & m2);
 
 private:
@@ -83,7 +84,7 @@ private:
 using Position = RE_Compiler::Marker::Position;
 
 inline Marker RE_Block_Compiler::compile(RE * const re) {
-    return process(re, Marker(mMain.mIndexStream, Position::AtNextChar));
+    return process(re, Marker(mPB.createOnes(), Position::AtNextCodeUnit));
 }
 
 inline Marker RE_Block_Compiler::compile(RE * const re, Marker initialMarkers) {
@@ -144,45 +145,38 @@ Marker RE_Block_Compiler::process(RE * const re, Marker marker) {
 }
 
 Marker RE_Block_Compiler::compileAny(Marker marker) {
-    PabloAST * nextPos = marker.stream();
-    if (marker.position() == Position::AtEnd) {
-        nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
-    }
-    return Marker(mPB.createAnd(nextPos, mMain.mMatchable));
+    PabloAST * nextPos = NextCharacter(marker, mPB);
+    return Marker(mPB.createAnd(nextPos, mMain.mMatchable, "Any"));
 }
 
 Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     if (cc->empty()) {
         return Marker(mPB.createZeroes());
     }
-    PabloAST * nextPos = marker.stream();
     const cc::Alphabet * a = cc->getAlphabet();
-    if (marker.position() == Position::AtEnd) {
-        if ((a == &cc::Byte) || (a == mMain.mCodeUnitAlphabet)) {
-            nextPos = mPB.createAdvance(nextPos, 1);
+    PabloAST * ccStrm = getCompiledCC(cc);
+    if (ccStrm == nullptr) {
+        unsigned i = 0;
+        while (i < mMain.mAlphabets.size() && (a != mMain.mAlphabets[i])) i++;
+        if (i < mMain.mAlphabets.size()) {
+            //llvm::errs() << "Found alphabet: " << i << ", " << mMain.mAlphabets[i]->getName() << "\n";
+            ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc, mPB));
+            mLocallyCompiledCCs.emplace(cc, ccStrm);
+        } else if (a == &cc::Byte) {
+            //llvm::errs() << "Using alphabet 0: for Byte\n";
+            ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc, mPB));
+            mLocallyCompiledCCs.emplace(cc, ccStrm);
         } else {
-            nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
+            llvm::report_fatal_error(llvm::StringRef("Alphabet ") + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
         }
     }
-    PabloAST * precompiled = getCompiledCC(cc);
-    if (precompiled) {
-        return Marker(mPB.createAnd(nextPos, precompiled));
+    PabloAST * nextPos = nullptr;
+    if ((a == &cc::Byte) || (a == mMain.mCodeUnitAlphabet)) {
+        nextPos = NextCodeUnitStream(marker, mPB);
+    } else {
+        nextPos = NextCharacter(marker, mPB);
     }
-    unsigned i = 0;
-    while (i < mMain.mAlphabets.size() && (a != mMain.mAlphabets[i])) i++;
-    if (i < mMain.mAlphabets.size()) {
-        //llvm::errs() << "Found alphabet: " << i << ", " << mMain.mAlphabets[i]->getName() << "\n";
-        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc, mPB));
-        mLocallyCompiledCCs.emplace(cc, ccStrm);
-        return Marker(mPB.createAnd(nextPos, ccStrm));
-    }
-    if (a == &cc::Byte) {
-        //llvm::errs() << "Using alphabet 0: for Byte\n";
-        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc, mPB));
-        mLocallyCompiledCCs.emplace(cc, ccStrm);
-        return Marker(mPB.createAnd(nextPos, ccStrm));
-    }
-    llvm::report_fatal_error(llvm::StringRef("Alphabet ") + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
+    return Marker(mPB.createAnd(nextPos, ccStrm));
 }
 
 inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
@@ -239,19 +233,16 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     if (externalLength != ext.maxLength()) {
         llvm::report_fatal_error(llvm::StringRef("Variable length external not in initial position:  ")  + nameString);
     }
-    auto external_adv = externalLength + ext.offset();
-    if (marker.position() == Position::AtNextChar) {
-        external_adv--;
-    }
-    PabloAST * nextPos = marker.stream();
+    PabloAST * nextPos = NextCharacter(marker, mPB);
+    auto external_adv = externalLength + ext.offset() - 1;
     if (external_adv > 0) {
         nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, external_adv);
     }
-    PabloAST * extStream = ext.stream();
+    PabloAST * extStream = mPB.createAnd(nextPos, ext.stream(), "ext_" + nameString);
     if (ext.offset() == 0) {
-        return Marker(mPB.createAnd3(mMain.mMatchable, extStream, nextPos));
+        return Marker(mPB.createAnd(mMain.mMatchable, extStream));
     }
-    return Marker(mPB.createAnd(nextPos, extStream, "m_" + nameString), Position::AtNextChar);
+    return Marker(extStream, Position::AtNextChar);
 }
 
 Marker RE_Block_Compiler::compileSeq(Seq * const seq, Marker marker) {
@@ -295,18 +286,19 @@ Marker RE_Block_Compiler::compileAlt(Alt * const alt, const Marker base) {
         while (o >= accum.size()) {accum.push_back(mPB.createZeroes());}
         accum[o] = mPB.createOr(accum[o], m.stream(), "offset" + std::to_string(o) + "_alt");
     }
-    unsigned max_offset = accum.size() - 1;
-    if ((max_offset > 0) && !isa<Zeroes>(accum[0])) {
-        PabloAST * adjusted = ScanToIndex(mPB.createAdvance(accum[0], 1), mMain.mIndexStream, mPB);
-        accum[1] = mPB.createOr(accum[1], adjusted);
-    }
-    for (unsigned offset = 1; offset < max_offset; offset++) {
-        if (!isa<Zeroes>(accum[offset])) {
-            PabloAST * adjusted = mPB.createIndexedAdvance(accum[offset], mMain.mIndexStream, max_offset - offset);
-            accum[max_offset] = mPB.createOr(accum[max_offset], adjusted);
+    if (accum.size() == 1) {
+        // Only have accumulated AtEnd results.
+        return Marker(accum[0]);
+    } else {
+        PabloAST * accumNext = mPB.createIndexedAdvance(accum[0], mMain.mIndexStream, 1);
+        if (!isa<Zeroes>(accum[1])) {
+            accumNext = mPB.createOr(accumNext, ScanToIndex(accum[1], mMain.mIndexStream, mPB));
         }
+        if (accum.size() == 3) {
+            accumNext = mPB.createOr(accumNext, accum[2]);
+        }
+        return Marker(accumNext, Position::AtNextChar);
     }
-    return Marker(accum[max_offset], static_cast<Position>(max_offset));
 }
 
 Marker RE_Block_Compiler::compileAssertion(Assertion * const a, Marker marker) {
@@ -744,7 +736,7 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
 
 inline Marker RE_Block_Compiler::compileStart(Marker marker) {
     PabloAST * SOT = mPB.createNot(mPB.createAdvance(mMain.mMatchable, 1), "SOT");
-    return Marker(ScanToIndex(SOT, mMain.mIndexStream, mPB), Position::AtNextChar);
+    return Marker(SOT, Position::AtNextCodeUnit);
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
@@ -759,6 +751,15 @@ inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
 PabloAST * RE_Block_Compiler::NextCharacter(Marker marker, PabloBuilder & pb) {
     if (marker.position() == Position::AtEnd) {
         return pb.createIndexedAdvance(marker.stream(), mMain.mIndexStream, 1);
+    } else if  (marker.position() == Marker::Position::AtNextCodeUnit) {
+        return ScanToIndex(marker.stream(), mMain.mIndexStream, pb);
+    }
+    return marker.stream();
+}
+
+inline PabloAST * RE_Block_Compiler::NextCodeUnitStream(Marker marker, PabloBuilder & pb) {
+    if (marker.position() == Marker::Position::AtEnd) {
+        return pb.createAdvance(marker.stream(), 1);
     }
     return marker.stream();
 }

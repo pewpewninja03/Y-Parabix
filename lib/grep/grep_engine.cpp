@@ -284,6 +284,7 @@ void GrepEngine::initRE(re::RE * re) {
         // be used for regular expression processing.
         bool useIndexedUTF8 = !UnicodeIndexing
                                     && !hasReference(mRE) 
+                                    && !(mGrepRecordBreak == GrepRecordBreakKind::Unicode)
                                     && !hasGraphemeClusterBoundary(mRE)
                                     && (maxLookaheadLength(re, &cc::Unicode) <= 1)
                                     && !mColoring;
