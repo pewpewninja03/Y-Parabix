@@ -176,7 +176,7 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     } else {
         nextPos = NextCharacter(marker, mPB);
     }
-    return Marker(mPB.createAnd(nextPos, ccStrm));
+    return Marker(mPB.createAnd(nextPos, ccStrm, "cc_" + cc->canonicalName()));
 }
 
 inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {

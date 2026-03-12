@@ -119,6 +119,7 @@ std::string RE_Kernel::makeSignature(RE_CompilerContext & ctxt, RE * re) {
         sigstrm << "|=";
     }
     std::string canon_string = Printer_RE::PrintRE(canonicalizeExternals(re, externalList));
+    //llvm::errs() << "RE_Kernel: " << canon_string << "\n";
     sigstrm << ":" << Kernel::getStringHash(canon_string);
     sigstrm.flush();
     return signature;
@@ -498,8 +499,9 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
         }
     } else if (Name * n = dyn_cast<Name>(re)) {
         auto name = n->getFullName();
+        //llvm::errs() << "getSpan finding external: " << name << "\n";
         auto f = mCtxt.mExternals.find(name);
-        assert(f != mCtxt.Externals.end());
+        assert(f != mCtxt.mExternals.end());
         auto matchEnd = f->second.extStream;
         auto minlgth = f->second.lgthRange.first;
         auto endOffset = f->second.offset;
@@ -575,11 +577,7 @@ RE * RE_PipelineBuilder::prepareRE(RE * re) {
     }
 
     if (mCtxt.mCodeUnitAlphabet == &cc::UTF8) {
-        if (mCtxt.mLengthAlphabet == &cc::UTF8) {
-            xfrmedRE = toUTF8(xfrmedRE);
-        } else {
-            xfrmedRE = toUTF8(xfrmedRE, /* useInternalNaming = */ true);
-        }
+        xfrmedRE = toUTF8(xfrmedRE);
     }
     return xfrmedRE;
 }
