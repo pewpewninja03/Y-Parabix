@@ -228,7 +228,7 @@ inline void registerStreamDataCapture(const char * kernelName, const char * stre
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
                 msg << "Illustrator error: multiple instances of " << streamName << " was registered for " << kernelName << "\n";
-                report_fatal_error(msg.str());
+                llvm::errs() << msg.str();
             }
             assert (strcmp(current->StreamName, streamName) != 0);
             StreamDataCapture * next = current->Next;

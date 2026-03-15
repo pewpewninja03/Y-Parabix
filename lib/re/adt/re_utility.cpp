@@ -17,13 +17,11 @@ RE * makeZerowidthComplement(RE * s) {
 }
 
 RE * makeWordBoundary() {
-    auto wordC = makePropertyExpression("word");
-    return makeBoundaryAssertion(wordC);
+    return makePropertyExpression(PropertyExpression::Kind::Boundary, "word");
 }
 
 RE * makeWordNonBoundary() {
-    auto wordC = makePropertyExpression("word");
-    return makeNegativeBoundaryAssertion(wordC);
+    return makeZerowidthComplement(makeWordBoundary());
 }
 
 RE * makeWordBegin() {

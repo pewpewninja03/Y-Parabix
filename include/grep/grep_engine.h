@@ -17,13 +17,13 @@
 #include <re/parse/GLOB_parser.h>
 #include <kernel/core/callback.h>
 #include <kernel/util/linebreak_kernel.h>
+#include <kernel/re/regexp_kernel.h>
 #include <grep/grep_kernel.h>
 
 namespace re { class CC; class Name; class RE; }
 namespace llvm { namespace cl { class OptionCategory; } }
 namespace kernel { class PipelineBuilder; }
 namespace kernel { class StreamSet; }
-namespace kernel { class ExternalStreamObject; }
 class BaseDriver;
 
 namespace grep {
@@ -111,33 +111,11 @@ public:
     unsigned RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Matches);
 
 protected:
-    // Functional components that may be required for grep searches,
-    // depending on search pattern, mode flags, external parameters and
-    // implementation strategy.
-    typedef uint32_t component_t;
-    enum class Component : component_t {
-        NoComponents = 0,
-        S2P = 1,
-        UTF8index = 2,
-        MoveMatchesToEOL = 4,
-        MatchSpans = 8,
-        U21 = 64
-    };
-    bool hasComponent(Component compon_set, Component c);
-    void setComponent(Component & compon_set, Component c);
     bool matchesToEOLrequired();
-
-    // Transpose to basis bit streams, if required otherwise return the source byte stream.
-    kernel::StreamSet * getBasis(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
-
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
-    // line break stream and the U8 index stream (if required).
+    // basis streams, line break stream and the U8 index stream (if required).
     void grepPrologue(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
-    // Prepare external property and GCB streams, if required.
-    void prepareExternalStreams(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
-    kernel::StreamSet * getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, kernel::StreamSet * MatchResults);
-    void addExternalStreams(kernel::PipelineBuilder & P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
     kernel::StreamSet * initialMatches(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * matchedLines(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     kernel::StreamSet * grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
@@ -167,6 +145,7 @@ protected:
     int mMaxCount;
     bool mGrepStdIn;
     NullCharMode mNullMode;
+    RE_CompilerContext mCtxt;
     BaseDriver & mGrepDriver;
     GrepFunctionType mMainMethod;
     size_t mBatchSize;
@@ -184,11 +163,8 @@ protected:
     re:: RE * mRE;
     re::ReferenceInfo mRefInfo;
     std::string mFileSuffix;
-    Component mExternalComponents;
-    Component mInternalComponents;
     const cc::Alphabet * mIndexAlphabet;
     const cc::Alphabet * mLengthAlphabet;
-    kernel::ExternalStreamTable mExternalTable;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;

@@ -113,9 +113,6 @@ void REStringBuilder::buildString(const RE * re) {
             case Assertion::Kind::LookBehind:
                 out << "LookBehind";
                 break;
-            case Assertion::Kind::Boundary:
-                out << "Boundary";
-                break;
         }
         out << "Assertion(";
         buildString(a->getAsserted());

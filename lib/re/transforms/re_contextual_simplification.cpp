@@ -494,11 +494,6 @@ public:
             ctxt = mContext.followingContext();
         } else if (k == Assertion::Kind::LookBehind) {
             ctxt = mContext.priorContext();
-        } else {
-            // BoundaryAssertion - TODO - evaluate if possible
-            //RE * prior = mContext.priorContext().currentItem();
-            //RE * following = mContext.followingContext().currentItem();
-            return a;
         }
         ContextMatchCursor x = ctxt_match(asserted, k, ContextMatchCursor{ctxt, makeSeq()});
         return makeAssertion(x.rslt, k, s);

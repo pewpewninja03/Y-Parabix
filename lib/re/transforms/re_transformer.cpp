@@ -71,6 +71,7 @@ RE * RE_Transformer::transformName(Name * nm) {
     }
     RE * const defn = nm->getDefinition();
     if (LLVM_UNLIKELY(defn == nullptr)) {
+        llvm::errs() << "In " << mTransformationName << "\n";
         UndefinedNameError(nm);
     }
     RE * t = transform(defn);

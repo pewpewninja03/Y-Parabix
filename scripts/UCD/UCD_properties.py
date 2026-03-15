@@ -264,6 +264,13 @@ def emit_enumerated_property(f, property_code, independent_prop_values, prop_val
     f.write("\n        }};"
             "\n    }\n")
 
+def emit_boundary_property(f, property_code):
+    s = string.Template(r"""    namespace ${prop_enum_up}_ns {
+        static BoundaryPropertyObject property_object(${prop_enum});
+    }
+""")
+    f.write(s.substitute(prop_enum = property_code, prop_enum_up = property_code.upper()))
+
 def emit_Obsolete_property(f, property_code):
     s = string.Template(r"""    namespace ${prop_enum_up}_ns {
         static ObsoletePropertyObject property_object(${prop_enum});
@@ -479,6 +486,8 @@ class UCD_generator():
             emit_string_override_property(f, property_code, property_object.overridden_code, property_object.overridden_set, property_object.cp_value_map)
         elif isinstance(property_object, NumericPropertyObject):
             emit_numeric_property(f, property_code, property_object.NaN_set, property_object.cp_value_map)
+        elif isinstance(property_object, BoundaryPropertyObject):
+            emit_boundary_property(f, property_code)
         elif isinstance(property_object, ObsoletePropertyObject):
             emit_Obsolete_property(f, property_code)
         else:
@@ -654,12 +663,15 @@ class UCD_generator():
         cformat.write_imports(f, ['<unicode/data/PropertyObjectTable.h>', '<array>'])
         f.write("\nnamespace UCD {\n")
         objlist = []
+        self.supported_props.append('g')
+        self.supported_props.append('w')
         for p in self.property_enum_name_list:
             k = self.property_object_map[p].getPropertyKind()
             if p in self.supported_props:
                 objlist.append("get_%s_PropertyObject()" % p.upper())
             else:
                 objlist.append("new UnsupportedPropertyObject(%s, PropertyObject::ClassTypeId::%sProperty)" % (p, k))
+
         f.write("\n  const std::array<PropertyObject *, %i> property_object_table = {{\n    " % len(objlist))
         f.write(",\n    ".join(objlist) + '  }};\n\n')
         f.write("PropertyObject * getPropertyObject(property_t property_code) {\n")
