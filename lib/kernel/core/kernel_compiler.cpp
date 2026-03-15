@@ -446,21 +446,27 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
         }
     }
     IntegerType * const sizeTy = b.getSizeTy();
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-
-        // In multi-threaded mode, given a small file, the pipeline could finish before all of the
-        // threads are constructed. Since we cannot detect when this occurs without additional
-        // book keeping and the behaviour is safe, we do not guard against double termination.
-        // All other kernels are checked to ensure that there are no pipeline errors.
-
-        if (mTarget->getTypeId() != Kernel::TypeId::Pipeline || mTarget->hasAttribute(AttrId::InternallySynchronized)) {
-            mTarget->addInternalScalar(sizeTy, TERMINATION_SIGNAL);
-        } else {
-            mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
-        }
+    if (mTarget->hasAttribute(AttrId::InternallySynchronized) || mTarget->canSetTerminateSignal()) {
+        mTarget->addInternalScalar(sizeTy, TERMINATION_SIGNAL);
     } else {
         mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
     }
+
+//    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+
+//        // In multi-threaded mode, given a small file, the pipeline could finish before all of the
+//        // threads are constructed. Since we cannot detect when this occurs without additional
+//        // book keeping and the behaviour is safe, we do not guard against double termination.
+//        // All other kernels are checked to ensure that there are no pipeline errors.
+
+//        if (mTarget->getTypeId() != Kernel::TypeId::Pipeline || mTarget->hasAttribute(AttrId::InternallySynchronized)) {
+//            mTarget->addInternalScalar(sizeTy, TERMINATION_SIGNAL);
+//        } else {
+//            mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
+//        }
+//    } else {
+//        mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
+//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1048,7 +1054,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
 
     // initialize the termination signal if this kernel can set it
     mTerminationSignalPtr = nullptr;
-    if (canTerminate) {
+    if (internallySynchronized || canTerminate) {
         mTerminationSignalPtr = getScalarFieldPtr(b, TERMINATION_SIGNAL).first;
         if (LLVM_UNLIKELY(enableAsserts)) {
             Value * const unterminated =

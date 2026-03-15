@@ -426,9 +426,13 @@ enum BufferPortType : unsigned {
     IsShared = 32,
     IsManaged = 64,
     CanModifySegmentLength = 128,
+    LoopAgainConstraint = 256,
     Illustrated = 512,
     InputMayBeTruncated = 1024,
     InputMustAlwaysBeFullyConsumed = 2048,
+// ---------------------------------------
+    TrackBlockedIO = 4096,
+    TrackBlockedIOSummary = 8192,
 };
 
 struct BufferPort {
@@ -483,6 +487,10 @@ struct BufferPort {
 
     bool canModifySegmentLength() const {
         return (Flags & BufferPortType::CanModifySegmentLength) != 0;
+    }
+
+    bool isLoopAgainConstraint() const {
+        return (Flags & BufferPortType::LoopAgainConstraint) != 0;
     }
 
     bool isIllustrated() const {

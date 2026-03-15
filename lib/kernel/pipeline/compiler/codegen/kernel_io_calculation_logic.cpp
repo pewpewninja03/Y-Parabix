@@ -42,8 +42,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     // kernels within the partition will execute. Otherwise we begin by bounding the kernel by the expected number
     // of strides w.r.t. its partition's root.
 
-    Value * maxSegmentLength = mMaximumNumOfStrides;
-
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[input];
         if (port.canModifySegmentLength()) {
@@ -81,15 +79,14 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
 
-    Value * numOfLinearStrides = isSourceKernel ? maxSegmentLength : nullptr;
 
+    Value * numOfLinearStrides = nullptr;
 
-
-//    if (mIsPartitionRoot) {
-//        numOfLinearStrides = isSourceKernel ? maxSegmentLength : sz_MAXINT;
-//    } else {
-//        numOfLinearStrides = b.CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
-//    }
+    if (isSourceKernel) {
+        numOfLinearStrides = mMaximumNumOfStrides;
+    } else if (!mIsPartitionRoot) {
+        numOfLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+    }
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -112,29 +109,25 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         }
     }
 
-    mPotentialSegmentLength = numOfLinearStrides;
     if (mIsPartitionRoot) {
-        mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
+        if (isSourceKernel) {
+            mPotentialSegmentLength = mMaximumNumOfStrides;
+        } else {
+            mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
+            Value * remainingLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, remainingLinearStrides);
+        }
+    } else {
+        mPotentialSegmentLength = nullptr;
     }
 
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
 
-    if (LLVM_LIKELY(!isSourceKernel)) {
-        Value * maxNumOfLinearStrides = b.CreateSub(maxSegmentLength, mCurrentNumOfStridesAtLoopEntryPhi);
-        numOfLinearStrides = b.CreateUMin(numOfLinearStrides, maxNumOfLinearStrides);
-    }
-
     mNumOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
 
     mUpdatedNumOfStrides = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mNumOfLinearStrides);
-
-//    if (LLVM_UNLIKELY(mIsNestedPipeline && mIsPartitionRoot)) {
-//        mMaximumNumOfStrides = b.CreateUMax(mUpdatedNumOfStrides, b.getSize(1));
-//        allocateThreadLocalMemoryForMaximumNumOfStrides(b);
-//        remapThreadLocalBufferMemory(b);
-//    }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
@@ -442,7 +435,9 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     Value * hasEnoughOrIsClosed = sufficientInput;
     Value * insufficient = mBranchToLoopExit;
 
-    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
+
+    if (LLVM_UNLIKELY(port.Flags & (BufferPortType::TrackBlockedIO | BufferPortType::TrackBlockedIOSummary))) {
+        assert (mBufferGraph[streamSet].isNonThreadLocal());
         recordBlockedIO = b.CreateBasicBlock(prefix + "_recordBlockedIO", hasInputData);
         insufficentIO = recordBlockedIO;
         // do not record the block if this not the first execution of the
@@ -462,11 +457,11 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
 
     // When tracing blocking I/O, test all I/O streams but do not execute
     // the kernel if any stream is insufficient.
-    if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
+    if (LLVM_UNLIKELY(recordBlockedIO)) {
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
         b.SetInsertPoint(recordBlockedIO);
-        recordBlockingIO(b, inputPort);
+        recordBlockingIO(b, port);
         BasicBlock * const exitBlock = b.GetInsertBlock();
         b.CreateBr(hasInputData);
 
@@ -581,9 +576,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
     Value * const nonFinal = b.CreateIsNull(mIsFinalInvocation);
     assert (mMaximumNumOfStrides);
-
     Value * const notAtSegmentLimit = b.CreateICmpNE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
-
     if (mIsPartitionRoot) {
 
         ConstantInt * const i1_TRUE = b.getTrue();
@@ -607,14 +600,9 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
             const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength()) {
+            if (port.isLoopAgainConstraint()) {
                 const auto streamSet = source(*ei, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_UNLIKELY(bn.isConstant())) {
-                    continue;
-                }
-
-                assert (bn.isNonThreadLocal());
 
                 const Binding & binding = port.Binding;
                 const ProcessingRate & rate = binding.getRate();
@@ -1448,10 +1436,12 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
                             bindingName,
                             position, total, offset);
 
-            Value * const alreadyProcessed = mCurrentProcessedItemCountPhi[ref];
+
+
+            Value * const alreadyProcessed = mInitiallyProcessedItemCount[ref];
 
             b.CreateAssert(b.CreateICmpUGE(position, alreadyProcessed),
-                            "%s.%s: partial sum reference position is less than its processed count (%" PRIu64 " vs. %" PRIu64 ")",
+                            "%s.%s: partial sum reference position is less than its initially processed item count (%" PRIu64 " vs. %" PRIu64 ")",
                             mCurrentKernelName,
                             bindingName,
                             position, alreadyProcessed);
@@ -1574,10 +1564,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     BasicBlock * const popCountEntry = b.GetInsertBlock();
 
+    assert (numOfLinearStrides);
     Value * cond = b.CreateICmpNE(numOfLinearStrides, sz_ZERO);
-
-//        cond = b.CreateAnd(cond, b.CreateICmpUGE(currentItemCount, minimumItemCount));
-
     b.CreateLikelyCondBr(cond, popCountLoop, popCountLoopExit);
 
     // TODO: replace this with a parallel icmp check and bitscan? binary search with initial
@@ -1589,19 +1577,8 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     PHINode * const nextRequiredItems = b.CreatePHI(sizeTy, 2);
     nextRequiredItems->addIncoming(MAX_INT, popCountEntry);
 
+
     Value * const strideIndex = b.CreateSub(numOfStrides, sz_ONE);
-
-    if (LLVM_UNLIKELY(CheckAssertions())) {
-
-        const Binding & binding = partialSumPort.Binding;
-        Constant * bindingName = b.GetString(binding.getName());
-
-        b.CreateAssert(b.CreateICmpUGE(numOfStrides, sz_ONE),
-                        "%s.%s: partial sum reference offset is zero",
-                        mCurrentKernelName,
-                        bindingName);
-
-    }
 
     Value * offset = strideIndex;
 
@@ -1610,17 +1587,27 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     // stream.
     const auto step = getPopCountStepSize(ref);
     if (LLVM_UNLIKELY(step > 1)) {
-        offset = b.CreateSub(b.CreateMul(numOfLinearStrides, b.getSize(step)), sz_ONE);
+        offset = b.CreateSub(b.CreateMul(numOfStrides, b.getSize(step)), sz_ONE);
     }
 
     Value * const pos = b.CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
+
+    if (LLVM_UNLIKELY(CheckAssertions())) {
+        const Binding & binding = partialSumPort.Binding;
+        Constant * bindingName = b.GetString(binding.getName());
+        b.CreateAssert(b.CreateICmpUGE(pos, mInitiallyProcessedItemCount[ref]),
+                        "%s.%s: partial sum reference offset (%" PRIu64 ") is less than the initial processed count (%" PRIu64 ")",
+                        mCurrentKernelName, bindingName, pos, mInitiallyProcessedItemCount[ref]);
+    }
+
+
+
     Value * ptr = nullptr;
     if (inputBaseAddr) {
         ptr = b.CreateGEP(sizeTy, inputBaseAddr, pos);
     } else {
         ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
     }
-
     Value * const requiredItems = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     Value * const notEnough = b.CreateICmpUGT(requiredItems, sourceItemCount);
 

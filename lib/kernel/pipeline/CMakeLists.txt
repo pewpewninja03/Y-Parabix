@@ -61,6 +61,7 @@ SRC
     compiler/statistics/multithreading_report_logic.cpp
     compiler/statistics/buffer_expansion_instrumentation_logic.cpp
     ${PAPI_CPP}
+    compiler/statistics/track_blocking_io_logic.cpp
     optimizationbranch/optimizationbranch.cpp
     pipeline_builder.cpp
     pipeline_kernel.cpp

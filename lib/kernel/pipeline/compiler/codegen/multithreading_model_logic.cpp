@@ -515,13 +515,15 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 csRetVal = b.CreateCall(doSegmentComputeFuncType, doSegmentComputeThreadFunc, args);
             }
 
+
+
             terminated = b.CreateExtractValue(csRetVal, {0});
 
             Value * done = b.CreateIsNotNull(terminated);
-            Value * madeProgress = nullptr;
+            Value * doNextSegment = nullptr;
             if (LLVM_UNLIKELY(checkProgress)) {
-                madeProgress = b.CreateExtractValue(csRetVal, {1});
-                madeProgress = b.CreateOr(madeProgress, done);
+                Value * const madeProgress = b.CreateExtractValue(csRetVal, {1});
+                doNextSegment = b.CreateAnd(madeProgress, b.CreateIsNull(terminated));
                 if (LLVM_UNLIKELY(CheckAssertions())) {
                     assert (madeProgressInLastSegment);
                     Value * const live = b.CreateOr(madeProgressInLastSegment, madeProgress);
@@ -712,7 +714,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             } else {
                 BasicBlock * const exitBlock = b.GetInsertBlock();
                 if (LLVM_UNLIKELY(CheckAssertions())) {
-                    madeProgressInLastSegment->addIncoming(madeProgress, pipelineStart ? pipelineLoop : exitBlock);
+                    madeProgressInLastSegment->addIncoming(doNextSegment, pipelineStart ? pipelineLoop : exitBlock);
                 }
                 if (mUseDynamicMultithreading && generateProcessThread) {
                     nextCheckSegmentPhi->addIncoming(startOfNextPeriodPhi, exitBlock);
@@ -724,32 +726,31 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                     indices2[1] = b.getInt32(CURRENT_THREAD_STATUS_FLAG);
                     Value * const statusFlagPtr = b.CreateGEP(threadStructTy, threadStruct, indices2);
                     Value * const cancelled = b.CreateAlignedLoad(sizeTy, statusFlagPtr, SizeTyABIAlignment);
-                    done = b.CreateOr(done, b.CreateICmpEQ(cancelled, sz_TWO));
+                    doNextSegment = b.CreateAnd(doNextSegment, b.CreateICmpNE(cancelled, sz_TWO));
                 }
                 assert (hasTermSignal);
 
-                Value * doneOrAtLimit = done;
+#warning need to change pipeline stall detection logic for layers
 
                 #ifndef PHASES_RUN_TO_COMPLETION
                 // We may have passed the phase limit if multiple threads are processing this phase
                 if (mPhaseSegmentLimit) {
-                    doneOrAtLimit = b.CreateOr(done, b.CreateICmpUGE(mSegNo, mPhaseSegmentLimit));
+                    doNextSegment = b.CreateAnd(doNextSegment, b.CreateICmpULT(mSegNo, mPhaseSegmentLimit));
                 }
                 #endif
-                b.CreateUnlikelyCondBr(doneOrAtLimit, pipelineEnd, pipelineLoop);
+                // TODO: need to check if we could potentially make more progress, not whether we did
+                b.CreateLikelyCondBr(doNextSegment, pipelineLoop, pipelineEnd);
             }
 
             b.SetInsertPoint(pipelineEnd);
             assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
             assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
-            //if (TerminalPhaseSet[mCurrentPipelinePhase - 1U]) {
-                if (allPhasesDone) {
-                    assert (numOfPhases > 2);
-                    allPhasesDone = b.CreateAnd(allPhasesDone, done);
-                } else {
-                    allPhasesDone = done;
-                }
-            //}
+            if (allPhasesDone) {
+                assert (numOfPhases > 2);
+                allPhasesDone = b.CreateAnd(allPhasesDone, done);
+            } else {
+                allPhasesDone = done;
+            }
             #ifndef PHASES_RUN_TO_COMPLETION
             // TODO: if we cannot process any more segments, we either processed enough segments to stop or
             // failed to. If we could not process enough, we should increase the number of segments the prior
@@ -1334,7 +1335,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         b.SetInsertPoint(mPipelineEnd);
 
     }
-
 
     if (PipelineHasTerminationSignal) {
         Value * const ptr = getTerminationSignalPtr();

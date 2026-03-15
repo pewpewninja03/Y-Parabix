@@ -441,7 +441,9 @@ public:
 
     static void linkInstrumentationFunctions(KernelBuilder & b);
 
-    void recordBlockingIO(KernelBuilder & b, const StreamSetPort port) const;
+    void addTrackBlockingIOSummaryProperties(KernelBuilder & b, const unsigned kernelId, const unsigned groupId);
+    void addTrackBlockingIOHistoryProperties(KernelBuilder & b, const unsigned kernel, const unsigned groupId);
+    void recordBlockingIO(KernelBuilder & b, const BufferPort & port) const;
 
     void printOptionalCycleCounter(KernelBuilder & b);
     StreamSetPort selectPrincipleCycleCountBinding(const unsigned kernel) const;

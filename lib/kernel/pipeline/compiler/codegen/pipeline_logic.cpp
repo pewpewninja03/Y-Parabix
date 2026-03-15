@@ -71,6 +71,9 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
     const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
 
+    const auto trackIOSummary = DebugOptionIsSet(codegen::EnableBlockingIOCounter);
+    const auto trackIOHistory = DebugOptionIsSet(codegen::TraceBlockedIO);
+
     for (size_t phase = 1; phase < numOfPhases; ++phase) {
 
         const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
@@ -95,8 +98,14 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
             #endif
             addProducedItemCountDeltaProperties(b, i);
             addUnconsumedItemCountProperties(b, i);
-            if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            if (LLVM_UNLIKELY(trackIOSummary)) {
                 addCycleCounterProperties(b, i, ((i + 1) == oneAfterLastKernelInCurrentPhase) | isRoot, isRoot, i);
+            }
+            if (LLVM_UNLIKELY(trackIOSummary)) {
+                addTrackBlockingIOSummaryProperties(b, i, i);
+            }
+            if (LLVM_UNLIKELY(trackIOHistory)) {
+                addTrackBlockingIOHistoryProperties(b, i, i);
             }
         }
     }

@@ -40,6 +40,8 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
     const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
 
+    const auto traceDynamicBufferFlag = mTraceDynamicBuffers ? BufferType::CanTrackBufferExpansionData : 0U;
+
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
 
     assert (PartitionPhaseBoundaries[1] > 0);
@@ -183,12 +185,12 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         break;
                     case AttrId::SharedManagedBuffer:
                         bp.Flags |= BufferPortType::IsShared;
-                        bn.Type |= BufferType::CanTrackBufferExpansionData;
+                        bn.Type |= traceDynamicBufferFlag;
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ManagedBuffer:
                         bp.Flags |= BufferPortType::IsManaged;
-                        bn.Type |= BufferType::CanTrackBufferExpansionData;
+                        bn.Type |= traceDynamicBufferFlag;
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ReturnedBuffer:
@@ -393,7 +395,10 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             assert (mStreamGraph[binding].Type == RelationshipNode::IsBinding);
             const auto portNum = port.Number + numOfInputs;
             E[portNum] = e;
-            if (LLVM_UNLIKELY(in_degree(binding, mStreamGraph) != 1)) {
+            if (LLVM_LIKELY(in_degree(binding, mStreamGraph) == 1)) {
+//                auto input = in_edge(binding, mStr)
+
+            } else {
                 for (const auto f : make_iterator_range(in_edges(binding, mStreamGraph))) {
                     const RelationshipType & ref = mStreamGraph[f];
                     if (ref.Reason == ReasonType::Reference) {
@@ -452,6 +457,11 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                     add_edge(principalInputPort, j, E);
                 }
             }
+        }
+
+        for (unsigned j = 0; j < numOfInputs; ++j) {
+
+
         }
 
         for (unsigned j = 1; j < numOfPorts; ++j) {
@@ -761,6 +771,10 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
 
     const auto numOfPhases = PartitionPhaseBoundaries.size();
 
+    const auto trackBlockIOSummaryFlag = DebugOptionIsSet(codegen::EnableBlockingIOCounter) ? TrackBlockedIOSummary : 0U;
+    const auto trackBlockIOFlag = DebugOptionIsSet(codegen::TraceBlockedIO) ? TrackBlockedIO : 0U;
+    const auto partitionRootIOFlag = BufferPortType::CanModifySegmentLength | BufferPortType::LoopAgainConstraint | trackBlockIOSummaryFlag | trackBlockIOFlag;
+
     for (size_t currentPhase = 1U; currentPhase < numOfPhases; ++currentPhase) {
         const auto firstPartition = PartitionPhaseBoundaries[currentPhase - 1];
         const auto oneAfterLastPartition = PartitionPhaseBoundaries[currentPhase];
@@ -776,19 +790,20 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                 const auto streamSet = source(e, mBufferGraph);
                 const BufferNode & N = mBufferGraph[streamSet];
-//                if (N.ProducedPhaseId < currentPhase) {
-//                    continue;
-//                }
+                if (N.isThreadLocal()) {
+                    continue;
+                }
                 BufferPort & inputRate = mBufferGraph[e];
                 #ifdef TEST_ALL_KERNEL_INPUTS
                 inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 #else
-                if (isPartitionRoot) {
+                if (N.isConstant()) {
                     inputRate.Flags |= BufferPortType::CanModifySegmentLength;
-                } else if (N.isThreadLocal() || N.isConstant()) {
-                    if (LLVM_LIKELY(!N.isTruncated())) {
-                        inputRate.Flags |= BufferPortType::CanModifySegmentLength;
-                    }
+                } else if (isPartitionRoot) {
+                    inputRate.Flags |= partitionRootIOFlag;
+                }
+                if (!N.IsLinear) {
+                    inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 }
                 #endif
             }
@@ -802,12 +817,10 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                 }
 
                 BufferPort & outputRate = mBufferGraph[output];
-
                 if (N.isUnowned()) {
                     outputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 } else if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
                     const auto srcStreamSet = parent(streamSet, InOutStreamSetReplacement);
-                    bool canModifyLength = false;
                     for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                         if (source(input, mBufferGraph) == srcStreamSet) {
                             const BufferPort & inputRate = mBufferGraph[input];
@@ -831,12 +844,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                                     }
                                 }
                             }
-                            canModifyLength = true;
+                            outputRate.Flags |= BufferPortType::CanModifySegmentLength;
                             break;
                         }
-                    }
-                    if (canModifyLength) {
-                        outputRate.Flags |= BufferPortType::CanModifySegmentLength;
                     }
                 }
             }
@@ -928,6 +938,8 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
 
     mInternalBuffers.reserve((LastStreamSet - FirstStreamSet + 1) * 2);
 
+    const auto traceDynamicBufferFlag = mTraceDynamicBuffers ? BufferType::CanTrackBufferExpansionData : 0U;
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];
 
@@ -969,7 +981,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 #endif
                 } else { // is internal buffer
                     assert (bn.IsLinear || !bn.isReturned());
-                    bn.Type |= BufferType::CanTrackBufferExpansionData;
+                    bn.Type |= traceDynamicBufferFlag;
                     outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
                 }
             }

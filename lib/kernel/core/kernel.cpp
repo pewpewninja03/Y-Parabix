@@ -391,8 +391,6 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             VecOfTypes shared(sharedGroups.size() + 2);
             VecOfTypes threadLocal(threadLocalGroups.size());
 
-            Type * const emptyTy = StructType::get(b.getContext());
-
             auto addScalar = [](VecOfTypes & S, const unsigned group, Type * const type) {
                 assert (group < S.size());
                 assert (type);
@@ -1079,7 +1077,9 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
     Function * doSegment = m->getFunction(funcName);
     if (LLVM_LIKELY(doSegment == nullptr)) {
 
-        Type * const retTy = canSetTerminateSignal() ? b.getSizeTy() : b.getVoidTy();
+        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+
+        Type * const retTy = (internallySynchronized || canSetTerminateSignal()) ? b.getSizeTy() : b.getVoidTy();
         FunctionType * const doSegmentType = FunctionType::get(retTy, getDoSegmentFields(b), false);
         doSegment = Function::Create(doSegmentType, GlobalValue::ExternalLinkage, funcName, m);
         doSegment->setCallingConv(CallingConv::C);
@@ -1107,11 +1107,13 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("threadLocal");
         }
-        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+
         const auto isPipeline = (getTypeId() == TypeId::Pipeline);
         const auto isMainPipeline = isPipeline && !internallySynchronized;
 
-        if (LLVM_LIKELY(!isMainPipeline)) {
+        if (LLVM_UNLIKELY(isMainPipeline)) {
+            setNextArgName("segmentSize");
+        } else {
             if (LLVM_UNLIKELY(internallySynchronized)) {
                 setNextArgName("segNo");
             }
@@ -1124,8 +1126,6 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
                 setNextArgName("eventSetId");
             }
             #endif
-        } else {
-            setNextArgName("segmentSize");
         }
 
         const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
