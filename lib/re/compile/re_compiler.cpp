@@ -766,10 +766,14 @@ inline PabloAST * RE_Block_Compiler::NextCodeUnitStream(Marker marker, PabloBuil
 
 inline void RE_Block_Compiler::AlignMarkers(Marker & m1, Marker & m2) {
     if (m1.position() == m2.position()) return;
-    if (m1.position() == Position::AtEnd) {
+    if ((m1.position() == Position::AtEnd) && (m2.position() == Position::AtNextCodeUnit)) {
+        m1 = Marker(NextCodeUnitStream(m1, mPB), Position::AtNextCodeUnit);
+    } else if ((m1.position() == Position::AtEnd) && (m2.position() == Position::AtNextChar)) {
+        m1 = Marker(NextCharacter(m1, mPB), Position::AtNextChar);
+    } else if ((m1.position() == Position::AtNextCodeUnit) && (m2.position() == Position::AtNextChar)) {
         m1 = Marker(NextCharacter(m1, mPB), Position::AtNextChar);
     } else {
-        m2 = Marker(NextCharacter(m2, mPB), Position::AtNextChar);
+        AlignMarkers(m2, m1);
     }
 }
 

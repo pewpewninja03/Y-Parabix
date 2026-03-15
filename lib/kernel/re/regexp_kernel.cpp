@@ -625,8 +625,14 @@ RE * RE_PipelineBuilder::processReferences(RE * re) {
 }
 
 
+void UnicodePropertyLogic(PipelineBuilder & P, PropertyExpression * pe,
+                          StreamSet * BasisBits, StreamSet * PropertyStream) {
+    UnicodePropertyLogic(P, pe, BasisBits, nullptr, PropertyStream);
+}
+
 void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
                           StreamSet * BasisBits, StreamSet * IndexStream, StreamSet * PropertyStream) {
+    //pe = cast<PropertyExpression>(UCD::linkAndResolve(pe, grep::lineNumGrep));
     std::string propName = pe->getFullName();
     if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
         P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(pe, BasisBits, PropertyStream);

@@ -282,7 +282,7 @@ void GrepEngine::initRE(re::RE * re) {
         mLengthAlphabet = &cc::Unicode;
         // Determine whether UTF8-indexed or Unicode-indexed streams will
         // be used for regular expression processing.
-        bool useIndexedUTF8 = !UnicodeIndexing
+        bool useIndexedUTF8 = !UnicodeBasisMode
                                     && !hasReference(mRE) 
                                     && !(mGrepRecordBreak == GrepRecordBreakKind::Unicode)
                                     && !hasGraphemeClusterBoundary(mRE)
