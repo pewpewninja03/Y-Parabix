@@ -79,6 +79,7 @@ void RE_CompilerContext::setCombiningStream(kernel::StreamSet * s, RE_CombiningT
     mCombiningType = k;
 }
 
+
 RE_Kernel::RE_Kernel(LLVMTypeSystemInterface & ts, RE_CompilerContext & ctxt, RE * re, StreamSet * results)
 : PabloKernel(ts, makeSignature(ctxt, re), makeInputBindings(ctxt, re), makeOutputBindings(re, results), {}, {}),
 mContext(ctxt), mRE(re) {
@@ -95,23 +96,31 @@ std::string RE_Kernel::makeSignature(RE_CompilerContext & ctxt, RE * re) {
     if (ctxt.mIndexStream) {
         sigstrm << "+X";
     }
+    std::set<std::string> localExternals;
+    std::set<std::string> localAlphabets;
+    gatherExternals(re, localExternals, localAlphabets);
     for (auto & a : ctxt.mAlphabets) {
-        sigstrm << '!' << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+        auto alphaName = a.first->getName();
+        if (localAlphabets.count(alphaName) == 1) {
+            sigstrm << '!' << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+        }
     }
     std::vector<std::string> externalList;
     for (const auto & e : ctxt.mExternals) {
         auto name = e.first;
-        auto ext = e.second;
-        if (ext.kind == ExternalStreamKind::ZeroWidth) {
-            sigstrm << "+Z"; 
-        } else if (ext.kind == ExternalStreamKind::FixedLength) {
-            sigstrm << "+F"; 
-        } else if (ext.kind == ExternalStreamKind::StartIndexed) {
-            sigstrm << "+S"; 
-        } else {
-            sigstrm << "+E";
+        if (localExternals.count(name) == 1) {
+            auto ext = e.second;
+            if (ext.kind == ExternalStreamKind::ZeroWidth) {
+                sigstrm << "+Z";
+            } else if (ext.kind == ExternalStreamKind::FixedLength) {
+                sigstrm << "+F";
+            } else if (ext.kind == ExternalStreamKind::StartIndexed) {
+                sigstrm << "+S";
+            } else {
+                sigstrm << "+E";
+            }
+            externalList.push_back(name);
         }
-        externalList.push_back(name);
     }
     if (ctxt.mCombiningType == RE_CombiningType::Exclude) {
         sigstrm << "&~";
@@ -132,6 +141,9 @@ unsigned round_up_to_blocksize(int lgth) {
 
 // TODO:  limit the alphabets and externals to those in the RE top-level
 Bindings RE_Kernel::makeInputBindings(RE_CompilerContext & ctxt, RE * re) {
+    std::set<std::string> localExternals;
+    std::set<std::string> localAlphabets;
+    gatherExternals(re, localExternals, localAlphabets);
     Bindings externalBindings;
     if (ctxt.mBarrierStream) {
         externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream);
@@ -140,18 +152,24 @@ Bindings RE_Kernel::makeInputBindings(RE_CompilerContext & ctxt, RE * re) {
         externalBindings.emplace_back("mIndexing", ctxt.mIndexStream);
     }
     for (auto & a : ctxt.mAlphabets) {
-        externalBindings.emplace_back(a.first->getName() + "_basis", a.second);
+        auto alphaName = a.first->getName();
+        llvm::errs() << "alphaName: " << alphaName << " count = " << localAlphabets.count(alphaName) << "\n";
+        if (localAlphabets.count(alphaName) == 1) {
+            externalBindings.emplace_back(alphaName + "_basis", a.second);
+        }
     }
     std::vector<std::string> externalList;
     for (const auto & e : ctxt.mExternals) {
         auto name = e.first;
-        //llvm::errs() << "RE_Kernel - adding external: " << name << "\n";
-        auto ext = e.second;
-        if (ext.kind == StartIndexed) {
-            unsigned blk_ahead = round_up_to_blocksize(ext.offset);
-            externalBindings.emplace_back(name, ext.extStream, FixedRate(), LookAhead(blk_ahead));
-        } else {
-            externalBindings.emplace_back(name, ext.extStream);
+        if (localExternals.count(name) == 1) {
+            //llvm::errs() << "RE_Kernel - adding external: " << name << "\n";
+            auto ext = e.second;
+            if (ext.kind == StartIndexed) {
+                unsigned blk_ahead = round_up_to_blocksize(ext.offset);
+                externalBindings.emplace_back(name, ext.extStream, FixedRate(), LookAhead(blk_ahead));
+            } else {
+                externalBindings.emplace_back(name, ext.extStream);
+            }
         }
     }
     if (ctxt.mCombiningType != RE_CombiningType::None) {
@@ -169,14 +187,20 @@ Bindings RE_Kernel::makeOutputBindings(RE * re, StreamSet * results) {
 
 void RE_Kernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
+    std::set<std::string> localExternals;
+    std::set<std::string> localAlphabets;
+    gatherExternals(mRE, localExternals, localAlphabets);
     PabloAST * barrier = nullptr;
     if (mContext.mBarrierStream) {
         barrier = pb.createExtract(getInputStreamVar("mBarrier"), pb.getInteger(0));
     }
     RE_Compiler re_compiler(getEntryScope(), barrier, mContext.mCodeUnitAlphabet);
     for (auto & a : mContext.mAlphabets) {
-        auto basis = getInputStreamSet(a.first->getName() + "_basis");
-        re_compiler.addAlphabet(a.first, basis);
+        auto alphaName = a.first->getName();
+        if (localAlphabets.count(alphaName) == 1) {
+            auto basis = getInputStreamSet(alphaName + "_basis");
+            re_compiler.addAlphabet(a.first, basis);
+        }
     }
     if (mContext.mIndexStream) {
         PabloAST * idxStrm = pb.createExtract(getInputStreamVar("mIndexing"), pb.getInteger(0));
@@ -184,14 +208,16 @@ void RE_Kernel::generatePabloMethod() {
     }
     for (auto & e : mContext.mExternals) {
         auto name = e.first;
-        auto ext = e.second;
-        PabloAST * extStrm = pb.createExtract(getInputStreamVar(name), pb.getInteger(0));
-        unsigned offset = ext.offset;
-        bool fromFirst = false;
-        if (ext.kind == ExternalStreamKind::StartIndexed) {
-            fromFirst = true;
+        if (localExternals.count(name) == 1) {
+            auto ext = e.second;
+            PabloAST * extStrm = pb.createExtract(getInputStreamVar(name), pb.getInteger(0));
+            unsigned offset = ext.offset;
+            bool fromFirst = false;
+            if (ext.kind == ExternalStreamKind::StartIndexed) {
+                fromFirst = true;
+            }
+            re_compiler.addPrecompiled(name, RE_Compiler::ExternalStream(extStrm, offset, ext.lgthRange, fromFirst));
         }
-        re_compiler.addPrecompiled(name, RE_Compiler::ExternalStream(extStrm, offset, ext.lgthRange, fromFirst));
     }
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());
     RE_Compiler::Marker matches = re_compiler.compileRE(mRE);
