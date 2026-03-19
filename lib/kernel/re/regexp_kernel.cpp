@@ -153,7 +153,7 @@ Bindings RE_Kernel::makeInputBindings(RE_CompilerContext & ctxt, RE * re) {
     }
     for (auto & a : ctxt.mAlphabets) {
         auto alphaName = a.first->getName();
-        llvm::errs() << "alphaName: " << alphaName << " count = " << localAlphabets.count(alphaName) << "\n";
+        //llvm::errs() << "alphaName: " << alphaName << " count = " << localAlphabets.count(alphaName) << "\n";
         if (localAlphabets.count(alphaName) == 1) {
             externalBindings.emplace_back(alphaName + "_basis", a.second);
         }

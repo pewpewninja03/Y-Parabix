@@ -162,16 +162,12 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
             //llvm::errs() << "Found alphabet: " << i << ", " << mMain.mAlphabets[i]->getName() << "\n";
             ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc, mPB));
             mLocallyCompiledCCs.emplace(cc, ccStrm);
-        } else if (a == &cc::Byte) {
-            //llvm::errs() << "Using alphabet 0: for Byte\n";
-            ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc, mPB));
-            mLocallyCompiledCCs.emplace(cc, ccStrm);
         } else {
             llvm::report_fatal_error(llvm::StringRef("Alphabet ") + a->getName() + " has no CC compiler, codeUnitAlphabet = " + mMain.mCodeUnitAlphabet->getName() + "\n in compiling RE: " + Printer_RE::PrintRE(cc) + "\n");
         }
     }
     PabloAST * nextPos = nullptr;
-    if ((a == &cc::Byte) || (a == mMain.mCodeUnitAlphabet)) {
+    if (a == mMain.mCodeUnitAlphabet) {
         nextPos = NextCodeUnitStream(marker, mPB);
     } else {
         nextPos = NextCharacter(marker, mPB);
