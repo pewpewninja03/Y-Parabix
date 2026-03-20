@@ -677,7 +677,7 @@ unsigned grepOffset(const RE * re) {
         if (a->getKind() == Assertion::Kind::LookBehind) {
             return grepOffset(a->getAsserted());
         }
-        return 1;
+        return 0;
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return grepOffset(diff->getLH());
     } else if (const Intersect * e = dyn_cast<Intersect>(re)) {

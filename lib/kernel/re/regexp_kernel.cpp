@@ -392,6 +392,12 @@ LongestSpan::LongestSpan (LLVMTypeSystemInterface & ts, unsigned pfxOffset, unsi
 
 
 void RE_PipelineBuilder::addExternal(std::string extName, ExternalStream s) {
+    //llvm::errs() << "addExternal(" << extName << ", ";
+    //if (s.kind == ExternalStreamKind::StartIndexed) llvm::errs() << "StartIndexed";
+    //if (s.kind == ExternalStreamKind::ZeroWidth) llvm::errs() << "ZeroWidth";
+    //if (s.kind == ExternalStreamKind::FixedLength) llvm::errs() << "FixedLength";
+    //if (s.kind == ExternalStreamKind::EndIndexed) llvm::errs() << "EndIndexed";
+    //llvm::errs() << ", (" << s.lgthRange.first << ", " << s.lgthRange.second << "), " << s.offset << ")\n";
     mCtxt.mExternals.emplace(extName, s);
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         mPB.captureBitstream(extName, s.extStream);
@@ -587,6 +593,9 @@ RE * RE_PipelineBuilder::prepareRE(RE * re) {
             compileProperty(pe);
         }
     }
+
+    re::LookAheadNamer LA;
+    xfrmedRE = LA.transformRE(xfrmedRE);
 
     re::VariableLengthCCNamer CCnamer;
     xfrmedRE = CCnamer.transformRE(xfrmedRE);

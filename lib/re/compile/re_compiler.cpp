@@ -20,6 +20,7 @@
 #include <re/analysis/re_analysis.h>
 #include <re/analysis/re_local.h>
 #include <re/analysis/cc_sequence_search.h>
+#include <re/transforms/name_lookaheads.h>
 #include <re/toolchain/toolchain.h>
 
 namespace pablo { class PabloAST; }
@@ -175,7 +176,7 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     return Marker(mPB.createAnd(nextPos, ccStrm, "cc_" + cc->canonicalName()));
 }
 
-inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
+Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
     const auto & nameString = name->getFullName();
     auto f = mMain.mExternalNameMap.find(nameString);
     if (f == mMain.mExternalNameMap.end()) {
@@ -202,6 +203,16 @@ inline Marker RE_Block_Compiler::compileName(Name * const name, Marker marker) {
         }
     }
     auto ext = f->second;
+    unsigned amt = NamedLookAheadAmount(name, *mMain.mCodeUnitAlphabet);
+    if (amt > 0) {
+        // Named lookahead expression.
+        if (marker.position() == Position::AtEnd) {
+            return Marker(mPB.createAnd(marker.stream(), mPB.createLookahead(ext.stream(), amt)));
+        } else {
+            PabloAST * nextPos = NextCharacter(marker, mPB);
+            return Marker(mPB.createAnd(nextPos, mPB.createLookahead(ext.stream(), amt - 1)), Position::AtNextChar);
+        }
+    }
     auto externalLength = ext.minLength();
     //llvm::errs() << "External: " << nameString << ", lgth " << externalLength << ", offset " << ext.offset() << "\n"; 
     if (ext.fromFirst() && (externalLength == ext.maxLength())) {
