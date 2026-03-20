@@ -726,8 +726,7 @@ void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
             std::vector<re::CC *> ccs = {makeCC(obj->GetCodepointSet("Y"), &cc::Unicode)};
             StreamSet * pStrm = P.CreateStreamSet(1);
             P.CreateKernelFamilyCall<CharClassesKernel>(ccs, BasisBits, pStrm);
-            StreamSet * bStrm  = P.CreateStreamSet(1);
-            P.CreateKernelCall<BoundaryKernel>(pStrm, IndexStream, bStrm);
+            P.CreateKernelCall<BoundaryKernel>(pStrm, IndexStream, PropertyStream);
         } else {
             llvm::report_fatal_error("Unsupported property for boundary expression");
         }
