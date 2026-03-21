@@ -159,7 +159,7 @@ private:
     const cc::Alphabet *                            mCodeUnitAlphabet;
     const cc::Alphabet *                            mIndexingAlphabet;
     pablo::PabloAST *                               mIndexStream;
-    pablo::PabloAST *                               mMatchable;
+    pablo::PabloAST *                               mBarrier;
     std::vector<const cc::Alphabet *>               mAlphabets;
     std::vector<std::vector<pablo::PabloAST *>>     mBasisSets;
     std::vector<std::unique_ptr<cc::CC_Compiler>>   mAlphabetCompilers;
