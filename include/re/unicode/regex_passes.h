@@ -15,8 +15,6 @@ typedef std::vector<uint64_t> (*GrepLinesFunctionType)(re::RE *, const char * bu
 
 RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive = false, GrepLinesFunctionType grep = nullptr);
 
-RE * excludeUnicodeLineBreak(RE * r);
-
 RE * remove_nullable_ends(RE * r);
 
 RE * regular_expression_passes(RE * r);

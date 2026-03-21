@@ -162,8 +162,8 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
 
             auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
             r = regular_expression_passes(r);
-            r = re::exclude_CC(r, breakCC);
-            r = resolveAnchors(r, breakCC);
+            //r = re::exclude_CC(r, breakCC);
+            //r = resolveAnchors(r, breakCC);
             r = toUTF8(r);
             // check if we need to combine the current result with the new set of matches
             const bool exclude = (patterns[i].first == re::PatternKind::Exclude);

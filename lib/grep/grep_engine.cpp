@@ -1092,8 +1092,6 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
         breakCC = re::makeCC(0x0A, &cc::UTF8);
     }
 
-    matchingRE = re::exclude_CC(matchingRE, breakCC);
-    matchingRE = resolveAnchors(matchingRE, breakCC);
     matchingRE = resolveCaseInsensitiveMode(matchingRE, mCaseInsensitive);
     matchingRE = regular_expression_passes(matchingRE);
     matchingRE = toUTF8(matchingRE);
@@ -1120,6 +1118,8 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     RE_CompilerContext ctxt;
     ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     ctxt.setIndexingContext(&cc::Unicode, u8index);
+    ctxt.setBarrier(RecordBreakStream);
+
     RE_PipelineBuilder RE_PB(E, ctxt);
     RE_PB.matchSearchPipeline(matchingRE, MatchResults);
     StreamSet * MatchingRecords = E.CreateStreamSet();
