@@ -82,13 +82,8 @@ RE * FixedSpanNamer::transform(RE * r) {
         } else {
             defn = makeAlt(grp.second.begin(), grp.second.end());
         }
-        if (lgth == 0) {
-            // Zero length alts do not generate spans.
-            mNewAlts.push_back(defn);
-        } else {
-            Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
-            mNewAlts.push_back(n);
-        }
+        Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
+        mNewAlts.push_back(n);
     }
     if (mNewAlts.size() == 1) return mNewAlts[0];
     return makeAlt(mNewAlts.begin(), mNewAlts.end());

@@ -127,6 +127,7 @@ public:
 
     void matchSearchPipeline(re::RE * re, kernel::StreamSet * results);
     void matchSpanPipeline(re::RE * re, kernel::StreamSet * spans);
+    kernel::PipelineBuilder & getPipelineBuilder() {return mPB;}
 
 protected:
     // Internal methods.
