@@ -675,8 +675,15 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
     if (mColoring) {
         MatchSpans = P.CreateStreamSet(1);
         RE_PB.matchSpanPipeline(mRE, Matches, MatchSpans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MatchSpans", MatchSpans);
+            P.captureBitstream("Matches", Matches);
+        }
     } else {
         RE_PB.matchSearchPipeline(mRE, Matches);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("Matches", Matches);
+        }
     }
 
     if (mIndexAlphabet == &cc::Unicode) {
