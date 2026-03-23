@@ -385,6 +385,9 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
 
         StreamSet * U21_LB = P.CreateStreamSet(1);
         FilterByMask(P, mU8index, mLineBreakStream, U21_LB);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("U21_LB", U21_LB);
+        }
         mCtxt.setBarrier(U21_LB);
     }
 }
@@ -668,8 +671,10 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
     RE_PipelineBuilder RE_PB(P, mCtxt);
 
     StreamSet * Matches = P.CreateStreamSet(1);
+    StreamSet * MatchSpans = nullptr;
     if (mColoring) {
-        RE_PB.matchSpanPipeline(mRE, Matches);
+        MatchSpans = P.CreateStreamSet(1);
+        RE_PB.matchSpanPipeline(mRE, Matches, MatchSpans);
     } else {
         RE_PB.matchSearchPipeline(mRE, Matches);
     }
@@ -684,11 +689,11 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
             P.captureBitstream("u8 matches", Matches);
         }
         if (mColoring) {
-            //StreamSet * u8Spans = P.CreateStreamSet(1, 1);
-            //SpreadByMask(P, mU8index, MatchSpans, u8Spans);
+            StreamSet * spreadSpans = P.CreateStreamSet(1, 1);
+            SpreadByMask(P, mU8index, MatchSpans, spreadSpans);
             StreamSet * ResultSpans = P.CreateStreamSet(1, 1);
-            P.CreateKernelCall<U8Spans>(Results, mU8index, ResultSpans);
-            Matches = ResultSpans;
+            P.CreateKernelCall<U8Spans>(spreadSpans, mU8index, ResultSpans);
+            MatchSpans = ResultSpans;
         }
     }
 
@@ -739,7 +744,7 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureByteData("Filtered", Filtered);
         }
-        StreamSet * MatchSpans = Matches;
+        //StreamSet * MatchSpans = Matches;
 
         StreamSet * FilteredMatchSpans = P.CreateStreamSet(1, 1);
         FilterByMask(P, MatchedLineSpans, MatchSpans, FilteredMatchSpans);

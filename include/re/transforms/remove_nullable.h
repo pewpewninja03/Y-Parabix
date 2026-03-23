@@ -16,4 +16,6 @@ RE * removeNullableSuffix(RE * re);
 
 RE * zeroBoundElimination(RE * re,
                           NameTransformationMode m = NameTransformationMode::None);
+
+RE * emptyMatchElimination(RE * r);
 }

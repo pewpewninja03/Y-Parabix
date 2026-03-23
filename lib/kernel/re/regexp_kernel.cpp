@@ -508,12 +508,14 @@ void RE_PipelineBuilder::matchSearchPipeline(RE * re, StreamSet * results) {
     mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, mRE, results);
 }
 
-void RE_PipelineBuilder::matchSpanPipeline(RE * re, StreamSet * spans) {
+void RE_PipelineBuilder::matchSpanPipeline(RE * re, StreamSet * matches, StreamSet * spans) {
     mRE = prepareRE(re);
     mRE = processReferences(mRE);
     mRE = spanFactoring(mRE);
     prepareExternals(mRE);
-    getSpan(mRE, spans);
+    mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, mRE, matches);
+    auto subsetRE = emptyMatchElimination(mRE);
+    getSpan(subsetRE, spans);
 }
 
 void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
