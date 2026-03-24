@@ -114,13 +114,15 @@ std::string RE_Kernel::makeSignature(RE_CompilerContext & ctxt, RE * re) {
                 sigstrm << "+Z";
             } else if (ext.kind == ExternalStreamKind::FixedLength) {
                 sigstrm << "+F";
-                sigstrm << ext.lgthRange.second + ext.offset;
+                sigstrm << ext.lgthRange.second;
+                if (ext.offset == 1) sigstrm << "o";
             } else if (ext.kind == ExternalStreamKind::StartIndexed) {
                 sigstrm << "+S";
                 sigstrm << ext.offset;
             } else {
                 sigstrm << "+E";
-                sigstrm << ext.lgthRange.first << "-" << ext.lgthRange.second << "@" << ext.offset;
+                sigstrm << ext.lgthRange.first << "-" << ext.lgthRange.second;
+                if (ext.offset == 1) sigstrm << "o";
             }
             externalList.push_back(name);
         }
