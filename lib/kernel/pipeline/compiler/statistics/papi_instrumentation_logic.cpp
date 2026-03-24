@@ -284,7 +284,7 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const
 
             b.CreateAssert(b.CreateICmpULE(beforeVal, afterVal), "%s.papi%" PRIu64 " or %" PRIu64 ".%" PRIu64 " : %" PRIu64 ", %" PRIu64, mCurrentKernelName, b.getSize(ifTrue), b.getSize(ifFalse), b.getSize(i), beforeVal, afterVal);
 
-            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
+            Value * const diff = b.CreateUnsignedSaturatingSub(afterVal, beforeVal);
             update[2] = from[1];
             Value * const ptr = b.CreateGEP(eventCounterSumty, eventCounterSumArray, update);
             Value * const curr = b.CreateAlignedLoad(papiCounterTy, ptr, papiCounterAlign);
@@ -323,7 +323,7 @@ void PipelineCompiler::recordTotalPAPIMeasurement(KernelBuilder & b) const {
 
             b.CreateAssert(b.CreateICmpULE(beforeVal, afterVal), "total");
 
-            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
+            Value * const diff = b.CreateUnsignedSaturatingSub(afterVal, beforeVal);
             Value * const ptr = b.CreateGEP(counterArrayTy, eventCounterSumArray, from);
             Value * const curr = b.CreateAlignedLoad(counterTy, ptr, papiCounterAlign);
             assert (curr->getType() == diff->getType());

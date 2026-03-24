@@ -113,9 +113,9 @@ public:
         return CreateSelect(CreateICmpSGT(a, b), a, b, Name);
     }
 
-    llvm::Value * CreateSaturatingAdd(llvm::Value * const a, llvm::Value * const b, const llvm::Twine Name = "");
+    llvm::Value * CreateUnsignedSaturatingAdd(llvm::Value * const a, llvm::Value * const b, const llvm::Twine Name = "");
 
-    llvm::Value * CreateSaturatingSub(llvm::Value * const a, llvm::Value * const b, const llvm::Twine Name = "");
+    llvm::Value * CreateUnsignedSaturatingSub(llvm::Value * const a, llvm::Value * const b, const llvm::Twine Name = "");
 
     llvm::Value * CreateMalloc(llvm::Value * const size);
 
@@ -532,5 +532,9 @@ llvm::ModulePass * createRemoveRedundantAssertionsPass();
 
 template <typename T, unsigned N>
 using FixedArray = std::array<T, N>;
+
+#ifndef NDEBUG
+bool isFromCurrentFunction(const CBuilder & b, const llvm::Value * const value, const bool allowNull = true);
+#endif
 
 

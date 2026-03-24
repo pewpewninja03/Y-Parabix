@@ -429,10 +429,11 @@ enum BufferPortType : unsigned {
     LoopAgainConstraint = 256,
     Illustrated = 512,
     InputMayBeTruncated = 1024,
-    InputMustAlwaysBeFullyConsumed = 2048,
+    InputMayBeImplicitlyZeroExtended = 2048,
+    InputMustAlwaysBeFullyConsumed = 4096,
 // ---------------------------------------
-    TrackBlockedIO = 4096,
-    TrackBlockedIOSummary = 8192,
+    TrackBlockedIO = 8192,
+    TrackBlockedIOSummary = 16384,
 };
 
 struct BufferPort {

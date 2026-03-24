@@ -180,18 +180,91 @@ Value * CBuilder::CreateRoundUp(Value * const number, Value * const divisor, con
 }
 
 
-Value * CBuilder::CreateSaturatingAdd(Value * const a, Value * const b, const Twine Name) {
+Value * CBuilder::CreateUnsignedSaturatingAdd(Value * const a, Value * const b, const Twine Name) {
     // TODO: this seems to be an intrinsic in later versions of LLVM. Determine which.
+    assert (a->getType() == b->getType());
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(14, 0, 0)
+    Function * const uaddSat = Intrinsic::getDeclaration(getModule(), Intrinsic::uadd_sat); assert (uaddSat);
+    FixedArray<Value *, 2> args;
+    args[0] = a;
+    args[1] = b;
+    return CreateCall(uaddSat, args, Name);
+    #else
     Value * const c = CreateAdd(a, b);
     Constant * const max = ConstantInt::getAllOnesValue(a->getType());
     return CreateSelect(CreateICmpULT(c, a), max, c, Name);
+    #endif
 }
 
-Value * CBuilder::CreateSaturatingSub(Value * const a, Value * const b, const Twine Name) {
+Value * CBuilder::CreateUnsignedSaturatingSub(Value * const a, Value * const b, const Twine Name) {
     // TODO: this seems to be an intrinsic in later versions of LLVM. Determine which.
-    Value * const c = CreateSub(a, b);
-    Constant * const min = ConstantInt::getNullValue(a->getType());
-    return CreateSelect(CreateICmpULT(a, b), min, c, Name);
+    assert (isFromCurrentFunction(*this, a, false));
+    assert (isFromCurrentFunction(*this, b, false));
+    assert (a->getType() == b->getType() && a->getType()->isIntOrIntVectorTy());
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(14, 0, 0)
+    Function * const usubSat = Intrinsic::getDeclaration(getModule(), Intrinsic::usub_sat); assert (usubSat);
+    FixedArray<Value *, 2> args;
+    args[0] = a;
+    args[1] = b;
+    return CreateCall(usubSat, args, Name);
+    #else
+
+//    ConstantInt * const cB = dyn_cast<ConstantInt>(b);
+//    if (LLVM_UNLIKELY(cB && cB->isNullValue())) {
+//        return a;
+//    }
+    // TODO: for some reason, LLVM 12 incorrectly handles (a - constant)? The select statement returns the
+    // *signed* saturated value? Even when I inline this, it ends up returning the wrong result so the error is
+    // likely in the backend. Not sure if this bug exists in later versions or if there is a better workaround.
+    Module * const m = getModule();
+//    const char * const name = (cB) ? "__usatsubc" : "__usatsub";
+    const char * const name = "__usatsub";
+    Function * uSatSub = m->getFunction(name);
+
+    if (uSatSub == nullptr) {
+
+        FixedArray<Type *, 2> paramTypes;
+        Type * const ty = a->getType();
+        paramTypes[0] = ty;
+        paramTypes[1] = ty;
+
+        FunctionType * funcTy = FunctionType::get(ty, paramTypes, false);
+
+        Constant * const intZero = ConstantInt::getNullValue(ty);
+
+        const auto ip = saveIP();
+        uSatSub = Function::Create(funcTy, Function::InternalLinkage, name, m);
+//        const auto inlineFlag = (cB) ? llvm::Attribute::AttrKind::NoInline : llvm::Attribute::AttrKind::AlwaysInline;
+        uSatSub->addFnAttr(llvm::Attribute::AttrKind::NoInline);
+
+        BasicBlock * const entry = BasicBlock::Create(getContext(), "entry", uSatSub);
+
+        SetInsertPoint(entry);
+        auto arg = uSatSub->arg_begin();
+        auto nextArg = [&]() {
+            assert (arg != uSatSub->arg_end());
+            Value * const v = &*arg;
+            std::advance(arg, 1);
+            return v;
+        };
+
+        Value * const a = nextArg();
+        Value * const b = nextArg();
+        assert (arg == uSatSub->arg_end());
+
+        Value * const c = CreateSub(a, b);
+        Value * const d = CreateICmpULT(a, b);
+        CreateRet(CreateSelect(d, intZero, c, Name));
+
+        restoreIP(ip);
+    }
+
+    FixedArray<Value *, 2> args;
+    args[0] = a;
+    args[1] = b;
+    return CreateCall(uSatSub, args, Name);
+
+    #endif
 }
 
 Value * CBuilder::CreateOpenCall(Value * filename, Value * oflag, Value * mode) {
@@ -2411,3 +2484,35 @@ void CBuilder::linkAllNecessaryExternalFunctions() const {
 std::string CBuilder::getKernelName() const {
     return "cbuilder";
 }
+
+
+#ifndef NDEBUG
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isFromCurrentFunction
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool isFromCurrentFunction(const CBuilder & b, const Value * const value, const bool allowNull) {
+    if (value == nullptr) {
+        assert ("value is null?" && allowNull);
+        return allowNull;
+    }
+    if (LLVM_UNLIKELY(&b.getContext() != &value->getContext())) {
+        assert (!"not from same context?");
+        return false;
+    }
+    BasicBlock * const ip = b.GetInsertBlock(); assert (ip);
+    if (isa<Constant>(value)) {
+        return true;
+    }
+    const Function * const builderFunction = ip->getParent();
+    assert (builderFunction);
+    const Function * function = builderFunction;
+    if (isa<Argument>(value)) {
+        function = cast<Argument>(value)->getParent();
+    } else if (isa<Instruction>(value)) {
+        function = cast<Instruction>(value)->getParent()->getParent();
+    }
+    assert (function);
+    assert ("not from same function?" && (builderFunction == function));
+    return (builderFunction == function);
+}
+#endif

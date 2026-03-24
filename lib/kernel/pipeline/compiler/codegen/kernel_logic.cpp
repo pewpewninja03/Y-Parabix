@@ -105,7 +105,7 @@ void PipelineCompiler::computeFullyProducedItemCounts(KernelBuilder & b, Value *
             const Binding & output = br.Binding;
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::Delayed))) {
                 const auto & D = output.findAttribute(AttrId::Delayed);
-                produced = b.CreateSaturatingSub(produced, b.getSize(D.amount()));
+                produced = b.CreateUnsignedSaturatingSub(produced, b.getSize(D.amount()));
             }
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::BlockSize))) {
                 Constant * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
@@ -138,7 +138,7 @@ Value * PipelineCompiler::subtractLookahead(KernelBuilder & b, const BufferPort 
     }
     Constant * const lookAhead = b.getSize(inputPort.LookAhead);
     Value * const closed = isClosed(b, inputPort.Port);
-    Value * const reducedItemCount = b.CreateSaturatingSub(itemCount, lookAhead);
+    Value * const reducedItemCount = b.CreateUnsignedSaturatingSub(itemCount, lookAhead);
     return b.CreateSelect(closed, itemCount, reducedItemCount);
 }
 

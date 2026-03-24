@@ -1068,41 +1068,73 @@ ignore_duplicate_entry:
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::buildZeroInputGraph() {
 
-    SmallVector<unsigned, 8> entries;
+    flat_set<unsigned> entries;
 
     const auto n = LastKernel - FirstKernel + 1;
 
     ZeroInputGraph G(n);
 
+    // If a non-principal streamset
+
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
 
         assert (entries.empty());
 
-        for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+        BufferGraph::in_edge_iterator ei_begin, ei_end;
+        std::tie(ei_begin, ei_end) = in_edges(kernel, mBufferGraph);
 
-            const auto streamSet = source(e, mBufferGraph);
-            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
-            const BufferNode & bn = mBufferGraph[streamSet];
+        for (auto ei = ei_begin; ei != ei_end; ++ei) {
 
-            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-
-            if (LLVM_UNLIKELY(!(bn.isTruncated() || bn.isConstant()))) {
-                const auto producer = parent(streamSet, mBufferGraph);
-                if (KernelPartitionId[producer] == KernelPartitionId[kernel]) {
-                    continue;
-                }
-            }
-
-            BufferPort & port = mBufferGraph[e];
+            BufferPort & port = mBufferGraph[*ei];
             assert (port.Port.Type == PortType::Input);
-            const Binding & input = port.Binding;
-            const ProcessingRate & rate = input.getRate();
 
             if (LLVM_UNLIKELY(port.Port.Reason != ReasonType::Explicit)) {
                 continue;
             }
+
+            if (LLVM_UNLIKELY(port.isPrincipal())) { assert (port.isFixed());
+
+                auto scan_other_ports = [&](BufferGraph::in_edge_iterator begin, BufferGraph::in_edge_iterator end) {
+                    for (auto ej = begin; ej != end; ++ej) {
+                        BufferPort & other = mBufferGraph[*ej];
+                        assert (other.Port.Type == PortType::Input);
+                        assert ("multiple principal rates is not allowed" && !other.isPrincipal());
+
+
+                        if (other.isFixed() && ((other.TransitiveAdd != port.TransitiveAdd))) {
+                            if (LLVM_UNLIKELY(other.Port.Reason != ReasonType::Explicit)) {
+                                continue;
+                            }
+                            const auto streamSet = source(*ej, mBufferGraph);
+                            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+                            const BufferNode & N = mBufferGraph[streamSet];
+                            if (LLVM_UNLIKELY(N.isConstant() || N.hasZeroElementsOrWidth())) {
+                                continue;
+                            }
+                            if (other.TransitiveAdd < port.TransitiveAdd) {
+                                other.Flags |= BufferPortType::InputMayBeImplicitlyZeroExtended;
+                            } else { // if (port.TransitiveAdd < other.TransitiveAdd)
+                                other.Flags |= BufferPortType::InputMayBeTruncated;
+                            }
+                            entries.insert(other.Port.Number);
+                        }
+                    }
+                };
+
+                scan_other_ports(ei_begin, ei);
+                scan_other_ports(ei + 1, ei_end);
+            }
+
+            const auto streamSet = source(*ei, mBufferGraph);
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const BufferNode & bn = mBufferGraph[streamSet];
+
+            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth() || (bn.isThreadLocal() && !bn.isTruncated()))) {
+                continue;
+            }
+
+            const Binding & input = port.Binding;
+            const ProcessingRate & rate = input.getRate();
 
             // TODO: have an "unsafe" override attribute for unowned ones? this isn't needed for
             // nested pipelines but could replace the source output.
@@ -1113,30 +1145,26 @@ void PipelineAnalysis::buildZeroInputGraph() {
 
             port.Flags |= BufferPortType::InputMayBeTruncated;
 
-            entries.emplace_back(port.Port.Number);
+            entries.insert(port.Port.Number);
         }
-
-        if (entries.empty()) {
-            continue;
-        }
-
-        // sort primarily by size so we can merge any larger ones as needed.
-        std::sort(entries.begin(), entries.end());
 
         const auto l = entries.size();
 
-        assert (num_vertices(G) >= n);
+        if (l) {
+            assert (num_vertices(G) >= n);
 
-        for (size_t k = num_vertices(G) - n; k < l; ++k) {
-            add_vertex(G);
+            for (size_t k = num_vertices(G) - n; k < l; ++k) {
+                add_vertex(G);
+            }
+
+            for (size_t k = 0U; k < l; ++k) {
+                add_edge(kernel - FirstKernel, n + k, *(entries.begin() + k), G);
+            }
+
+            entries.clear();
         }
 
-        for (size_t k = 0U; k < l; ++k) {
-            const auto portNum = entries[k];
-            add_edge(kernel - FirstKernel, n + k, portNum, G);
-        }
 
-        entries.clear();
     }
 
     mZeroInputGraph = G;

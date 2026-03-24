@@ -164,7 +164,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
             delayOrLookBehind = std::max(delayOrLookBehind, d);
         }
         if (delayOrLookBehind) {
-            produced = b.CreateSaturatingSub(produced, b.getSize(delayOrLookBehind));
+            produced = b.CreateUnsignedSaturatingSub(produced, b.getSize(delayOrLookBehind));
         }
         itemCount = produced;
     } else {
@@ -209,7 +209,7 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(KernelBuilder & b) {
             const BufferPort & br = mBufferGraph[input];
             if (LLVM_UNLIKELY(br.LookBehind != 0)) {
                 ConstantInt * const amount = b.getSize(br.LookBehind);
-                processed = b.CreateSaturatingSub(processed, amount);
+                processed = b.CreateUnsignedSaturatingSub(processed, amount);
             }
             const auto streamSet = source(e, mConsumerGraph);
             assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);

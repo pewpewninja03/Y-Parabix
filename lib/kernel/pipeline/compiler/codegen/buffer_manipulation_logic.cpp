@@ -227,10 +227,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
         Value * const selected = accessibleItems[inputPort.Number];
-
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
-
-        // inputCapacity[inputPort.Number] = buffer->getCapacity(b);
 
         inputCapacity[inputPort.Number] = totalNumOfItems;
 
@@ -239,12 +236,21 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         if (LLVM_UNLIKELY(alwaysTruncate)) {
             b.CreateBr(maskedInput);
         } else {
-            Value * const tooMany = b.CreateICmpULT(selected, totalNumOfItems);
-            Value * computeMask = tooMany;
-            if (mIsInputZeroExtended[inputPort]) {
-                computeMask = b.CreateAnd(tooMany, b.CreateNot(mIsInputZeroExtended[inputPort]));
+            constexpr auto ALLFLAGS = BufferPortType::InputMayBeTruncated | BufferPortType::InputMayBeImplicitlyZeroExtended;
+            const auto flags = port.Flags & ALLFLAGS; assert (flags);
+            if (flags == ALLFLAGS) {
+                Value * const exactMatch = b.CreateICmpNE(selected, totalNumOfItems);
+                b.CreateUnlikelyCondBr(exactMatch, maskedInput, selectedInput);
+            } else if (flags == BufferPortType::InputMayBeTruncated) {
+                Value * tooMany = b.CreateICmpULT(selected, totalNumOfItems);
+                if (mIsInputZeroExtended[inputPort]) {
+                    tooMany = b.CreateAnd(tooMany, b.CreateNot(mIsInputZeroExtended[inputPort]));
+                }
+                b.CreateUnlikelyCondBr(tooMany, maskedInput, selectedInput);
+            } else {
+                Value * tooFew = b.CreateICmpUGT(selected, totalNumOfItems);
+                b.CreateUnlikelyCondBr(tooFew, maskedInput, selectedInput);
             }
-            b.CreateUnlikelyCondBr(computeMask, maskedInput, selectedInput);
         }
 
         b.SetInsertPoint(maskedInput);

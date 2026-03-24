@@ -320,9 +320,5 @@ public:
     }
 };
 
-#ifndef NDEBUG
-bool isFromCurrentFunction(const KernelBuilder & b, const llvm::Value * const value, const bool allowNull = true);
-#endif
-
 }
 

@@ -951,12 +951,12 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * const avail = mLocallyAvailableItems[id];
-        writable = b.CreateSaturatingSub(avail, produced);
+        writable = b.CreateUnsignedSaturatingSub(avail, produced);
     } else if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
         const auto src = parent(streamSet, InOutStreamSetReplacement);
         assert (FirstStreamSet <= src && src <= LastStreamSet);
         Value * const avail = mLocallyAvailableItems[src];
-        writable = b.CreateSaturatingSub(avail, produced);
+        writable = b.CreateUnsignedSaturatingSub(avail, produced);
     } else {
 
         Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
@@ -1039,7 +1039,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
                             produced, avail);
         }
 
-        writable = b.CreateSaturatingSub(avail, produced);
+        writable = b.CreateUnsignedSaturatingSub(avail, produced);
     } else {
 
         assert (mConsumerGraph[src] != 0);
@@ -1141,7 +1141,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             if (LLVM_LIKELY(k > 0)) {
                 selected = b.CreateAdd(accessible, b.getSize(k));
             } else  {
-                selected = b.CreateSaturatingSub(accessible, b.getSize(k));
+                selected = b.CreateUnsignedSaturatingSub(accessible, b.getSize(k));
             }
             Value * closed = mHasExhaustedClosedInput;
             if (closed == nullptr) {
@@ -1254,17 +1254,28 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                     // (x + (g/h)) * (c/d) = (xh + g) * c/hd
                     Constant * const h = b.getSize(stride);
                     Value * const xh = b.CreateMul(minFixedRateFactor, h);
-                    Constant * const g = b.getSize(std::abs(k));
+//                    Constant * const g = b.getSize(std::abs(k));
                     Value * y;
+
+                    b.CallPrintInt("xh", xh);
+
+
                     if (k > 0) {
-                        y = b.CreateAdd(xh, g);
+                        y = b.CreateAdd(xh, b.getSize(k));
                     } else {
-                        y = b.CreateSub(xh, g);
+                        y = b.CreateUnsignedSaturatingSub(xh, b.getSize(-k));
                     }
+
+                    b.CallPrintInt("y" + std::to_string(mKernelId) + "i" + std::to_string(port.Port.Number), y);
 
                     const Rational r{factor.numerator(), factor.denominator() * stride}; // := factor / Rational{stride};
                     Value * const z = b.CreateCeilUMulRational(y, r);
+
+                    b.CallPrintInt("z" + std::to_string(r.numerator()) + "d" + std::to_string(r.denominator()), z);
+
                     calculated = b.CreateSelect(isClosed(b, inputPort, true), z, calculated);
+
+                    b.CallPrintInt("calculated", calculated);
                 }
 
                 accessibleItems[inputPort.Number] = calculated;
@@ -1303,15 +1314,24 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             writable = calculateNumOfLinearItems(b, port, sz_ONE, "calculateFinal");
         }
 
+        const auto k = port.TransitiveAdd;
+        if (k) {
+            if (k > 0) {
+                writable = b.CreateAdd(writable, b.getSize(k));
+            } else {
+                writable = b.CreateUnsignedSaturatingSub(writable, b.getSize(-k));
+            }
+        }
+
         // update the final item counts with any Add/RoundUp attributes
         for (const Attribute & attr : output.getAttributes()) {
             switch (attr.getKind()) {
-                case AttrId::Add:
-                    writable = b.CreateAdd(writable, b.getSize(attr.amount()));
-                    break;
-                case AttrId::Truncate:
-                    writable = b.CreateSaturatingSub(writable, b.getSize(attr.amount()));
-                    break;
+//                case AttrId::Add:
+//                    writable = b.CreateAdd(writable, b.getSize(attr.amount()));
+//                    break;
+//                case AttrId::Truncate:
+//                    writable = b.CreateUnsignedSaturatingSub(writable, b.getSize(attr.amount()));
+//                    break;
                 case AttrId::RoundUpTo:
                     writable = b.CreateRoundUp(writable, b.getSize(attr.amount()));
                     break;
