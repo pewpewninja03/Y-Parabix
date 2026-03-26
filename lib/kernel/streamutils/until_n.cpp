@@ -91,7 +91,7 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     localIndex->addIncoming(ZERO, strideLoop);
     Value * const blockIndex = b.CreateAdd(baseBlockIndex, localIndex);
     Value * inputValue = b.loadInputStreamBlock("bits", ZERO, blockIndex);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+    if (!mUseInOut) {
         b.storeOutputStreamBlock("uptoN", ZERO, blockIndex, inputValue);
     }
     Value * const inputPackValue = b.simd_any(packSize, inputValue);
@@ -168,7 +168,7 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     Value * const basePosition = b.CreateMul(packOffset, PACK_SIZE);
     Value * const blockOffset = b.CreateOr(basePosition, packPosition);
     Value * const priorProducedItemCount = b.getProducedItemCount("uptoN");
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+    if (!mUseInOut) {
         if ((mMode == Mode::ZeroAfterN) || (mMode == Mode::TerminateAtN)) {
             Value * const inputValue2 = b.loadInputStreamBlock("bits", ZERO, blockIndex2);
             Value * const mask = b.bitblock_mask_to(blockOffset, true);
@@ -229,7 +229,7 @@ UntilNkernel::UntilNkernel(LLVMTypeSystemInterface & ts, Scalar * N, StreamSet *
 }(),
 {Binding{"bits", Markers}},
 // outputs
-{Binding{"uptoN", FirstN, FixedRate(), InOut("bits")}},
+{},
 // input scalar
 {Binding{"N", N}}, {},
 // internal state
@@ -238,7 +238,15 @@ UntilNkernel::UntilNkernel(LLVMTypeSystemInterface & ts, Scalar * N, StreamSet *
         case Mode::TerminateAtN:
         case Mode::ReportAcceptedLengthAtAndBeforeN:
             addAttribute(CanTerminateEarly());
-        default: break;
+            mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
+            break;
+        case Mode::ZeroAfterN:
+            mUseInOut = false;
+    }
+    if (mUseInOut) {
+        mOutputStreamSets.push_back(Binding{"uptoN", FirstN, FixedRate(), InOut("bits")});
+    } else {
+        mOutputStreamSets.push_back(Binding{"uptoN", FirstN});
     }
 }
 

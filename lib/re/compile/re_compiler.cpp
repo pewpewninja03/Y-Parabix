@@ -494,7 +494,8 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
             if (lb > 0) {
                 PabloAST * cc_lb = consecutive_matches(cc, 1, rpt, lengths.first, nullptr);
                 auto lb_lgth = lengths.first * rpt;
-                if (marker.position() == Position::AtNextChar) {
+                if (marker.position() != Position::AtEnd) {
+                    marker = Marker(NextCharacter(marker, mPB));
                     lb_lgth--;
                 }
                 PabloAST * marker_fwd = mPB.createAdvance(marker.stream(), lb_lgth, "marker_fwd");
@@ -519,7 +520,7 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
                 PabloAST * cc = compile(repeated).stream();
                 PabloAST * cursor = marker.stream();
                 if (marker.position() != Position::AtEnd) {
-                    cursor = mPB.createAnd(cc, mPB.createScanTo(marker.stream(), mMain.mIndexStream));
+                    cursor = mPB.createAnd(cc, NextCharacter(marker, mPB));
                     rpt -= 1;
                 }
                 PabloAST * cc_lb = consecutive_matches(cc, 1, rpt, 1, mMain.mIndexStream);

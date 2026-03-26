@@ -90,7 +90,7 @@ using UntilNMode = UntilNkernel::Mode;
 
 static cl::opt<UntilNMode>
 MaxLimitTerminationMode("maxlimit-termination-mode",
-                  cl::init(UntilNMode::TerminateAtN),
+                  cl::init(UntilNMode::ZeroAfterN),
                   cl::desc("method of pipeline termination when -m=maxlimit is reached."),
                   cl::values(clEnumValN(UntilNMode::ReportAcceptedLengthAtAndBeforeN, "report", "halt pipeline after maxlimit using truncated streamset"),
                              clEnumValN(UntilNMode::TerminateAtN, "terminate", "halt pipeline after maxlimit using streamset copy"),
@@ -380,15 +380,17 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
             P.CreateKernelCall<UTF8_Decoder>(Source, u21_u8indexed);
             StreamSet * u21 = P.CreateStreamSet(21);
             FilterByMask(P, mU8index, u21_u8indexed, u21);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBixNum("u21basis", u21);
+            }
             mCtxt.setCodeUnitContext(mIndexAlphabet, u21);
         }
-
-        StreamSet * U21_LB = P.CreateStreamSet(1);
-        FilterByMask(P, mU8index, mLineBreakStream, U21_LB);
+        mU21_LB = P.CreateStreamSet(1);
+        FilterByMask(P, mU8index, mLineBreakStream, mU21_LB);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("U21_LB", U21_LB);
+            P.captureBitstream("mU21_LB", mU21_LB);
         }
-        mCtxt.setBarrier(U21_LB);
+        mCtxt.setBarrier(mU21_LB);
     }
 }
 
@@ -402,11 +404,11 @@ StreamSet * GrepEngine::initialMatches(RE_PipelineBuilder & RE_PB, StreamSet * I
     return Matches;
 }
 
-StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * initialMatches) {
+StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * initialMatches, StreamSet * lineBreaks) {
     StreamSet * MatchedLineEnds = nullptr;
     if (matchesToEOLrequired() || mColoring) {
         StreamSet * const MovedMatches = P.CreateStreamSet();
-        P.CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
+        P.CreateKernelCall<MatchedLinesKernel>(initialMatches, lineBreaks, MovedMatches);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureBitstream("MovedMatches", MovedMatches);
         }
@@ -416,31 +418,11 @@ StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * in
     }
     if (mInvertMatches) {
         StreamSet * const InvertedMatches = P.CreateStreamSet();
-        P.CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
+        P.CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, lineBreaks, InvertedMatches);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureBitstream("InvertedMatches", InvertedMatches);
         }
         MatchedLineEnds = InvertedMatches;
-    }
-    if (mMaxCount > 0) {
-        StreamSet * MaxCountLines = nullptr;
-        Scalar * const maxCount = P.getInputScalar("maxCount");
-        const UntilNMode m = MaxLimitTerminationMode;
-        if (m == UntilNMode::ReportAcceptedLengthAtAndBeforeN) {
-            MaxCountLines = P.CreateTruncatedStreamSet(MatchedLineEnds);
-        } else {
-            MaxCountLines = P.CreateStreamSet();
-        }
-        P.CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("MaxCountLines", MaxCountLines);
-        }
-        MatchedLineEnds = MaxCountLines;
-        StreamSet * TruncatedLines = streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("TruncatedLines", TruncatedLines);
-        }
-        mLineBreakStream = TruncatedLines;
     }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         P.captureBitstream("MatchedLineEnds", MatchedLineEnds);
@@ -448,23 +430,40 @@ StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * in
     return MatchedLineEnds;
 }
 
+StreamSet * GrepEngine::applyMatchLimit(kernel::PipelineBuilder & P, StreamSet * MatchedLineEnds) {
+    if (mMaxCount > 0) {
+        StreamSet * MaxCountLines = nullptr;
+        Scalar * const maxCount = P.getInputScalar("maxCount");
+        if (MaxLimitTerminationMode == UntilNMode::ReportAcceptedLengthAtAndBeforeN) {
+            MaxCountLines = P.CreateTruncatedStreamSet(MatchedLineEnds);
+        } else {
+            MaxCountLines = P.CreateStreamSet();
+        }
+        P.CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, MaxLimitTerminationMode);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MaxCountLines", MaxCountLines);
+        }
+        MatchedLineEnds = MaxCountLines;
+        if (MaxLimitTerminationMode != UntilNMode::ZeroAfterN) {
+            StreamSet * TruncatedLines = streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBitstream("TruncatedLines", TruncatedLines);
+            }
+            mLineBreakStream = TruncatedLines;
+        }
+    }
+    return MatchedLineEnds;
+
+}
+
 StreamSet * GrepEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * InputStream) {
     grepPrologue(P, InputStream);
     RE_PipelineBuilder RE_PB(P, mCtxt);
     StreamSet * Matches = initialMatches(RE_PB, InputStream);
-    if (mIndexAlphabet == &cc::Unicode) {
-        StreamSet * u8index1 = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
-        StreamSet * Results = P.CreateStreamSet(1, 1);
-        SpreadByMask(P, u8index1, Matches, Results);
-        Matches = Results;
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("u8 matches", Matches);
-        }
-    }
-    return matchedLines(P, Matches);
+    StreamSet * lbs = (mIndexAlphabet == &cc::Unicode) ? mU21_LB : mLineBreakStream;
+    StreamSet * matches = matchedLines(P, Matches, lbs);
+    return applyMatchLimit(P, matches);
 }
-
 
 
 // The QuietMode, MatchOnly and CountOnly engines share a common code generation main function,
@@ -686,42 +685,46 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         }
     }
 
-    if (mIndexAlphabet == &cc::Unicode) {
-        StreamSet * u8index1 = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
-        StreamSet * Results = P.CreateStreamSet(1, 1);
-        SpreadByMask(P, u8index1, Matches, Results);
-        Matches = Results;
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("u8 matches", Matches);
-        }
-        if (mColoring) {
-            StreamSet * spreadSpans = P.CreateStreamSet(1, 1);
-            SpreadByMask(P, mU8index, MatchSpans, spreadSpans);
-            StreamSet * ResultSpans = P.CreateStreamSet(1, 1);
-            P.CreateKernelCall<U8Spans>(spreadSpans, mU8index, ResultSpans);
-            MatchSpans = ResultSpans;
-        }
-    }
-
-    StreamSet * MatchedLineEnds = matchedLines(P, Matches);
+    StreamSet * lbs = (mIndexAlphabet == &cc::Unicode) ? mU21_LB : mLineBreakStream;
+    StreamSet * MatchedLineEnds = matchedLines(P, Matches, lbs);
 
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
     StreamSet * MatchesByLine = nullptr;
     if (mColoring | hasContext) {
         MatchesByLine = P.CreateStreamSet(1, 1);
-        FilterByMask(P, mLineBreakStream, MatchedLineEnds, MatchesByLine);
+        FilterByMask(P, lbs, MatchedLineEnds, MatchesByLine);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureBitstream("MatchesByLine", MatchesByLine);
         }
     }
+
     if (hasContext) {
         StreamSet * ContextByLine = P.CreateStreamSet(1, 1);
         P.CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
         StreamSet * SelectedLines = P.CreateStreamSet(1, 1);
+        // Note that the following spread will produce SelectedLines in u8 space.
         SpreadByMask(P, mLineBreakStream, ContextByLine, SelectedLines);
         MatchedLineEnds = SelectedLines;
         MatchesByLine = ContextByLine;
+    } else if (mIndexAlphabet == &cc::Unicode) {
+        StreamSet * u8index1 = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        StreamSet * Results = P.CreateStreamSet(1, 1);
+        SpreadByMask(P, u8index1, MatchedLineEnds, Results);
+        MatchedLineEnds = Results;
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("u8 matches", MatchedLineEnds);
+        }
+    }
+
+    MatchedLineEnds = applyMatchLimit(P, MatchedLineEnds);
+
+    if (mColoring && (mIndexAlphabet == &cc::Unicode)) {
+        StreamSet * spreadSpans = P.CreateStreamSet(1, 1);
+        SpreadByMask(P, mU8index, MatchSpans, spreadSpans);
+        StreamSet * ResultSpans = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<U8Spans>(spreadSpans, mU8index, ResultSpans);
+        MatchSpans = ResultSpans;
     }
 
     if (mColoring) {
