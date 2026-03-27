@@ -569,7 +569,7 @@ bool hasEndAnchor(const RE * re) {
 
 class StartFreeValidator : public RE_Validator {
 public:
-    StartFreeValidator() : RE_Validator("StartFreeValidator") {}
+    StartFreeValidator() : RE_Validator("StartFreeValidator", NameProcessingMode::ProcessDefinition) {}
     bool validateStart(const Start * s) override {return false;}
 };
 
@@ -578,7 +578,7 @@ bool anyStartAnchor(const RE * re) {
 }
 class EndFreeValidator : public RE_Validator {
 public:
-    EndFreeValidator() : RE_Validator("EndFreeValidator") {}
+    EndFreeValidator() : RE_Validator("EndFreeValidator", NameProcessingMode::ProcessDefinition) {}
     bool validateEnd(const End * e) override {return false;}
 };
 
@@ -651,6 +651,7 @@ bool DefiniteLengthBackReferencesOnly(const RE * re) {
     return true; // otherwise = CC, Any, Start, End, Range
 }
 
+# define End_Lookahead 1
 unsigned grepOffset(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {
         unsigned altOffset = 0;
@@ -662,7 +663,7 @@ unsigned grepOffset(const RE * re) {
         if (seq->empty()) return 1;
         for (auto i = seq->rbegin(); i != seq->rend(); ++i) {
             unsigned o = grepOffset(*i);
-            if (!isa<Assertion>(*i)) return o;
+            if (!isa<Assertion>(*i) && !isa<End>(*i)) return o;
             if (o == 1) return o;
         }
         return 1;
@@ -672,7 +673,7 @@ unsigned grepOffset(const RE * re) {
     } else if (isa<Start>(re)) {
         return 1;
     } else if (isa<End>(re)) {
-        return 1;
+        return 1 - End_Lookahead;
     } else if (const Assertion * a = dyn_cast<Assertion>(re)) {
         if (a->getKind() == Assertion::Kind::LookBehind) {
             return grepOffset(a->getAsserted());

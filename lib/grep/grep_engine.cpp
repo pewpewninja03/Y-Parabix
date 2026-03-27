@@ -257,7 +257,7 @@ bool GrepEngine::matchesToEOLrequired () {
     // may be on the CR of a CRLF.
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) return true;
     // If all REs are anchored to EOL already, then we can avoid moving them.
-    if (hasEndAnchor(mRE)) return false;
+    if (hasEndAnchor(mRE) && (grepOffset(mRE) > 0)) return false;
     //
     // Not all REs are anchored.   We can avoid moving matches, if we are
     // in MatchOnly mode (or CountOnly with MaxCount = 1) and no invert match inversion.

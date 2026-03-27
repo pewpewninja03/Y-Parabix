@@ -747,11 +747,12 @@ inline Marker RE_Block_Compiler::compileStart(Marker marker) {
 }
 
 inline Marker RE_Block_Compiler::compileEnd(Marker marker) {
-    PabloAST * nextPos = marker.stream();
     if (marker.position() == Position::AtEnd) {
-        nextPos = mPB.createIndexedAdvance(nextPos, mMain.mIndexStream, 1);
+        PabloAST * barrierAhead = mPB.createLookahead(mMain.mBarrier, 1);
+        return Marker(mPB.createAnd(marker.stream(), barrierAhead, "EOT_match"));
     }
-    PabloAST * const EOT_match = mPB.createAnd(mMain.mBarrier, nextPos, "EOT_match");
+    PabloAST * nextPos = NextCharacter(marker, mPB);
+    PabloAST * const EOT_match = mPB.createAnd(mMain.mBarrier, nextPos, "EOT_follow");
     return Marker(EOT_match, Position::AtNextChar);
 }
 

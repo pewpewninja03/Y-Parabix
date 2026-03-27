@@ -91,8 +91,14 @@ std::string RE_Kernel::makeSignature(RE_CompilerContext & ctxt, RE * re) {
     llvm::raw_string_ostream sigstrm(signature);
     sigstrm << AnnotateWithREflags("RE");
     if (ctxt.mBarrierStream) {
+        // A barrier stream is normally expected.
+        if (anyEndAnchor(re)) {
+            // For end anchors, a lookahead attribute is added.
+            sigstrm << "+B";
+        }
+    } else {
         sigstrm << "-B";
-    }    
+    }
     if (ctxt.mIndexStream) {
         sigstrm << "+X";
     }
@@ -151,7 +157,11 @@ Bindings RE_Kernel::makeInputBindings(RE_CompilerContext & ctxt, RE * re) {
     gatherExternals(re, localExternals, localAlphabets);
     Bindings externalBindings;
     if (ctxt.mBarrierStream) {
-        externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream);
+        if (anyEndAnchor(re)) {
+            externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream, FixedRate(), LookAhead(1));
+        } else {
+            externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream);
+        }
     }
     if (ctxt.mIndexStream) {
         externalBindings.emplace_back("mIndexing", ctxt.mIndexStream);
