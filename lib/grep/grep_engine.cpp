@@ -707,8 +707,11 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         MatchedLineEnds = SelectedLines;
         MatchesByLine = ContextByLine;
     } else if (mIndexAlphabet == &cc::Unicode) {
-        StreamSet * u8index1 = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        StreamSet * u8index1 = mU8index;
+        if (grepOffset(mRE) > 0) {
+            u8index1 = P.CreateStreamSet(1, 1);
+            P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        }
         StreamSet * Results = P.CreateStreamSet(1, 1);
         SpreadByMask(P, u8index1, MatchedLineEnds, Results);
         MatchedLineEnds = Results;
