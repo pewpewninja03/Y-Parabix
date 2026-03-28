@@ -728,6 +728,9 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         StreamSet * ResultSpans = P.CreateStreamSet(1, 1);
         P.CreateKernelCall<U8Spans>(spreadSpans, mU8index, ResultSpans);
         MatchSpans = ResultSpans;
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("u8 spreadSpans", ResultSpans);
+        }
     }
 
     if (mColoring) {
@@ -747,6 +750,9 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         }
         StreamSet * MatchedLineSpans = P.CreateStreamSet(1, 1);
         P.CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MatchedLineSpans", MatchedLineSpans);
+        }
 
         StreamSet * Filtered = P.CreateStreamSet(1, 8);
         if (UseByteFilterByMask) {
@@ -757,7 +763,6 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureByteData("Filtered", Filtered);
         }
-        //StreamSet * MatchSpans = Matches;
 
         StreamSet * FilteredMatchSpans = P.CreateStreamSet(1, 1);
         FilterByMask(P, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
@@ -769,6 +774,9 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
             Staged_S2P(P, Filtered, FilteredBasis);
         } else {
             P.CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBixNum("FilteredBasis", FilteredBasis);
+            }
         }
 
         applyColorization(P, SourceCoords, FilteredMatchSpans, FilteredBasis);

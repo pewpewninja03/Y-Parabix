@@ -386,8 +386,8 @@ void LongestSpan::generatePabloMethod() {
     PabloAST * matchEnd = getInputStreamSet("matchEnd")[0];
     PabloAST * pfxStart = pb.createAnd(pb.createLookahead(pfxStrm, mPfxOffset), pb.createLookahead(endBack, mPfxOffset));
     PabloAST * longestEnd = pb.createAnd(matchEnd, pb.createNot(endBack));
-    if (mEndOffset != 0) {
-        longestEnd = pb.createAdvance(longestEnd, 1);
+    if (mEndOffset > 0) {
+        longestEnd = pb.createAnd(pb.createLookahead(matchEnd, mEndOffset), pb.createNot(pb.createLookahead(endBack, mEndOffset)));
     }
     PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {pfxStart, longestEnd});
     writeOutputStreamSet("spans", std::vector<PabloAST*>{spans});
@@ -398,8 +398,8 @@ LongestSpan::LongestSpan (LLVMTypeSystemInterface & ts, unsigned pfxOffset, unsi
 : PabloKernel(ts, "LongestSpan_" + std::to_string(pfxOffset) + ":" + std::to_string(endOffset),
 // inputs
 {Binding{"pfxStrm", pfxStrm, FixedRate(1), LookAhead(pfxOffset)},
- Binding{"endBack", endBack, FixedRate(1), LookAhead(pfxOffset)},
- Binding{"matchEnd", matchEnd}},
+ Binding{"endBack", endBack, FixedRate(1), LookAhead(std::max(pfxOffset, endOffset))},
+ Binding{"matchEnd", matchEnd, FixedRate(1), LookAhead(endOffset)}},
 // output
 {Binding{"spans", spans}}), mPfxOffset(pfxOffset),  mEndOffset(endOffset) {
     
@@ -554,6 +554,7 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
         auto matchEnd = f->second.extStream;
         auto minlgth = f->second.lgthRange.first;
         auto endOffset = f->second.offset;
+        //llvm::errs() << "endOffset: " << endOffset << "\n";
         auto f2 = mUPnamer.mNameMap.find(name);
         if (f2 != mUPnamer.mNameMap.end()) {
             auto namedRE = f2->second;
@@ -564,10 +565,16 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
             auto pfxStrm = fp->second.extStream;
             auto pfxLgth = fp->second.lgthRange.first;
             auto pfxOffset = fp->second.offset;
+            //llvm::errs() << "pfxOffset: " << pfxOffset << "\n";
             StreamSet * maskStrm = mPB.CreateStreamSet(1);
             OrCombine(mPB, pfxStrm, matchEnd, maskStrm);
             StreamSet * endBack = mPB.CreateStreamSet(1);
             mPB.CreateKernelCall<IndexedShiftBack>(maskStrm, matchEnd, endBack);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                mPB.captureBitstream("pfxStrm", pfxStrm);
+                mPB.captureBitstream("endBack", endBack);
+            }
+
             mPB.CreateKernelCall<LongestSpan>(pfxLgth + pfxOffset - 1, endOffset, pfxStrm, endBack, matchEnd, spans);
         } else {
             mPB.CreateKernelFamilyCall<FixedMatchSpansKernel>(minlgth, endOffset, matchEnd, spans);
