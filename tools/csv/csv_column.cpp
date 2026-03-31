@@ -43,7 +43,10 @@ using namespace pablo;
 //  These declarations are for command line processing.
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
 static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
-static cl::opt<int> columnNo(cl::Positional, cl::desc("column number (1-based)"), cl::Required, cl::cat(CSV_Options));
+//static cl::opt<int> columnNo(cl::Positional, cl::desc("column number (1-based)"), cl::Required, cl::cat(CSV_Options));
+static cl::list<std::string> Columns("columns",
+                                     cl::desc("A comma-separated list of column names or indices"),
+                                     cl::ValueRequired, cl::OneOrMore, cl::CommaSeparated, cl::cat(CSV_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
@@ -90,13 +93,73 @@ void SelectField::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), pb.createInFile(toKeep));
 }
 
+class SelectMultiField : public PabloKernel {
+public:
+    SelectMultiField(LLVMTypeSystemInterface & ts, StreamSet * csvMarks,
+                              StreamSet * Record_separators,
+                              StreamSet * Field_separators,
+                              StreamSet * toKeep,
+                              const std::vector<unsigned> & columnNos);
+protected:
+    std::string colNoString(const std::vector<unsigned> & cols);
+    void generatePabloMethod() override;
+    const std::vector<unsigned> & mColumnNos;
+};
+
+SelectMultiField::SelectMultiField(LLVMTypeSystemInterface & ts,
+                                   StreamSet * csvMarks,
+                                   StreamSet * Record_separators,
+                                   StreamSet * Field_separators,
+                                   StreamSet * toKeep,
+                                   const std::vector<unsigned> & columnNos)
+: PabloKernel(ts, "SelectMultiField_" + colNoString(columnNos),
+  {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
+   Binding{"Record_separators", Record_separators},
+   Binding{"Field_separators", Field_separators}},
+  {Binding{"toKeep", toKeep}}), mColumnNos(columnNos)  {}
+
+std::string SelectMultiField::colNoString(const std::vector<unsigned> & columnNos) {
+    std::stringstream ss;
+    ss << columnNos[0];
+    for (unsigned i = 1; i < columnNos.size(); i++) {
+        ss << "," << columnNos[i];
+    }
+    return ss.str();
+}
+
+void SelectMultiField::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * Record_separators = pb.createExtract(getInputStreamVar("Record_separators"), pb.getInteger(0));
+    PabloAST * Field_separators = pb.createExtract(getInputStreamVar("Field_separators"), pb.getInteger(0));
+    PabloAST * recordStarts = pb.createNot(pb.createAdvance(pb.createNot(Record_separators), 1));
+    PabloAST * fieldStarts = pb.createNot(pb.createAdvance(pb.createNot(Field_separators), 1));
+    PabloAST * columnMark = recordStarts;
+    PabloAST * notEOF = pb.createNot(pb.createExtract(getInputStreamVar("csvMarks"), pb.getInteger(markEOF)));
+    PabloAST * toKeep = pb.createAnd(Record_separators, notEOF);
+    unsigned nextCol = 0;
+    for (unsigned i = 0; i < mColumnNos.size(); i++) {
+        if (mColumnNos[i] > nextCol) {
+            columnMark = pb.createIndexedAdvance(columnMark, fieldStarts, mColumnNos[i] - nextCol);
+        }
+        PabloAST * columnFollow = pb.createScanTo(columnMark, Field_separators);
+        PabloAST * columnMask  = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {columnMark, columnFollow});
+        toKeep = pb.createOr(toKeep, columnMask);
+        nextCol = mColumnNos[i] + 1;
+        columnMark = pb.createAdvance(columnFollow, 1);
+        if (i < mColumnNos.size() - 1) {
+            toKeep = pb.createOr(toKeep, columnFollow);
+        }
+    }
+    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), pb.createInFile(toKeep));
+}
+
 typedef void (*CSVFunctionType)(uint32_t fd);
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
-CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & headers) {
+CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned> & colNos) {
 
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
@@ -126,7 +189,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
 
     StreamSet * Selected = P.CreateStreamSet(1);
-    P.CreateKernelCall<SelectField>(csvCCs, recordSeparators, fieldSeparators, Selected, columnNo);
+    P.CreateKernelCall<SelectMultiField>(csvCCs, recordSeparators, fieldSeparators, Selected, colNos);
     SHOW_STREAM(recordSeparators);
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(Selected);
@@ -160,14 +223,33 @@ int main(int argc, char *argv[]) {
     } else {
         headers = parse_CSV_headers(HeaderSpec);
     }
-    for (auto & s : headers) {
-        if (s.size() > MaxHeaderSize) {
-            s = s.substr(0, MaxHeaderSize);
+    std::map<std::string, unsigned> header_map;
+    for (unsigned i = 0; i < headers.size(); i++) {
+        header_map.emplace(headers[i], i);
+        if (headers[i].size() > MaxHeaderSize) {
+            headers[i] = headers[i].substr(0, MaxHeaderSize);
         }
     }
+    std::vector<unsigned> colNos(Columns.size());
+    for (unsigned i = 0; i < Columns.size(); i++) {
+        auto f = header_map.find(Columns[i]);
+        if (f != header_map.end()) {
+            colNos[i] = f->second;
+        } else {
+            std::stringstream ss(Columns[i]);
+            unsigned colNo;
+            ss >> colNo;
+            if (ss.eof() && (colNo < headers.size())) {
+                colNos[i] = colNo;
+            } else {
+                llvm::report_fatal_error("Invalid column spec");
+            }
+        }
+    }
+    
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
-    CSVFunctionType fn = generatePipeline(driver, headers);
+    CSVFunctionType fn = generatePipeline(driver, colNos);
     //  The compile function "fn"  can now be used.   It takes a file
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
