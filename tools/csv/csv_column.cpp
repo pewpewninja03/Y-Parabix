@@ -47,6 +47,7 @@ static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing 
 static cl::list<std::string> Columns("columns",
                                      cl::desc("A comma-separated list of column names or indices"),
                                      cl::ValueRequired, cl::OneOrMore, cl::CommaSeparated, cl::cat(CSV_Options));
+static cl::opt<bool> ZeroIndexing("zero", cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
@@ -240,10 +241,15 @@ int main(int argc, char *argv[]) {
             unsigned colNo;
             ss >> colNo;
             if (ss.eof() && (colNo < headers.size())) {
-                colNos[i] = colNo;
-            } else {
-                llvm::report_fatal_error("Invalid column spec");
+                if (ZeroIndexing) {
+                    colNos[i] = colNo;
+                    continue;
+                } else if (colNo > 0) {
+                    colNos[i] = colNo - 1;
+                    continue;
+                }
             }
+            llvm::report_fatal_error("Invalid column spec");
         }
     }
     
@@ -260,6 +266,6 @@ int main(int argc, char *argv[]) {
     } else {
         fn(fd);
         close(fd);
-   }
+    }
     return 0;
 }
