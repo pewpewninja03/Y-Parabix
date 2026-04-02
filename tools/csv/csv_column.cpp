@@ -212,6 +212,46 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
 
 const unsigned MaxHeaderSize = 24;
 
+unsigned getColumn(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
+    auto f = headerMap.find(columnSpec);
+    if (f != headerMap.end()) {
+        return f->second;
+    }
+    // Not a column name - must be a column number.
+    std::stringstream ss(columnSpec);
+    unsigned colNo;
+    ss >> colNo;
+    if (ss.eof()) {
+        if (ZeroIndexing) {
+            return colNo;
+        } else if (colNo > 0) {
+            return colNo - 1;
+        }
+    }
+    llvm::report_fatal_error("Invalid column spec");
+}
+
+std::pair<unsigned, unsigned> getColumnRange(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
+    // We may have a column name.
+    auto f = headerMap.find(columnSpec);
+    if (f != headerMap.end()) {
+        return std::pair<unsigned, unsigned>(f->second, f->second);
+    }
+    // We may have a hyphen-separated range.
+    auto pos = columnSpec.find('-');
+    if (pos != std::string::npos) {
+        auto range_lo = columnSpec.substr(0, pos);
+        auto range_hi = columnSpec.substr(pos+1);
+        if (range_lo > range_hi) {
+            llvm::report_fatal_error("Bad column range");
+        }
+        return std::pair<unsigned, unsigned>(getColumn(range_lo, headerMap), getColumn(range_hi, headerMap));
+    } else {
+        auto colNo = getColumn(columnSpec, headerMap);
+        return std::pair<unsigned, unsigned>(colNo, colNo);
+    }
+}
+
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
@@ -224,35 +264,24 @@ int main(int argc, char *argv[]) {
     } else {
         headers = parse_CSV_headers(HeaderSpec);
     }
-    std::map<std::string, unsigned> header_map;
+    std::map<std::string, unsigned> headerMap;
     for (unsigned i = 0; i < headers.size(); i++) {
-        header_map.emplace(headers[i], i);
+        headerMap.emplace(headers[i], i);
         if (headers[i].size() > MaxHeaderSize) {
             headers[i] = headers[i].substr(0, MaxHeaderSize);
         }
     }
-    std::vector<unsigned> colNos(Columns.size());
+    std::vector<unsigned> colNos;;
     for (unsigned i = 0; i < Columns.size(); i++) {
-        auto f = header_map.find(Columns[i]);
-        if (f != header_map.end()) {
-            colNos[i] = f->second;
-        } else {
-            std::stringstream ss(Columns[i]);
-            unsigned colNo;
-            ss >> colNo;
-            if (ss.eof() && (colNo < headers.size())) {
-                if (ZeroIndexing) {
-                    colNos[i] = colNo;
-                    continue;
-                } else if (colNo > 0) {
-                    colNos[i] = colNo - 1;
-                    continue;
-                }
-            }
-            llvm::report_fatal_error("Invalid column spec");
+        auto rg = getColumnRange(Columns[i], headerMap);
+        if (rg.second >= headers.size()) {
+            llvm::report_fatal_error("Column number too large");
+        }
+        for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
+            colNos.push_back(i);
         }
     }
-    
+
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     CSVFunctionType fn = generatePipeline(driver, colNos);
