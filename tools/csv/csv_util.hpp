@@ -7,8 +7,6 @@
 #include <pablo/pe_ones.h>
 #include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
-#include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string/split.hpp>
 #include <boost/intrusive/detail/math.hpp>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
@@ -17,29 +15,6 @@ using namespace pablo;
 using namespace kernel;
 
 using boost::intrusive::detail::ceil_log2;
-
-std::vector<std::string> parse_CSV_headers(std::string headerString) {
-    std::vector<std::string> headers;
-    boost::algorithm::split(headers, headerString, [] (char c) {return (c == ',');});
-    for (unsigned i = 0; i < headers.size(); i++) {
-        boost::algorithm::trim(headers[i]);
-    }
-    return headers;
-}
-
-std::vector<std::string> get_CSV_headers(std::string filename) {
-    std::vector<std::string> headers;
-    std::ifstream headerFile(filename.c_str());
-    std::string line1;
-    if (headerFile.is_open()) {
-        std::getline(headerFile, line1);
-        headerFile.close();
-        headers = parse_CSV_headers(line1);
-    } else {
-        llvm::report_fatal_error(llvm::StringRef("Cannot open ") + filename);
-    }
-    return headers;
-}
 
 std::vector<std::string> JSONfieldPrefixes(std::vector<std::string> fieldNames) {
     std::vector<std::string> tmp;

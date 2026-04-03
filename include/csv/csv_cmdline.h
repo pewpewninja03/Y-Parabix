@@ -6,20 +6,31 @@
  *
  */
 #pragma once
- 
+
 #include <string>
 #include <vector>
-//#include <llvm/Support/CommandLine.h>
 namespace llvm { namespace cl { class OptionCategory; } }
 
 namespace csv {
 
 extern llvm::cl::OptionCategory CSV_Options;
 
+extern std::string inputFile;
+
 extern bool HeaderSpecNamesFile;
 extern std::string HeaderSpec;
 
-    
-//void InitializeCommandLineInterface(int argc, char *argv[]);
+std::vector<std::string> get_CSV_headers();
+
+void InitializeCommandLineInterface(int argc, char *argv[]);
+
+
+//
+// Command line exit codes.
+enum ExitCode {
+    SuccessExitCode = 0, 
+    InternalFailureCode = 2,      // Fatal error code due to program logic or system problem.
+    UsageErrorCode = 3            // Error in command line parameters.
+};
 
 }

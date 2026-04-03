@@ -54,7 +54,6 @@ using namespace kernel;
 using namespace llvm;
 using namespace pablo;
 
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(csv::CSV_Options));
 static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(csv::CSV_Options));
 static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(csv::CSV_Options));
 
@@ -194,26 +193,12 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     return P.compile();
 }
 
-const unsigned MaxHeaderSize = 24;
-
 int main(int argc, char *argv[]) {
-    //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
-    //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&csv::CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    llvm_shutdown_obj shutdown;
+    csv::InitializeCommandLineInterface(argc, argv);
 
-    std::vector<std::string> headers;
-    if (csv::HeaderSpec == "") {
-        headers = get_CSV_headers(inputFile);
-    } else if (csv::HeaderSpecNamesFile) {
-        headers = get_CSV_headers(csv::HeaderSpec);
-    } else {
-        headers = parse_CSV_headers(csv::HeaderSpec);
-    }
-    for (auto & s : headers) {
-        if (s.size() > MaxHeaderSize) {
-            s = s.substr(0, MaxHeaderSize);
-        }
-    }
+    std::vector<std::string> headers = csv::get_CSV_headers();
+
     const auto templateStrs = JSONfieldPrefixes(headers);
     //for (auto & s : templateStrs) {
     //    llvm::errs() << "template string: |" << s << "|\n";
@@ -228,9 +213,9 @@ int main(int argc, char *argv[]) {
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
 
-    const int fd = open(inputFile.c_str(), O_RDONLY);
+    const int fd = open(csv::inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+        llvm::report_fatal_error(llvm::StringRef("Cannot open ") + csv::inputFile);
     } else {
         #ifdef REPORT_PAPI_TESTS
         papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};

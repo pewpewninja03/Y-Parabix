@@ -47,7 +47,6 @@ static cl::list<std::string> Columns("columns",
                                      cl::desc("A comma-separated list of column names or indices"),
                                      cl::ValueRequired, cl::OneOrMore, cl::CommaSeparated, cl::cat(csv::CSV_Options));
 static cl::opt<bool> ZeroIndexing("zero", cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(csv::CSV_Options));
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(csv::CSV_Options));
 static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), cl::init(false), cl::cat(csv::CSV_Options));
 
 class SelectField : public PabloKernel {
@@ -250,17 +249,11 @@ std::pair<unsigned, unsigned> getColumnRange(std::string & columnSpec, std::map<
 }
 
 int main(int argc, char *argv[]) {
-    //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
-    //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&csv::CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    std::vector<std::string> headers;
-    if (csv::HeaderSpec == "") {
-        headers = get_CSV_headers(inputFile);
-    } else if (csv::HeaderSpecNamesFile) {
-        headers = get_CSV_headers(csv::HeaderSpec);
-    } else {
-        headers = parse_CSV_headers(csv::HeaderSpec);
-    }
+    llvm_shutdown_obj shutdown;
+    csv::InitializeCommandLineInterface(argc, argv);
+
+    std::vector<std::string> headers = csv::get_CSV_headers();
+
     std::map<std::string, unsigned> headerMap;
     for (unsigned i = 0; i < headers.size(); i++) {
         headerMap.emplace(headers[i], i);
@@ -286,9 +279,9 @@ int main(int argc, char *argv[]) {
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
 
-    const int fd = open(inputFile.c_str(), O_RDONLY);
+    const int fd = open(csv::inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+        llvm::report_fatal_error(llvm::StringRef("Cannot open ") + csv::inputFile);
     } else {
         fn(fd);
         close(fd);
