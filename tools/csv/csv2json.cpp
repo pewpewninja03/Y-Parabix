@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <vector>
+#include <csv/csv_cmdline.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
@@ -53,15 +54,9 @@ using namespace kernel;
 using namespace llvm;
 using namespace pablo;
 
-//  These declarations are for command line processing.
-//  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
-static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
-static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
-
-static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(CSV_Options));
-static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(CSV_Options));
+static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(csv::CSV_Options));
+static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(csv::CSV_Options));
+static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(csv::CSV_Options));
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -108,7 +103,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(quoteEscape);
     StreamSet * toKeep = P.CreateStreamSet(1);
-    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
+    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, csv::HeaderSpec == "");
     SHOW_STREAM(toKeep);
     //
     // Create a short stream which is 1-to-1 with the (field/record) separators,
@@ -204,15 +199,15 @@ const unsigned MaxHeaderSize = 24;
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&csv::CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
 
     std::vector<std::string> headers;
-    if (HeaderSpec == "") {
+    if (csv::HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
-    } else if (HeaderSpecNamesFile) {
-        headers = get_CSV_headers(HeaderSpec);
+    } else if (csv::HeaderSpecNamesFile) {
+        headers = get_CSV_headers(csv::HeaderSpec);
     } else {
-        headers = parse_CSV_headers(HeaderSpec);
+        headers = parse_CSV_headers(csv::HeaderSpec);
     }
     for (auto & s : headers) {
         if (s.size() > MaxHeaderSize) {

@@ -9,6 +9,7 @@ NAME
 SRC
     csv2json.cpp
 DEPS
+    csv
     pablo
     kernel.basis
     kernel.bitwise
@@ -25,6 +26,7 @@ NAME
 SRC
     csv_column.cpp
 DEPS
+    csv
     pablo
     kernel.basis
     kernel.io

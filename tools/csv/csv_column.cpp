@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <vector>
+#include <csv/csv_cmdline.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
@@ -42,16 +43,12 @@ using namespace pablo;
 
 //  These declarations are for command line processing.
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
-//static cl::opt<int> columnNo(cl::Positional, cl::desc("column number (1-based)"), cl::Required, cl::cat(CSV_Options));
 static cl::list<std::string> Columns("columns",
                                      cl::desc("A comma-separated list of column names or indices"),
-                                     cl::ValueRequired, cl::OneOrMore, cl::CommaSeparated, cl::cat(CSV_Options));
-static cl::opt<bool> ZeroIndexing("zero", cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(CSV_Options));
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
-static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
-static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
-static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), cl::init(false), cl::cat(CSV_Options));
+                                     cl::ValueRequired, cl::OneOrMore, cl::CommaSeparated, cl::cat(csv::CSV_Options));
+static cl::opt<bool> ZeroIndexing("zero", cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(csv::CSV_Options));
+static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(csv::CSV_Options));
+static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), cl::init(false), cl::cat(csv::CSV_Options));
 
 class SelectField : public PabloKernel {
 public:
@@ -255,14 +252,14 @@ std::pair<unsigned, unsigned> getColumnRange(std::string & columnSpec, std::map<
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&csv::CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
     std::vector<std::string> headers;
-    if (HeaderSpec == "") {
+    if (csv::HeaderSpec == "") {
         headers = get_CSV_headers(inputFile);
-    } else if (HeaderSpecNamesFile) {
-        headers = get_CSV_headers(HeaderSpec);
+    } else if (csv::HeaderSpecNamesFile) {
+        headers = get_CSV_headers(csv::HeaderSpec);
     } else {
-        headers = parse_CSV_headers(HeaderSpec);
+        headers = parse_CSV_headers(csv::HeaderSpec);
     }
     std::map<std::string, unsigned> headerMap;
     for (unsigned i = 0; i < headers.size(); i++) {
