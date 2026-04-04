@@ -15,12 +15,19 @@ namespace csv {
 
 extern llvm::cl::OptionCategory CSV_Options;
 
+// input file parameter
 extern std::string inputFile;
 
+// header information
 extern bool HeaderSpecNamesFile;
 extern std::string HeaderSpec;
 
 std::vector<std::string> get_CSV_headers();
+
+extern std::vector<std::string> Columns;
+extern bool ZeroIndexing;
+
+std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers);
 
 void InitializeCommandLineInterface(int argc, char *argv[]);
 

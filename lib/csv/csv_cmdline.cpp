@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <vector>
 #include <fstream>
+#include <sstream>
+#include <map>
 #include <csv/csv_cmdline.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
@@ -37,6 +39,14 @@ std::string HeaderSpec;
 static cl::opt<bool, true> HeaderSpecNamesFileOption("f", cl::location(HeaderSpecNamesFile), cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string, true> HeaderSpecOption("headers", cl::location(HeaderSpec), cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
 
+std::vector<std::string> Columns;
+bool ZeroIndexing;
+static cl::list<std::string, std::vector<std::string>> ColumnsOption("columns", cl::location(Columns),
+                                     cl::desc("A comma-separated list of column names or indices"),
+                                     cl::CommaSeparated, cl::cat(csv::CSV_Options));
+static cl::alias ColumnsA("c", cl::desc("Alias for -columns"), cl::aliasopt(ColumnsOption));
+static cl::opt<bool, true> ZeroIndexingOption("zero", cl::location(ZeroIndexing), 
+	cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(csv::CSV_Options));
 
 std::vector<std::string> parse_CSV_headers(std::string headerString) {
     std::vector<std::string> headers;
@@ -78,6 +88,67 @@ std::vector<std::string> get_CSV_headers() {
         }
     }
     return headers;
+}
+
+unsigned getColumn(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
+    auto f = headerMap.find(columnSpec);
+    if (f != headerMap.end()) {
+        return f->second;
+    }
+    // Not a column name - must be a column number.
+    std::stringstream ss(columnSpec);
+    unsigned colNo;
+    ss >> colNo;
+    if (ss.eof()) {
+        if (ZeroIndexing) {
+            return colNo;
+        } else if (colNo > 0) {
+            return colNo - 1;
+        }
+    }
+    llvm::report_fatal_error("Invalid column spec");
+}
+
+std::pair<unsigned, unsigned> getColumnRange(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
+    // We may have a column name.
+    auto f = headerMap.find(columnSpec);
+    if (f != headerMap.end()) {
+        return std::pair<unsigned, unsigned>(f->second, f->second);
+    }
+    // We may have a hyphen-separated range.
+    auto pos = columnSpec.find('-');
+    if (pos != std::string::npos) {
+        auto range_lo = columnSpec.substr(0, pos);
+        auto range_hi = columnSpec.substr(pos+1);
+        if (range_lo > range_hi) {
+            llvm::report_fatal_error("Bad column range");
+        }
+        return std::pair<unsigned, unsigned>(getColumn(range_lo, headerMap), getColumn(range_hi, headerMap));
+    } else {
+        auto colNo = getColumn(columnSpec, headerMap);
+        return std::pair<unsigned, unsigned>(colNo, colNo);
+    }
+}
+
+std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers) {
+    std::map<std::string, unsigned> headerMap;
+    for (unsigned i = 0; i < headers.size(); i++) {
+        headerMap.emplace(headers[i], i);
+        if (headers[i].size() > MaxHeaderSize) {
+            headers[i] = headers[i].substr(0, MaxHeaderSize);
+        }
+    }
+	std::vector<unsigned> colNos;
+    for (unsigned i = 0; i < csv::Columns.size(); i++) {
+        auto rg = getColumnRange(csv::Columns[i], headerMap);
+        if (rg.second >= headers.size()) {
+            llvm::report_fatal_error("Column number too large");
+        }
+        for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
+            colNos.push_back(i);
+        }
+    }
+    return colNos;
 }
 
 //

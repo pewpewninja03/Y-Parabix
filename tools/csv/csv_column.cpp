@@ -43,10 +43,6 @@ using namespace pablo;
 
 //  These declarations are for command line processing.
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::list<std::string> Columns("columns",
-                                     cl::desc("A comma-separated list of column names or indices"),
-                                     cl::ValueRequired, cl::OneOrMore, cl::CommaSeparated, cl::cat(csv::CSV_Options));
-static cl::opt<bool> ZeroIndexing("zero", cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(csv::CSV_Options));
 static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), cl::init(false), cl::cat(csv::CSV_Options));
 
 class SelectField : public PabloKernel {
@@ -206,71 +202,13 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     return P.compile();
 }
 
-const unsigned MaxHeaderSize = 24;
-
-unsigned getColumn(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
-    auto f = headerMap.find(columnSpec);
-    if (f != headerMap.end()) {
-        return f->second;
-    }
-    // Not a column name - must be a column number.
-    std::stringstream ss(columnSpec);
-    unsigned colNo;
-    ss >> colNo;
-    if (ss.eof()) {
-        if (ZeroIndexing) {
-            return colNo;
-        } else if (colNo > 0) {
-            return colNo - 1;
-        }
-    }
-    llvm::report_fatal_error("Invalid column spec");
-}
-
-std::pair<unsigned, unsigned> getColumnRange(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
-    // We may have a column name.
-    auto f = headerMap.find(columnSpec);
-    if (f != headerMap.end()) {
-        return std::pair<unsigned, unsigned>(f->second, f->second);
-    }
-    // We may have a hyphen-separated range.
-    auto pos = columnSpec.find('-');
-    if (pos != std::string::npos) {
-        auto range_lo = columnSpec.substr(0, pos);
-        auto range_hi = columnSpec.substr(pos+1);
-        if (range_lo > range_hi) {
-            llvm::report_fatal_error("Bad column range");
-        }
-        return std::pair<unsigned, unsigned>(getColumn(range_lo, headerMap), getColumn(range_hi, headerMap));
-    } else {
-        auto colNo = getColumn(columnSpec, headerMap);
-        return std::pair<unsigned, unsigned>(colNo, colNo);
-    }
-}
-
 int main(int argc, char *argv[]) {
     llvm_shutdown_obj shutdown;
     csv::InitializeCommandLineInterface(argc, argv);
 
     std::vector<std::string> headers = csv::get_CSV_headers();
 
-    std::map<std::string, unsigned> headerMap;
-    for (unsigned i = 0; i < headers.size(); i++) {
-        headerMap.emplace(headers[i], i);
-        if (headers[i].size() > MaxHeaderSize) {
-            headers[i] = headers[i].substr(0, MaxHeaderSize);
-        }
-    }
-    std::vector<unsigned> colNos;;
-    for (unsigned i = 0; i < Columns.size(); i++) {
-        auto rg = getColumnRange(Columns[i], headerMap);
-        if (rg.second >= headers.size()) {
-            llvm::report_fatal_error("Column number too large");
-        }
-        for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
-            colNos.push_back(i);
-        }
-    }
+    std::vector<unsigned> colNos = csv::getColumnArgs(headers);
 
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
@@ -286,5 +224,5 @@ int main(int argc, char *argv[]) {
         fn(fd);
         close(fd);
     }
-    return 0;
+    return csv::SuccessExitCode;
 }

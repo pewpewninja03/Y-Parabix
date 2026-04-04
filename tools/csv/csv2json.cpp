@@ -233,5 +233,5 @@ int main(int argc, char *argv[]) {
         jitExecution.write(std::cerr);
         #endif
     }
-    return 0;
+    return csv::SuccessExitCode;
 }
