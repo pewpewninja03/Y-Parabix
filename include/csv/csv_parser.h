@@ -22,11 +22,10 @@ namespace csv {
 // Produce a set of 4 character class streams for CSV processing.
 // LF - line feed stream
 // CR - carriage return stream
-// DQ - quote stream according to the given Unicode quote character codepoint.
-// Comma - comma stream according to the given Unicode comma character codepoint.
+// DQ - quote stream possibly overriden by csv::QuoteChar.
+// Comma - comma stream, possibly overriden by csv::FieldDelimiter.
 enum {markLF = 0, markCR = 1, markDQ = 2, markComma = 3};
-void CSV_Lexer(PipelineBuilder & P, codepoint_t delimiter, codepoint_t quote, StreamSet * source, 
-               StreamSet * csvCCs);
+void CSV_Lexer(PipelineBuilder & P, StreamSet * source, StreamSet * csvCCs);
 
 // Parse a CSV file determining the record separators, field separators as
 // well as any escaped quote marks.

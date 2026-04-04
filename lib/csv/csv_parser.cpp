@@ -19,12 +19,12 @@ namespace csv {
 char charLF = 0xA;
 char charCR = 0xD;
 
-void CSV_Lexer(PipelineBuilder & P, codepoint_t delimiter, codepoint_t quote, StreamSet * source, StreamSet * csvCCs) {
+void CSV_Lexer(PipelineBuilder & P, StreamSet * source, StreamSet * csvCCs) {
     std::vector<re::CC *> csv_marks(4);
     csv_marks[markLF] = re::makeCC(charLF);
     csv_marks[markCR] = re::makeCC(charCR);
-    csv_marks[markDQ] = re::makeCC(quote);
-    csv_marks[markComma] = re::makeCC(delimiter);
+    csv_marks[markDQ] = re::makeCC(csv::QuoteChar);
+    csv_marks[markComma] = re::makeCC(csv::FieldDelimiter);
     P.CreateKernelCall<CharClassesKernel>(csv_marks, source, csvCCs);
 }
 

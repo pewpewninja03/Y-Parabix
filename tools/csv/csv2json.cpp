@@ -174,7 +174,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     SHOW_BIXNUM(BasisBits);
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P.CreateStreamSet(4);
-    csv::CSV_Lexer(P, csv::FieldDelimiter, csv::QuoteChar, BasisBits, csvCCs);
+    csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     StreamSet * recordSeparators = P.CreateStreamSet(1);
     StreamSet * fieldSeparators = P.CreateStreamSet(1);

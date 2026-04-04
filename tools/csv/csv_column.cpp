@@ -73,7 +73,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     SHOW_BIXNUM(BasisBits);
 
     StreamSet * csvCCs = P.CreateStreamSet(4);
-    csv::CSV_Lexer(P, csv::FieldDelimiter, csv::QuoteChar, BasisBits, csvCCs);
+    csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     StreamSet * recordSeparators = P.CreateStreamSet(1);
     StreamSet * fieldSeparators = P.CreateStreamSet(1);
