@@ -18,6 +18,7 @@
 #include <pablo/pablo_toolchain.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/split.hpp>
+#include <boost/locale/encoding_utf.hpp>
 
 using namespace llvm;
 
@@ -26,8 +27,7 @@ using namespace llvm;
 
 namespace csv {
 
-cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
-
+cl::OptionCategory CSV_Options("CSV Processing Options", "Options to control parsing and field selection of input files");
 
 std::string inputFile;
 static cl::opt<std::string, true> inputFileOption(cl::location(inputFile), cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(csv::CSV_Options));
@@ -36,15 +36,28 @@ static cl::opt<std::string, true> inputFileOption(cl::location(inputFile), cl::P
 // we can provide them directly or from a file.
 bool HeaderSpecNamesFile;
 std::string HeaderSpec;
-static cl::opt<bool, true> HeaderSpecNamesFileOption("f", cl::location(HeaderSpecNamesFile), cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
+static cl::opt<bool, true> HeaderSpecNamesFileOption("headers-from-file", cl::location(HeaderSpecNamesFile), cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string, true> HeaderSpecOption("headers", cl::location(HeaderSpec), cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
+
+char32_t FieldDelimiter;
+static cl::opt<std::string> FieldDelimiterOption("delimiter",
+	cl::desc("Delimiter to separate fields (default comma)"), cl::init(","), cl::cat(CSV_Options));
+static cl::alias DelimterA("d", cl::desc("Alias for --delimiter"), cl::aliasopt(FieldDelimiterOption), cl::NotHidden);
+static cl::opt<bool> TabDelimiter("tabs",
+	cl::desc("Use tabs as delimiter (overrides --delimiter)"), cl::init(false), cl::cat(CSV_Options));
+static cl::alias TabsA("t", cl::desc("Alias for --tabs"), cl::aliasopt(FieldDelimiterOption), cl::NotHidden);
+
+char32_t QuoteChar;
+static cl::opt<std::string> QuoteCharOption("quotechar",
+	cl::desc("Quote character (default double quote)"), cl::init("\""), cl::cat(CSV_Options));
+static cl::alias QuoteA("q", cl::desc("Alias for --quotechar"), cl::aliasopt(QuoteCharOption), cl::NotHidden);
 
 std::vector<std::string> Columns;
 bool ZeroIndexing;
 static cl::list<std::string, std::vector<std::string>> ColumnsOption("columns", cl::location(Columns),
                                      cl::desc("A comma-separated list of column names or indices"),
                                      cl::CommaSeparated, cl::cat(csv::CSV_Options));
-static cl::alias ColumnsA("c", cl::desc("Alias for -columns"), cl::aliasopt(ColumnsOption));
+static cl::alias ColumnsA("c", cl::desc("Alias for --columns"), cl::aliasopt(ColumnsOption), cl::NotHidden);
 static cl::opt<bool, true> ZeroIndexingOption("zero", cl::location(ZeroIndexing), 
 	cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(csv::CSV_Options));
 
@@ -151,6 +164,7 @@ std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers) {
     return colNos;
 }
 
+
 //
 // Handler for errors reported through llvm::report_fatal_error.  Report
 // and signal error the InternalFailure exit code.
@@ -175,9 +189,28 @@ static void csv_error_handler(void *UserData,
     exit(InternalFailureCode);
 }
 
+const char32_t TAB = U'\t';
+
 void InitializeCommandLineInterface(int argc, char *argv[]) {
     llvm::install_fatal_error_handler(&csv_error_handler);
     codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+
+    // Set the delimiter and quote characters.
+    if (TabDelimiter) {
+        // --tabs or -t overrides field delimiter
+        FieldDelimiter = TAB;
+    } else {
+        std::u32string delimArg = boost::locale::conv::utf_to_utf<char32_t>(FieldDelimiterOption);
+        if (delimArg.size() != 1) {
+            report_fatal_error("Field Delimiter must be a single Unicode character");
+        }
+        FieldDelimiter = delimArg[0];
+    }
+    std::u32string quoteArg = boost::locale::conv::utf_to_utf<char32_t>(QuoteCharOption);
+    if (quoteArg.size() != 1) {
+        report_fatal_error("Quote Character must be a single Unicode character");
+    }
+    QuoteChar = quoteArg[0];
 }
 
 }

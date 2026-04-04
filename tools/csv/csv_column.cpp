@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <vector>
 #include <csv/csv_cmdline.h>
+#include <csv/csv_parser.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
@@ -35,7 +36,6 @@
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include "csv_util.hpp"
 
 using namespace kernel;
 using namespace llvm;
@@ -43,52 +43,12 @@ using namespace pablo;
 
 //  These declarations are for command line processing.
 //  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), cl::init(false), cl::cat(csv::CSV_Options));
-
-class SelectField : public PabloKernel {
-public:
-    SelectField(LLVMTypeSystemInterface & ts, StreamSet * csvMarks,
-                              StreamSet * Record_separators,
-                              StreamSet * Field_separators,
-                              StreamSet * toKeep,
-                              unsigned columnNo);
-protected:
-    void generatePabloMethod() override;
-    unsigned mColumnNo;
-};
-
-SelectField::SelectField(LLVMTypeSystemInterface & ts,  StreamSet * csvMarks,
-                                        StreamSet * Record_separators,
-                                        StreamSet * Field_separators,
-                                        StreamSet * toKeep,
-                                        unsigned columnNo)
-: PabloKernel(ts, "SelectField" + std::to_string(columnNo),
-  {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
-   Binding{"Record_separators", Record_separators},
-   Binding{"Field_separators", Field_separators}},
-  {Binding{"toKeep", toKeep}}), mColumnNo(columnNo)  {}
-
-
-void SelectField::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    PabloAST * Record_separators = pb.createExtract(getInputStreamVar("Record_separators"), pb.getInteger(0));
-    PabloAST * Field_separators = pb.createExtract(getInputStreamVar("Field_separators"), pb.getInteger(0));
-    PabloAST * recordStarts = pb.createNot(pb.createAdvance(pb.createNot(Record_separators), 1));
-    PabloAST * fieldStarts = pb.createNot(pb.createAdvance(pb.createNot(Field_separators), 1));
-    PabloAST * columnMark = recordStarts;
-    if (mColumnNo > 1) {
-        columnMark = pb.createIndexedAdvance(columnMark, fieldStarts, mColumnNo - 1);
-    }
-    PabloAST * columnFollow = pb.createScanTo(columnMark, Field_separators);
-    PabloAST * columnMask  = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {columnMark, columnFollow});
-    PabloAST * notEOF = pb.createNot(pb.createExtract(getInputStreamVar("csvMarks"), pb.getInteger(markEOF)));
-    PabloAST * toKeep = pb.createAnd(pb.createOr(columnMask, Record_separators), notEOF);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), pb.createInFile(toKeep));
-}
+static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), 
+    cl::init(false), cl::cat(csv::CSV_Options), cl::Hidden);
 
 class SelectMultiField : public PabloKernel {
 public:
-    SelectMultiField(LLVMTypeSystemInterface & ts, StreamSet * csvMarks,
+    SelectMultiField(LLVMTypeSystemInterface & ts,
                               StreamSet * Record_separators,
                               StreamSet * Field_separators,
                               StreamSet * toKeep,
@@ -100,14 +60,12 @@ protected:
 };
 
 SelectMultiField::SelectMultiField(LLVMTypeSystemInterface & ts,
-                                   StreamSet * csvMarks,
                                    StreamSet * Record_separators,
                                    StreamSet * Field_separators,
                                    StreamSet * toKeep,
                                    const std::vector<unsigned> & columnNos)
 : PabloKernel(ts, "SelectMultiField_" + colNoString(columnNos),
-  {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
-   Binding{"Record_separators", Record_separators},
+  {Binding{"Record_separators", Record_separators},
    Binding{"Field_separators", Field_separators}},
   {Binding{"toKeep", toKeep}}), mColumnNos(columnNos)  {}
 
@@ -127,8 +85,7 @@ void SelectMultiField::generatePabloMethod() {
     PabloAST * recordStarts = pb.createNot(pb.createAdvance(pb.createNot(Record_separators), 1));
     PabloAST * fieldStarts = pb.createNot(pb.createAdvance(pb.createNot(Field_separators), 1));
     PabloAST * columnMark = recordStarts;
-    PabloAST * notEOF = pb.createNot(pb.createExtract(getInputStreamVar("csvMarks"), pb.getInteger(markEOF)));
-    PabloAST * toKeep = pb.createAnd(Record_separators, notEOF);
+    PabloAST * toKeep = Record_separators;
     unsigned nextCol = 0;
     for (unsigned i = 0; i < mColumnNos.size(); i++) {
         if (mColumnNos[i] > nextCol) {
@@ -172,19 +129,16 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     SHOW_BYTES(ByteStream);
     SHOW_BIXNUM(BasisBits);
 
-    //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P.CreateStreamSet(5);
-    P.CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
+    StreamSet * csvCCs = P.CreateStreamSet(4);
+    csv::CSV_Lexer(P, csv::FieldDelimiter, csv::QuoteChar, BasisBits, csvCCs);
 
     StreamSet * recordSeparators = P.CreateStreamSet(1);
     StreamSet * fieldSeparators = P.CreateStreamSet(1);
     StreamSet * quoteEscape = P.CreateStreamSet(1);
-    P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
 
     StreamSet * Selected = P.CreateStreamSet(1);
-    P.CreateKernelCall<SelectMultiField>(csvCCs, recordSeparators, fieldSeparators, Selected, colNos);
-    SHOW_STREAM(recordSeparators);
-    SHOW_STREAM(fieldSeparators);
+    P.CreateKernelCall<SelectMultiField>(recordSeparators, fieldSeparators, Selected, colNos);
     SHOW_STREAM(Selected);
 
     StreamSet * Filtered = P.CreateStreamSet(1, 8);

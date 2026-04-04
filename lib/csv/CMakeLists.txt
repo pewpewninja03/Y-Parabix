@@ -8,4 +8,7 @@ NAME
     csv
 SRC
     csv_cmdline.cpp
+    csv_parser.cpp
+DEPS
+    kernel.unicode
 )

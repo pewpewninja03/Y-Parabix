@@ -26,4 +26,20 @@ void AddSentinel::generatePabloMethod() {
         pb.createAssign(pb.createExtract(outputs, pb.getInteger(i)), extended);
     }
 }
+
+EOFbit::EOFbit(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
+: PabloKernel(ts, "EOFbit" + std::to_string(input->getNumElements()) + "x" + std::to_string(input->getFieldWidth()),
+{Binding{"input", input}},
+{Binding{"output", output, FixedRate(), Add1()}}) {
+    assert (output->getFieldWidth() == 1);
+    assert (output->getNumElements() == 1);
+}
+
+void EOFbit::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
+    Var * const outputs = getOutputStreamVar("output");
+    pb.createAssign(pb.createExtract(outputs, pb.getInteger(0)), EOFbit);
+}
+
 }

@@ -22,8 +22,13 @@ extern std::string inputFile;
 extern bool HeaderSpecNamesFile;
 extern std::string HeaderSpec;
 
+// delimiters
+extern char32_t FieldDelimiter;
+extern char32_t QuoteChar;
+
 std::vector<std::string> get_CSV_headers();
 
+// Specifying columns
 extern std::vector<std::string> Columns;
 extern bool ZeroIndexing;
 
