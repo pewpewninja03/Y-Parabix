@@ -68,4 +68,67 @@ void ParseCSV(PipelineBuilder & P, StreamSet * csvCCs,
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(quoteEscape);
 }
+
+class SelectMultiField : public PabloKernel {
+public:
+    SelectMultiField(LLVMTypeSystemInterface & ts,
+                              StreamSet * Record_separators,
+                              StreamSet * Field_separators,
+                              StreamSet * toKeep,
+                              const std::vector<unsigned> & columnNos);
+protected:
+    std::string colNoString(const std::vector<unsigned> & cols);
+    void generatePabloMethod() override;
+    const std::vector<unsigned> & mColumnNos;
+};
+
+SelectMultiField::SelectMultiField(LLVMTypeSystemInterface & ts,
+                                   StreamSet * Record_separators,
+                                   StreamSet * Field_separators,
+                                   StreamSet * toKeep,
+                                   const std::vector<unsigned> & columnNos)
+: PabloKernel(ts, "SelectMultiField_" + colNoString(columnNos),
+  {Binding{"Record_separators", Record_separators},
+   Binding{"Field_separators", Field_separators}},
+  {Binding{"toKeep", toKeep}}), mColumnNos(columnNos)  {
+}
+
+std::string SelectMultiField::colNoString(const std::vector<unsigned> & columnNos) {
+    std::stringstream ss;
+    ss << columnNos[0];
+    for (unsigned i = 1; i < columnNos.size(); i++) {
+        ss << "," << columnNos[i];
+    }
+    return ss.str();
+}
+
+void SelectMultiField::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * Record_separators = pb.createExtract(getInputStreamVar("Record_separators"), pb.getInteger(0));
+    PabloAST * Field_separators = pb.createExtract(getInputStreamVar("Field_separators"), pb.getInteger(0));
+    PabloAST * recordStarts = pb.createNot(pb.createAdvance(pb.createNot(Record_separators), 1));
+    PabloAST * fieldStarts = pb.createNot(pb.createAdvance(pb.createNot(Field_separators), 1));
+    PabloAST * columnMark = recordStarts;
+    PabloAST * toKeep = Record_separators;
+    unsigned nextCol = 0;
+    for (unsigned i = 0; i < mColumnNos.size(); i++) {
+        if (mColumnNos[i] > nextCol) {
+            columnMark = pb.createIndexedAdvance(columnMark, fieldStarts, mColumnNos[i] - nextCol);
+        }
+        PabloAST * columnFollow = pb.createScanTo(columnMark, Field_separators);
+        PabloAST * columnMask  = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {columnMark, columnFollow});
+        toKeep = pb.createOr(toKeep, columnMask);
+        nextCol = mColumnNos[i] + 1;
+        columnMark = pb.createAdvance(columnFollow, 1);
+        if (i < mColumnNos.size() - 1) {
+            toKeep = pb.createOr(toKeep, columnFollow);
+        }
+    }
+    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), pb.createInFile(toKeep));
+}
+
+void ColumnSelectionMask(PipelineBuilder & P, StreamSet * Record_separators, StreamSet * Field_separators,
+                         StreamSet * toKeep, const std::vector<unsigned> & columnNos) {
+    P.CreateKernelCall<SelectMultiField>(Record_separators, Field_separators, toKeep, columnNos);
+}
 }

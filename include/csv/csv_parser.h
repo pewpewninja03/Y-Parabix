@@ -33,4 +33,6 @@ void CSV_Lexer(PipelineBuilder & P, codepoint_t delimiter, codepoint_t quote, St
 void ParseCSV(PipelineBuilder & P, StreamSet * csvCCs, 
               StreamSet * recordSeparators, StreamSet * fieldSeparators, StreamSet * quoteEscape);
 
+void ColumnSelectionMask(PipelineBuilder & P, StreamSet * Record_separators, StreamSet * Field_separators,
+                         StreamSet * toKeep, const std::vector<unsigned> & columnNos);
 }

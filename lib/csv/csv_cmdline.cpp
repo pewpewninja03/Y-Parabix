@@ -52,12 +52,11 @@ static cl::opt<std::string> QuoteCharOption("quotechar",
 	cl::desc("Quote character (default double quote)"), cl::init("\""), cl::cat(CSV_Options));
 static cl::alias QuoteA("q", cl::desc("Alias for --quotechar"), cl::aliasopt(QuoteCharOption), cl::NotHidden);
 
-std::vector<std::string> Columns;
 bool ZeroIndexing;
-static cl::list<std::string, std::vector<std::string>> ColumnsOption("columns", cl::location(Columns),
+static cl::list<std::string> Columns("columns",
                                      cl::desc("A comma-separated list of column names or indices"),
                                      cl::CommaSeparated, cl::cat(csv::CSV_Options));
-static cl::alias ColumnsA("c", cl::desc("Alias for --columns"), cl::aliasopt(ColumnsOption), cl::NotHidden);
+//static cl::alias ColumnsA("c", cl::desc("Alias for --columns"), cl::aliasopt(Columns), cl::NotHidden);
 static cl::opt<bool, true> ZeroIndexingOption("zero", cl::location(ZeroIndexing), 
 	cl::desc("Use 0-based rather than 1-based indices for column numbers"), cl::init(false), cl::cat(csv::CSV_Options));
 
@@ -119,7 +118,7 @@ unsigned getColumn(std::string & columnSpec, std::map<std::string, unsigned> & h
             return colNo - 1;
         }
     }
-    llvm::report_fatal_error("Invalid column spec");
+    llvm::report_fatal_error(llvm::StringRef("Invalid column spec:" + columnSpec));
 }
 
 std::pair<unsigned, unsigned> getColumnRange(std::string & columnSpec, std::map<std::string, unsigned> & headerMap) {
@@ -153,12 +152,13 @@ std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers) {
     }
 	std::vector<unsigned> colNos;
     for (unsigned i = 0; i < csv::Columns.size(); i++) {
+        //llvm::errs() << "csv::Columns[i] = " << csv::Columns[i] << "\n";
         auto rg = getColumnRange(csv::Columns[i], headerMap);
         if (rg.second >= headers.size()) {
             llvm::report_fatal_error("Column number too large");
         }
         for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
-            colNos.push_back(i);
+            colNos.push_back(colNo);
         }
     }
     return colNos;

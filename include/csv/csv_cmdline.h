@@ -28,10 +28,6 @@ extern char32_t QuoteChar;
 
 std::vector<std::string> get_CSV_headers();
 
-// Specifying columns
-extern std::vector<std::string> Columns;
-extern bool ZeroIndexing;
-
 std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers);
 
 void InitializeCommandLineInterface(int argc, char *argv[]);
