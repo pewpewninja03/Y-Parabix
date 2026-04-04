@@ -386,10 +386,12 @@ void LongestSpan::generatePabloMethod() {
     PabloAST * matchEnd = getInputStreamSet("matchEnd")[0];
     PabloAST * pfxStart = pb.createAnd(pb.createLookahead(pfxStrm, mPfxOffset), pb.createLookahead(endBack, mPfxOffset));
     PabloAST * longestEnd = pb.createAnd(matchEnd, pb.createNot(endBack));
+    PabloAST * spans = nullptr;
     if (mEndOffset > 0) {
-        longestEnd = pb.createAnd(pb.createLookahead(matchEnd, mEndOffset), pb.createNot(pb.createLookahead(endBack, mEndOffset)));
+        spans = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {pfxStart, longestEnd});
+    } else {
+        spans = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {pfxStart, longestEnd});
     }
-    PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {pfxStart, longestEnd});
     writeOutputStreamSet("spans", std::vector<PabloAST*>{spans});
 }
 
@@ -398,8 +400,8 @@ LongestSpan::LongestSpan (LLVMTypeSystemInterface & ts, unsigned pfxOffset, unsi
 : PabloKernel(ts, "LongestSpan_" + std::to_string(pfxOffset) + ":" + std::to_string(endOffset),
 // inputs
 {Binding{"pfxStrm", pfxStrm, FixedRate(1), LookAhead(pfxOffset)},
- Binding{"endBack", endBack, FixedRate(1), LookAhead(std::max(pfxOffset, endOffset))},
- Binding{"matchEnd", matchEnd, FixedRate(1), LookAhead(endOffset)}},
+ Binding{"endBack", endBack, FixedRate(1), LookAhead(pfxOffset)},
+ Binding{"matchEnd", matchEnd}},
 // output
 {Binding{"spans", spans}}), mPfxOffset(pfxOffset),  mEndOffset(endOffset) {
     
@@ -565,7 +567,6 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
             auto pfxStrm = fp->second.extStream;
             auto pfxLgth = fp->second.lgthRange.first;
             auto pfxOffset = fp->second.offset;
-            //llvm::errs() << "pfxOffset: " << pfxOffset << "\n";
             StreamSet * maskStrm = mPB.CreateStreamSet(1);
             OrCombine(mPB, pfxStrm, matchEnd, maskStrm);
             StreamSet * endBack = mPB.CreateStreamSet(1);
@@ -574,7 +575,6 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
                 mPB.captureBitstream("pfxStrm", pfxStrm);
                 mPB.captureBitstream("endBack", endBack);
             }
-
             mPB.CreateKernelCall<LongestSpan>(pfxLgth + pfxOffset - 1, endOffset, pfxStrm, endBack, matchEnd, spans);
         } else {
             mPB.CreateKernelFamilyCall<FixedMatchSpansKernel>(minlgth, endOffset, matchEnd, spans);
@@ -600,6 +600,7 @@ RE * RE_PipelineBuilder::spanFactoring(RE * re) {
     re::FixedSpanNamer FLnamer(mCtxt.mCodeUnitAlphabet);
     RE * xfrmedRE = FLnamer.transformRE(re);
     xfrmedRE = mUPnamer.transformRE(xfrmedRE);
+    xfrmedRE = zeroBoundElimination(xfrmedRE);
     //re::Repeated_CC_Seq_Namer RCCSnamer;
     //xfrmedRE = mRCCSnamer.transformRE(xfrmedRE);
     return xfrmedRE;
