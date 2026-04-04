@@ -6,8 +6,7 @@
 
 #include <unicode/data/PropertyObjects.h>
 #include <string>
-#include <locale>
-#include <codecvt>
+#include <boost/locale/encoding_utf.hpp>
 #include <sstream>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
@@ -49,13 +48,7 @@ const UnicodeSet PropertyObject::GetCodepointSetMatchingPattern(re::RE * re, Gre
 }
 
 const std::u32string PropertyObject::GetU32StringValue(codepoint_t cp) const {
-    std::string s = GetStringValue(cp);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-    return conv.from_bytes(s);
-#pragma GCC diagnostic pop
+    return boost::locale::conv::utf_to_utf<char32_t>(GetStringValue(cp));
 }
 
 const std::string PropertyObject::GetStringValue(codepoint_t cp) const {
@@ -416,13 +409,8 @@ const std::u32string CodePointPropertyObject::GetU32StringValue(codepoint_t cp) 
 }
 
 const std::string CodePointPropertyObject::GetStringValue(codepoint_t cp) const {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
     std::u32string s(1, GetCodePointValue(cp));
-    return conv.to_bytes(s);
-#pragma GCC diagnostic pop
+    return boost::locale::conv::utf_to_utf<char>(s);
 }
 
 std::vector<UCD::UnicodeSet> & CodePointPropertyObject::GetBitTransformSets() {
@@ -524,25 +512,14 @@ const std::u32string StringPropertyObject::GetU32StringValue(codepoint_t cp) con
         std::u32string s(1, cp);
         return s;
     }
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-    std::string s = GetStringValue(cp);
-    return conv.from_bytes(s);
-#pragma GCC diagnostic pop
+    return boost::locale::conv::utf_to_utf<char32_t>(GetStringValue(cp));
 }
 
 const std::string StringPropertyObject::GetStringValue(codepoint_t cp) const {
     if (mNullCodepointSet.contains(cp)) return "";
     if (mSelfCodepointSet.contains(cp)) {
         std::u32string s(1, cp);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-        return conv.to_bytes(s);
-#pragma GCC diagnostic pop
+        return boost::locale::conv::utf_to_utf<char>(s);
     }
     // Otherwise, binary search through the explicit cps to find the index.
     // string index.
@@ -589,13 +566,7 @@ const UnicodeSet StringOverridePropertyObject::GetReflexiveSet() const {
 
 const std::u32string StringOverridePropertyObject::GetU32StringValue(codepoint_t cp) const {
     if (!mOverriddenSet.contains(cp)) return getPropertyObject(mBaseProperty)->GetU32StringValue(cp);
-    std::string s = GetStringValue(cp);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-    return conv.from_bytes(s);
-#pragma GCC diagnostic pop
+    return boost::locale::conv::utf_to_utf<char32_t>(GetStringValue(cp));
 }
 
 const std::string StringOverridePropertyObject::GetStringValue(codepoint_t cp) const {

@@ -46,7 +46,7 @@
 #include <unicode/data/PropertyObjectTable.h>
 #include <unicode/utf/utf_compiler.h>
 #include <unicode/utf/transchar.h>
-#include <codecvt>
+#include <boost/locale/encoding_utf.hpp>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -612,13 +612,8 @@ int main(int argc, char *argv[]) {
         }
     } else if (SrcChars != "" && TgtChars != "") {
         unicode::TranslationMap charmap;
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-        std::u32string src = conv.from_bytes(SrcChars);
-        std::u32string tgt = conv.from_bytes(TgtChars);
-#pragma GCC diagnostic pop
+        std::u32string src = boost::locale::conv::utf_to_utf<char32_t>(SrcChars);
+        std::u32string tgt = boost::locale::conv::utf_to_utf<char32_t>(TgtChars);
         for (unsigned i = 0; i < src.size(); i++) {
             if (i < tgt.size()) {
                 charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[i]));

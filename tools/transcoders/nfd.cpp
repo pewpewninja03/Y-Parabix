@@ -54,7 +54,6 @@
 #include <unicode/utf/utf_compiler.h>
 #include <unicode/utf/utf_encoder.h>
 #include <unicode/utf/transchar.h>
-#include <codecvt>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
