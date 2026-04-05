@@ -11,6 +11,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/ManagedStatic.h>
 #include <llvm/IR/Module.h>
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
