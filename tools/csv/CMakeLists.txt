@@ -36,3 +36,21 @@ DEPS
     toolchain
 )
 
+parabix_add_executable(
+NAME
+    csvgrep
+SRC
+    csvgrep.cpp
+DEPS
+    csv
+    pablo
+    grep
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.re
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
+
