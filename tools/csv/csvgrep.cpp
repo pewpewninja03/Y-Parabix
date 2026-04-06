@@ -10,6 +10,7 @@
 #include <vector>
 #include <csv/csv_cmdline.h>
 #include <csv/csv_parser.h>
+#include <unicode/utf/utf_encoder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
@@ -29,6 +30,8 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/re/regexp_kernel.h>
+#include <kernel/unicode/utf8_support.h>
+#include <kernel/unicode/utf8_decoder.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>
 #include <re/transforms/re_transformer.h>
@@ -44,6 +47,7 @@ using namespace pablo;
 
 static cl::opt<std::string> Regex("regex", cl::desc("regular expression to search selected columns"), cl::cat(csv::CSV_Options));
 static cl::alias RegexA("r", cl::desc("Alias for --regex"), cl::aliasopt(Regex), cl::cat(csv::CSV_Options), cl::NotHidden);
+static cl::opt<bool> U21("u21", cl::desc("force work to be carried out in Unicode 21 bit space "), cl::cat(csv::CSV_Options));
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -132,6 +136,38 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     SHOW_BYTES(ByteStream);
     SHOW_BIXNUM(BasisBits);
 
+    UTF_Encoder u8_encoder(8);
+
+    re::RE * searchRE = csvRE(re::RE_Parser::parse(Regex));
+    RE_CompilerContext ctxt;
+    StreamSet * u8index = nullptr;
+
+    unsigned DQ_u8bytes = u8_encoder.encoded_length(csv::QuoteChar);
+    unsigned Delim_u8bytes = u8_encoder.encoded_length(csv::FieldDelimiter);
+
+    if ((DQ_u8bytes > 1) || (Delim_u8bytes > 1) || U21) {
+        u8index = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+        SHOW_STREAM(u8index);
+
+        // UTF-8 to U21 Conversion Pipeline
+        // Creating U21 codepoint stream from UTF-8 basis bits (U21 Codepoint Generation)
+        StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
+        P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+
+        SHOW_BIXNUM(U21_u8indexed);
+
+        StreamSet * U21codepoints = P.CreateStreamSet(21, 1);
+        FilterByMask(P, u8index, U21_u8indexed, U21codepoints);
+        SHOW_BIXNUM(U21codepoints);
+
+        BasisBits = U21codepoints;
+
+        ctxt.setCodeUnitContext(&cc::Unicode, BasisBits);
+    } else {
+        ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
+    }
+
     StreamSet * csvCCs = P.CreateStreamSet(4);
     csv::CSV_Lexer(P, BasisBits, csvCCs);
 
@@ -150,9 +186,6 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     StreamSet * Barrier = P.CreateStreamSet(1);
     OrCombine(P, NonSelected, fieldSeparators, Barrier);
 
-    re::RE * searchRE = csvRE(re::RE_Parser::parse(Regex));
-    RE_CompilerContext ctxt;
-    ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     ctxt.setBarrier(Barrier);
     RE_PipelineBuilder RE_PB(P, ctxt);
     StreamSet * Matches = P.CreateStreamSet(1);
@@ -180,6 +213,14 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
         P.captureBitstream("MatchedLineSpans", MatchedLineSpans);
     }
 
+    if (u8index != nullptr) {
+        StreamSet * SpreadSpans = P.CreateStreamSet(1, 1);
+        SpreadByMask(P, u8index, MatchedLineSpans, SpreadSpans);
+
+        StreamSet * ResultSpans = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<U8Spans>(SpreadSpans, u8index, ResultSpans);
+        MatchedLineSpans = ResultSpans;
+    }
     StreamSet * Filtered = P.CreateStreamSet(1, 8);
     FilterByMask(P, MatchedLineSpans, ByteStream, Filtered, 0, 64);
 
