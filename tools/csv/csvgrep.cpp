@@ -47,65 +47,63 @@ static cl::alias RegexA("r", cl::desc("Alias for --regex"), cl::aliasopt(Regex),
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
-using namespace re;
-
 //
 //  When match CSV fields, any double quote character within the
 //  field will be doubled up to represent and escaped double quote.
 //  So we transform the RE to match a pair of double quotes whenever
 //  a single one is desired.
 
-struct DoubleQuoteEscape : public RE_Transformer {
+struct DoubleQuoteEscape : public re::RE_Transformer {
     DoubleQuoteEscape(codepoint_t dqChar) : RE_Transformer("DoubleQuoteEscape"),
        mDQ(dqChar), mDQ_CC(nullptr), mDoubleEscape(nullptr) {}
-    CC * getDQ_CC() {
+    re::CC * getDQ_CC() {
         if (mDQ_CC == nullptr) {
             mDQ_CC = re::makeCC(mDQ, &cc::Unicode);
         }
         return mDQ_CC;
     }
-    RE * getDoubleEscape() {
+    re::RE * getDoubleEscape() {
         if (mDoubleEscape == nullptr) {
-            CC * DQ_CC = getDQ_CC();
-            mDoubleEscape = makeSeq({DQ_CC, DQ_CC});
+            re::CC * DQ_CC = getDQ_CC();
+            mDoubleEscape = re::makeSeq({DQ_CC, DQ_CC});
         }
         return mDoubleEscape;
     }
-    RE * transformCC (CC * cc) override {
+    re::RE * transformCC (re::CC * cc) override {
         if (cc->contains(mDQ)) {
             auto dblEsc = getDoubleEscape();
             if (cc->count() == 1) {
                 return dblEsc;
             }
-            return makeAlt({dblEsc, subtractCC(cc, mDQ_CC)});
+            return re::makeAlt({dblEsc, subtractCC(cc, mDQ_CC)});
         }
         return cc;
     }
-    RE * transformAny (Any * a) override {
-        return makeDiff(a, getDQ_CC());
+    re::RE * transformAny (re::Any * a) override {
+        return re::makeDiff(a, getDQ_CC());
     }
-    RE * transformName (Name * name) override {
-        RE * defn = name->getDefinition();
-        if (!defn || isa<Any>(defn)) return makeDiff(name, getDQ_CC());
-        RE * d = transform(defn);
+    re::RE * transformName (re::Name * name) override {
+        re::RE * defn = name->getDefinition();
+        if (!defn) return makeDiff(name, getDQ_CC());
+        re::RE * d = transform(defn);
         if (d == defn) return name;
         return d;
     }
-    RE * transformPropertyExpression (PropertyExpression * pe) override {
-        RE * defn = pe->getResolvedRE();
+    re::RE * transformPropertyExpression (re::PropertyExpression * pe) override {
+        re::RE * defn = pe->getResolvedRE();
         if (!defn) return makeDiff(pe, getDQ_CC());
-        RE * d = transform(defn);
+        re::RE * d = transform(defn);
         if (d == defn) return pe;
         return d;
     }
 private:
     codepoint_t mDQ;
-    CC * mDQ_CC;
-    RE * mDoubleEscape;
+    re::CC * mDQ_CC;
+    re::RE * mDoubleEscape;
 };
 
-RE * csvRE(RE * re) {
-    RE * xfrmedRE = resolveModesAndExternalSymbols(re, false, grep::lineNumGrep);
+re::RE * csvRE(re::RE * re) {
+    re::RE * xfrmedRE = resolveModesAndExternalSymbols(re, false, grep::lineNumGrep);
     xfrmedRE = DoubleQuoteEscape(csv::QuoteChar).transformRE(xfrmedRE);
     return xfrmedRE;
 }
@@ -152,7 +150,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     StreamSet * Barrier = P.CreateStreamSet(1);
     OrCombine(P, NonSelected, fieldSeparators, Barrier);
 
-    RE * searchRE = csvRE(RE_Parser::parse(Regex));
+    re::RE * searchRE = csvRE(re::RE_Parser::parse(Regex));
     RE_CompilerContext ctxt;
     ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     ctxt.setBarrier(Barrier);
