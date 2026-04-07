@@ -22,9 +22,9 @@ DEPS
 
 parabix_add_executable(
 NAME
-    csv_column
+    csvcut
 SRC
-    csv_column.cpp
+    csvcut.cpp
 DEPS
     csv
     pablo

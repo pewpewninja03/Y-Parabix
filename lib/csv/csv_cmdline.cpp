@@ -162,6 +162,9 @@ std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers) {
             if (rg.second >= headers.size()) {
                 llvm::report_fatal_error("Column number too large");
             }
+            if ((i > 0) && (rg.first < colNos.back())) {
+                llvm::report_fatal_error("Column numbers must be specified in strictly increasing order");
+            }
             for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
                 colNos.push_back(colNo);
             }
