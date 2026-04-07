@@ -151,14 +151,20 @@ std::vector<unsigned> getColumnArgs(std::vector<std::string> & headers) {
         }
     }
 	std::vector<unsigned> colNos;
-    for (unsigned i = 0; i < csv::Columns.size(); i++) {
-        //llvm::errs() << "csv::Columns[i] = " << csv::Columns[i] << "\n";
-        auto rg = getColumnRange(csv::Columns[i], headerMap);
-        if (rg.second >= headers.size()) {
-            llvm::report_fatal_error("Column number too large");
+    if (csv::Columns.size() == 0) {
+        for (unsigned i = 0; i < headers.size(); i++) {
+            colNos.push_back(i);
         }
-        for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
-            colNos.push_back(colNo);
+    } else {
+        for (unsigned i = 0; i < csv::Columns.size(); i++) {
+            //llvm::errs() << "csv::Columns[i] = " << csv::Columns[i] << "\n";
+            auto rg = getColumnRange(csv::Columns[i], headerMap);
+            if (rg.second >= headers.size()) {
+                llvm::report_fatal_error("Column number too large");
+            }
+            for (auto colNo = rg.first; colNo <= rg.second; colNo++) {
+                colNos.push_back(colNo);
+            }
         }
     }
     return colNos;

@@ -47,7 +47,9 @@ using namespace pablo;
 
 static cl::opt<std::string> Regex("regex", cl::desc("regular expression to search selected columns"), cl::cat(csv::CSV_Options));
 static cl::alias RegexA("r", cl::desc("Alias for --regex"), cl::aliasopt(Regex), cl::cat(csv::CSV_Options), cl::NotHidden);
-static cl::opt<bool> U21("u21", cl::desc("force work to be carried out in Unicode 21 bit space "), cl::cat(csv::CSV_Options));
+static cl::opt<bool> U21("u21", cl::desc("force work to be carried out in Unicode 21 bit space"), cl::cat(csv::CSV_Options));
+static cl::opt<bool> FieldMatch("field-match", cl::desc("require that entire field be matched"), cl::init(false), cl::cat(csv::CSV_Options));
+static cl::alias FieldMatchA("x", cl::desc("Alias for --match"), cl::aliasopt(FieldMatch), cl::cat(csv::CSV_Options), cl::NotHidden);
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -109,6 +111,9 @@ private:
 re::RE * csvRE(re::RE * re) {
     re::RE * xfrmedRE = resolveModesAndExternalSymbols(re, false, grep::lineNumGrep);
     xfrmedRE = DoubleQuoteEscape(csv::QuoteChar).transformRE(xfrmedRE);
+    if (FieldMatch) {
+        xfrmedRE = re::makeSeq({re::makeStart(), xfrmedRE, re::makeEnd()});
+    }
     return xfrmedRE;
 }
 
@@ -145,7 +150,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     unsigned DQ_u8bytes = u8_encoder.encoded_length(csv::QuoteChar);
     unsigned Delim_u8bytes = u8_encoder.encoded_length(csv::FieldDelimiter);
 
-    if ((DQ_u8bytes > 1) || (Delim_u8bytes > 1) || U21) {
+    if (!validateFixedUTF8(searchRE) || (DQ_u8bytes > 1) || (Delim_u8bytes > 1) || U21) {
         u8index = P.CreateStreamSet(1, 1);
         P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
         SHOW_STREAM(u8index);
@@ -165,6 +170,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
 
         ctxt.setCodeUnitContext(&cc::Unicode, BasisBits);
     } else {
+        searchRE = toUTF8(searchRE);
         ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     }
 
