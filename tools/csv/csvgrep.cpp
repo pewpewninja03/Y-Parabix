@@ -49,7 +49,7 @@ static cl::opt<std::string> Regex("regex", cl::desc("regular expression to searc
 static cl::alias RegexA("r", cl::desc("Alias for --regex"), cl::aliasopt(Regex), cl::cat(csv::CSV_Options), cl::NotHidden);
 static cl::opt<bool> U21("u21", cl::desc("force work to be carried out in Unicode 21 bit space"), cl::cat(csv::CSV_Options));
 static cl::opt<bool> FieldMatch("field-match", cl::desc("require that entire field be matched"), cl::init(false), cl::cat(csv::CSV_Options));
-static cl::alias FieldMatchA("x", cl::desc("Alias for --match"), cl::aliasopt(FieldMatch), cl::cat(csv::CSV_Options), cl::NotHidden);
+static cl::alias FieldMatchA("x", cl::desc("Alias for --field-match"), cl::aliasopt(FieldMatch), cl::cat(csv::CSV_Options), cl::NotHidden);
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 

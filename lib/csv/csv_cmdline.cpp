@@ -41,7 +41,8 @@ static cl::opt<std::string, true> HeaderSpecOption("headers", cl::location(Heade
 
 char32_t FieldDelimiter;
 static cl::opt<std::string> FieldDelimiterOption("delimiter",
-	cl::desc("Delimiter to separate fields (default comma)"), cl::init(","), cl::cat(CSV_Options));
+	cl::desc("Delimiter to separate fields (default comma)"), cl::init(","),
+    cl::value_desc("Unicode character"), cl::cat(CSV_Options));
 static cl::alias DelimterA("d", cl::desc("Alias for --delimiter"), cl::aliasopt(FieldDelimiterOption), cl::NotHidden);
 static cl::opt<bool> TabDelimiter("tabs",
 	cl::desc("Use tabs as delimiter (overrides --delimiter)"), cl::init(false), cl::cat(CSV_Options));
@@ -49,7 +50,8 @@ static cl::alias TabsA("t", cl::desc("Alias for --tabs"), cl::aliasopt(FieldDeli
 
 char32_t QuoteChar;
 static cl::opt<std::string> QuoteCharOption("quotechar",
-	cl::desc("Quote character (default double quote)"), cl::init("\""), cl::cat(CSV_Options));
+	cl::desc("Quote character (default double quote)"), cl::init("\""), 
+    cl::value_desc("Unicode character"), cl::cat(CSV_Options));
 static cl::alias QuoteA("q", cl::desc("Alias for --quotechar"), cl::aliasopt(QuoteCharOption), cl::NotHidden);
 
 bool ZeroIndexing;

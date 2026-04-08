@@ -356,11 +356,11 @@ void ParseCommandLineOptions(int argc, const char * const *argv, std::initialize
 }
 
 void printParabixVersion (raw_ostream & outs) {
+    outs << "Parabix revision " << PARABIX_VERSION << "\n";
+    outs << "Unicode version " << UCD::UnicodeVersion << "\n";
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
     llvm::sys::printDefaultTargetAndDetectedCPU(outs);
 #endif
-    outs << "Unicode version " << UCD::UnicodeVersion << "\n";
-    outs << "Parabix (http://parabix.costar.sfu.ca/):\n  " << "Parabix revision " << PARABIX_VERSION << "\n";
 }
 
 void AddParabixVersionPrinter() {
