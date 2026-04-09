@@ -143,16 +143,20 @@ void CSV_Char_Replacement::generatePabloMethod() {
     PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     //
-    // Translate "" to \"  ASCII value of " = 0x22, ASCII value of \ = 0x5C
+    // Replace the quote escape character with \ = 0x5C
     std::vector<PabloAST *> translated_basis(8, nullptr);
-    translated_basis[0] = basis[0];
-    translated_basis[1] = pb.createXor(basis[1], quoteEscape);
-    translated_basis[2] = pb.createXor(basis[2], quoteEscape);
-    translated_basis[3] = pb.createXor(basis[3], quoteEscape);
-    translated_basis[4] = pb.createXor(basis[4], quoteEscape);
-    translated_basis[5] = pb.createXor(basis[5], quoteEscape);
-    translated_basis[6] = pb.createXor(basis[6], quoteEscape);
-    translated_basis[7] = basis[7];
+    PabloAST * notQuoteEscape = pb.createNot(quoteEscape);
+    // Low 2 bits zeroed out whenever we have quoteEscape
+    translated_basis[0] = pb.createAnd(basis[0], notQuoteEscape);
+    translated_basis[1] = pb.createAnd(basis[1], notQuoteEscape);
+    // Next 2 bits set whenever we have quoteEscape
+    translated_basis[2] = pb.createOr(basis[2], quoteEscape);
+    translated_basis[3] = pb.createOr(basis[3], quoteEscape);
+
+    translated_basis[4] = pb.createOr(basis[4], quoteEscape);
+    translated_basis[5] = pb.createAnd(basis[5], notQuoteEscape);
+    translated_basis[6] = pb.createOr(basis[6], quoteEscape);
+    translated_basis[7] = pb.createAnd(basis[7], notQuoteEscape);
     writeOutputStreamSet("translatedBasis", translated_basis);
 }
 
