@@ -343,8 +343,8 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 //                }
 //            }
         }
-        if (out_degree(streamSet, InOutStreamSetReplacement) != 0) {
-            const auto inOutTarget = child(streamSet, InOutStreamSetReplacement);
+        if (in_degree(streamSet, InOutStreamSetReplacement) != 0) {
+            const auto inOutTarget = parent(streamSet, InOutStreamSetReplacement);
             out << "|INOUT:" << inOutTarget;
         }
         #ifndef USE_SIMPLE_BUFFER_GRAPH

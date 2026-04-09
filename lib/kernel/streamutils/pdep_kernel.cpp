@@ -175,6 +175,7 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
         ConstantInt * const mult = b.getSize(getStride() / b.getBitBlockWidth());
         numOfBlocks = b.CreateMul(numOfStrides, mult);
     }
+
     Value * processedSourceItems = b.getProcessedItemCount("source");
     Value * initialSourceOffset = b.CreateURem(processedSourceItems, BLOCK_WIDTH);
     Value * const streamBase = b.getScalarField("base");
@@ -195,11 +196,11 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
     SmallVector<PHINode *, 16> pendingDataPhi(mSelectedStreamCount);
     blockNoPhi->addIncoming(ZERO, entry);
     pendingOffsetPhi->addIncoming(initialSourceOffset, entry);
-
     for (unsigned i = 0; i < mSelectedStreamCount; i++) {
         pendingDataPhi[i] = b.CreatePHI(b.getBitBlockType(), incomingCount);
         pendingDataPhi[i]->addIncoming(pendingData[i], entry);
     }
+
     Value * deposit_mask = b.loadInputStreamBlock("marker", ZERO, blockNoPhi);
     Value * nextBlk = b.CreateAdd(blockNoPhi, b.getSize(1));
     Value * moreToDo = b.CreateICmpNE(nextBlk, numOfBlocks);
@@ -1591,7 +1592,7 @@ ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, Stre
    nm.flush();
    return tmp;
 }(),
-{Binding{"spread", spread}, Binding{"byteStream", byteStream, PopcountOf("spread")}},
+{Binding{"spread", spread}, Binding{"byteStream", byteStream, PopcountOf("spread"), EmptyReadOverflow()}},
 {Binding{"output", output}}, {}, {}, {}) {
     if (streamOffset) {
         mInputScalars.emplace_back("offset", streamOffset);

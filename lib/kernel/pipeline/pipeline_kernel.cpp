@@ -612,8 +612,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         std::advance(arg, 1);
         return v;
     };
+
     SmallVector<Value *, 16> segmentArgs(doSegment->arg_size());
     auto segmentArgCount = suppliedArgs;
+
 
     if (LLVM_UNLIKELY(numOfStreamSets > 0)) {
 
@@ -643,26 +645,42 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             Value * accessible = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
             segmentArgs[segmentArgCount++] = accessible;
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                segmentArgs[segmentArgCount++] = accessible;
+                segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(accessible, b.getBitBlockWidth()); // capacity
             }
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
+
             Value * const streamSetArg = nextArg();
             assert (streamSetArg->getType() == streamSetPtrTy);
-
             // shared dynamic buffer handle or virtual base output address
             fields[1] = i32_ZERO;
+            assert (segmentArgCount < doSegment->arg_size());
             segmentArgs[segmentArgCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
-
             // produced output items
+            assert (canSetTerminateSignal());
             fields[1] = i32_ONE;
             Value * const itemPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
+            assert (segmentArgCount < doSegment->arg_size());
             segmentArgs[segmentArgCount++] = itemPtr;
-            Value * produced = b.CreateLoad(int64Ty, itemPtr);
-            segmentArgs[segmentArgCount++] = produced;
-            if (LLVM_UNLIKELY(checkStreamSet)) {
-                segmentArgs[segmentArgCount++] = ConstantInt::getAllOnesValue(sizeTy);
+            const auto isLocal = isLocalBuffer(mOutputStreamSets[i]);
+            assert (!isLocal.isShared());
+            if (LLVM_UNLIKELY(isLocal.any())) {
+                assert (segmentArgCount < doSegment->arg_size());
+                segmentArgs[segmentArgCount++] = b.getSize(0);
+                if (LLVM_UNLIKELY(checkStreamSet)) {
+                    assert (segmentArgCount < doSegment->arg_size());
+#warning keep this in array to read out
+                    segmentArgs[segmentArgCount++] = b.CreateAllocaAtEntryPoint(sizeTy, nullptr);
+                }
+            } else {
+                Value * writeable = b.CreateLoad(int64Ty, itemPtr);
+                assert (segmentArgCount < doSegment->arg_size());
+                segmentArgs[segmentArgCount++] = writeable; // writable
+                if (LLVM_UNLIKELY(checkStreamSet)) {
+                    assert (segmentArgCount < doSegment->arg_size());
+                    segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(writeable, b.getBitBlockWidth()); // capacity
+                }
             }
         }
     }

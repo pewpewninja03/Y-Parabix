@@ -1034,6 +1034,9 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         // that we are not using an old buffer allocation.
         if (isLocal.any()) {
             fields.push_back(sizeTy); // consumed
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                fields.push_back(sizePtrTy); // updatable capacity
+            }
         } else {
             if (isMainPipeline || requiresItemCount(output)) {
                 fields.push_back(sizeTy); // writable item count
@@ -1142,8 +1145,12 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            if (LLVM_UNLIKELY(isLocalBuffer(output).any())) {
+            const auto isLocal = Kernel::isLocalBuffer(output);
+            if (LLVM_UNLIKELY(isLocal.any())) {
                 setNextArgName(output.getName() + "_consumed");
+                if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                    setNextArgName(output.getName() + "_updatableCapacity");
+                }
             } else {
                 if (isMainPipeline || requiresItemCount(output)) {
                     setNextArgName(output.getName() + "_writable");

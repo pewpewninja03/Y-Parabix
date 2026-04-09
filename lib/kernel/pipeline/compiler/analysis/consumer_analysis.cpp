@@ -96,26 +96,17 @@ restart:    const auto & cn = mBufferGraph[id];
         }
 
         assert (lastConsumer[streamSet - FirstStreamSet] == 0 || mConsumerGraph[streamSet] == streamSet);
-
-        if (!allConsumersFixedRate) {
-            BufferNode & sn = mBufferGraph[id];
-            sn.Type |= BufferType::HasNonFixedRateConsumer;
-        }
-
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto lc = lastConsumer[streamSet - FirstStreamSet];
         if (lc != 0 && out_degree(streamSet, mConsumerGraph) == 0) {
-
             assert (mConsumerGraph[streamSet] == streamSet);
-
             for (auto ss = streamSet; ss <= LastStreamSet; ++ss) {
                 if (mConsumerGraph[ss] == streamSet) {
                     for (const auto ce : make_iterator_range(out_edges(ss, mBufferGraph))) {
                         const auto consumer = target(ce, mBufferGraph);
                         if (consumer == lc) {
-
                             const unsigned index = out_degree(streamSet, mConsumerGraph);
                             const BufferPort & input = mBufferGraph[ce];
                             add_edge(streamSet, consumer, ConsumerEdge{input.Port, index, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
@@ -130,13 +121,16 @@ restart:    const auto & cn = mBufferGraph[id];
 
     for (auto id = FirstStreamSet; id <= LastStreamSet; ++id) {
 
-        if (mConsumerGraph[id] == 0) {
+        if (id != mConsumerGraph[id]) {
             continue;
         }
+
+        BufferNode & bn = mBufferGraph[id];
 
         if (LLVM_UNLIKELY(out_degree(id, mConsumerGraph) == 0)) {
             const auto producer = parent(id, mBufferGraph);
             if (producer == PipelineInput || mTraceDynamicBuffers) {
+                bn.Type |= BufferType::RequiresConsumedItemCount;
                 add_edge(id, PipelineOutput, ConsumerEdge{}, mConsumerGraph);
                 continue;
             } else {
@@ -146,10 +140,11 @@ restart:    const auto & cn = mBufferGraph[id];
         }
 
         #ifndef NDEBUG
-        const BufferNode & bn = mBufferGraph[id];
         assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isTruncated()));
         assert (in_degree(id, mConsumerGraph) == 1);
         #endif
+
+        bn.Type |= BufferType::RequiresConsumedItemCount;
 
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
@@ -187,8 +182,9 @@ restart:    const auto & cn = mBufferGraph[id];
                 ConsumerEdge & cn = mConsumerGraph[f];
                 cn.Flags |= ConsumerEdge::UpdateExternalCount;
             } else {
-                const BufferPort & br = mBufferGraph[input];
-                add_edge(streamSet, PipelineOutput, ConsumerEdge{br.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
+                BufferNode & bn = mBufferGraph[streamSet];
+                bn.Type |= BufferType::RequiresConsumedItemCount;
+                add_edge(streamSet, PipelineOutput, ConsumerEdge{bp.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
             }
         }
     }

@@ -334,16 +334,6 @@ public:
 
 protected:
 
-    LLVM_READNONE llvm::Value * getStreamSetAssertionInputItemCapacity(const unsigned index) const {
-        return mInputItemCapacity[index];
-    }
-
-    LLVM_READNONE llvm::Value * getStreamSetAssertionOutputItemCapacity(const unsigned index) const {
-        return mOutputItemCapacity[index];
-    }
-
-protected:
-
     virtual void constructStreamSetBuffers(KernelBuilder & b);
 
     virtual void addBaseInternalProperties(KernelBuilder & b);
@@ -457,14 +447,13 @@ protected:
 
     Vec<llvm::Value *>              mAccessibleInputItems;
     Vec<llvm::Value *>              mAvailableInputItems;
-    Vec<llvm::Value *>              mInputItemCapacity;
     Vec<llvm::Value *>              mProducedOutputItemPtr;
     Vec<llvm::Value *>              mUpdatableOutputBaseVirtualAddressPtr;
+    Vec<llvm::Value *>              mUpdatableOutputCapacityPtr;
     Vec<llvm::Value *>              mInitiallyProducedOutputItems;
 
     Vec<llvm::Value *>              mWritableOutputItems;
     Vec<llvm::Value *>              mConsumedOutputItems;
-    Vec<llvm::Value *>              mOutputItemCapacity;
 
     ScalarValueMap                  mScalarFieldMap;
     ScalarAliasMap                  mScalarAliasMap;

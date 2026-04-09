@@ -148,9 +148,10 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
     // --- lambda function start
     auto phiOutItemCounts = [&](const Vec<Value *> & accessibleItems,
-                               const Vec<Value *> & inputCapacity,
+                               const Vec<Value *> & inputBufferCapacity,
                                const Vec<Value *> & inputVirtualBaseAddress,
                                const Vec<Value *> & writableItems,
+
                                Value * const fixedRateFactor,
                                Value * const terminationSignal,
                                Value * const numOfLinearStrides,
@@ -163,8 +164,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             const auto port = bp.Port;
             assert (mLinearInputItemsPhi[port] && accessibleItems[port.Number]);
             mLinearInputItemsPhi[port]->addIncoming(accessibleItems[port.Number], exitBlock);
-            if (bp.inputMayBeTruncated()) {
-                mLinearInputItemCapacityPhi[port]->addIncoming(inputCapacity[port.Number], exitBlock);
+            if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                mInputBufferCapacityPhi[port]->addIncoming(inputBufferCapacity[port.Number], exitBlock);
             }
             assert (mInputVirtualBaseAddressPhi[port] && inputVirtualBaseAddress[port.Number]);
             mInputVirtualBaseAddressPhi[port]->addIncoming(inputVirtualBaseAddress[port.Number], exitBlock);
@@ -201,8 +202,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
     Vec<Value *> accessibleItems(numOfInputs);
 
-    Vec<Value *> inputCapacity(numOfInputs);
-
+    Vec<Value *> inputBufferCapacity(numOfInputs, nullptr);
     Vec<Value *> inputVirtualBaseAddress(numOfInputs, nullptr);
 
     Vec<Value *> writableItems(numOfOutputs);
@@ -221,8 +221,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
         BasicBlock * const enteringNonFinalSegment = b.CreateBasicBlock(prefix + "_nonFinalSegment", mKernelCheckOutputSpace);
 
-        Vec<Value *> zeroExtendedInputVirtualBaseAddress(numOfInputs, nullptr);
-
         /// -------------------------------------------------------------------------------------
         /// HANDLE ZERO EXTENSION
         /// -------------------------------------------------------------------------------------
@@ -234,18 +232,50 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             isFinalSegment = mFinalPartitionSegment;
         }
 
+
         BasicBlock * const nonZeroExtendExit = b.GetInsertBlock();
 
         BasicBlock * afterNonFinalZeroExtendExit = nullptr;
 
+        if (LLVM_UNLIKELY(mCheckStreamSets)) {
+            for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+                const auto streamSet = source(input, mBufferGraph);
+                assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+                const BufferPort & port = mBufferGraph[input];
+                const BufferNode & bn = mBufferGraph[streamSet];
+                Value * max = nullptr;
+                if (LLVM_UNLIKELY(bn.isConstant())) {
+                    Value * pos = nullptr;
+                    if (LLVM_UNLIKELY(port.isDeferred())) {
+                        pos = mCurrentProcessedDeferredItemCountPhi[port.Port];
+                    } else {
+                        pos = mCurrentProcessedItemCountPhi[port.Port];
+                    }
+                    max = b.CreateAdd(pos, b.getSize(getGuaranteedRepeatingStreamSetLength(b, streamSet, true)));
+                } else {
+                    Value * pos = nullptr;
+                    if (bn.isThreadLocal()) {
+                        pos = mInitiallyProcessedItemCount[port.Port];
+                    } else {
+                        pos = readConsumedItemCount(b, streamSet);
+                    }
+                    max = b.CreateAdd(pos, bn.OutputBuffer->getInternalCapacity(b));
+                }
+                inputBufferCapacity[port.Port.Number] = max;
+            }
+        }
+
+        Vec<Value *> zeroExtendedInputVirtualBaseAddress(inputVirtualBaseAddress);
+
+        Vec<Value *> zeroExtendedInputBufferCapacity(inputBufferCapacity);
+
         if (mHasZeroExtendedInput) {
-            BasicBlock * const checkFinal =
-                b.CreateBasicBlock(prefix + "_checkFinal", enteringNonFinalSegment);
+            BasicBlock * const checkFinal = b.CreateBasicBlock(prefix + "_checkFinal", enteringNonFinalSegment);
             Value * const isFinalOrZeroExtended = b.CreateOr(mHasZeroExtendedInput, isFinalSegment);
             b.CreateUnlikelyCondBr(isFinalOrZeroExtended, checkFinal, enteringNonFinalSegment);
 
             b.SetInsertPoint(checkFinal);
-            Value * const zeroExtendSpace = allocateLocalZeroExtensionSpace(b, enteringNonFinalSegment);
+            Value * const zeroExtendSpace = allocateLocalZeroExtensionSpace(b, zeroExtendedInputBufferCapacity, enteringNonFinalSegment);
             getZeroExtendedInputVirtualBaseAddresses(b, inputVirtualBaseAddress, zeroExtendSpace, zeroExtendedInputVirtualBaseAddress);
             afterNonFinalZeroExtendExit = b.GetInsertBlock();
         }
@@ -258,12 +288,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
         b.SetInsertPoint(enteringFinalSegment);
         // if we have a potentially zero-extended buffer, use that; otherwise select the normal buffer
-        Vec<Value *> truncatedInputVirtualBaseAddress(numOfInputs);
-        for (unsigned i = 0; i != numOfInputs; ++i) {
-            Value * const ze = zeroExtendedInputVirtualBaseAddress[i];
-            Value * const vba = inputVirtualBaseAddress[i];
-            truncatedInputVirtualBaseAddress[i] = ze ? ze : vba;
-        }
+        Vec<Value *> truncatedInputVirtualBaseAddress(zeroExtendedInputVirtualBaseAddress);
 
         /// -------------------------------------------------------------------------------------
         /// KERNEL ENTERING FINAL STRIDE
@@ -287,8 +312,10 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         Value * partialPartitionStride = nullptr;
         calculateFinalItemCounts(b, accessibleItems, writableItems, fixedItemFactor, partialPartitionStride);
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
-        zeroInputAfterFinalItemCount(b, accessibleItems, inputCapacity, truncatedInputVirtualBaseAddress);
-        phiOutItemCounts(accessibleItems, inputCapacity, truncatedInputVirtualBaseAddress, writableItems,
+
+        Vec<Value *> truncatedInputBufferCapacity(zeroExtendedInputBufferCapacity);
+        zeroInputAfterFinalItemCount(b, accessibleItems, truncatedInputBufferCapacity, truncatedInputVirtualBaseAddress);
+        phiOutItemCounts(accessibleItems, truncatedInputBufferCapacity, truncatedInputVirtualBaseAddress, writableItems,
                          fixedItemFactor, completed, sz_ZERO, partialPartitionStride, true);
         b.CreateBr(mKernelCheckOutputSpace);
 
@@ -308,18 +335,34 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             nonFinalNumOfLinearStrides = nonFinalNumOfLinearStridesPhi;
         }
 
-        for (unsigned i = 0; i != numOfInputs; ++i) {
-            Value * const ze = zeroExtendedInputVirtualBaseAddress[i];
-            if (ze) {
-                PHINode * const phi = b.CreatePHI(ze->getType(), 3);
-                phi->addIncoming(inputVirtualBaseAddress[i], nonZeroExtendExit);
+        for (size_t port = 0; port < numOfInputs; ++port) {
+            Value * const ba = inputVirtualBaseAddress[port];
+            Value * const ze = zeroExtendedInputVirtualBaseAddress[port];
+            if (LLVM_UNLIKELY(ba != ze)) {
+                PHINode * const phi = b.CreatePHI(ba->getType(), 3, "vbaPhi");
+                phi->addIncoming(ba, nonZeroExtendExit);
                 if (afterNonFinalZeroExtendExit) {
                     phi->addIncoming(ze, afterNonFinalZeroExtendExit);
                 }
                 if (penultimateSegmentExit) {
                     phi->addIncoming(ze, penultimateSegmentExit);
                 }
-                inputVirtualBaseAddress[i] = phi;
+                inputVirtualBaseAddress[port] = phi;
+            }
+            if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                Value * const bc = inputBufferCapacity[port];
+                Value * const zc = zeroExtendedInputBufferCapacity[port];
+                if (LLVM_UNLIKELY(bc != zc)) {
+                    PHINode * const phi = b.CreatePHI(b.getSizeTy(), 3, "bufferCapacityPhi");
+                    phi->addIncoming(bc, nonZeroExtendExit);
+                    if (afterNonFinalZeroExtendExit) {
+                        phi->addIncoming(zc, afterNonFinalZeroExtendExit);
+                    }
+                    if (penultimateSegmentExit) {
+                        phi->addIncoming(zc, penultimateSegmentExit);
+                    }
+                    inputBufferCapacity[port] = phi;
+                }
             }
         }
 
@@ -348,15 +391,15 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         accessibleItems[br.Port.Number] = calculateNumOfLinearItems(b, br, nonFinalNumOfLinearStrides, "calculateNonFinal");
-        inputCapacity[br.Port.Number] = mLocallyAvailableItems[source(e, mBufferGraph)];
     }
+
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         writableItems[br.Port.Number] = calculateNumOfLinearItems(b, br, nonFinalNumOfLinearStrides, "calculateNonFinal");
     }
 
-    phiOutItemCounts(accessibleItems, inputCapacity, inputVirtualBaseAddress, writableItems,
+    phiOutItemCounts(accessibleItems, inputBufferCapacity, inputVirtualBaseAddress, writableItems,
                      fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO, false);
 
     b.CreateBr(mKernelCheckOutputSpace);
@@ -716,7 +759,7 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
 
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
-        Constant * v = getGuaranteedRepeatingStreamSetLength(b, streamSet);
+        Value * const v = b.getSize(getGuaranteedRepeatingStreamSetLength(b, streamSet, false));
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, inputPort);
         debugPrint(b, prefix + "_available(const) = %" PRIu64, v);
@@ -810,9 +853,6 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     Value * const beforeExpansion = getWritableOutputItems(b, port);
 
     Value * hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
-    if (streamSet == 10) {
-        hasEnoughSpace = b.CreateAnd(hasEnoughSpace, b.CreateICmpNE(mSegNo, b.getSize(0)));
-    }
 
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), beforeExpansion);
@@ -852,7 +892,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
-    Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
+    Value * const consumed = mKernelConsumedItemCount[outputPort]; assert (consumed);
 
     BasicBlock * const afterCopyBackOrExpand = b.CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
 
@@ -1072,7 +1112,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
 
         assert (mConsumerGraph[src] != 0);
 
-        Value * const consumed = readConsumedItemCount(b, src); assert (consumed);
+        Value * const consumed = mKernelConsumedItemCount[outputPort]; assert (consumed);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_consumed%" PRIu64 " = %" PRIu64, b.getSize(src), consumed);

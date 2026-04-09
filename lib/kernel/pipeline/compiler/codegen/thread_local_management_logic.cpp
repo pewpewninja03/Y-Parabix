@@ -157,6 +157,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
         #endif
 
         Value * const sz_ZERO = b.getSize(0);
+        Value * const sz_ONE = b.getSize(1);
 
         #ifndef NDEBUG
         flat_set<unsigned> visited;
@@ -187,6 +188,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                         maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.NumOfOverflowStrides));
                     }
                     const auto & P = ThreadLocalPlacement[e];
+                    assert (P.numerator() > 0);
                     Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, P * THREAD_LOCAL_ALLOC_SCALE), LOG_2_PAGE_SIZE);
                     if (u < PartitionCount) {
                         start = sz_ZERO;
@@ -202,6 +204,12 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                     mThreadLocalStartOffset[streamSet] = start;
                     mThreadLocalEndOffset[streamSet] = end;
 
+                    if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                        auto & dl = b.getModule()->getDataLayout();
+                        ExternalBuffer * const buf = cast<ExternalBuffer>(bn.OutputBuffer);
+                        const auto ts = b.getTypeSize(dl, buf->getType());
+                        buf->setCapacity(b, b.CreateMulRational(off, Rational{b.getBitBlockWidth(), ts}));
+                    }
 
                     for (auto inOut = streamSet; LLVM_UNLIKELY(out_degree(inOut, InOutStreamSetReplacement)); ) {
                         inOut = child(inOut, InOutStreamSetReplacement);
@@ -332,7 +340,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
             Value * const virtualBaseOffset = b.CreateSub(startOffset, offsetBytes);
             Value * const ba = b.CreateGEP(b.getInt8Ty(), mThreadLocalStreamSetBaseAddress, virtualBaseOffset);
             buffer->setBaseAddress(b, b.CreatePointerCast(ba, ptrTy));
-            if (LLVM_UNLIKELY(CheckAssertions())) {
+            if (LLVM_UNLIKELY(CheckAssertions() || checkStreamSet)) {
                 Value * size = b.CreateSub(mThreadLocalEndOffset[streamSet], mThreadLocalStartOffset[streamSet]);
                 Rational itemsPerByte{blockWidth, typeWidth};
                 Value * capacity = b.CreateMulRational(size, itemsPerByte);

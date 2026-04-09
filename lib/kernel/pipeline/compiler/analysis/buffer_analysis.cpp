@@ -922,6 +922,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 outputBuffer = new ExternalBuffer(streamSet, b, output.getType(), 0);
             } else { // is internal buffer
                 assert (bn.IsLinear || !bn.isReturned());
+                assert ((bn.Type & BufferType::RequiresConsumedItemCount) != 0);
                 outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
             }
         }

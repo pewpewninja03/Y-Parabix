@@ -280,6 +280,7 @@ enum BufferType : unsigned {
     , StartsNestedSynchronizationRegion = 1024
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
+    , RequiresConsumedItemCount = 8192
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
