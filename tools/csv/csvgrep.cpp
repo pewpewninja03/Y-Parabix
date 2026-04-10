@@ -51,8 +51,6 @@ static cl::opt<bool> U21("u21", cl::desc("force work to be carried out in Unicod
 static cl::opt<bool> FieldMatch("field-match", cl::desc("require that entire field be matched"), cl::init(false), cl::cat(csv::CSV_Options));
 static cl::alias FieldMatchA("x", cl::desc("Alias for --field-match"), cl::aliasopt(FieldMatch), cl::cat(csv::CSV_Options), cl::NotHidden);
 
-typedef void (*CSVFunctionType)(uint32_t fd);
-
 //
 //  When match CSV fields, any double quote character within the
 //  field will be doubled up to represent and escaped double quote.
@@ -117,9 +115,41 @@ re::RE * csvRE(re::RE * re) {
     return xfrmedRE;
 }
 
+// The barrier stream marks with 1 bits positions that do not
+// participate in matching.   For csvgrep, the barrier consists
+// of all positions outside of the selected columns, all 
+// field separators (including the final record separator), and
+// quote marks that surround fields.
+
+class RegexBarrier : public PabloKernel {
+public:
+    RegexBarrier(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldSeparators, StreamSet * selected, StreamSet * barrier)
+    : PabloKernel(ts, "RegexBarrier",
+                      {Binding{"csvMarks", csvMarks},
+                       Binding{"fieldSeparators", fieldSeparators, FixedRate(), LookAhead(1)},
+                       Binding{"selected", selected}},
+                      {Binding{"barrier", barrier}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void RegexBarrier::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
+    PabloAST * fieldSeparators = pb.createExtract(getInputStreamVar("fieldSeparators"), pb.getInteger(0));
+    PabloAST * selectedFields = pb.createExtract(getInputStreamVar("selected"), pb.getInteger(0));
+    PabloAST * barrier = pb.createOr(pb.createNot(selectedFields), fieldSeparators);
+    PabloAST * fieldStartQuote = pb.createAnd(pb.createAdvance(fieldSeparators, 1), csvMarks[csv::markDQ]);
+    PabloAST * fieldEndQuote = pb.createAnd(pb.createLookahead(fieldSeparators, 1), csvMarks[csv::markDQ]);
+    barrier = pb.createOr3(barrier, fieldStartQuote, fieldEndQuote);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("barrier"), pb.getInteger(0)), barrier);
+}
+
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
+
+typedef void (*CSVFunctionType)(uint32_t fd);
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned> & colNos) {
 
@@ -185,12 +215,9 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     StreamSet * Selected = P.CreateStreamSet(1);
     csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos);
     SHOW_STREAM(Selected);
-
-    StreamSet * NonSelected = P.CreateStreamSet(1);
-    Invert(P, Selected, NonSelected);
     
     StreamSet * Barrier = P.CreateStreamSet(1);
-    OrCombine(P, NonSelected, fieldSeparators, Barrier);
+    P.CreateKernelCall<RegexBarrier>(csvCCs, fieldSeparators, Selected, Barrier);
 
     ctxt.setBarrier(Barrier);
     RE_PipelineBuilder RE_PB(P, ctxt);
