@@ -75,29 +75,35 @@ public:
                               StreamSet * Record_separators,
                               StreamSet * Field_separators,
                               StreamSet * toKeep,
-                              const std::vector<unsigned> & columnNos);
+                              const std::vector<unsigned> & columnNos,
+                              bool forCut);
 protected:
-    std::string colNoString(const std::vector<unsigned> & cols);
+    std::string colNoString(const std::vector<unsigned> & cols, bool forCut);
     void generatePabloMethod() override;
     const std::vector<unsigned> & mColumnNos;
+    bool mForCut;
 };
 
 SelectMultiField::SelectMultiField(LLVMTypeSystemInterface & ts,
                                    StreamSet * Record_separators,
                                    StreamSet * Field_separators,
                                    StreamSet * toKeep,
-                                   const std::vector<unsigned> & columnNos)
-: PabloKernel(ts, "SelectMultiField_" + colNoString(columnNos),
+                                   const std::vector<unsigned> & columnNos,
+                                   bool forCut)
+: PabloKernel(ts, "SelectMultiField_" + colNoString(columnNos, forCut),
   {Binding{"Record_separators", Record_separators},
    Binding{"Field_separators", Field_separators}},
-  {Binding{"toKeep", toKeep}}), mColumnNos(columnNos)  {
+  {Binding{"toKeep", toKeep}}), mColumnNos(columnNos), mForCut(forCut) {
 }
 
-std::string SelectMultiField::colNoString(const std::vector<unsigned> & columnNos) {
+std::string SelectMultiField::colNoString(const std::vector<unsigned> & columnNos, bool forCut) {
     std::stringstream ss;
     ss << columnNos[0];
     for (unsigned i = 1; i < columnNos.size(); i++) {
         ss << "," << columnNos[i];
+    }
+    if (forCut) {
+        ss << "_c";
     }
     return ss.str();
 }
@@ -109,7 +115,7 @@ void SelectMultiField::generatePabloMethod() {
     PabloAST * recordStarts = pb.createNot(pb.createAdvance(pb.createNot(Record_separators), 1));
     PabloAST * fieldStarts = pb.createNot(pb.createAdvance(pb.createNot(Field_separators), 1));
     PabloAST * columnMark = recordStarts;
-    PabloAST * toKeep = Record_separators;
+    PabloAST * toKeep = pb.createZeroes();
     unsigned nextCol = 0;
     for (unsigned i = 0; i < mColumnNos.size(); i++) {
         if (mColumnNos[i] > nextCol) {
@@ -120,7 +126,9 @@ void SelectMultiField::generatePabloMethod() {
         toKeep = pb.createOr(toKeep, columnMask);
         nextCol = mColumnNos[i] + 1;
         columnMark = pb.createAdvance(columnFollow, 1);
-        if (i < mColumnNos.size() - 1) {
+        if (mForCut && (i == mColumnNos.size() - 1)) {
+            toKeep = pb.createOr(toKeep, Record_separators);
+        } else {
             toKeep = pb.createOr(toKeep, columnFollow);
         }
     }
@@ -128,7 +136,39 @@ void SelectMultiField::generatePabloMethod() {
 }
 
 void ColumnSelectionMask(PipelineBuilder & P, StreamSet * Record_separators, StreamSet * Field_separators,
-                         StreamSet * toKeep, const std::vector<unsigned> & columnNos) {
-    P.CreateKernelCall<SelectMultiField>(Record_separators, Field_separators, toKeep, columnNos);
+                         StreamSet * toKeep, const std::vector<unsigned> & columnNos, bool forCut) {
+    P.CreateKernelCall<SelectMultiField>(Record_separators, Field_separators, toKeep, columnNos, forCut);
+}
+
+class EmptyFieldsKernel : public PabloKernel {
+public:
+    EmptyFieldsKernel(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * fieldSeparators,
+                      StreamSet * EmptyFields);
+protected:
+    void generatePabloMethod() override;
+};
+
+EmptyFieldsKernel::EmptyFieldsKernel(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * fieldSeparators,
+                                     StreamSet * EmptyMarks)
+: PabloKernel(ts, "EmptyFieldsKernel" + csvCCs->shapeString(),
+  {Binding{"csvCCs", csvCCs},
+   Binding{"fieldSeparators", fieldSeparators, FixedRate(), LookAhead(1)}},
+  {Binding{"EmptyMarks", EmptyMarks}})  {
+}
+
+void EmptyFieldsKernel::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvCCs");
+    PabloAST * fieldSeparators = pb.createExtract(getInputStreamVar("fieldSeparators"), pb.getInteger(0));
+    PabloAST * fsNext = pb.createAdvance(fieldSeparators, 1);
+    PabloAST * quotedStart = pb.createAnd(fsNext, csvMarks[csv::markDQ]);
+    PabloAST * quoted2 = pb.createAnd(pb.createAdvance(quotedStart, 1), csvMarks[csv::markDQ]);
+    PabloAST * empties = pb.createAnd(pb.createOr(fsNext, pb.createAdvance(quoted2, 1)), fieldSeparators);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("EmptyMarks"), pb.getInteger(0)), empties);
+}
+
+void GetEmptyFields(PipelineBuilder & P, StreamSet * csvCCs, StreamSet * fieldSeparators,
+                    StreamSet * EmptyFieldMarks) {
+    P.CreateKernelCall<EmptyFieldsKernel>(csvCCs, fieldSeparators, EmptyFieldMarks);
 }
 }

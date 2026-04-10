@@ -33,5 +33,8 @@ void ParseCSV(PipelineBuilder & P, StreamSet * csvCCs,
               StreamSet * recordSeparators, StreamSet * fieldSeparators, StreamSet * quoteEscape);
 
 void ColumnSelectionMask(PipelineBuilder & P, StreamSet * Record_separators, StreamSet * Field_separators,
-                         StreamSet * toKeep, const std::vector<unsigned> & columnNos);
+                         StreamSet * toKeep, const std::vector<unsigned> & columnNos, bool forCut = false);
+
+void GetEmptyFields(PipelineBuilder & P, StreamSet * csvCCs, StreamSet * fieldSeparators,
+                    StreamSet * EmptyFieldMarks);
 }

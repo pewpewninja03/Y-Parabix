@@ -17,6 +17,7 @@
 #include <llvm/Support/ManagedStatic.h>
 #include <unicode/core/unicode_set.h>
 #include <re/adt/adt.h>
+#include <re/adt/re_re.h>
 #include <re/parse/parser.h>
 #include <re/unicode/regex_passes.h>
 #include <grep/grep_engine.h>
@@ -84,7 +85,8 @@ struct DoubleQuoteEscape : public re::RE_Transformer {
         return cc;
     }
     re::RE * transformAny (re::Any * a) override {
-        return re::makeDiff(a, getDQ_CC());
+        auto dblEsc = getDoubleEscape();
+        return re::makeAlt({dblEsc, re::makeDiff(a, getDQ_CC())});
     }
     re::RE * transformName (re::Name * name) override {
         re::RE * defn = name->getDefinition();
@@ -123,7 +125,8 @@ re::RE * csvRE(re::RE * re) {
 
 class RegexBarrier : public PabloKernel {
 public:
-    RegexBarrier(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldSeparators, StreamSet * selected, StreamSet * barrier)
+    RegexBarrier(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldSeparators, StreamSet * selected,
+                 StreamSet * barrier)
     : PabloKernel(ts, "RegexBarrier",
                       {Binding{"csvMarks", csvMarks},
                        Binding{"fieldSeparators", fieldSeparators, FixedRate(), LookAhead(1)},
@@ -174,12 +177,12 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     UTF_Encoder u8_encoder(8);
 
     re::RE * searchRE = csvRE(re::RE_Parser::parse(Regex));
-    RE_CompilerContext ctxt;
     StreamSet * u8index = nullptr;
 
     unsigned DQ_u8bytes = u8_encoder.encoded_length(csv::QuoteChar);
     unsigned Delim_u8bytes = u8_encoder.encoded_length(csv::FieldDelimiter);
 
+    RE_CompilerContext ctxt;
     if (!validateFixedUTF8(searchRE) || (DQ_u8bytes > 1) || (Delim_u8bytes > 1) || U21) {
         u8index = P.CreateStreamSet(1, 1);
         P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
@@ -215,16 +218,23 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     StreamSet * Selected = P.CreateStreamSet(1);
     csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos);
     SHOW_STREAM(Selected);
-    
-    StreamSet * Barrier = P.CreateStreamSet(1);
-    P.CreateKernelCall<RegexBarrier>(csvCCs, fieldSeparators, Selected, Barrier);
 
-    ctxt.setBarrier(Barrier);
-    RE_PipelineBuilder RE_PB(P, ctxt);
     StreamSet * Matches = P.CreateStreamSet(1);
-    RE_PB.matchSearchPipeline(searchRE, Matches);
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        P.captureBitstream("Matches", Matches);
+    if (re::matchesEmptyString(searchRE)) {
+        StreamSet * Empties = P.CreateStreamSet(1);
+        csv::GetEmptyFields(P, csvCCs, fieldSeparators, Empties);
+        AndCombine(P, Empties, Selected, Matches);
+    } else {
+        StreamSet * Barrier = P.CreateStreamSet(1);
+        P.CreateKernelCall<RegexBarrier>(csvCCs, fieldSeparators, Selected, Barrier);
+        SHOW_STREAM(Barrier);
+
+        ctxt.setBarrier(Barrier);
+        RE_PipelineBuilder RE_PB(P, ctxt);
+        RE_PB.matchSearchPipeline(searchRE, Matches);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("Matches", Matches);
+        }
     }
     StreamSet * MatchedLineEnds = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<MatchedLinesKernel>(Matches, recordSeparators, MatchedLineEnds);
