@@ -599,30 +599,18 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 ConstantInt * const BLOCK_WIDTH = getSize(getBitBlockWidth());
 
-//                if (buffer->isLinear()) {
-//                    Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
-//                    Value * const capacityChunks = CreateUDiv(buffer->getCapacity(*this), BLOCK_WIDTH);
-//                    Value * const needsExpansion = CreateICmpUGT(requiredChunks, capacityChunks);
-//                    CreateUnlikelyCondBr(needsExpansion, expandInternalBuffer, exit);
-//                } else {
-                    Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
-                    Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
-                    Value * const capacityChunks = CreateExactUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
-                    Value * const newCapacityChunks = CreateAdd(consumedChunks, capacityChunks);
-                    BasicBlock * const updateExpandedCapacity = BasicBlock::Create(C, "updateExpandedCapacity", f, exit);
-                    CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, newCapacityChunks), expandInternalBuffer, updateExpandedCapacity);
 
-                    SetInsertPoint(updateExpandedCapacity);
-//                    managedBuffer->setCapacity(*this, CreateMul(newCapacityChunks, BLOCK_WIDTH));
-                    CreateBr(exit);
-//                }
+                Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
+                Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
+                Value * const capacityChunks = CreateExactUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
+                Value * const newCapacityChunks = CreateAdd(consumedChunks, capacityChunks);
+                CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, newCapacityChunks), expandInternalBuffer, exit);
 
                 SetInsertPoint(expandInternalBuffer);
                 managedBuffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
                 CreateBr(exit);
 
                 SetInsertPoint(exit);
-
                 CreateRetVoid();
 
                 restoreIP(ip);

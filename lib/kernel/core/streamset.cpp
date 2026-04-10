@@ -488,29 +488,19 @@ Value * InternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * co
 }
 
 Value * InternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const producedItems, Value * const consumedItems) const {
-//    if (LLVM_UNLIKELY(mLinear)) {
-//        Value * const capacity = getCapacity(b);
-//        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
-//            Value * const valid = b.CreateICmpULE(producedItems, capacity);
-//            b.CreateAssert(valid, "produced item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
-//                            producedItems, capacity);
-//        }
-//        return b.CreateSub(capacity, producedItems);
-//     } else {
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
-            Value * const valid = b.CreateICmpULE(consumedItems, producedItems);
-            b.CreateAssert(valid, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
-                            consumedItems, producedItems);
-        }
-        Value * const capacity = getInternalCapacity(b);
-        Value * const unconsumedItems = b.CreateSub(producedItems, consumedItems);
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
-            Value * const valid = b.CreateICmpULE(unconsumedItems, capacity);
-            b.CreateAssert(valid, "unconsumed item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
-                            unconsumedItems, capacity);
-        }
-        return b.CreateSub(capacity, unconsumedItems);
-//    }
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
+        Value * const valid = b.CreateICmpULE(consumedItems, producedItems);
+        b.CreateAssert(valid, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
+                        consumedItems, producedItems);
+    }
+    Value * const capacity = getInternalCapacity(b);
+    Value * const unconsumedItems = b.CreateSub(producedItems, consumedItems);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
+        Value * const valid = b.CreateICmpULE(unconsumedItems, capacity);
+        b.CreateAssert(valid, "unconsumed item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
+                        unconsumedItems, capacity);
+    }
+    return b.CreateSub(capacity, unconsumedItems);
 }
 
 // Managed Dynamic Buffer
@@ -620,7 +610,6 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
         BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
         BasicBlock * const allocBuffer = BasicBlock::Create(C, "allocBuffer", f);
-        BasicBlock * const setInternalCapacity = BasicBlock::Create(C, "setInternalCapacity", f);
         BasicBlock * const exit = BasicBlock::Create(C, "exit", f);
 
         b.SetInsertPoint(entry);
@@ -666,7 +655,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         Value * currentAddr = b.CreateAlignedLoad(addrPtrTy, baseAddressField, voidPtrTyAlign);
         // If the user has filled in a base address in the init function, assume they're handling all
         // memory management.
-        b.CreateCondBr(b.CreateICmpEQ(currentAddr, nullVoidPtr), allocBuffer, setInternalCapacity);
+        b.CreateCondBr(b.CreateICmpEQ(currentAddr, nullVoidPtr), allocBuffer, exit);
 
         // --------------------------------------------------------
 
@@ -704,26 +693,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         b.CreateAlignedStore(capacity, capacityField, intPtrTyAlign);
 
         b.CreateAlignedStore(baseAddress, baseAddressField, voidPtrTyAlign);
-
-//        indices[1] = b.getInt32(LinearEffectiveCapacity);
-//        Value * effCapacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
-//        b.CreateAlignedStore(capacity, effCapacityField, intPtrTyAlign);
-
         b.CreateBr(exit);
-
-        // --------------------------------------------------------
-
-        b.SetInsertPoint(setInternalCapacity);
-//        indices[1] = b.getInt32(LinearEffectiveCapacity);
-//        Value * effCapacityField2 = b.CreateInBoundsGEP(handleTy, handle, indices);
-//        Value * const effCapacity = b.CreateAlignedLoad(intPtrTy,effCapacityField2, intPtrTyAlign);
-
-//        indices[1] = b.getInt32(LinearInternalCapacity);
-//        Value * intCapacityField2 = b.CreateInBoundsGEP(handleTy, handle, indices);
-//        b.CreateAlignedStore(effCapacity, intCapacityField2, intPtrTyAlign);
-
-        b.CreateBr(exit);
-
 
         // --------------------------------------------------------
 

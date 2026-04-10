@@ -756,7 +756,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             #else
             const BufferNode & N = mBufferGraph[streamSet];
-            if (isPartitionRoot || !N.IsLinear || N.isConstant()) {
+            if (isPartitionRoot || !N.IsLinear || N.isConstant() || N.isExternal()) {
                 inputRate.Flags |= BufferPortType::CanModifySegmentLength;
             }
             #endif

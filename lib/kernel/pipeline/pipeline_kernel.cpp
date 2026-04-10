@@ -645,7 +645,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             Value * accessible = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
             segmentArgs[segmentArgCount++] = accessible;
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(accessible, b.getBitBlockWidth()); // capacity
+                // TODO: how best should this be fixed? we can't trust the user to properly allocate an array that meets
+                // the needs of the internal kernels when overflows are needed?
+                Value * capacity = b.CreateAdd(accessible, b.getSize(b.getBitBlockWidth()));
+                segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(capacity, b.getBitBlockWidth()); // capacity
             }
         }
 
@@ -679,7 +682,8 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
                 segmentArgs[segmentArgCount++] = writeable; // writable
                 if (LLVM_UNLIKELY(checkStreamSet)) {
                     assert (segmentArgCount < doSegment->arg_size());
-                    segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(writeable, b.getBitBlockWidth()); // capacity
+                    Value * capacity = b.CreateAdd(writeable, b.getSize(b.getBitBlockWidth()));
+                    segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(capacity, b.getBitBlockWidth()); // capacity
                 }
             }
         }

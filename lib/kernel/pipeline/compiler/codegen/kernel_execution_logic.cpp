@@ -615,25 +615,22 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             if (requiresItemCount(rt.Binding)) {
                 addNextArg(mLinearOutputItemsPhi[rt.Port]);
             }
-            Value * max = nullptr;
             if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                Value * capacity = nullptr;
                 if (bn.isConstant()) {
-                    max = b.CreateAdd(produced, b.getSize(getGuaranteedRepeatingStreamSetLength(b, streamSet, true)));
+                    capacity = b.CreateAdd(produced, b.getSize(getGuaranteedRepeatingStreamSetLength(b, streamSet, true)));
                 } else {
+                    Value * pos = nullptr;
                     if (bn.isThreadLocal()) {
-                        max = b.CreateAdd(mInitiallyProducedItemCount[streamSet], bn.OutputBuffer->getCapacity(b));
+                        pos = mInitiallyProducedItemCount[streamSet];
+                    } else if (LLVM_UNLIKELY((bn.Type & BufferType::RequiresConsumedItemCount) == 0)) {
+                        pos = readConsumedItemCount(b, streamSet);
                     } else {
-                        Value * base = nullptr;
-                        if ((bn.Type & BufferType::RequiresConsumedItemCount) == 0) {
-                            base = readConsumedItemCount(b, streamSet); assert (base);
-                        } else {
-                            base = mKernelConsumedItemCount[rt.Port]; assert (base);
-                        }
-                        max = b.CreateAdd(base, buffer->getInternalCapacity(b));
-//                        max = bn.OutputBuffer->getCapacity(b);
+                        pos = mKernelConsumedItemCount[rt.Port]; assert (pos);
                     }
+                    capacity = b.CreateAdd(pos, buffer->getInternalCapacity(b));
                 }
-                addNextArg(max);
+                addNextArg(capacity);
             }
         }
     }
