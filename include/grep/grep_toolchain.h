@@ -2,7 +2,6 @@
 
 namespace grep {
 
-extern int Threads;
 extern bool UnicodeIndexing;
 extern bool UnicodeBasisMode;
 extern bool PropertyKernels;

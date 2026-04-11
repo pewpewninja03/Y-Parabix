@@ -129,15 +129,13 @@ skip_phase_check:
         }
 
         sn.Type |= allConsumersFixedRate ? 0U : BufferType::HasNonFixedRateConsumer;
-
+        assert (lastConsumer[streamSet - FirstStreamSet] == 0 || mConsumerGraph[streamSet] == streamSet);
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto lc = lastConsumer[streamSet - FirstStreamSet];
         if (lc != 0 && out_degree(streamSet, mConsumerGraph) == 0) {
-
             assert (mConsumerGraph[streamSet] == streamSet);
-
             for (auto ss = streamSet; ss <= LastStreamSet; ++ss) {
                 if (mConsumerGraph[ss] == streamSet) {
                     for (const auto ce : make_iterator_range(out_edges(ss, mBufferGraph))) {
@@ -176,6 +174,7 @@ skip_phase_check:
         if (LLVM_UNLIKELY(out_degree(id, mConsumerGraph) == 0)) {
             const auto producer = parent(id, mBufferGraph);
             if (producer == PipelineInput || mTraceDynamicBuffers) {
+                bn.Type |= BufferType::RequiresConsumedItemCount;
                 add_edge(id, PipelineOutput, ConsumerEdge{}, mConsumerGraph);
                 continue;
             } else {
@@ -183,6 +182,13 @@ skip_phase_check:
                 continue;
             }
         }
+
+        #ifndef NDEBUG
+        assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isTruncated()));
+        assert (in_degree(id, mConsumerGraph) == 1);
+        #endif
+
+        bn.Type |= BufferType::RequiresConsumedItemCount;
 
         // TODO: check gb18030. we can reduce the number of tests by knowing that kernel processes
         // the same amount of data so we only need to update this value after invoking the last one.
@@ -212,8 +218,9 @@ skip_phase_check:
                 ConsumerEdge & cn = mConsumerGraph[f];
                 cn.Flags |= ConsumerEdge::UpdateExternalCount;
             } else {
-                const BufferPort & br = mBufferGraph[input];
-                add_edge(streamSet, PipelineOutput, ConsumerEdge{br.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
+                BufferNode & bn = mBufferGraph[streamSet];
+                bn.Type |= BufferType::RequiresConsumedItemCount;
+                add_edge(streamSet, PipelineOutput, ConsumerEdge{bp.Port, 0, ConsumerEdge::UpdateExternalCount}, mConsumerGraph);
             }
         }
     }

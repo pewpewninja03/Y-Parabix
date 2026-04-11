@@ -6,9 +6,12 @@
 
 #include <cstdio>
 #include <vector>
+#include <csv/csv_cmdline.h>
+#include <csv/csv_parser.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/ManagedStatic.h>
 #include <llvm/IR/Module.h>
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
@@ -17,6 +20,7 @@
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
+#include <kernel/streamutils/sentinel.h>
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
@@ -36,14 +40,17 @@
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <pablo/builder.hpp>
+#include <pablo/pe_ones.h>
 #include <pablo/pablo_kernel.h>
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include "csv_util.hpp"
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
 #endif
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::ceil_log2;
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -53,15 +60,8 @@ using namespace kernel;
 using namespace llvm;
 using namespace pablo;
 
-//  These declarations are for command line processing.
-//  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
-static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
-static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
-
-static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(CSV_Options));
-static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(CSV_Options));
+static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(csv::CSV_Options), cl::Hidden);
+static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(csv::CSV_Options), cl::Hidden);
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
@@ -77,6 +77,87 @@ inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, 
     StreamSet * expandedB = P.CreateStreamSet(elems);
     SpreadByMask(P, inverted, b, expandedB);
     OrCombine(P, expandedA, expandedB, merged);
+}
+
+std::vector<std::string> JSONfieldPrefixes(std::vector<std::string> fieldNames) {
+    std::vector<std::string> tmp;
+    if (fieldNames.size() == 0) return tmp;
+    for (unsigned i = 0; i < fieldNames.size(); i++) {
+        tmp.push_back("\"" + fieldNames[i] + "\":\"");
+    }
+    tmp[0] = "{" + tmp[0];
+    return tmp;
+}
+
+class CSVdataFieldMask : public PabloKernel {
+public:
+    CSVdataFieldMask(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * EOFbit, StreamSet * recordSeparators, StreamSet * quoteEscape,
+        StreamSet * toKeep, bool deleteHeader = true)
+        : PabloKernel(ts, "CSVdataFieldMask" + std::to_string(deleteHeader),
+                      {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
+                       Binding{"EOFbit", EOFbit, FixedRate(), LookAhead(1)},
+                       Binding{"recordSeparators", recordSeparators},
+                       Binding{"quoteEscape", quoteEscape}},
+                      {Binding{"toKeep", toKeep}})
+    , mDeleteHeader(deleteHeader) {}
+protected:
+    void generatePabloMethod() override;
+    bool mDeleteHeader;
+};
+
+void CSVdataFieldMask::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
+    PabloAST * recordMarks = pb.createExtract(getInputStreamVar("recordSeparators"), pb.getInteger(0));
+    PabloAST * EOFmark = pb.createExtract(getInputStreamVar("EOFbit"), pb.getInteger(0));
+    PabloAST * quoteEscape = pb.createExtract(getInputStreamVar("quoteEscape"), pb.getInteger(0));
+    PabloAST * CRbeforeLF = pb.createAnd(csvMarks[csv::markCR], pb.createLookahead(csvMarks[csv::markLF], 1));
+    PabloAST * escaped_quote = pb.createAdvance(quoteEscape, 1);
+    PabloAST * fieldQuotes = pb.createAnd(csvMarks[csv::markDQ], pb.createNot(pb.createOr(quoteEscape, escaped_quote)));
+    PabloAST * toDelete = pb.createOr(CRbeforeLF, fieldQuotes);
+    if (mDeleteHeader) {
+        PabloAST * afterHeader = pb.createMatchStar(pb.createAdvance(recordMarks, 1), pb.createOnes());
+        toDelete = pb.createOr(toDelete, pb.createNot(afterHeader));
+    }
+    // Delete the final LF position, so that we won't generate a template string at EOF.
+    toDelete = pb.createOr(toDelete, pb.createAnd(recordMarks, pb.createLookahead(EOFmark, 1)));
+    // Also delete the final EOFbit position generated by the Add1 attribute of the CSV lexer to avoid a null.
+    toDelete = pb.createOr(toDelete, EOFmark);
+    PabloAST * toKeep = pb.createInFile(pb.createNot(toDelete));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
+}
+
+class CSV_Char_Replacement : public PabloKernel {
+public:
+    CSV_Char_Replacement(LLVMTypeSystemInterface & ts, StreamSet * quoteEscape, StreamSet * basis,
+                         StreamSet * translatedBasis)
+        : PabloKernel(ts, "CSV_Char_Replacement",
+                      {Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
+                      {Binding{"translatedBasis", translatedBasis}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void CSV_Char_Replacement::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    //
+    // Replace the quote escape character with \ = 0x5C
+    std::vector<PabloAST *> translated_basis(8, nullptr);
+    PabloAST * notQuoteEscape = pb.createNot(quoteEscape);
+    // Low 2 bits zeroed out whenever we have quoteEscape
+    translated_basis[0] = pb.createAnd(basis[0], notQuoteEscape);
+    translated_basis[1] = pb.createAnd(basis[1], notQuoteEscape);
+    // Next 2 bits set whenever we have quoteEscape
+    translated_basis[2] = pb.createOr(basis[2], quoteEscape);
+    translated_basis[3] = pb.createOr(basis[3], quoteEscape);
+
+    translated_basis[4] = pb.createOr(basis[4], quoteEscape);
+    translated_basis[5] = pb.createAnd(basis[5], notQuoteEscape);
+    translated_basis[6] = pb.createOr(basis[6], quoteEscape);
+    translated_basis[7] = pb.createAnd(basis[7], notQuoteEscape);
+    writeOutputStreamSet("translatedBasis", translated_basis);
 }
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
@@ -97,18 +178,19 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     Selected_S2P(P, ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
     //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P.CreateStreamSet(5);
-    P.CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
+    StreamSet * csvCCs = P.CreateStreamSet(4);
+    csv::CSV_Lexer(P, BasisBits, csvCCs);
+
     StreamSet * recordSeparators = P.CreateStreamSet(1);
     StreamSet * fieldSeparators = P.CreateStreamSet(1);
     StreamSet * quoteEscape = P.CreateStreamSet(1);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
 
-    P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
-    SHOW_STREAM(recordSeparators);
-    SHOW_STREAM(fieldSeparators);
-    SHOW_STREAM(quoteEscape);
+    StreamSet * EOFmark = P.CreateStreamSet(1);
+    P.CreateKernelCall<EOFbit>(BasisBits, EOFmark);
+
     StreamSet * toKeep = P.CreateStreamSet(1);
-    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
+    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, EOFmark, recordSeparators, quoteEscape, toKeep, csv::HeaderSpec == "");
     SHOW_STREAM(toKeep);
     //
     // Create a short stream which is 1-to-1 with the (field/record) separators,
@@ -199,26 +281,12 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     return P.compile();
 }
 
-const unsigned MaxHeaderSize = 24;
-
 int main(int argc, char *argv[]) {
-    //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
-    //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    llvm_shutdown_obj shutdown;
+    csv::InitializeCommandLineInterface(argc, argv);
 
-    std::vector<std::string> headers;
-    if (HeaderSpec == "") {
-        headers = get_CSV_headers(inputFile);
-    } else if (HeaderSpecNamesFile) {
-        headers = get_CSV_headers(HeaderSpec);
-    } else {
-        headers = parse_CSV_headers(HeaderSpec);
-    }
-    for (auto & s : headers) {
-        if (s.size() > MaxHeaderSize) {
-            s = s.substr(0, MaxHeaderSize);
-        }
-    }
+    std::vector<std::string> headers = csv::get_CSV_headers();
+
     const auto templateStrs = JSONfieldPrefixes(headers);
     //for (auto & s : templateStrs) {
     //    llvm::errs() << "template string: |" << s << "|\n";
@@ -233,9 +301,9 @@ int main(int argc, char *argv[]) {
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
 
-    const int fd = open(inputFile.c_str(), O_RDONLY);
+    const int fd = open(csv::inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+        llvm::report_fatal_error(llvm::StringRef("Cannot open ") + csv::inputFile);
     } else {
         #ifdef REPORT_PAPI_TESTS
         papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
@@ -253,5 +321,5 @@ int main(int argc, char *argv[]) {
         jitExecution.write(std::cerr);
         #endif
     }
-    return 0;
+    return csv::SuccessExitCode;
 }

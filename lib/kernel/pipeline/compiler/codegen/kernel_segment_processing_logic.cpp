@@ -109,7 +109,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
     readAvailableItemCounts(b);
-    readConsumedItemCounts(b);
     recordUnconsumedItemCounts(b);
     detemineMaximumNumberOfStrides(b);
     remapThreadLocalBufferMemory(b);
@@ -504,11 +503,9 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(KernelBuilder & b) {
         const auto prefix = makeBufferName(mKernelId, inputPort);
         PHINode * const phi = b.CreatePHI(sizeTy, 2, prefix + "_linearlyAccessiblePhi");
         mLinearInputItemsPhi[inputPort] = phi;
-        if (bp.inputMayBeTruncated()) {
-            PHINode * const capacityPhi = b.CreatePHI(sizeTy, 2, prefix + "_inputCapacityPhi");
-            mLinearInputItemCapacityPhi[inputPort] = capacityPhi;
-        } else {
-            mLinearInputItemCapacityPhi[inputPort] = nullptr;
+        if (LLVM_UNLIKELY(mCheckStreamSets)) {
+            PHINode * const capacityPhi = b.CreatePHI(sizeTy, 2, prefix + "_inputBufferCapacityPhi");
+            mInputBufferCapacityPhi[inputPort] = capacityPhi;
         }
         mCurrentLinearInputItems[inputPort] = phi;
         Type * const bufferTy = getInputBuffer(inputPort)->getPointerType();

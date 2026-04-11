@@ -157,6 +157,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     #endif
 
     Value * const sz_ZERO = b.getSize(0);
+    Value * const sz_ONE = b.getSize(1);
 
     #ifndef NDEBUG
     flat_set<unsigned> visited;
@@ -202,6 +203,12 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 mThreadLocalStartOffset[streamSet] = start;
                 mThreadLocalEndOffset[streamSet] = end;
 
+                if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                    auto & dl = b.getModule()->getDataLayout();
+                    ExternalBuffer * const buf = cast<ExternalBuffer>(bn.Buffer);
+                    const auto ts = b.getTypeSize(dl, buf->getType());
+                    buf->setCapacity(b, b.CreateMulRational(off, Rational{b.getBitBlockWidth(), ts}));
+                }
 
                 for (auto inOut = streamSet; LLVM_UNLIKELY(out_degree(inOut, InOutStreamSetReplacement)); ) {
                     inOut = child(inOut, InOutStreamSetReplacement);
@@ -331,12 +338,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
             Value * const ba = b.CreateGEP(b.getInt8Ty(), mThreadLocalStreamSetBaseAddress, virtualBaseOffset);
 
             buffer->setBaseAddress(b, b.CreatePointerCast(ba, ptrTy));
-            if (LLVM_UNLIKELY(CheckAssertions())) {
-                Value * size = b.CreateSub(mThreadLocalEndOffset[streamSet], mThreadLocalStartOffset[streamSet]);
-                Rational itemsPerByte{blockWidth, typeWidth};
-                Value * capacity = b.CreateMulRational(size, itemsPerByte);
-                buffer->setCapacity(b, capacity);
-            }
+
         }
     }
 }

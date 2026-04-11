@@ -79,6 +79,7 @@ void RE_CompilerContext::setCombiningStream(kernel::StreamSet * s, RE_CombiningT
     mCombiningType = k;
 }
 
+
 RE_Kernel::RE_Kernel(LLVMTypeSystemInterface & ts, RE_CompilerContext & ctxt, RE * re, StreamSet * results)
 : PabloKernel(ts, makeSignature(ctxt, re), makeInputBindings(ctxt, re), makeOutputBindings(re, results), {}, {}),
 mContext(ctxt), mRE(re) {
@@ -90,28 +91,47 @@ std::string RE_Kernel::makeSignature(RE_CompilerContext & ctxt, RE * re) {
     llvm::raw_string_ostream sigstrm(signature);
     sigstrm << AnnotateWithREflags("RE");
     if (ctxt.mBarrierStream) {
+        // A barrier stream is normally expected.
+        if (anyEndAnchor(re)) {
+            // For end anchors, a lookahead attribute is added.
+            sigstrm << "+B";
+        }
+    } else {
         sigstrm << "-B";
-    }    
+    }
     if (ctxt.mIndexStream) {
         sigstrm << "+X";
     }
+    std::set<std::string> localExternals;
+    std::set<std::string> localAlphabets;
+    gatherExternals(re, localExternals, localAlphabets);
     for (auto & a : ctxt.mAlphabets) {
-        sigstrm << '!' << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+        auto alphaName = a.first->getName();
+        if (localAlphabets.count(alphaName) == 1) {
+            sigstrm << '!' << a.second->getNumElements() << 'x' << a.second->getFieldWidth();
+        }
     }
     std::vector<std::string> externalList;
     for (const auto & e : ctxt.mExternals) {
         auto name = e.first;
-        auto ext = e.second;
-        if (ext.kind == ExternalStreamKind::ZeroWidth) {
-            sigstrm << "+Z"; 
-        } else if (ext.kind == ExternalStreamKind::FixedLength) {
-            sigstrm << "+F"; 
-        } else if (ext.kind == ExternalStreamKind::StartIndexed) {
-            sigstrm << "+S"; 
-        } else {
-            sigstrm << "+E";
+        if (localExternals.count(name) == 1) {
+            auto ext = e.second;
+            if (ext.kind == ExternalStreamKind::ZeroWidth) {
+                sigstrm << "+Z";
+            } else if (ext.kind == ExternalStreamKind::FixedLength) {
+                sigstrm << "+F";
+                sigstrm << ext.lgthRange.second;
+                if (ext.offset == 1) sigstrm << "o";
+            } else if (ext.kind == ExternalStreamKind::StartIndexed) {
+                sigstrm << "+S";
+                sigstrm << ext.offset;
+            } else {
+                sigstrm << "+E";
+                sigstrm << ext.lgthRange.first << "-" << ext.lgthRange.second;
+                if (ext.offset == 1) sigstrm << "o";
+            }
+            externalList.push_back(name);
         }
-        externalList.push_back(name);
     }
     if (ctxt.mCombiningType == RE_CombiningType::Exclude) {
         sigstrm << "&~";
@@ -132,26 +152,39 @@ unsigned round_up_to_blocksize(int lgth) {
 
 // TODO:  limit the alphabets and externals to those in the RE top-level
 Bindings RE_Kernel::makeInputBindings(RE_CompilerContext & ctxt, RE * re) {
+    std::set<std::string> localExternals;
+    std::set<std::string> localAlphabets;
+    gatherExternals(re, localExternals, localAlphabets);
     Bindings externalBindings;
     if (ctxt.mBarrierStream) {
-        externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream);
+        if (anyEndAnchor(re)) {
+            externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream, FixedRate(), LookAhead(1));
+        } else {
+            externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream);
+        }
     }
     if (ctxt.mIndexStream) {
         externalBindings.emplace_back("mIndexing", ctxt.mIndexStream);
     }
     for (auto & a : ctxt.mAlphabets) {
-        externalBindings.emplace_back(a.first->getName() + "_basis", a.second);
+        auto alphaName = a.first->getName();
+        //llvm::errs() << "alphaName: " << alphaName << " count = " << localAlphabets.count(alphaName) << "\n";
+        if (localAlphabets.count(alphaName) == 1) {
+            externalBindings.emplace_back(alphaName + "_basis", a.second);
+        }
     }
     std::vector<std::string> externalList;
     for (const auto & e : ctxt.mExternals) {
         auto name = e.first;
-        //llvm::errs() << "RE_Kernel - adding external: " << name << "\n";
-        auto ext = e.second;
-        if (ext.kind == StartIndexed) {
-            unsigned blk_ahead = round_up_to_blocksize(ext.offset);
-            externalBindings.emplace_back(name, ext.extStream, FixedRate(), LookAhead(blk_ahead));
-        } else {
-            externalBindings.emplace_back(name, ext.extStream);
+        if (localExternals.count(name) == 1) {
+            //llvm::errs() << "RE_Kernel - adding external: " << name << "\n";
+            auto ext = e.second;
+            if (ext.kind == StartIndexed) {
+                unsigned blk_ahead = round_up_to_blocksize(ext.offset);
+                externalBindings.emplace_back(name, ext.extStream, FixedRate(), LookAhead(blk_ahead));
+            } else {
+                externalBindings.emplace_back(name, ext.extStream);
+            }
         }
     }
     if (ctxt.mCombiningType != RE_CombiningType::None) {
@@ -169,14 +202,20 @@ Bindings RE_Kernel::makeOutputBindings(RE * re, StreamSet * results) {
 
 void RE_Kernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
+    std::set<std::string> localExternals;
+    std::set<std::string> localAlphabets;
+    gatherExternals(mRE, localExternals, localAlphabets);
     PabloAST * barrier = nullptr;
     if (mContext.mBarrierStream) {
         barrier = pb.createExtract(getInputStreamVar("mBarrier"), pb.getInteger(0));
     }
     RE_Compiler re_compiler(getEntryScope(), barrier, mContext.mCodeUnitAlphabet);
     for (auto & a : mContext.mAlphabets) {
-        auto basis = getInputStreamSet(a.first->getName() + "_basis");
-        re_compiler.addAlphabet(a.first, basis);
+        auto alphaName = a.first->getName();
+        if (localAlphabets.count(alphaName) == 1) {
+            auto basis = getInputStreamSet(alphaName + "_basis");
+            re_compiler.addAlphabet(a.first, basis);
+        }
     }
     if (mContext.mIndexStream) {
         PabloAST * idxStrm = pb.createExtract(getInputStreamVar("mIndexing"), pb.getInteger(0));
@@ -184,14 +223,16 @@ void RE_Kernel::generatePabloMethod() {
     }
     for (auto & e : mContext.mExternals) {
         auto name = e.first;
-        auto ext = e.second;
-        PabloAST * extStrm = pb.createExtract(getInputStreamVar(name), pb.getInteger(0));
-        unsigned offset = ext.offset;
-        bool fromFirst = false;
-        if (ext.kind == ExternalStreamKind::StartIndexed) {
-            fromFirst = true;
+        if (localExternals.count(name) == 1) {
+            auto ext = e.second;
+            PabloAST * extStrm = pb.createExtract(getInputStreamVar(name), pb.getInteger(0));
+            unsigned offset = ext.offset;
+            bool fromFirst = false;
+            if (ext.kind == ExternalStreamKind::StartIndexed) {
+                fromFirst = true;
+            }
+            re_compiler.addPrecompiled(name, RE_Compiler::ExternalStream(extStrm, offset, ext.lgthRange, fromFirst));
         }
-        re_compiler.addPrecompiled(name, RE_Compiler::ExternalStream(extStrm, offset, ext.lgthRange, fromFirst));
     }
     Var * const final_matches = pb.createVar("final_matches", pb.createZeroes());
     RE_Compiler::Marker matches = re_compiler.compileRE(mRE);
@@ -345,10 +386,12 @@ void LongestSpan::generatePabloMethod() {
     PabloAST * matchEnd = getInputStreamSet("matchEnd")[0];
     PabloAST * pfxStart = pb.createAnd(pb.createLookahead(pfxStrm, mPfxOffset), pb.createLookahead(endBack, mPfxOffset));
     PabloAST * longestEnd = pb.createAnd(matchEnd, pb.createNot(endBack));
-    if (mEndOffset != 0) {
-        longestEnd = pb.createAdvance(longestEnd, 1);
+    PabloAST * spans = nullptr;
+    if (mEndOffset > 0) {
+        spans = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {pfxStart, longestEnd});
+    } else {
+        spans = pb.createIntrinsicCall(pablo::Intrinsic::InclusiveSpan, {pfxStart, longestEnd});
     }
-    PabloAST * spans = pb.createIntrinsicCall(pablo::Intrinsic::SpanUpTo, {pfxStart, longestEnd});
     writeOutputStreamSet("spans", std::vector<PabloAST*>{spans});
 }
 
@@ -366,6 +409,12 @@ LongestSpan::LongestSpan (LLVMTypeSystemInterface & ts, unsigned pfxOffset, unsi
 
 
 void RE_PipelineBuilder::addExternal(std::string extName, ExternalStream s) {
+    //llvm::errs() << "addExternal(" << extName << ", ";
+    //if (s.kind == ExternalStreamKind::StartIndexed) llvm::errs() << "StartIndexed";
+    //if (s.kind == ExternalStreamKind::ZeroWidth) llvm::errs() << "ZeroWidth";
+    //if (s.kind == ExternalStreamKind::FixedLength) llvm::errs() << "FixedLength";
+    //if (s.kind == ExternalStreamKind::EndIndexed) llvm::errs() << "EndIndexed";
+    //llvm::errs() << ", (" << s.lgthRange.first << ", " << s.lgthRange.second << "), " << s.offset << ")\n";
     mCtxt.mExternals.emplace(extName, s);
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         mPB.captureBitstream(extName, s.extStream);
@@ -476,12 +525,14 @@ void RE_PipelineBuilder::matchSearchPipeline(RE * re, StreamSet * results) {
     mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, mRE, results);
 }
 
-void RE_PipelineBuilder::matchSpanPipeline(RE * re, StreamSet * spans) {
+void RE_PipelineBuilder::matchSpanPipeline(RE * re, StreamSet * matches, StreamSet * spans) {
     mRE = prepareRE(re);
     mRE = processReferences(mRE);
     mRE = spanFactoring(mRE);
     prepareExternals(mRE);
-    getSpan(mRE, spans);
+    mPB.CreateKernelFamilyCall<RE_Kernel>(mCtxt, mRE, matches);
+    auto subsetRE = emptyMatchElimination(mRE);
+    getSpan(subsetRE, spans);
 }
 
 void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
@@ -505,6 +556,7 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
         auto matchEnd = f->second.extStream;
         auto minlgth = f->second.lgthRange.first;
         auto endOffset = f->second.offset;
+        //llvm::errs() << "endOffset: " << endOffset << "\n";
         auto f2 = mUPnamer.mNameMap.find(name);
         if (f2 != mUPnamer.mNameMap.end()) {
             auto namedRE = f2->second;
@@ -519,6 +571,10 @@ void RE_PipelineBuilder::getSpan(RE * re, StreamSet * spans) {
             OrCombine(mPB, pfxStrm, matchEnd, maskStrm);
             StreamSet * endBack = mPB.CreateStreamSet(1);
             mPB.CreateKernelCall<IndexedShiftBack>(maskStrm, matchEnd, endBack);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                mPB.captureBitstream("pfxStrm", pfxStrm);
+                mPB.captureBitstream("endBack", endBack);
+            }
             mPB.CreateKernelCall<LongestSpan>(pfxLgth + pfxOffset - 1, endOffset, pfxStrm, endBack, matchEnd, spans);
         } else {
             mPB.CreateKernelFamilyCall<FixedMatchSpansKernel>(minlgth, endOffset, matchEnd, spans);
@@ -544,6 +600,7 @@ RE * RE_PipelineBuilder::spanFactoring(RE * re) {
     re::FixedSpanNamer FLnamer(mCtxt.mCodeUnitAlphabet);
     RE * xfrmedRE = FLnamer.transformRE(re);
     xfrmedRE = mUPnamer.transformRE(xfrmedRE);
+    xfrmedRE = zeroBoundElimination(xfrmedRE);
     //re::Repeated_CC_Seq_Namer RCCSnamer;
     //xfrmedRE = mRCCSnamer.transformRE(xfrmedRE);
     return xfrmedRE;
@@ -561,6 +618,9 @@ RE * RE_PipelineBuilder::prepareRE(RE * re) {
             compileProperty(pe);
         }
     }
+
+    re::LookAheadNamer LA;
+    xfrmedRE = LA.transformRE(xfrmedRE);
 
     re::VariableLengthCCNamer CCnamer;
     xfrmedRE = CCnamer.transformRE(xfrmedRE);
@@ -691,8 +751,7 @@ void UnicodePropertyLogic(PipelineBuilder & P, re::PropertyExpression * pe,
             std::vector<re::CC *> ccs = {makeCC(obj->GetCodepointSet("Y"), &cc::Unicode)};
             StreamSet * pStrm = P.CreateStreamSet(1);
             P.CreateKernelFamilyCall<CharClassesKernel>(ccs, BasisBits, pStrm);
-            StreamSet * bStrm  = P.CreateStreamSet(1);
-            P.CreateKernelCall<BoundaryKernel>(pStrm, IndexStream, bStrm);
+            P.CreateKernelCall<BoundaryKernel>(pStrm, IndexStream, PropertyStream);
         } else {
             llvm::report_fatal_error("Unsupported property for boundary expression");
         }

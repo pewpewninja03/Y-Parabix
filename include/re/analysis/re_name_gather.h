@@ -10,6 +10,8 @@ namespace re {
 
     void gatherNames(RE * const re, std::set<Name *> & mNameSet);
 
-    std::vector<std::string> gatherExternals(RE * const re);
+    void gatherExternals(RE * const re,
+                         std::set<std::string> & names,
+                         std::set<std::string> & alphabets);
 
 }

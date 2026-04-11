@@ -235,8 +235,8 @@ public:
         LinearMallocedAddress = 0,
         LinearInternalCapacity = 1,
         LinearBaseAddress = 2,
-        LinearEffectiveCapacity = 3,
-        PendingDeletionStruct = 4
+        PendingDeletionStruct = 3,
+        PendingDeletionAdditionalStructPointer = 4
     };
 
     static inline bool classof(const StreamSetBuffer * b) {

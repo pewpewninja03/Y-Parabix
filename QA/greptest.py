@@ -172,7 +172,8 @@ flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             '-segment-size' : ['8192', '16384', '32768'],
             '-ccc-type' : ['ternary'],
             '-colors' : ['always', 'never'],
-            '-EnableTernaryOpt' : []}
+            '-EnableTernaryOpt' : [],
+            '-maxlimit-termination-mode' : ['report', 'terminate', 'zero']}
 
 def add_random_flags(flags, fileLength):
     selected = list(fixed_flags.keys())
@@ -188,6 +189,9 @@ def add_random_flags(flags, fileLength):
         # Avoid duplicate flags and expensive test cases
         while rand_flag in selected or (rand_flag == "-v" and fileLength > 4000):
             rand_flag = flag_keys[random.randint(0, len(flag_map) - 1)]
+            if rand_flag == '-maxlimit-termination-mode' and not 'm' in selected:
+                selected.append('-m')
+                flags['-m'] = '3'
         selected.append(rand_flag)
         values = flag_map[rand_flag]
         if values == []:

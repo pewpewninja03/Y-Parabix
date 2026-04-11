@@ -256,18 +256,6 @@ void PipelineCompiler::determinePartitionStrideRateScalingFactor() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief loadLastGoodVirtualBaseAddressesOfUnownedBuffersInCurrentPartition
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(KernelBuilder & b) const {
-    for (auto i = mKernelId; i <= LastKernel; ++i) {
-        if (KernelPartitionId[i] != mCurrentPartitionId) {
-            break;
-        }
-        loadLastGoodVirtualBaseAddressesOfUnownedBuffers(b, i);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief loadLastGoodVirtualBaseAddressesOfUnownedBuffersInCurrentPartition
- ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::phiOutPartitionItemCounts(KernelBuilder & b, const unsigned kernel,
                                                  const unsigned targetPartitionId,
                                                  const bool fromKernelEntryBlock) {
@@ -549,9 +537,6 @@ void PipelineCompiler::releaseAllSynchronizationLocksFor(KernelBuilder & b, cons
 void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) {
 
     b.SetInsertPoint(mKernelInitiallyTerminated);
-
-    loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(b);
-
     // NOTE: this branches to the next partition regardless of the jump target destination.
 
     const auto nextPartitionId = mCurrentPartitionId + 1U;

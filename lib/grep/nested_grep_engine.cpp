@@ -86,11 +86,10 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
     re::CC * breakCC = nullptr;
 
     if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-        breakCC = re::makeByte(0x0);
+        breakCC = re::makeCC(0x0, &cc::UTF8);
     } else {// if (mGrepRecordBreak == GrepRecordBreakKind::LF)
-        breakCC = re::makeByte(0x0A);
+        breakCC = re::makeCC(0x0A, &cc::UTF8);
     }
-
     P.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, basisBits, breaks);
     StreamSet * const U8index = P.CreateStreamSet();
     P.CreateKernelCall<UTF8_index>(basisBits, U8index);
@@ -163,8 +162,8 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
 
             auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
             r = regular_expression_passes(r);
-            r = re::exclude_CC(r, breakCC);
-            r = resolveAnchors(r, breakCC);
+            //r = re::exclude_CC(r, breakCC);
+            //r = resolveAnchors(r, breakCC);
             r = toUTF8(r);
             // check if we need to combine the current result with the new set of matches
             const bool exclude = (patterns[i].first == re::PatternKind::Exclude);

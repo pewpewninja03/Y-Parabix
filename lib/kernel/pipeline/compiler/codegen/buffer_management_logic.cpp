@@ -40,14 +40,15 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
                 hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
             } else {
-                mTarget->addNonPersistentScalar(handleType, prefix);
-                requiresLGVBA = true;
+                // mTarget->addNonPersistentScalar(handleType, prefix);
+                mTarget->addInternalScalar(handleType, prefix, groupId);
+//                requiresLGVBA = true;
             }
         }
 
-        if (requiresLGVBA) {
-            mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
-        }
+//        if (requiresLGVBA) {
+//            mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
+//        }
 
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             if (rd.isManaged() || bn.Buffer->isDynamic()) {
@@ -405,9 +406,15 @@ void PipelineCompiler::updateLocalDynamicBufferStructsUntil(KernelBuilder & b, c
                     const auto consumer = target(input, mBufferGraph);
                     assert (mKernelId < consumer && consumer <= PipelineOutput);
                     if (consumer >= targetKernelId) {
-                        Value * avail = readConsumedItemCount(b, streamSet);
+                        const BufferPort & rt = mBufferGraph[output];
+                        Value * consumed = nullptr;
+                        if (kernelId == mKernelId && (bn.Type & BufferType::RequiresConsumedItemCount)) {
+                            consumed = mKernelConsumedItemCount[rt.Port];
+                        } else {
+                            consumed = readConsumedItemCount(b, streamSet);
+                        }
                         Value * const ba = buffer->getBaseAddress(b);
-                        Value * vba = buffer->getVirtualBasePtr(b, ba, avail);
+                        Value * vba = buffer->getVirtualBasePtr(b, ba, consumed);
                         vba = b.CreatePointerCast(vba, b.getVoidPtrTy());
                         assert (bn.ManagedStructId < ManagedBufferStructCount);
                         b.setScalarField(MANAGED_STREAMSET_LOCAL_VIRTUAL_BASE_ADDRESS + std::to_string(bn.ManagedStructId), vba);
@@ -620,6 +627,14 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
         const auto streamSet = target(e, mBufferGraph);
         const auto prefix = makeBufferName(mKernelId, outputPort);
 
+        const BufferNode & bn = mBufferGraph[streamSet];
+
+        Value * consumed = nullptr;
+        if (bn.Type & BufferType::RequiresConsumedItemCount) {
+            consumed = readConsumedItemCount(b, streamSet); assert (consumed);
+        }
+        mKernelConsumedItemCount[outputPort] = consumed;
+
         if (LLVM_UNLIKELY(br.isRelative())) {
 
             const auto ref = getReference(br.Port);
@@ -666,6 +681,26 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
                 mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
             }
         }
+
+
+        if (LLVM_UNLIKELY(CheckAssertions() && consumed)) {
+            Value * const produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
+            Value * valid = b.CreateICmpULE(consumed, produced);
+            if (mInitiallyTerminated) {
+                valid = b.CreateOr(valid, mInitiallyTerminated);
+            }
+            constexpr auto msg =
+                "Consumed item count (%" PRId64 ") of %s.%s exceeds its produced item count (%" PRId64 ").";
+            const auto e = in_edge(streamSet, mBufferGraph);
+            const BufferPort & port = mBufferGraph[e];
+            Constant * const bindingName = b.GetString(getBinding(mKernelId, port.Port).getName());
+            b.CreateAssert(valid, msg,
+                consumed, mCurrentKernelName, bindingName, produced);
+        }
+
+        freePendingDeletions(b, streamSet, consumed);
+
+
     }
 }
 
@@ -750,14 +785,13 @@ void PipelineCompiler::recordFinalProducedItemCounts(KernelBuilder & b) {
         mLocallyAvailableItems[streamSet] = fullyProduced;
 
         writeTransitoryConsumedItemCount(b, streamSet, fullyProduced);
-        mInitialConsumedItemCount[streamSet] = nullptr;
 
         // update any external output port(s)
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isExternal())) {
             for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const BufferPort & external = mBufferGraph[f];
-                Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
+                Value * const ptr = getProducedOutputItemsPtr(external.Port.Number); assert (ptr);
                 b.CreateAlignedStore(fullyProduced, ptr, SizeTyABIAlignment);
             }
         }
@@ -767,62 +801,6 @@ void PipelineCompiler::recordFinalProducedItemCounts(KernelBuilder & b) {
         debugPrint(b, prefix + "_producedΔ = %" PRIu64, producedDelta);
         #endif
 
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief readReturnedOutputVirtualBaseAddresses
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(KernelBuilder & b) const {
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & rd = mBufferGraph[e];
-        assert (rd.Port.Type == PortType::Output);
-        const StreamSetPort port(PortType::Output, rd.Port.Number);
-        if (rd.isManaged()) {
-            const auto streamSet = target(e, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            assert (bn.isNonThreadLocal());
-            Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
-            StreamSetBuffer * const buffer = bn.Buffer;
-            assert (isa<ExternalBuffer>(buffer));
-            Value * vba = b.CreateAlignedLoad(buffer->getPointerType(), ptr, PtrTyABIAlignment);
-            buffer->setBaseAddress(b, vba);
-            buffer->setCapacity(b, mProducedItemCount[port]);
-            const auto handleName = makeBufferName(mKernelId, port);
-            #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
-            debugPrint(b, "%s_updatedVirtualBaseAddress = 0x%" PRIx64, b.GetString(handleName), buffer->getBaseAddress(b));
-            #endif
-            b.setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
-        } else {
-            assert (mReturnedOutputVirtualBaseAddressPtr[port] == nullptr);
-        }
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief loadLastGoodVirtualBaseAddressesOfUnownedBuffers
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const {
-    for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-        const auto streamSet = target(e, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        // owned or external buffers do not have a mutable vba
-        if (LLVM_LIKELY(bn.isOwned() || bn.isExternal() || bn.hasZeroElementsOrWidth())) {
-            continue;
-        }
-        assert (bn.isNonThreadLocal());
-        const BufferPort & rd = mBufferGraph[e];
-        const auto handleName = makeBufferName(kernelId, rd.Port);
-        Value * const vba = b.getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
-        StreamSetBuffer * const buffer = bn.Buffer;
-        buffer->setBaseAddress(b, vba);
-//        if (CheckAssertions()) {
-//            b.CreateAssert(vba, "%s.%s last good virtual base addresss cannot be null",
-//                            mCurrentKernelName, b.GetString(rd.Binding.get().getName()));
-//        }
-        #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
-        debugPrint(b, "%s_loadPriorVirtualBaseAddress = 0x%" PRIx64, b.GetString(handleName), buffer->getBaseAddress(b));
-        #endif
     }
 }
 
@@ -915,16 +893,6 @@ void PipelineCompiler::getInputVirtualBaseAddresses(KernelBuilder & b, Vec<Value
         }
         const auto streamSet = source(input, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-
-        if (LLVM_UNLIKELY(bn.isUnowned() && bn.isInternal())) {
-            const auto output = in_edge(streamSet, mBufferGraph);
-            const auto producer = source(output, mBufferGraph);
-            assert (producer < mKernelId);
-            const BufferPort & outputPort = mBufferGraph[output];
-            const auto handleName = makeBufferName(producer, outputPort.Port);
-            Value * const vba = b.getScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS);
-            bn.Buffer->setBaseAddress(b, vba);
-        }
         Value * addr = getVirtualBaseAddress(b, inputPort, bn, processed, bn.isNonThreadLocal(), false);
         baseAddresses[inputPort.Port.Number] = addr;
     }

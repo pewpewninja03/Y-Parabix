@@ -248,8 +248,6 @@ public:
     void writePartitionEntryIOGuard(KernelBuilder & b);
     Value * calculatePartitionSegmentLength(KernelBuilder & b);
 
-    void loadLastGoodVirtualBaseAddressesOfUnownedBuffersInPartition(KernelBuilder & b) const;
-
     void phiOutPartitionItemCounts(KernelBuilder & b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
     void phiOutPartitionStatusFlags(KernelBuilder & b, const unsigned targetPartitionId, const bool fromKernelEntry);
 
@@ -308,17 +306,16 @@ public:
 
     Value * revertTransitiveAddCalculation(KernelBuilder & b, const ProcessingRate &rate, Value * expectedItemCount, Value * rejectedTerminationSignal);
 
-    void zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputCapacity, Vec<Value *> & inputBaseAddresses);
+    void zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems, Vec<Value *> & inputBufferCapacity, Vec<Value *> & inputBaseAddresses);
     void freeZeroedInputBuffers(KernelBuilder & b);
 
-    Value * allocateLocalZeroExtensionSpace(KernelBuilder & b, BasicBlock * const insertBefore) const;
+    Value * allocateLocalZeroExtensionSpace(KernelBuilder & b, Vec<Value *> & zeroExtendedInputBufferCapacity,  BasicBlock * const insertBefore) const;
 
     void writeKernelCall(KernelBuilder & b);
     void buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args);
     void updateProcessedAndProducedItemCounts(KernelBuilder & b, Value * rejectedTermSignal);
     void writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination);
     void readAndUpdateInternalProcessedAndProducedItemCounts(KernelBuilder & b);
-    void readReturnedOutputVirtualBaseAddresses(KernelBuilder & b) const;
     Value * addVirtualBaseAddressArg(KernelBuilder & b, const StreamSetBuffer * buffer, ArgVec & args);
 
     void normalCompletionCheck(KernelBuilder & b);
@@ -387,7 +384,6 @@ public:
     void addConsumerKernelProperties(KernelBuilder & b, const unsigned producer);
     void writeTransitoryConsumedItemCount(KernelBuilder & b, const unsigned streamSet, Value * const produced);
     void readExternalConsumerItemCounts(KernelBuilder & b);
-    void readConsumedItemCounts(KernelBuilder & b);
     Value * readConsumedItemCount(KernelBuilder & b, const size_t streamSet);
     void setConsumedItemCount(KernelBuilder & b, const size_t streamSet, Value * consumed, const unsigned slot) const;
     void updateExternalConsumedItemCounts(KernelBuilder & b);
@@ -402,7 +398,6 @@ public:
     void freePendingDeletions(KernelBuilder & b, const size_t streamSet, Value * const consumed);
     bool initializeOutputStreamSetBuffersBeforeSegmentInvocation(KernelBuilder & b) const;
     void resetInternalBufferHandles();
-    void loadLastGoodVirtualBaseAddressesOfUnownedBuffers(KernelBuilder & b, const size_t kernelId) const;
     void addLocalDynamicBufferStructs(KernelBuilder & b);
     void updateLocalDynamicBufferStructsUntil(KernelBuilder & b, const size_t targetKernelId);
 
@@ -410,7 +405,7 @@ public:
 
     Value * getVirtualBaseAddress(KernelBuilder & b, const BufferPort & rateData, const BufferNode & bn, Value * position, const bool prefetch, const bool write) const;
     void getInputVirtualBaseAddresses(KernelBuilder & b, Vec<Value *> & baseAddresses) const;
-    void getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & b, const Vec<Value *> & baseAddresses, Value * const zeroExtensionSpace, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
+    void getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & b, const Vec<Value *> & baseAddresses, Value * const zeroExtendAddress, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
 
     void addZeroInputStructProperties(KernelBuilder & b) const;
 
@@ -422,7 +417,7 @@ public:
     void addRepeatingStreamSetBufferProperties(KernelBuilder & b);
     void deallocateRepeatingBuffers(KernelBuilder & b);
     void generateMetaDataForRepeatingStreamSets(KernelBuilder & b);
-    Constant * getGuaranteedRepeatingStreamSetLength(KernelBuilder & b, const unsigned streamSet) const;
+    size_t getGuaranteedRepeatingStreamSetLength(KernelBuilder & b, const unsigned streamSet, const bool addOverflow) const;
     void bindRepeatingStreamSetInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) const;
     void addRepeatingStreamSetInitializationArguments(const unsigned kernelId, ArgVec & args) const;
 
@@ -631,6 +626,7 @@ protected:
     CompilerAllocator                           mAllocator;
 
     const bool                                  mCheckAssertions;
+    const bool                                  mCheckStreamSets;
     const bool                                  mTraceProcessedProducedItemCounts;
     const bool                                  mTraceDynamicBuffers;
     const bool                                  mTraceIndividualConsumedItemCounts;
@@ -763,7 +759,7 @@ protected:
 
     BasicBlock *                                mNextPartitionEntryPoint = nullptr;
     FixedVector<Value *>                        mKernelTerminationSignal;
-    FixedVector<Value *>                        mInitialConsumedItemCount;
+    OutputPortVector<Value *>                   mKernelConsumedItemCount;
 
     PartitionPhiNodeTable                       mPartitionProducedItemCountPhi;
     PartitionPhiNodeTable                       mPartitionConsumedItemCountPhi;
@@ -840,7 +836,7 @@ protected:
 
     InputPortVector<Value *>                    mInternalAccessibleInputItems;
     InputPortVector<PHINode *>                  mLinearInputItemsPhi;
-    InputPortVector<PHINode *>                  mLinearInputItemCapacityPhi;
+    InputPortVector<PHINode *>                  mInputBufferCapacityPhi;
 
 
     InputPortVector<Value *>                    mReturnedProcessedItemCountPtr; // written by the kernel
@@ -876,6 +872,7 @@ protected:
     OutputPortVector<Value *>                   mReturnedOutputVirtualBaseAddressPtr; // written by the kernel
     OutputPortVector<Value *>                   mOutputVirtualBaseAddress;
     OutputPortVector<Value *>                   mReturnedProducedItemCountPtr; // written by the kernel
+    OutputPortVector<Value *>                   mReturnedProducedCapacityPtr; // written by the kernel
     OutputPortVector<Value *>                   mProducedItemCountPtr; // exiting the segment loop
     OutputPortVector<Value *>                   mProducedItemCount;
     OutputPortVector<Value *>                   mProducedDeferredItemCountPtr;
@@ -949,6 +946,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 : KernelCompiler(pipelineKernel)
 , PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
 , mCheckAssertions(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnablePipelineAsserts))
+, mCheckStreamSets(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(P.mTraceDynamicBuffers)
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
@@ -1025,7 +1023,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mPartitionEntryPoint(PartitionCount, mAllocator)
 
 , mKernelTerminationSignal(FirstKernel, LastKernel, mAllocator)
-, mInitialConsumedItemCount(FirstStreamSet, LastStreamSet, mAllocator)
+, mKernelConsumedItemCount(P.MaxNumOfOutputPorts, mAllocator)
 
 , mPartitionProducedItemCountPhi(extents[PartitionCount][LastStreamSet - FirstStreamSet + 1])
 , mPartitionConsumedItemCountPhi(extents[PartitionCount][LastStreamSet - FirstStreamSet + 1])
@@ -1041,7 +1039,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mFirstInputStrideLength(P.MaxNumOfInputPorts, mAllocator)
 , mInternalAccessibleInputItems(P.MaxNumOfInputPorts, mAllocator)
 , mLinearInputItemsPhi(P.MaxNumOfInputPorts, mAllocator)
-, mLinearInputItemCapacityPhi(P.MaxNumOfInputPorts, mAllocator)
+, mInputBufferCapacityPhi(P.MaxNumOfInputPorts, mAllocator)
 , mReturnedProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCountPtr(P.MaxNumOfInputPorts, mAllocator)
 , mProcessedItemCount(P.MaxNumOfInputPorts, mAllocator)
@@ -1070,6 +1068,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mReturnedOutputVirtualBaseAddressPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mOutputVirtualBaseAddress(P.MaxNumOfOutputPorts, mAllocator)
 , mReturnedProducedItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
+, mReturnedProducedCapacityPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedItemCount(P.MaxNumOfOutputPorts, mAllocator)
 , mProducedDeferredItemCountPtr(P.MaxNumOfOutputPorts, mAllocator)

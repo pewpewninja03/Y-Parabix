@@ -367,18 +367,14 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             flat_set<unsigned> sharedGroups;
             flat_set<unsigned> threadLocalGroups;
 
-
-
             for (const auto & scalar : mInternalScalars) {
                 assert (scalar.getValueType());
                 switch (scalar.getScalarType()) {
                     case ScalarType::Internal:
                         sharedGroups.insert(scalar.getGroup());
-
                         break;
                     case ScalarType::ThreadLocal:
                         threadLocalGroups.insert(scalar.getGroup());
-
                         break;
                     default: break;
                 }
@@ -391,9 +387,27 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             VecOfTypes shared(sharedGroups.size() + 2);
             VecOfTypes threadLocal(threadLocalGroups.size());
 
-            auto addScalar = [](VecOfTypes & S, const unsigned group, Type * const type) {
-                assert (group < S.size());
+            #ifndef NDEBUG
+            std::function<void(Type *)> checkType = [&](Type * type) {
                 assert (type);
+                assert (&type->getContext() == &b.getContext());
+                if (isa<ArrayType>(type)) {
+                    checkType(type->getArrayElementType());
+                } else if (isa<VectorType>(type)) {
+                    checkType(type->getScalarType());
+                } else if (isa<StructType>(type)) {
+                    for (size_t i = 0; i < type->getStructNumElements(); ++i) {
+                        checkType(type->getStructElementType(i));
+                    }
+                }
+            };
+            #endif
+
+            auto addScalar = [&](VecOfTypes & S, const unsigned group, Type * const type) {
+                assert (group < S.size());
+                #ifndef NDEBUG
+                checkType(type);
+                #endif
                 S[group].push_back(type);
             };
 
@@ -441,7 +455,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             auto & C = m->getContext();
 
-            auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec, size_t count,
+            auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec, const size_t count,
                                       StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
 
                 if (count == 0) return nullptr;
@@ -1045,6 +1059,9 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         // that we are not using an old buffer allocation.
         if (isLocal.any()) {
             fields.push_back(sizeTy); // consumed
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                fields.push_back(sizePtrTy); // updatable capacity
+            }
         } else {
             if (isMainPipeline || requiresItemCount(output)) {
                 fields.push_back(sizeTy); // writable item count
@@ -1155,8 +1172,12 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            if (LLVM_UNLIKELY(isLocalBuffer(output).any())) {
+            const auto isLocal = Kernel::isLocalBuffer(output);
+            if (LLVM_UNLIKELY(isLocal.any())) {
                 setNextArgName(output.getName() + "_consumed");
+                if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                    setNextArgName(output.getName() + "_updatableCapacity");
+                }
             } else {
                 if (isMainPipeline || requiresItemCount(output)) {
                     setNextArgName(output.getName() + "_writable");

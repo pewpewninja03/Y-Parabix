@@ -280,9 +280,10 @@ enum BufferType : unsigned {
     , HasIllustratedStreamset = 512
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
-    , CrossesPhaseBoundary = 8192
+    , RequiresConsumedItemCount = 8192
+    , CrossesPhaseBoundary = 16384
     // ------------------
-    , CanTrackBufferExpansionData = 16384
+    , CanTrackBufferExpansionData = 32768
 };
 
 ENABLE_ENUM_FLAGS(BufferType)

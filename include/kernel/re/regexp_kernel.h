@@ -126,7 +126,8 @@ public:
     void setCaseInsensitive(bool caseless) {mCaseInsensitive = caseless;}
 
     void matchSearchPipeline(re::RE * re, kernel::StreamSet * results);
-    void matchSpanPipeline(re::RE * re, kernel::StreamSet * spans);
+    void matchSpanPipeline(re::RE * re, kernel::StreamSet * matches, kernel::StreamSet * spans);
+    kernel::PipelineBuilder & getPipelineBuilder() {return mPB;}
 
 protected:
     // Internal methods.

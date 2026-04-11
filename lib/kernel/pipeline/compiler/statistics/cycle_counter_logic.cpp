@@ -941,6 +941,7 @@ void PipelineCompiler::addUnconsumedItemCountProperties(KernelBuilder & b, unsig
  * @brief recordStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::recordUnconsumedItemCounts(KernelBuilder & b) {
+#warning fix me
     if (LLVM_UNLIKELY(TraceUnconsumedItemCounts)) {
         const auto n = out_degree(mKernelId, mBufferGraph);
         if (LLVM_UNLIKELY(n == 0)) {

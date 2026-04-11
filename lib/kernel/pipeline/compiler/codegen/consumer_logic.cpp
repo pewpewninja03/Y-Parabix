@@ -36,6 +36,11 @@ void PipelineCompiler::addConsumerKernelProperties(KernelBuilder & b, const unsi
         // If the out-degree for this buffer is zero, then we've proven that its consumption rate
         // is identical to its production rate.
         const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);
+        #ifndef NDEBUG
+        const auto id = mConsumerGraph[streamSet];
+        assert (id != 0 || numOfIndependentConsumers == 0);
+        assert ((numOfIndependentConsumers == 0) == ((mBufferGraph[streamSet].Type & BufferType::RequiresConsumedItemCount) == 0));
+        #endif
         if (LLVM_UNLIKELY(numOfIndependentConsumers != 0)) {
 
             assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
@@ -58,52 +63,6 @@ void PipelineCompiler::addConsumerKernelProperties(KernelBuilder & b, const unsi
         }
     }
 }
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief readConsumedItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readConsumedItemCounts(KernelBuilder & b) {
-    for (const auto e : make_iterator_range(out_edges(mKernelId, mConsumerGraph))) {
-        const auto streamSet = target(e, mConsumerGraph);
-        const auto & bn = mBufferGraph[streamSet];
-        assert (mInitialConsumedItemCount[streamSet] == nullptr);
-        Value * consumed = readConsumedItemCount(b, streamSet);
-        if (LLVM_UNLIKELY(CheckAssertions())) {
-            Value * const produced = mInitiallyProducedItemCount[streamSet];
-            Value * valid = b.CreateICmpULE(consumed, produced);
-            if (mInitiallyTerminated) {
-                valid = b.CreateOr(valid, mInitiallyTerminated);
-            }
-            constexpr auto msg =
-                "Consumed item count (%" PRId64 ") of %s.%s exceeds its produced item count (%" PRId64 ").";
-            const ConsumerEdge & c = mConsumerGraph[e];
-            const StreamSetPort port{PortType::Output, c.Port};
-            Constant * const bindingName = b.GetString(getBinding(mKernelId, port).getName());
-            b.CreateAssert(valid, msg,
-                consumed, mCurrentKernelName, bindingName, produced);
-        }
-        if (LLVM_LIKELY(!bn.isInOutRedirect())) {
-            freePendingDeletions(b, streamSet, consumed);
-        }
-        // A returned buffer never releases data.
-        #ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
-        consumed = b.getSize(0);
-        #else
-
-        if (LLVM_UNLIKELY(bn.preserveEntireStreamSet())) {
-            consumed = b.getSize(0);
-        }
-        #endif
-        mInitialConsumedItemCount[streamSet] = consumed; assert (consumed);
-        #ifdef PRINT_DEBUG_MESSAGES
-        const ConsumerEdge & c = mConsumerGraph[e];
-        const StreamSetPort port{PortType::Output, c.Port};
-        const auto prefix = makeBufferName(mKernelId, port);
-        debugPrint(b, prefix + "_consumed = %" PRIu64, consumed);
-        #endif
-    }
-}
-
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readExternalConsumerItemCounts
@@ -132,16 +91,16 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
     assert (in_degree(streamSet, mBufferGraph) > 0);
     const auto id = mConsumerGraph[streamSet];
     assert (FirstStreamSet <= id && id <= LastStreamSet);
-    if (mInitialConsumedItemCount[id]) {
-        return mInitialConsumedItemCount[id];
-    }
-    const BufferNode & bn = mBufferGraph[id];
-    if (bn.Type & BufferType::PreserveEntireStreamSet) {
-        return b.getSize(0);
-    }
 
     Value * itemCount = nullptr;
-    if (out_degree(id, mConsumerGraph) == 0) {
+    const BufferNode & bn = mBufferGraph[id];
+    // A returned buffer never releases data.
+    #ifdef FORCE_PIPELINE_TO_PRESERVE_CONSUMED_DATA
+    itemCount = b.getSize(0);
+    #else
+    if (LLVM_UNLIKELY(bn.preserveEntireStreamSet())) {
+        itemCount = b.getSize(0);
+    } else if (out_degree(id, mConsumerGraph) == 0) {
         // This stream either has no consumers or we've proven that
         // its consumption rate is identical to its production rate
         Value * produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
@@ -176,6 +135,7 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
         }
         itemCount = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment, true);
     }
+    #endif
     assert (itemCount);
     return itemCount;
 }
@@ -318,7 +278,6 @@ void PipelineCompiler::updateExternalConsumedItemCounts(KernelBuilder & b) {
         const BufferPort & inputPort = mBufferGraph[input];
         if (LLVM_LIKELY(inputPort.Port.Reason == ReasonType::Explicit)) {
             const auto streamSet = target(input, mBufferGraph);
-            assert (mInitialConsumedItemCount[streamSet] == nullptr);
             Value * const consumed = readConsumedItemCount(b, streamSet);
             b.CreateAlignedStore(consumed, getProcessedInputItemsPtr(inputPort.Port.Number), SizeTyABIAlignment);
         }

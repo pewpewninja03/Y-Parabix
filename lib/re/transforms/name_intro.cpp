@@ -13,6 +13,7 @@
 #include <re/analysis/collect_ccs.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
+#include <kernel/core/kernel.h>
 #include <map>
 #include <memory>
 
@@ -20,9 +21,14 @@ using namespace llvm;
 
 namespace re {
 
+const unsigned maxNameLength = 50;
+
 Name * NameIntroduction::createName(std::string name, RE * defn) {
     auto f = mNameMap.find(name);
     if (f == mNameMap.end()) {
+        if (name.size() > maxNameLength) {
+            name = kernel::Kernel::getStringHash(name);
+        }
         mNameMap.emplace(name, defn);
         return makeName(name, defn);
     } else {
@@ -82,13 +88,8 @@ RE * FixedSpanNamer::transform(RE * r) {
         } else {
             defn = makeAlt(grp.second.begin(), grp.second.end());
         }
-        if (lgth == 0) {
-            // Zero length alts do not generate spans.
-            mNewAlts.push_back(defn);
-        } else {
-            Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
-            mNewAlts.push_back(n);
-        }
+        Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
+        mNewAlts.push_back(n);
     }
     if (mNewAlts.size() == 1) return mNewAlts[0];
     return makeAlt(mNewAlts.begin(), mNewAlts.end());

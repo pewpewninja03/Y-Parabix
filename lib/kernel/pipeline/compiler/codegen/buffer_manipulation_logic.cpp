@@ -7,53 +7,50 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief allocateLocalZeroExtensionSpace
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b, BasicBlock * const insertBefore) const {
+Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b,
+                                                          Vec<Value *> & inputBufferCapacity,
+                                                          BasicBlock * const insertBefore) const {
     #ifndef DISABLE_ZERO_EXTEND
-    const auto strideSize = mKernel->getStride();
-    const auto blockWidth = b.getBitBlockWidth();
-    Value * requiredSpace = nullptr;
+    const size_t blockWidth = b.getBitBlockWidth();
 
-    Constant * const ZERO = b.getSize(0);
-    Constant * const ONE = b.getSize(1);
-    Value * const numOfStrides = b.CreateUMax(mNumOfLinearStrides, ONE);
+    Value * const numOfStrides = b.CreateUMax(mNumOfLinearStrides, b.getSize(1));
+
+    auto & dl = b.getModule()->getDataLayout();
+
+    IntegerType * const sizeTy = b.getSizeTy();
+
+    Value * requiredSpace = nullptr;
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
 
         const BufferPort & br = mBufferGraph[e];
-        if (br.isZeroExtended()) {
+
+        Value * zeroExtended = mIsInputZeroExtended[br.Port];
+        assert (br.isZeroExtended() == (zeroExtended != nullptr));
+
+        if (zeroExtended) {
 
             assert (HasZeroExtendedStream);
 
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            const Binding & input = br.Binding;
 
-            const auto itemWidth = getItemWidth(input.getType());
-            Constant * const strideFactor = b.getSize(itemWidth * strideSize / 8);
-            Value * requiredBytes = b.CreateMul(numOfStrides, strideFactor); assert (requiredBytes);
-            if (br.LookAhead) {
-                const auto lh = (br.LookAhead * itemWidth);
-                requiredBytes = b.CreateAdd(requiredBytes, b.getSize(lh));
-            }
-            if (LLVM_LIKELY(itemWidth < blockWidth)) {
-                Constant * const factor = b.getSize(blockWidth / itemWidth);
-                assert ((blockWidth % itemWidth) == 0);
-                requiredBytes = b.CreateRoundUp(requiredBytes, factor);
-            }
-            requiredBytes = b.CreateMul(requiredBytes, bn.Buffer->getStreamSetCount(b));
+            const auto ts = b.getTypeSize(dl, bn.Buffer->getType());
 
-            const auto fieldWidth = input.getFieldWidth();
-            if (fieldWidth < 8) {
-                requiredBytes = b.CreateUDiv(requiredBytes, b.getSize(8 / fieldWidth));
-            } else if (fieldWidth > 8) {
-                requiredBytes = b.CreateMul(requiredBytes, b.getSize(fieldWidth / 8));
+            Rational scaleFactor{ts * br.Maximum.numerator(), blockWidth * blockWidth * br.Maximum.denominator()};
+
+            Value * ns = numOfStrides;
+            if (bn.NumOfOverflowStrides) {
+                ns = b.CreateAdd(ns, b.getSize(bn.NumOfOverflowStrides));
             }
-            const auto name = makeBufferName(mKernelId, br.Port);
-            requiredBytes = b.CreateSelect(mIsInputZeroExtended[br.Port], requiredBytes, ZERO, "zeroExtendRequiredBytes");
-            requiredSpace = b.CreateUMax(requiredSpace, requiredBytes);
+            zeroExtended = b.CreateZExt(zeroExtended, sizeTy);
+            Value * const requiredBytes = b.CreateCeilUMulRational(b.CreateMul(ns, zeroExtended), scaleFactor);
+            requiredSpace = b.CreateUMax(requiredBytes, requiredSpace);
         }
     }
     assert (requiredSpace);    
+    requiredSpace = b.CreateRoundUpRational(requiredSpace, b.getPageSize());
+
     const auto prefix = makeKernelName(mKernelId);
     BasicBlock * const entry = b.GetInsertBlock();
     BasicBlock * const expandZeroExtension =
@@ -62,13 +59,11 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b, Bas
         b.CreateBasicBlock(prefix + "_hasSufficientZeroExtendSpace", insertBefore);
 
     auto zeSpaceRef = b.getScalarFieldPtr(ZERO_EXTENDED_SPACE);
-    assert (zeSpaceRef.second == b.getSizeTy());
-    Value * const currentSpace = b.CreateAlignedLoad(zeSpaceRef.second, zeSpaceRef.first, SizeTyABIAlignment);
+    assert (zeSpaceRef.second == sizeTy);
+    Value * const currentSpace = b.CreateAlignedLoad(sizeTy, zeSpaceRef.first, SizeTyABIAlignment);
 
     auto zeBufferRef = b.getScalarFieldPtr(ZERO_EXTENDED_BUFFER);
     Value * const currentBuffer = b.CreateAlignedLoad(zeBufferRef.second, zeBufferRef.first, PtrTyABIAlignment);
-
-    requiredSpace = b.CreateRoundUp(requiredSpace, b.getSize(b.getCacheAlignment()));
 
     Value * const largeEnough = b.CreateICmpUGE(currentSpace, requiredSpace);
     b.CreateLikelyCondBr(largeEnough, hasSufficientZeroExtendSpace, expandZeroExtension);
@@ -83,10 +78,28 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b, Bas
     b.CreateBr(hasSufficientZeroExtendSpace);
 
     b.SetInsertPoint(hasSufficientZeroExtendSpace);
-    PHINode * const zeroBuffer = b.CreatePHI(b.getVoidPtrTy(), 2);
-    zeroBuffer->addIncoming(currentBuffer, entry);
-    zeroBuffer->addIncoming(newBuffer, expandZeroExtension);
-    return zeroBuffer;
+    PHINode * const zeroBufferPhi = b.CreatePHI(b.getVoidPtrTy(), 2);
+    zeroBufferPhi->addIncoming(currentBuffer, entry);
+    zeroBufferPhi->addIncoming(newBuffer, expandZeroExtension);
+    if (LLVM_UNLIKELY(mCheckStreamSets)) {
+        PHINode * const allocedSpacePhi = b.CreatePHI(sizeTy, 2);
+        allocedSpacePhi->addIncoming(currentSpace, entry);
+        allocedSpacePhi->addIncoming(requiredSpace, expandZeroExtension);
+        for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+            const BufferPort & br = mBufferGraph[e];
+            Value * const zeroExtended = mIsInputZeroExtended[br.Port];
+            if (zeroExtended) {
+                const auto streamSet = source(e, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                const auto ts = b.getTypeSize(dl, bn.Buffer->getType());
+                Rational scaleFactor{blockWidth * blockWidth * br.Maximum.denominator(), ts * br.Maximum.numerator()};
+                Value * const ic = b.CreateMulRational(allocedSpacePhi, scaleFactor);
+                auto & ze = inputBufferCapacity[br.Port.Number];
+                ze = b.CreateSelect(zeroExtended, b.CreateAdd(mCurrentProcessedItemCountPhi[br.Port], ic), ze);
+            }
+        }
+    }
+    return zeroBufferPhi;
     #else
     return nullptr;
     #endif
@@ -99,6 +112,9 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & 
                                                                 const Vec<Value *> & baseAddresses,
                                                                 Value * const zeroExtensionSpace,
                                                                 Vec<Value *> & zeroExtendedVirtualBaseAddress) const {
+
+    // TODO: if we reserve a "zero extension" block in the thread local memory, we could trade this logic for a memclear
+
     #ifndef DISABLE_ZERO_EXTEND
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & rt = mBufferGraph[e];
@@ -159,8 +175,10 @@ void PipelineCompiler::addZeroInputStructProperties(KernelBuilder & b) const {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief zeroInputAfterFinalItemCount
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec<Value *> & accessibleItems,
-                                                    Vec<Value *> & inputCapacity, Vec<Value *> & inputBaseAddresses) {
+void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
+                                                    const Vec<Value *> & accessibleItems,
+                                                    Vec<Value *> & inputBufferCapacity,
+                                                    Vec<Value *> & inputBaseAddresses) {
 
     #ifndef DISABLE_INPUT_ZEROING
     const auto n = out_degree(mKernelId - FirstKernel, mZeroInputGraph);
@@ -229,8 +247,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         Value * const selected = accessibleItems[inputPort.Number];
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
 
-        inputCapacity[inputPort.Number] = totalNumOfItems;
-
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
         if (LLVM_UNLIKELY(alwaysTruncate)) {
@@ -283,6 +299,17 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             Constant * const BLOCK_MASK = b.getSize(blockWidth - 1);
             Constant * const LOG_2_BLOCK_WIDTH = b.getSize(log2BlockWidth);
 
+            Type * retTy = nullptr;
+            if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                FixedArray<Type *, 2> fields;
+                fields[0] = int8PtrTy;
+                fields[1] = sizeTy;
+                retTy = StructType::get(b.getContext(), fields);
+            } else {
+                retTy = int8PtrTy;
+            }
+
+
             const auto ip = b.saveIP();
 
             FixedArray<Type *, 6> params;
@@ -295,7 +322,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
             LLVMContext & C = m->getContext();
 
-            FunctionType * const funcTy = FunctionType::get(int8PtrTy, params, false);
+            FunctionType * const funcTy = FunctionType::get(retTy, params, false);
             maskInput = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
             if (LLVM_UNLIKELY(CheckAssertions())) {
                 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
@@ -380,6 +407,12 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             PHINode * maskedBuffer = b.CreatePHI(int8PtrTy, 2);
             maskedBuffer->addIncoming(existingBuffer, entry);
             maskedBuffer->addIncoming(newBuffer, allocateNewBuffer);
+            PHINode * maskedBytes = nullptr;
+            if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                maskedBytes = b.CreatePHI(sizeTy, 2);
+                maskedBytes->addIncoming(mallocBytes, entry);
+                maskedBytes->addIncoming(allocedBytes, allocateNewBuffer);
+            }
 
             BasicBlock * const hasDataToCopy = b.CreateBasicBlock("hasDataToCopy");
             BasicBlock * const maskedInputLoop = BasicBlock::Create(C, "maskInputLoop", maskInput);
@@ -444,8 +477,17 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             b.CreateCondBr(notDone, maskedInputLoop, maskedInputExit);
 
             b.SetInsertPoint(maskedInputExit);
-            b.CreateRet(b.CreatePointerCast(maskedAddress, int8PtrTy));
 
+            Value * const retAddress = b.CreatePointerCast(maskedAddress, int8PtrTy);
+
+            if (LLVM_UNLIKELY(mCheckStreamSets)) {
+                FixedArray<Value *, 2> fields;
+                fields[0] = retAddress;
+                fields[1] = maskedBytes;
+                b.CreateAggregateRet(fields.data(), 2);
+            } else {
+                b.CreateRet(retAddress);
+            }
             b.restoreIP(ip);
         }
 
@@ -460,6 +502,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
         args[1] = itemsPerSegment;
         Value * processed = nullptr;
+
+
+
         Value * max = mCurrentProcessedItemCountPhi[inputPort];
         if (port.isDeferred()) {
             processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
@@ -479,16 +524,32 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
 
         Value * const capacity = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], itemsPerSegment);
 
-        Value * const maskedAddress = b.CreatePointerCast(b.CreateCall(maskInput->getFunctionType(), maskInput, args), bufferType);
+        Value * const maskVal = b.CreateCall(maskInput->getFunctionType(), maskInput, args);
+
+        Value * maskedAddress = maskVal;
+        Value * maskedCapacity = nullptr;
+        if (LLVM_UNLIKELY(mCheckStreamSets)) {
+            maskedAddress = b.CreateExtractValue(maskVal, {0});
+            Value * const maskedBytes = b.CreateExtractValue(maskVal, {1});
+            const auto & DL = m->getDataLayout();
+            const auto ts = b.getTypeSize(DL, buffer->getType());
+            maskedCapacity = b.CreateMulRational(maskedBytes, Rational{b.getBitBlockWidth(), ts});
+            maskedCapacity = b.CreateAdd(processed, maskedCapacity);
+        }
+        assert (maskedAddress->getType()->isPointerTy());
+        maskedAddress = b.CreatePointerCast(maskedAddress, bufferType);
         BasicBlock * const maskedInputLoopExit = b.GetInsertBlock();
         b.CreateBr(selectedInput);
 
         b.SetInsertPoint(selectedInput);
-        PHINode * const inputCapacityPhi = b.CreatePHI(sizeTy, 2);
-        if (!alwaysTruncate) {
-            inputCapacityPhi->addIncoming(inputCapacity[inputPort.Number], entryBlock);
+        if (LLVM_UNLIKELY(mCheckStreamSets)) {
+            PHINode * const inputBufferCapacityPhi = b.CreatePHI(sizeTy, 2, "truncatedBufferCapacityPhi");
+            if (!alwaysTruncate) {
+                inputBufferCapacityPhi->addIncoming(inputBufferCapacity[inputPort.Number], entryBlock);
+            }
+            inputBufferCapacityPhi->addIncoming(maskedCapacity, maskedInputLoopExit);
+            inputBufferCapacity[inputPort.Number] = inputBufferCapacityPhi;
         }
-        inputCapacityPhi->addIncoming(capacity, maskedInputLoopExit);
 
         PHINode * const baseAddrPhi = b.CreatePHI(bufferType, 2);
         if (!alwaysTruncate) {
@@ -496,7 +557,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         }
         baseAddrPhi->addIncoming(maskedAddress, maskedInputLoopExit);
 
-        inputCapacity[inputPort.Number] = inputCapacityPhi;
         inputBaseAddresses[inputPort.Number] = baseAddrPhi;
     }
     #endif

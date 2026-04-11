@@ -7,10 +7,6 @@ constexpr auto DefaultByteCClimit = 6;
 
 namespace grep {
 
-int Threads;
-static cl::opt<int, true> OptThreads("t", cl::location(Threads),
-                                     cl::desc("Total number of threads."), cl::init(2));
-
 bool UnicodeIndexing;
 static cl::opt<bool, true> OptUnicodeIndexing("UnicodeIndexing", cl::location(UnicodeIndexing),
                                               cl::desc("Enable CC multiplexing and Unicode indexing."), cl::init(false));

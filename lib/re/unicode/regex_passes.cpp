@@ -55,14 +55,6 @@ RE * resolveModesAndExternalSymbols(RE * r, bool globallyCaseInsensitive, GrepLi
     return r;
 }
 
-RE * excludeUnicodeLineBreak(RE * r) {
-    r = exclude_CC(r, re::makeCC(re::makeCC(0x0A, 0x0D), re::makeCC(re::makeCC(0x85), re::makeCC(0x2028, 0x2029))));
-    if (PrintOptionIsSet(ShowAllREs)) {
-        errs() << "excludeUnicodeLineBreak:\n" << Printer_RE::PrintRE(r) << '\n';
-    }
-    return r;
-}
-
 RE * remove_nullable_ends(RE * re) {
     RE * r = re;
     r = removeNullablePrefix(r);
@@ -80,7 +72,6 @@ RE * regular_expression_passes(RE * re) {
         r = simplifyRE(r);
     }
     r = resolveDiffs(r);
-    r = resolveAnchors(r, makeAlt());
     return r;
 }
 

@@ -437,7 +437,7 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
     for (unsigned i = 0; i < n; ++i) {
         const Binding & output = mOutputStreamSets[i];
         Type * const handleTy = mStreamSetOutputBuffers[i]->getHandleType(b);
-        assert (handleTy && !handleTy->isPointerTy());
+        assert (handleTy && !handleTy->isPointerTy() && &handleTy->getContext() == &b.getContext());
         const auto isLocal = Kernel::isLocalBuffer(output);
         if (LLVM_UNLIKELY(isLocal.any())) {
             mTarget->addInternalScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
@@ -451,22 +451,6 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
     } else {
         mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
     }
-
-//    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-
-//        // In multi-threaded mode, given a small file, the pipeline could finish before all of the
-//        // threads are constructed. Since we cannot detect when this occurs without additional
-//        // book keeping and the behaviour is safe, we do not guard against double termination.
-//        // All other kernels are checked to ensure that there are no pipeline errors.
-
-//        if (mTarget->getTypeId() != Kernel::TypeId::Pipeline || mTarget->hasAttribute(AttrId::InternallySynchronized)) {
-//            mTarget->addInternalScalar(sizeTy, TERMINATION_SIGNAL);
-//        } else {
-//            mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
-//        }
-//    } else {
-//        mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
-//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -929,18 +913,19 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         assert (accessible);
         assert (accessible->getType() == sizeTy);
         mAccessibleInputItems[i] = accessible;
-        Value * avail = b.CreateAdd(processed, accessible);
+        /// ----------------------------------------------------
+        /// available
+        /// ----------------------------------------------------
+        Value * const avail = b.CreateAdd(processed, accessible);
         mAvailableInputItems[i] = avail;
-        if (input.hasLookahead()) {
-            avail = b.CreateAdd(avail, b.getSize(input.getLookahead()));
-        }
-        buffer->setCapacity(b, avail);
         /// ----------------------------------------------------
         /// capacity
         /// ----------------------------------------------------
+        Value * capacity = avail;
         if (LLVM_UNLIKELY(checkStreamSet)) {
-            mInputItemCapacity[i] = nextArg();
+            capacity = nextArg(); assert (capacity->getType()->isIntegerTy());
         }
+        buffer->setCapacity(b, capacity);
     }
 
     // set all of the output buffers
@@ -1015,6 +1000,10 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
             mConsumedOutputItems[i] = consumed;
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                mUpdatableOutputCapacityPtr[i] = nextArg();
+                assert (mUpdatableOutputCapacityPtr[i]->getType()->isPointerTy());
+            }
             buffer->freePendingDeletions(b, consumed);
             writable = buffer->getLinearlyWritableItems(b, produced, consumed);
             assert (writable && writable->getType() == sizeTy);
@@ -1026,20 +1015,18 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
                 writable = b.CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
                 assert (writable && writable->getType() == sizeTy);
             }
-            Value * capacity = nullptr;
-            if (writable) {
-                capacity = b.CreateAdd(produced, writable);
-                buffer->setCapacity(b, capacity);
-            } else {
-                capacity = ConstantExpr::getNeg(b.getSize(1));
-                buffer->setCapacity(b, capacity);
-            }
             /// ----------------------------------------------------
             /// capacity
             /// ----------------------------------------------------
+            Value * capacity = nullptr;
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                mOutputItemCapacity[i] = nextArg();
+                capacity = nextArg(); assert (capacity->getType()->isIntegerTy());
+            } else if (writable) {
+                capacity = b.CreateAdd(produced, writable);
+            } else {
+                capacity = ConstantInt::getAllOnesValue(sizeTy);
             }
+            buffer->setCapacity(b, capacity);
         }
         mWritableOutputItems[i] = writable;
     }
@@ -1136,11 +1123,8 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         if (isMainPipeline || requiresItemCount(input)) {
             props.push_back(mAccessibleInputItems[i]);
         }
-        /// ----------------------------------------------------
-        /// capacity
-        /// ----------------------------------------------------
         if (LLVM_UNLIKELY(checkStreamSet)) {
-            props.push_back(mInputItemCapacity[i]);
+            props.push_back(buffer->getCapacity(b));
         }
     }
 
@@ -1182,15 +1166,15 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         if (LLVM_UNLIKELY(isLocal.any())) {
             props.push_back(mConsumedOutputItems[i]);
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                props.push_back(mUpdatableOutputCapacityPtr[i]);
+            }
         } else {
             if (isMainPipeline || requiresItemCount(output)) {
                 props.push_back(mWritableOutputItems[i]);
             }
-            /// ----------------------------------------------------
-            /// capacity
-            /// ----------------------------------------------------
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                props.push_back(mOutputItemCapacity[i]);
+                props.push_back(buffer->getCapacity(b));
             }
         }
     }
@@ -1257,6 +1241,11 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));
 
             b.CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
+        }
+        if (LLVM_UNLIKELY(mUpdatableOutputCapacityPtr[i])) {
+            assert (isFromCurrentFunction(b, mUpdatableOutputCapacityPtr[i], true));
+            Value * const capacity = buffer->getCapacity(b);
+            b.CreateStore(capacity, mUpdatableOutputCapacityPtr[i]);
         }
     }
 
@@ -2387,14 +2376,13 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     reset(mProcessedInputItemPtr, numOfInputs);
     reset(mAccessibleInputItems, numOfInputs);
     reset(mAvailableInputItems, numOfInputs);
-    reset(mInputItemCapacity, numOfInputs);
     const auto numOfOutputs = getNumOfStreamOutputs();
     reset(mProducedOutputItemPtr, numOfOutputs);
     reset(mInitiallyProducedOutputItems, numOfOutputs);
     reset(mWritableOutputItems, numOfOutputs);
     reset(mConsumedOutputItems, numOfOutputs);
-    reset(mOutputItemCapacity, numOfOutputs);
     reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
+    reset(mUpdatableOutputCapacityPtr, numOfOutputs);
     for (const auto & buffer : mStreamSetInputBuffers) {
         buffer->setHandle(nullptr);
     }

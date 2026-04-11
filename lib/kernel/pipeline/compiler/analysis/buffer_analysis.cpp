@@ -797,12 +797,9 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                 #ifdef TEST_ALL_KERNEL_INPUTS
                 inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 #else
-                if (N.isConstant()) {
-                    inputRate.Flags |= BufferPortType::CanModifySegmentLength;
-                } else if (isPartitionRoot) {
+                if (isPartitionRoot) {
                     inputRate.Flags |= partitionRootIOFlag;
-                }
-                if (!N.IsLinear) {
+                } else if (N.isConstant() || N.isExternal() || !N.IsLinear) {
                     inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 }
                 #endif

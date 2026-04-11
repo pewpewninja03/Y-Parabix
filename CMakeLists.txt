@@ -412,6 +412,7 @@ add_subdirectory(lib/unicode/core)
 add_subdirectory(lib/unicode/data)
 add_subdirectory(lib/unicode/utf)
 add_subdirectory(lib/audio)
+add_subdirectory(lib/csv)
 
 # Kernel Libraries
 add_subdirectory(lib/kernel/basis)

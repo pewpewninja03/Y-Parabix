@@ -108,7 +108,6 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
-    unsigned RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Matches);
 
 protected:
     bool matchesToEOLrequired();
@@ -116,9 +115,10 @@ protected:
     // Implement any required checking/processing of null characters, determine the
     // basis streams, line break stream and the U8 index stream (if required).
     void grepPrologue(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
-    kernel::StreamSet * initialMatches(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
-    kernel::StreamSet * matchedLines(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
-    kernel::StreamSet * grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * initialMatches(RE_PipelineBuilder & RE_PB, kernel::StreamSet * Source);
+    kernel::StreamSet * matchedLines(kernel::PipelineBuilder & P, kernel::StreamSet * matches, kernel::StreamSet * linebreaks);
+    kernel::StreamSet * applyMatchLimit(kernel::PipelineBuilder & P, kernel::StreamSet * matched);
+    kernel::StreamSet * grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * Source);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
     void applyColorization(kernel::PipelineBuilder & E,
@@ -168,6 +168,7 @@ protected:
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mU21;
+    kernel::StreamSet * mU21_LB;
     std::vector<std::string> mSpanNames;
     re::UTF8_Transformer mUTF8_Transformer;
     pthread_t mEngineThread;
