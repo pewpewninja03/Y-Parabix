@@ -168,4 +168,20 @@ private:
     const std::vector<re::CC *> mTransitionCCs;
     StreamSet * mIndexStrm;
 };
+
+//
+//  Give a stream marking breaks (e.g. linebreaks), determine which
+//  represent empty strings, i.e., breaks which immediately follow
+//  a prior break or a break at the beginning of the stream.
+//  If the index stream is non-null, 1 bits in the index mark
+//  full character positions.
+//
+class FindEmptyBreaks : public pablo::PabloKernel {
+public:
+    FindEmptyBreaks(LLVMTypeSystemInterface & ts, StreamSet * breaks, StreamSet * empties, StreamSet * index = nullptr);
+protected:
+    void generatePabloMethod() override;
+private:
+    StreamSet * mIndexStrm;
+};
 }

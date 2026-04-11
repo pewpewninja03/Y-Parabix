@@ -742,7 +742,9 @@ Marker RE_Block_Compiler::processUnboundedRep(RE * const repeated, Marker marker
 }
 
 inline Marker RE_Block_Compiler::compileStart(Marker marker) {
-    PabloAST * SOT = mPB.createNot(mPB.createAdvance(mPB.createNot(mMain.mBarrier), 1), "SOT");
+    PabloAST * notBarrier = mPB.createNot(mMain.mBarrier);
+    PabloAST * barrierFollow = mPB.createNot(mPB.createAdvance(notBarrier, 1));
+    PabloAST * SOT = mPB.createAnd(barrierFollow, notBarrier, "SOT");
     return Marker(SOT, Position::AtNextCodeUnit);
 }
 

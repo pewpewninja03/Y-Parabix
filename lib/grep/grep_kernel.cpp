@@ -411,3 +411,29 @@ void MaskSelfTransitions::generatePabloMethod() {
     }
     pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
 }
+
+
+FindEmptyBreaks::FindEmptyBreaks(LLVMTypeSystemInterface & ts, StreamSet * breaks, StreamSet * empties, StreamSet * index)
+: PabloKernel(ts, index == nullptr ? "FindEmptyBreaks" : "FindEmptyBreaks+x",
+              {Binding{"breaks", breaks}},
+              {Binding{"empties", empties}}), mIndexStrm(nullptr) {
+                  if (index != nullptr) {
+                      mInputStreamSets.push_back(Binding{"index", index});
+                      mIndexStrm = index;
+                  }
+              }
+
+void FindEmptyBreaks::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * breaks = getInputStreamSet("breaks")[0];
+    PabloAST * advBreaks = nullptr;
+    if (mIndexStrm) {
+        PabloAST * index = getInputStreamSet("index")[0];
+        PabloAST * nonBreaks = pb.createAnd(pb.createNot(breaks), index);
+        advBreaks = pb.createAnd(pb.createNot(pb.createIndexedAdvance(nonBreaks, index, 1)), index);
+    } else {
+        advBreaks = pb.createNot(pb.createAdvance(pb.createNot(breaks), 1));
+    }
+    PabloAST * empties = pb.createAnd(advBreaks, breaks);
+    writeOutputStreamSet("empties", std::vector<PabloAST*>{empties});
+}

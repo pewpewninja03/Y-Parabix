@@ -219,23 +219,27 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos);
     SHOW_STREAM(Selected);
 
+
     StreamSet * Matches = P.CreateStreamSet(1);
+    StreamSet * Barrier = P.CreateStreamSet(1);
+    P.CreateKernelCall<RegexBarrier>(csvCCs, fieldSeparators, Selected, Barrier);
+    SHOW_STREAM(Barrier);
+
+    ctxt.setBarrier(Barrier);
+    RE_PipelineBuilder RE_PB(P, ctxt);
+    RE_PB.matchSearchPipeline(searchRE, Matches);
+
     if (re::matchesEmptyString(searchRE)) {
         StreamSet * Empties = P.CreateStreamSet(1);
         csv::GetEmptyFields(P, csvCCs, fieldSeparators, Empties);
-        AndCombine(P, Empties, Selected, Matches);
-    } else {
-        StreamSet * Barrier = P.CreateStreamSet(1);
-        P.CreateKernelCall<RegexBarrier>(csvCCs, fieldSeparators, Selected, Barrier);
-        SHOW_STREAM(Barrier);
-
-        ctxt.setBarrier(Barrier);
-        RE_PipelineBuilder RE_PB(P, ctxt);
-        RE_PB.matchSearchPipeline(searchRE, Matches);
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("Matches", Matches);
-        }
+        SHOW_STREAM(Empties);
+        StreamSet * emptyMatches = P.CreateStreamSet(1);
+        AndCombine(P, Empties, Selected, emptyMatches);
+        StreamSet * combined = P.CreateStreamSet(1);
+        OrCombine(P, Matches, emptyMatches, combined);
+        Matches = combined;
     }
+
     StreamSet * MatchedLineEnds = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<MatchedLinesKernel>(Matches, recordSeparators, MatchedLineEnds);
     
