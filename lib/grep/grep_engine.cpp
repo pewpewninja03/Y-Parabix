@@ -21,6 +21,7 @@
 #include <re/unicode/regex_passes.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/core/idisa_target.h>
 #include <kernel/core/streamset.h>
 #include <kernel/core/kernel_builder.h>
@@ -161,6 +162,9 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
     mU8index(nullptr),
+    mEmptyMatches(nullptr),
+    mU21(nullptr),
+    mU21_LB(nullptr),
     mEngineThread(pthread_self()) {
 
     }
@@ -378,12 +382,12 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         } else {
             StreamSet * u21_u8indexed = P.CreateStreamSet(21);
             P.CreateKernelCall<UTF8_Decoder>(Source, u21_u8indexed);
-            StreamSet * u21 = P.CreateStreamSet(21);
-            FilterByMask(P, mU8index, u21_u8indexed, u21);
+            StreamSet * mU21 = P.CreateStreamSet(21);
+            FilterByMask(P, mU8index, u21_u8indexed, mU21);
             if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-                P.captureBixNum("u21basis", u21);
+                P.captureBixNum("u21basis", mU21);
             }
-            mCtxt.setCodeUnitContext(mIndexAlphabet, u21);
+            mCtxt.setCodeUnitContext(mIndexAlphabet, mU21);
         }
         mU21_LB = P.CreateStreamSet(1);
         FilterByMask(P, mU8index, mLineBreakStream, mU21_LB);
@@ -392,12 +396,28 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         }
         mCtxt.setBarrier(mU21_LB);
     }
+    if (re::matchesEmptyString(mRE)) {
+        mEmptyMatches = P.CreateStreamSet(1);
+        if (mIndexAlphabet == &cc::UTF8) {
+            P.CreateKernelCall<FindEmptyBreaks>(mLineBreakStream, mEmptyMatches, mU8index);
+        } else {
+            P.CreateKernelCall<FindEmptyBreaks>(mU21_LB, mEmptyMatches);
+        }
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("mEmptyMatches", mEmptyMatches);
+        }
+    }
 }
 
 StreamSet * GrepEngine::initialMatches(RE_PipelineBuilder & RE_PB, StreamSet * InputStream) {
     kernel::PipelineBuilder & P = RE_PB.getPipelineBuilder();
     StreamSet * Matches = P.CreateStreamSet();
     RE_PB.matchSearchPipeline(mRE, Matches);
+    if (mEmptyMatches) {
+        StreamSet * combined = P.CreateStreamSet();
+        OrCombine(P, Matches, mEmptyMatches, combined);
+        Matches = combined;
+    }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         P.captureBitstream("initial matches", Matches);
     }
@@ -458,9 +478,9 @@ StreamSet * GrepEngine::applyMatchLimit(kernel::PipelineBuilder & P, StreamSet *
 
 StreamSet * GrepEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * InputStream) {
     grepPrologue(P, InputStream);
+    StreamSet * lbs = (mIndexAlphabet == &cc::Unicode) ? mU21_LB : mLineBreakStream;
     RE_PipelineBuilder RE_PB(P, mCtxt);
     StreamSet * Matches = initialMatches(RE_PB, InputStream);
-    StreamSet * lbs = (mIndexAlphabet == &cc::Unicode) ? mU21_LB : mLineBreakStream;
     StreamSet * matches = matchedLines(P, Matches, lbs);
     return applyMatchLimit(P, matches);
 }
@@ -687,6 +707,11 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureBitstream("Matches", Matches);
         }
+    }
+    if (mEmptyMatches) {
+        StreamSet * combined = P.CreateStreamSet();
+        OrCombine(P, Matches, mEmptyMatches, combined);
+        Matches = combined;
     }
 
     StreamSet * lbs = (mIndexAlphabet == &cc::Unicode) ? mU21_LB : mLineBreakStream;

@@ -81,7 +81,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
 
     StreamSet * Selected = P.CreateStreamSet(1);
-    csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos);
+    csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos, /*forCut = */ true);
     SHOW_STREAM(Selected);
 
     StreamSet * Filtered = P.CreateStreamSet(1, 8);
