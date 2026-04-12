@@ -752,9 +752,10 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     #endif
 
     Value * accessible = b.CreateSub(available, processed);
-    if (LLVM_UNLIKELY(port.Add > 0)) {
+    if (LLVM_UNLIKELY(port.Add != 0)) {
         Value * const closed = isClosed(b, streamSet);
-        Value * const addedItems = b.CreateSelect(closed, b.getSize(port.Add), b.getSize(0));
+        Value * ifClosed = b.CreateAdd(available, b.getSize(port.Add));
+        Value * const addedItems = b.CreateSelect(closed, ifClosed, b.getSize(0));
         accessible = b.CreateAdd(accessible, addedItems);
     }
 
@@ -1178,7 +1179,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
         const BufferPort & port = mBufferGraph[e];
         assert (port.Port.Type == PortType::Input);
         Value * accessible = getAccessibleInputItems(b, port);
-        const int k = port.Add - port.Truncate;
+        const int k = port.Add;
         if (LLVM_UNLIKELY(k != 0)) {
             Value * selected;
             if (LLVM_LIKELY(k > 0)) {
@@ -1286,7 +1287,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                 assert (rate.isFixed());
                 const auto factor = rate.getRate() / mFixedRateLCM;
                 Value * calculated = b.CreateCeilUMulRational(minFixedRateFactor, factor);
-                const auto k = port.TransitiveAdd;
+                const auto k = port.Add;
 
                 // ... but ensure that it reflects whether it was produced with an
                 // Add/Truncate attributed rate.
@@ -1344,15 +1345,12 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             writable = calculateNumOfLinearItems(b, port, sz_ONE, "calculateFinal");
         }
 
-        const auto k = port.TransitiveAdd;
-        if (k) {
-            if (k > 0) {
-                writable = b.CreateAdd(writable, b.getSize(k));
-            } else {
-                writable = b.CreateUnsignedSaturatingSub(writable, b.getSize(-k));
-            }
+        const auto k = port.Add;
+        if (k > 0) {
+            writable = b.CreateAdd(writable, b.getSize(k));
+        } else if (k < 0) {
+            writable = b.CreateUnsignedSaturatingSub(writable, b.getSize(-k));
         }
-
         // update the final item counts with any Add/RoundUp attributes
         for (const Attribute & attr : output.getAttributes()) {
             switch (attr.getKind()) {
@@ -1768,14 +1766,15 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
             b.CreateBlockAlignedStore(splat, ptr);
         }
 
+        ConstantInt * const sz_maxStepFactor = b.getSize(spanLength * stepsPerBlock);
+
+        Value * const final = b.CreateRoundUp(b.CreateAdd(produced, sz_stepsPerBlock), sz_maxStepFactor);
+
         #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
-        debugPrint(b, "  < splatting %" PRIu64 " across %" PRIu64 " -> %" PRIu64 "\n",
-                   total, produced, b.CreateAdd(produced, b.getSize(spanLength * stepsPerBlock)));
+        debugPrint(b, "  < splatting %" PRIu64 " across %" PRIu64 " -> %" PRIu64 "\n", total, produced, final);
         #endif
 
-        ConstantInt * const sz_maxStepFactor = b.getSize(spanLength * stepsPerBlock);
-        Value * prod = b.CreateRoundUp(b.CreateAdd(produced, sz_maxStepFactor), sz_maxStepFactor);
-        mProducedAtTermination[outputPort.Port] = prod;
+        mProducedAtTermination[outputPort.Port] = final;
     }
 
 }

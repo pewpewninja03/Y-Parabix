@@ -312,7 +312,7 @@ struct BufferNode {
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
     unsigned LookBehind = 0;
-    unsigned MaxAdd = 0;
+    unsigned RequiredOverflowSpace = 0;
 
     unsigned NumOfOverflowStrides = 0;
 
@@ -448,16 +448,12 @@ struct BufferPort {
     double LayerBoundaryRestriction = 0.0;
 
     // binding attributes
-    unsigned Add = 0;
-    unsigned Truncate = 0;
-    unsigned Delay = 0;
-    unsigned LookAhead = 0;
-    unsigned LookBehind = 0;
-    unsigned EmptyOverflow = 0;
-
-    //bool mCanModifySegmentLength = false;
-
-    int TransitiveAdd = 0;
+    int Add = 0;
+    int OverflowSlackSpace = 0;
+    int Delay = 0;
+    int LookAhead = 0;
+    int LookBehind = 0;
+    int EmptyOverflow = 0;
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;

@@ -678,7 +678,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b, V
         if (LLVM_LIKELY(rate.isFixed() || rate.isPartialSum() || rate.isGreedy() || mAllowDataParallelExecution)) {
 
             Value * inputItems = mCurrentLinearInputItems[inputPort];
-            if (LLVM_UNLIKELY(rejectedTermSignal && port.TransitiveAdd > 0 && rate.isFixed())) {
+            if (LLVM_UNLIKELY(rejectedTermSignal && port.Add != 0 && rate.isFixed())) {
                 inputItems = revertTransitiveAddCalculation(b, rate, inputItems, rejectedTermSignal);
             }
             processed = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], inputItems);

@@ -308,8 +308,8 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         if (bn.LookBehind) {
             out << "|LB:" << bn.LookBehind;
         }
-        if (bn.MaxAdd) {
-            out << "|+" << bn.MaxAdd;
+        if (bn.RequiredOverflowSpace) {
+            out << "|+" << bn.RequiredOverflowSpace;
         }
 
         #endif
@@ -618,8 +618,13 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         if (port.isShared()) {
             out << " [S]";
         }
-        if (port.TransitiveAdd) {
-            out << " +" << port.TransitiveAdd;
+        if (port.Add) {
+            if (port.Add > 0) {
+                out << " +";
+            } else {
+                out << ' ';
+            }
+            out << port.Add;
         }
         if (isZeroExtended) {
             if (port.isZeroExtended()) {

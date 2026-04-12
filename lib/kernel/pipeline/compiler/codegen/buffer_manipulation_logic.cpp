@@ -245,7 +245,9 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
         Value * const selected = accessibleItems[inputPort.Number];
+        b.CallPrintInt("selected", selected);
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
+        b.CallPrintInt("totalNumOfItems", totalNumOfItems);
 
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
@@ -256,15 +258,27 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             const auto flags = port.Flags & ALLFLAGS; assert (flags);
             if (flags == ALLFLAGS) {
                 Value * const exactMatch = b.CreateICmpNE(selected, totalNumOfItems);
+                b.CallPrintInt("exactMatch", exactMatch);
                 b.CreateUnlikelyCondBr(exactMatch, maskedInput, selectedInput);
             } else if (flags == BufferPortType::InputMayBeTruncated) {
+                Value * total = totalNumOfItems;
+                if (bn.RequiredOverflowSpace > 0) {
+                    assert (port.OverflowSlackSpace <= bn.RequiredOverflowSpace);
+                    total = b.CreateAdd(total, b.getSize(bn.RequiredOverflowSpace - port.OverflowSlackSpace));
+                }
                 Value * tooMany = b.CreateICmpULT(selected, totalNumOfItems);
                 if (mIsInputZeroExtended[inputPort]) {
                     tooMany = b.CreateAnd(tooMany, b.CreateNot(mIsInputZeroExtended[inputPort]));
                 }
+                b.CallPrintInt("tooMany", tooMany);
                 b.CreateUnlikelyCondBr(tooMany, maskedInput, selectedInput);
             } else {
-                Value * tooFew = b.CreateICmpUGT(selected, totalNumOfItems);
+                Value * total = totalNumOfItems;
+                if (bn.RequiredOverflowSpace > 0) {
+                    total = b.CreateAdd(total, b.getSize(port.OverflowSlackSpace));
+                }
+                Value * tooFew = b.CreateICmpUGT(selected, total);
+                b.CallPrintInt("tooFew", tooFew);
                 b.CreateUnlikelyCondBr(tooFew, maskedInput, selectedInput);
             }
         }
@@ -698,16 +712,14 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
 
         // Zero out any blocks we could potentially touch
         const BufferPort & rd = mBufferGraph[e];
-        auto strideLength = rd.Maximum + rd.Add;
+        auto strideLength = rd.Maximum;
         for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const BufferPort & rd = mBufferGraph[e];
-            const auto d = std::max(rd.LookAhead, rd.Add);
-            const auto r = rd.Maximum + d;
-            strideLength = std::max(strideLength, r);
+            strideLength = std::max(strideLength, rd.Maximum);
         }
+        strideLength += bn.RequiredOverflowSpace;
 
         const auto blocksToZero = ceiling(Rational{strideLength.numerator(), blockWidth * strideLength.denominator()});
-
 
         if (blocksToZero > 1) {
             Value * const nextBlockIndex = b.CreateAdd(blockIndex, ONE);

@@ -373,7 +373,7 @@ public:
     Value * hasPipelineTerminated(KernelBuilder & b);
     void signalAbnormalTermination(KernelBuilder & b);
     LLVM_READNONE static Constant * getTerminationSignal(KernelBuilder & b, const TerminationSignal type);
-
+    void calculateTerminatedProducedItemCounts(KernelBuilder & b);
     void readCountableItemCountsAfterAbnormalTermination(KernelBuilder & b);
     void propagateTerminationSignal(KernelBuilder & b);
     void verifyPostInvocationTerminationSignal(KernelBuilder & b);

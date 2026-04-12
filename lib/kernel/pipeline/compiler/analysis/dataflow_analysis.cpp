@@ -337,11 +337,14 @@ void PipelineAnalysis::calculatePartialSumStepFactors(KernelBuilder & b) {
                     const auto k = G[e] * StrideRepetitionVector[consumer];
                     maxStepFactor = std::max(maxStepFactor, k);
                 }
-                maxStepFactor = round_up_to(maxStepFactor, stepsPerBlock);
+
+                BufferNode & bn = mBufferGraph[streamSet];
+
+                maxStepFactor = round_up_to(maxStepFactor + bn.RequiredOverflowSpace, stepsPerBlock);
                 const auto spanLength = maxStepFactor / stepsPerBlock;
                 add_edge(kernel, streamSet, spanLength, G);
                 assert (spanLength > 0);
-                BufferNode & bn = mBufferGraph[streamSet];
+
                 bn.PartialSumSpanLength = std::max(bn.PartialSumSpanLength, spanLength + 1);
             }
         }

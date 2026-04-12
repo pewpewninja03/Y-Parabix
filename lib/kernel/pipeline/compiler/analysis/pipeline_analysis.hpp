@@ -71,13 +71,14 @@ public:
         if (P.RequiresIllustratorObject) {
             P.identifyIllustratedStreamSets();
         }
-        P.calculatePartialSumStepFactors(b);
 
         P.estimateInitialBufferSizes(b);
 
         P.makeConsumerGraph();
 
         P.buildZeroInputGraph();
+
+        P.calculatePartialSumStepFactors(b);
 
         P.identifyPortsThatModifySegmentLength();
 

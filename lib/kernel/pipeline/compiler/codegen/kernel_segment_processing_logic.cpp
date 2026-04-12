@@ -201,6 +201,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
+    calculateTerminatedProducedItemCounts(b);
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }

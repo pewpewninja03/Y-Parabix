@@ -149,10 +149,14 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             }
 
             BufferNode & bn = mBufferGraph[streamSet];
+
+            unsigned maxAdd = 0;
+            unsigned maxTruncate = 0;
+
             for (const Attribute & attr : binding.getAttributes()) {
                 switch (attr.getKind()) {
                     case AttrId::Add:
-                        bp.Add = std::max<unsigned>(bp.Add, attr.amount());
+                        maxAdd = std::max<unsigned>(maxAdd, attr.amount());
                         break;
                     case AttrId::Delayed:
                         bp.Delay = std::max<unsigned>(bp.Delay, attr.amount());
@@ -167,7 +171,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::Truncate:
-                        bp.Truncate = std::max<unsigned>(bp.Truncate, attr.amount());
+                        maxTruncate = std::max<unsigned>(maxTruncate, attr.amount());
                         break;
                     case AttrId::Principal:
                         bp.Flags |= BufferPortType::IsPrincipal;
@@ -209,7 +213,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                             assert ((width % fw) == 0);
                             width /= fw;
                         }
-                        bp.EmptyOverflow = std::max(bp.EmptyOverflow, width);
+                        bp.EmptyOverflow = std::max<int>(bp.EmptyOverflow, width);
                         bn.Type |= BufferType::RequiresEmptyOverflow;
                         bn.NumOfOverflowStrides = std::max(bn.NumOfOverflowStrides, 1U);
                         END_SCOPED_REGION
@@ -260,6 +264,8 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                     default: break;
                 }
             }
+
+            bp.Add = (int)maxAdd - (int)maxTruncate;
 
             if (LLVM_UNLIKELY(bn.Type & BufferType::RequiresEmptyOverflow)) {
                 auto id = streamSet;
@@ -888,16 +894,16 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             maxLookBehind = producerRate.LookBehind;
             const auto extra = std::max(producerRate.LookAhead, producerRate.Add);
-            maxOverflow = std::max(maxOverflow, extra);
+            maxOverflow = std::max<int>(maxOverflow, extra);
 
             for (const auto e : make_iterator_range(out_edges(id, mBufferGraph))) {
 
                 const BufferPort & consumerRate = mBufferGraph[e];
 
-                maxLookBehind = std::max(maxLookBehind, consumerRate.LookBehind);
+                maxLookBehind = std::max<int>(maxLookBehind, consumerRate.LookBehind);
                 const auto extra = std::max(consumerRate.LookAhead, consumerRate.Add);
-                maxOverflow = std::max(maxOverflow, extra);
-                maxOverflow = std::max(maxOverflow, bn.PartialSumSpanLength);
+                maxOverflow = std::max<int>(maxOverflow, extra);
+                maxOverflow = std::max<int>(maxOverflow, bn.PartialSumSpanLength);
             }
 
             if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
@@ -1098,7 +1104,7 @@ void PipelineAnalysis::buildZeroInputGraph() {
                         assert ("multiple principal rates is not allowed" && !other.isPrincipal());
 
 
-                        if (other.isFixed() && ((other.TransitiveAdd != port.TransitiveAdd))) {
+                        if (other.isFixed() && ((other.Add != port.Add))) {
                             if (LLVM_UNLIKELY(other.Port.Reason != ReasonType::Explicit)) {
                                 continue;
                             }
@@ -1108,9 +1114,9 @@ void PipelineAnalysis::buildZeroInputGraph() {
                             if (LLVM_UNLIKELY(N.isConstant() || N.hasZeroElementsOrWidth())) {
                                 continue;
                             }
-                            if (other.TransitiveAdd < port.TransitiveAdd) {
+                            if (other.Add < port.Add) {
                                 other.Flags |= BufferPortType::InputMayBeImplicitlyZeroExtended;
-                            } else { // if (port.TransitiveAdd < other.TransitiveAdd)
+                            } else { // if (port.Add < other.Add)
                                 other.Flags |= BufferPortType::InputMayBeTruncated;
                             }
                             entries.insert(other.Port.Number);

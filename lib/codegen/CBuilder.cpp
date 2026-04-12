@@ -201,7 +201,7 @@ Value * CBuilder::CreateUnsignedSaturatingSub(Value * const a, Value * const b, 
     assert (isFromCurrentFunction(*this, a, false));
     assert (isFromCurrentFunction(*this, b, false));
     assert (a->getType() == b->getType() && a->getType()->isIntOrIntVectorTy());
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(14, 0, 0)
+    #if 0 // LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
     Function * const usubSat = Intrinsic::getDeclaration(getModule(), Intrinsic::usub_sat); assert (usubSat);
     FixedArray<Value *, 2> args;
     args[0] = a;
@@ -209,32 +209,32 @@ Value * CBuilder::CreateUnsignedSaturatingSub(Value * const a, Value * const b, 
     return CreateCall(usubSat, args, Name);
     #else
 
-//    ConstantInt * const cB = dyn_cast<ConstantInt>(b);
-//    if (LLVM_UNLIKELY(cB && cB->isNullValue())) {
-//        return a;
-//    }
-    // TODO: for some reason, LLVM 12 incorrectly handles (a - constant)? The select statement returns the
-    // *signed* saturated value? Even when I inline this, it ends up returning the wrong result so the error is
-    // likely in the backend. Not sure if this bug exists in later versions or if there is a better workaround.
-    Module * const m = getModule();
-//    const char * const name = (cB) ? "__usatsubc" : "__usatsub";
-    const char * const name = "__usatsub";
-    Function * uSatSub = m->getFunction(name);
+    // TODO: for some reason, LLVM 12 incorrectly handles (a - constant)? The select statement returns a - b?
+    // Even when I inline this, it returns the wrong result so the error is likely in the backend.
+    // Similar bug is reported in 2022.
 
+    Module * const m = getModule();
+
+    SmallVector<char, 32> tmp;
+    raw_svector_ostream nm(tmp);
+    nm << "__usatsub";
+    Type * const ty = a->getType();
+    if (LLVM_UNLIKELY(ty->isVectorTy())) {
+        nm << cast<FixedVectorType>(ty)->getNumElements() << 'x' << cast<FixedVectorType>(ty)->getElementType()->getScalarSizeInBits();
+    } else {
+        nm << ty->getScalarSizeInBits();
+    }
+    Function * uSatSub = m->getFunction(nm.str());
     if (uSatSub == nullptr) {
 
         FixedArray<Type *, 2> paramTypes;
-        Type * const ty = a->getType();
         paramTypes[0] = ty;
         paramTypes[1] = ty;
 
         FunctionType * funcTy = FunctionType::get(ty, paramTypes, false);
 
-        Constant * const intZero = ConstantInt::getNullValue(ty);
-
         const auto ip = saveIP();
-        uSatSub = Function::Create(funcTy, Function::InternalLinkage, name, m);
-//        const auto inlineFlag = (cB) ? llvm::Attribute::AttrKind::NoInline : llvm::Attribute::AttrKind::AlwaysInline;
+        uSatSub = Function::Create(funcTy, Function::InternalLinkage, nm.str(), m);
         uSatSub->addFnAttr(llvm::Attribute::AttrKind::NoInline);
 
         BasicBlock * const entry = BasicBlock::Create(getContext(), "entry", uSatSub);
@@ -254,7 +254,7 @@ Value * CBuilder::CreateUnsignedSaturatingSub(Value * const a, Value * const b, 
 
         Value * const c = CreateSub(a, b);
         Value * const d = CreateICmpULT(a, b);
-        CreateRet(CreateSelect(d, intZero, c, Name));
+        CreateRet(CreateSelect(d, ConstantInt::getNullValue(ty), c, Name));
 
         restoreIP(ip);
     }

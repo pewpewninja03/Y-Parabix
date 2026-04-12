@@ -284,6 +284,17 @@ void PipelineCompiler::writeTerminationSignal(KernelBuilder & b, const unsigned 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief calculateTerminatedProducedItemCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::calculateTerminatedProducedItemCounts(KernelBuilder & b) {
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto outputPort = mBufferGraph[e].Port;
+        mProducedAtTermination[outputPort] = mProducedAtTerminationPhi[outputPort];
+    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief readCountableItemCountsAfterAbnormalTermination
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readCountableItemCountsAfterAbnormalTermination(KernelBuilder & b) {
