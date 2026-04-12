@@ -659,7 +659,6 @@ void GrepEngine::applyColorization(PipelineBuilder & P,
         Kernel * const matchK = E.CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
-        return E.makeKernel();
     };
 
 
@@ -675,7 +674,9 @@ void GrepEngine::applyColorization(PipelineBuilder & P,
                                 SideEffecting()
                                 );
 
-        P.AddKernelCall(makeNestedColourizationPipeline(E));
+        makeNestedColourizationPipeline(E);
+
+        P.AddKernelCall(E.makeKernel());
 
     } else {
 
