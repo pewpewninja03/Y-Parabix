@@ -7,6 +7,8 @@
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <unicode/utf/utf_encoder.h>
+#include <unicode/utf/transchar.h>
 
 using StreamSet = kernel::StreamSet;
 using PipelineBuilder = kernel::PipelineBuilder;
@@ -244,3 +246,43 @@ void UpdateBitXfrms(pablo::PabloBuilder & pb,
                     pablo::PabloAST * marker,
                     std::vector<pablo::PabloAST *> & sets,
                     std::vector<BitXfrmSpec> & xfrmSpecs);
+
+// NFD Support
+
+class NFD_BixData {
+public:
+    NFD_BixData();
+    std::vector<re::CC *> NFD_Insertion_BixNumCCs();
+    std::vector<re::CC *> UTF8_Insertion_BixNumCCs();
+    std::vector<re::CC *> UTF8_Deletion_BixNumCCs();
+    unicode::BitTranslationSets NFD_1st_BitXorCCs();
+    unicode::BitTranslationSets NFD_2nd_BitCCs();
+    unicode::BitTranslationSets NFD_3rd_BitCCs();
+    unicode::BitTranslationSets NFD_4th_BitCCs();
+private:
+    UTF_Encoder mU8_encoder;
+    std::unordered_map<codepoint_t, unsigned> mNFD_expansion;
+    std::unordered_map<codepoint_t, unsigned> mUTF8_expansion;
+    std::unordered_map<codepoint_t, unsigned> mUTF8_deletion;
+    unicode::TranslationMap mNFD_CharMap[4];
+    UCD::UnicodeSet mHangul_Precomposed_LV;
+    UCD::UnicodeSet mHangul_Precomposed_LVT;
+};
+
+class NFD_PipelineBuilder {
+public:
+    NFD_PipelineBuilder(PipelineBuilder & P) :
+        mPB(P) {}
+
+    StreamSet * NFD_U21_Pipeline(StreamSet * U21_Basis);
+
+    void DetermineNFD_WorkItems(StreamSet * U8_Basis, StreamSet * u8index, StreamSet * workItems);
+
+    void NFD_FilterStage(StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * WorkingBasis);
+
+    void NFD_U8_Pipeline(StreamSet * WorkingBasis, StreamSet * TransformedBasis);
+
+private:
+    PipelineBuilder & mPB;
+    NFD_BixData NFD_Data;
+};
