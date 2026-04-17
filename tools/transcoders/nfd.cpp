@@ -20,6 +20,7 @@
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
+#include <kernel/streamutils/sentinel.h>
 #include <kernel/streamutils/sorting.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
@@ -425,27 +426,6 @@ void LVT2NFD::generatePabloMethod() {
     }
     writeOutputStreamSet("NFD_Basis", basisVar);
 }
-class Mark_EOF : public pablo::PabloKernel {
-public:
-    Mark_EOF(LLVMTypeSystemInterface & ts, StreamSet * u8index, StreamSet * EOF_mark);
-protected:
-    void generatePabloMethod() override;
-};
-
-Mark_EOF::Mark_EOF (LLVMTypeSystemInterface & ts, StreamSet * u8index, StreamSet * EOF_mark)
-: PabloKernel(ts, "Mark_EOF",
-// inputs
-{Binding{"u8index", u8index}},
-// output
-{Binding{"EOF_mark", EOF_mark}}) {
-}
-
-void Mark_EOF::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("EOF_mark"), pb.getInteger(0)), EOFbit);
-}
-
 //
 //  Given a canonical combining class (CCC) basis stream and the u8final index stream,
 //  identify starts and ends of reorderable character sequences and determine any
@@ -699,7 +679,7 @@ StreamSet * DetermineNFD_WorkItems(PipelineBuilder & P, NFD_BixData & NFD_Data, 
         SHOW_BIXNUM(CCC_Basis);
 
         StreamSet * EOF_mark = P.CreateStreamSet(1, 1);
-        P.CreateKernelCall<Mark_EOF>(u8index, EOF_mark);
+        P.CreateKernelCall<EOFbit>(u8index, EOF_mark);
         SHOW_STREAM(EOF_mark);
 
         StreamSet * CCC_SeqMarks = P.CreateStreamSet(1, 1);

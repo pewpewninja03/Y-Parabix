@@ -28,7 +28,7 @@ void AddSentinel::generatePabloMethod() {
 }
 
 EOFbit::EOFbit(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
-: PabloKernel(ts, "EOFbit" + std::to_string(input->getNumElements()) + "x" + std::to_string(input->getFieldWidth()),
+: PabloKernel(ts, "EOFbit" + input->shapeString(),
 {Binding{"input", input}},
 {Binding{"output", output, FixedRate(), Add1()}}) {
     assert (output->getFieldWidth() == 1);
