@@ -245,9 +245,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
         Value * const selected = accessibleItems[inputPort.Number];
-        b.CallPrintInt("selected", selected);
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
-        b.CallPrintInt("totalNumOfItems", totalNumOfItems);
 
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
@@ -258,7 +256,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             const auto flags = port.Flags & ALLFLAGS; assert (flags);
             if (flags == ALLFLAGS) {
                 Value * const exactMatch = b.CreateICmpNE(selected, totalNumOfItems);
-                b.CallPrintInt("exactMatch", exactMatch);
                 b.CreateUnlikelyCondBr(exactMatch, maskedInput, selectedInput);
             } else if (flags == BufferPortType::InputMayBeTruncated) {
                 Value * total = totalNumOfItems;
@@ -270,7 +267,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
                 if (mIsInputZeroExtended[inputPort]) {
                     tooMany = b.CreateAnd(tooMany, b.CreateNot(mIsInputZeroExtended[inputPort]));
                 }
-                b.CallPrintInt("tooMany", tooMany);
                 b.CreateUnlikelyCondBr(tooMany, maskedInput, selectedInput);
             } else {
                 Value * total = totalNumOfItems;
@@ -278,7 +274,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
                     total = b.CreateAdd(total, b.getSize(port.OverflowSlackSpace));
                 }
                 Value * tooFew = b.CreateICmpUGT(selected, total);
-                b.CallPrintInt("tooFew", tooFew);
                 b.CreateUnlikelyCondBr(tooFew, maskedInput, selectedInput);
             }
         }
@@ -627,7 +622,6 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
 
         Value * const numOfStreams = buffer->getStreamSetCount(b);
 
-
         const BufferPort & rt = mBufferGraph[e];
         assert (rt.Port.Type == PortType::Output);
         const auto port = rt.Port;
@@ -653,14 +647,15 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
             maskOffset = b.CreateAnd(position, BLOCK_MASK);
         }
         Value * const mask = b.CreateNot(b.bitblock_mask_from(maskOffset));
-        BasicBlock * const maskLoop = b.CreateBasicBlock(prefix + "_zeroUnwrittenLoop", mKernelLoopExit);
-        BasicBlock * const maskExit = b.CreateBasicBlock(prefix + "_zeroUnwrittenExit", mKernelLoopExit);
-
 
         Value * const baseAddress = buffer->getBaseAddress(b);
 
         DataLayout DL(b.getModule());
         Type * const intPtrTy = DL.getIntPtrType(baseAddress->getType());
+
+
+        BasicBlock * const maskLoop = b.CreateBasicBlock(prefix + "_zeroUnwrittenLoop", mKernelLoopExit);
+        BasicBlock * const maskExit = b.CreateBasicBlock(prefix + "_zeroUnwrittenExit", mKernelLoopExit);
 
         BasicBlock * const entry = b.GetInsertBlock();
         b.CreateCondBr(b.CreateICmpNE(maskOffset, sz_ZERO), maskLoop, maskExit);
@@ -681,61 +676,80 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
         #endif
         Value * const value = b.CreateBlockAlignedLoad(mask->getType(), inputPtr);
         Value * const maskedValue = b.CreateAnd(value, mask);
+        b.CreateBlockAlignedStore(maskedValue, inputPtr);
 
-        Value * outputPtr = inputPtr;
-        if (LLVM_UNLIKELY(bn.isTruncated())) {
+        const auto isUnary = isa<ConstantInt>(numOfStreams) && cast<ConstantInt>(numOfStreams)->isOne();
+
+        if (isUnary) {
+            b.CreateBr(maskExit);
+        } else {
+
             if (itemWidth > 1) {
-                outputPtr = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, packIndex);
-            } else {
-                outputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndexPhi, blockIndex);
+                // Since packs are laid out sequentially in memory, it will hopefully be cheaper to zero them out here
+                // because they may be within the same cache line.
+                Value * const nextPackIndex = b.CreateAdd(packIndex, ONE);
+                Value * const start = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, nextPackIndex);
+                Value * const startInt = b.CreatePtrToInt(start, intPtrTy);
+                Value * const end = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, ITEM_WIDTH);
+                Value * const endInt = b.CreatePtrToInt(end, intPtrTy);
+                Value * const remainingPackBytes = b.CreateSub(endInt, startInt);
+                #ifdef PRINT_DEBUG_MESSAGES
+                #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
+                debugPrint(b, prefix + "_zeroUnwritten_clearRange = [0x%" PRIx64 ",0x%" PRIx64 ")", startInt, endInt);
+                #endif
+                debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingPackBytes);
+                #endif
+                b.CreateMemZero(start, remainingPackBytes, blockWidth / 8);
             }
+
+            Value * const nextStreamIndex = b.CreateAdd(streamIndexPhi, ONE);
+            streamIndexPhi->addIncoming(nextStreamIndex, b.GetInsertBlock());
+            Value * const notDone = b.CreateICmpNE(nextStreamIndex, numOfStreams);
+            b.CreateCondBr(notDone, maskLoop, maskExit);
+
         }
-        b.CreateBlockAlignedStore(maskedValue, outputPtr);
-        if (itemWidth > 1) {
-            // Since packs are laid out sequentially in memory, it will hopefully be cheaper to zero them out here
-            // because they may be within the same cache line.
-            Value * const nextPackIndex = b.CreateAdd(packIndex, ONE);
-            Value * const start = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, nextPackIndex);
-            Value * const startInt = b.CreatePtrToInt(start, intPtrTy);
-            Value * const end = buffer->getStreamPackPtr(b, baseAddress, streamIndexPhi, blockIndex, ITEM_WIDTH);
-            Value * const endInt = b.CreatePtrToInt(end, intPtrTy);
-            Value * const remainingPackBytes = b.CreateSub(endInt, startInt);
-            b.CreateMemZero(start, remainingPackBytes, blockWidth / 8);
-        }
-        BasicBlock * const maskLoopExit = b.GetInsertBlock();
-        Value * const nextStreamIndex = b.CreateAdd(streamIndexPhi, ONE);
-        streamIndexPhi->addIncoming(nextStreamIndex, maskLoopExit);
-        Value * const notDone = b.CreateICmpNE(nextStreamIndex, numOfStreams);
-        b.CreateCondBr(notDone, maskLoop, maskExit);
 
         b.SetInsertPoint(maskExit);
 
         // Zero out any blocks we could potentially touch
-        const BufferPort & rd = mBufferGraph[e];
-        auto strideLength = rd.Maximum;
-        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const BufferPort & rd = mBufferGraph[e];
-            strideLength = std::max(strideLength, rd.Maximum);
-        }
-        strideLength += bn.RequiredOverflowSpace;
+        const auto blocksPerStride = ceiling(Rational{rt.Maximum.numerator() * StrideStepLength[mKernelId], rt.Maximum.denominator() * blockWidth});
+        assert (blocksPerStride > 0);
+        const auto blocksToZero = blocksPerStride + bn.NumOfOverflowStrides;
 
-        const auto blocksToZero = ceiling(Rational{strideLength.numerator(), blockWidth * strideLength.denominator()});
+        const auto doUnaryPack = (isUnary && itemWidth > 1);
 
-        if (blocksToZero > 1) {
-            Value * const nextBlockIndex = b.CreateAdd(blockIndex, ONE);
-            Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
-            Value * const startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, nextOffset);
+        if (doUnaryPack || blocksToZero > 1) {
+
+            Value * startPtr = nullptr;
+            Value * endPtr = nullptr;
+
+            if (doUnaryPack) {
+                Value * const nextPackIndex = b.CreateAdd(packIndex, ONE);
+                Value * const currentBlockIndex = buffer->modByCapacity(b, blockIndex);
+                startPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, currentBlockIndex, nextPackIndex);
+                Value * const nextBlockIndex = b.CreateRoundUpRational(currentBlockIndex, blocksToZero);
+                endPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, nextBlockIndex, ITEM_WIDTH);
+            }  else {
+                Value * const nextBlockIndex = b.CreateAdd(blockIndex, ONE);
+                Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
+                startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, nextOffset);
+                Value * const endOffset = b.CreateRoundUp(nextOffset, b.getSize(blocksToZero));
+                endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, endOffset);
+            }
+
             Value * const startPtrInt = b.CreatePtrToInt(startPtr, intPtrTy);
-            Value * const endOffset = b.CreateRoundUp(nextOffset, b.getSize(blocksToZero));
-            Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, endOffset);
             Value * const endPtrInt = b.CreatePtrToInt(endPtr, intPtrTy);
             Value * const remainingBytes = b.CreateSub(endPtrInt, startPtrInt);
-//            #ifdef PRINT_DEBUG_MESSAGES
-//            debugPrint(b, prefix + "_zeroUnwritten_bufferStart = %" PRIu64, b.CreateSub(startPtrInt, epochInt));
-//            debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
-//            #endif
+
+            #ifdef PRINT_DEBUG_MESSAGES
+            #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
+            debugPrint(b, prefix + "_zeroUnwritten_clearRange = [0x%" PRIx64 ",0x%" PRIx64 ")", startPtrInt, endPtrInt);
+            #endif
+            debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
+            #endif
             b.CreateMemZero(startPtr, remainingBytes, blockWidth / 8);
         }
+
     }
     #endif
 }

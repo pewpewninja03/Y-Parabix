@@ -79,7 +79,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 
     const auto isSourceKernel = in_degree(mKernelId, mBufferGraph) == 0;
 
-
     Value * numOfLinearStrides = nullptr;
 
     if (isSourceKernel) {
@@ -109,6 +108,8 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         }
     }
 
+    Value * const potentialNumOfLinearStrides = numOfLinearStrides;
+
     if (mIsPartitionRoot) {
         if (isSourceKernel) {
             mPotentialSegmentLength = mMaximumNumOfStrides;
@@ -125,7 +126,7 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         numOfLinearStrides = checkOptimizationBranchSpanLength(b, numOfLinearStrides);
     }
 
-    mNumOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides);
+    mNumOfLinearStrides = calculateTransferableItemCounts(b, numOfLinearStrides, potentialNumOfLinearStrides);
 
     mUpdatedNumOfStrides = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, mNumOfLinearStrides);
 
@@ -142,7 +143,7 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief calculateTransferableItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides) {
+Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const potentialNumOfLinearStrides) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
@@ -157,6 +158,9 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                                Value * const terminationSignal,
                                Value * const numOfLinearStrides,
                                Value * const fixedRatePartialStrideRemainder,
+
+                               Value * const isInPenultimateSubSegment,
+
                                const bool isFinalStride) {
         BasicBlock * const exitBlock = b.GetInsertBlock();
         for (auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -193,6 +197,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         if (mIsPartitionRoot) {
             mFinalPartialStrideFixedRateRemainderPhi->addIncoming(fixedRatePartialStrideRemainder, exitBlock);
         }
+        mPenultimateSubSegmentPhi->addIncoming(isInPenultimateSubSegment, exitBlock);
     };
 
     // --- lambda function end
@@ -200,6 +205,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
 
     ConstantInt * const sz_ZERO = b.getSize(0);
+
+    Constant * const i1_False = b.getFalse();
 
     Vec<Value *> accessibleItems(numOfInputs);
 
@@ -212,8 +219,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
     getInputVirtualBaseAddresses(b, inputVirtualBaseAddress);
 
-    Value * nonFinalNumOfLinearStrides =
-        b.CreateRoundDown(numOfLinearStrides, mStrideStepSize);
+    Value * nonFinalNumOfLinearStrides = b.CreateRoundDown(numOfLinearStrides, mStrideStepSize);
+    Value * inPenultimateSubSegment = i1_False;
 
     if (LLVM_LIKELY(in_degree(mKernelId, mBufferGraph) > 0)) {
 
@@ -228,11 +235,10 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
         Value * isFinalSegment = nullptr;
         if (mIsPartitionRoot) {
-            isFinalSegment = mAnyClosed ? mAnyClosed : b.getFalse();
+            isFinalSegment = mAnyClosed ? mAnyClosed : i1_False;
         } else {
             isFinalSegment = mFinalPartitionSegment;
         }
-
 
         BasicBlock * const nonZeroExtendExit = b.GetInsertBlock();
 
@@ -296,17 +302,10 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         /// -------------------------------------------------------------------------------------
 
         Value * const isFinal = b.CreateICmpEQ(numOfLinearStrides, sz_ZERO);
-        Value * penultimateNumOfStrides = nullptr;
 
-        if (LLVM_LIKELY(mHasExhaustedClosedInput != nullptr)) {
-            penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
-        } else {
-            penultimateNumOfStrides = numOfLinearStrides;
-        }
-
+        BasicBlock * const enteringPenultimateSubSegment = b.CreateBasicBlock(prefix + "_penultimateSubSegment", mKernelCheckOutputSpace);
         BasicBlock * const enteringFinalStride = b.CreateBasicBlock(prefix + "_finalStride", mKernelCheckOutputSpace);
-        BasicBlock * const penultimateSegmentExit = b.GetInsertBlock();
-        b.CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringNonFinalSegment);
+        b.CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringPenultimateSubSegment);
 
         b.SetInsertPoint(enteringFinalStride);
         Value * fixedItemFactor = nullptr;
@@ -317,16 +316,39 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         Vec<Value *> truncatedInputBufferCapacity(zeroExtendedInputBufferCapacity);
         zeroInputAfterFinalItemCount(b, accessibleItems, truncatedInputBufferCapacity, truncatedInputVirtualBaseAddress);
         phiOutItemCounts(accessibleItems, truncatedInputBufferCapacity, truncatedInputVirtualBaseAddress, writableItems,
-                         fixedItemFactor, completed, sz_ZERO, partialPartitionStride, true);
+                         fixedItemFactor, completed, sz_ZERO, partialPartitionStride, i1_False, true);
         b.CreateBr(mKernelCheckOutputSpace);
 
         /// -------------------------------------------------------------------------------------
-        /// KERNEL ENTERING NON-FINAL SEGMENT
+        /// KERNEL ENTERING PENULTIMATE SEGMENT
         /// -------------------------------------------------------------------------------------
 
-        b.SetInsertPoint(enteringNonFinalSegment);
+        b.SetInsertPoint(enteringPenultimateSubSegment);
 
-        if (numOfLinearStrides != nonFinalNumOfLinearStrides) {
+        Value * penultimateNumOfStrides = numOfLinearStrides;
+
+        if (mHasExhaustedClosedInput && (numOfLinearStrides != nonFinalNumOfLinearStrides)) {
+            penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
+        }
+
+        if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides)) {
+            inPenultimateSubSegment = b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides);
+        } else {
+            inPenultimateSubSegment = b.getTrue();
+        }
+        if (mHasZeroExtendedInput) {
+            inPenultimateSubSegment = mIsPartitionRoot ? b.CreateAnd(isFinalSegment, inPenultimateSubSegment) : isFinalSegment;
+        }
+
+        BasicBlock * const penultimateSegmentExit = b.GetInsertBlock();
+        b.CreateBr(enteringNonFinalSegment);
+
+        /// -------------------------------------------------------------------------------------
+        /// KERNEL ENTERING NON-FINAL SEGMENT
+        /// ------------------------------------------------------------------------------------
+
+        b.SetInsertPoint(enteringNonFinalSegment);
+        if (nonFinalNumOfLinearStrides != penultimateNumOfStrides) {
             PHINode * const nonFinalNumOfLinearStridesPhi = b.CreatePHI(numOfLinearStrides->getType(), 3);
             nonFinalNumOfLinearStridesPhi->addIncoming(nonFinalNumOfLinearStrides, nonZeroExtendExit);
             if (afterNonFinalZeroExtendExit) {
@@ -335,6 +357,14 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             nonFinalNumOfLinearStridesPhi->addIncoming(penultimateNumOfStrides, penultimateSegmentExit);
             nonFinalNumOfLinearStrides = nonFinalNumOfLinearStridesPhi;
         }
+
+        PHINode * const inPenultimateSegmentPhi = b.CreatePHI(b.getInt1Ty(), 3);
+        inPenultimateSegmentPhi->addIncoming(i1_False, nonZeroExtendExit);
+        if (afterNonFinalZeroExtendExit) {
+            inPenultimateSegmentPhi->addIncoming(i1_False, afterNonFinalZeroExtendExit);
+        }
+        inPenultimateSegmentPhi->addIncoming(inPenultimateSubSegment, penultimateSegmentExit);
+        inPenultimateSubSegment = inPenultimateSegmentPhi;
 
         for (size_t port = 0; port < numOfInputs; ++port) {
             Value * const ba = inputVirtualBaseAddress[port];
@@ -345,9 +375,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                 if (afterNonFinalZeroExtendExit) {
                     phi->addIncoming(ze, afterNonFinalZeroExtendExit);
                 }
-                if (penultimateSegmentExit) {
-                    phi->addIncoming(ze, penultimateSegmentExit);
-                }
+                phi->addIncoming(ze, penultimateSegmentExit);
                 inputVirtualBaseAddress[port] = phi;
             }
             if (LLVM_UNLIKELY(mCheckStreamSets)) {
@@ -359,9 +387,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                     if (afterNonFinalZeroExtendExit) {
                         phi->addIncoming(zc, afterNonFinalZeroExtendExit);
                     }
-                    if (penultimateSegmentExit) {
-                        phi->addIncoming(zc, penultimateSegmentExit);
-                    }
+                     phi->addIncoming(zc, penultimateSegmentExit);
                     inputBufferCapacity[port] = phi;
                 }
             }
@@ -378,8 +404,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
     /// -------------------------------------------------------------------------------------
     /// KERNEL CALCULATE NON-FINAL INPUT COUNT
     /// -------------------------------------------------------------------------------------
-
-    assert (nonFinalNumOfLinearStrides);
 
     Value * fixedRateFactor = nullptr;
     if (mFixedRateFactorPhi) {
@@ -401,7 +425,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
     }
 
     phiOutItemCounts(accessibleItems, inputBufferCapacity, inputVirtualBaseAddress, writableItems,
-                     fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO, false);
+                     fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO, inPenultimateSubSegment, false);
 
     b.CreateBr(mKernelCheckOutputSpace);
     b.SetInsertPoint(mKernelCheckOutputSpace);
@@ -615,7 +639,9 @@ Value * PipelineCompiler::checkIfInputIsExhausted(KernelBuilder & b, InputExhaus
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasMoreInput
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
+Value * PipelineCompiler::hasMoreInput(KernelBuilder & b, Value * const delayReleaseOfPreInvocationLock) {
+
+    assert (false);
 
     Value * const nonFinal = b.CreateIsNull(mIsFinalInvocation);
     assert (mMaximumNumOfStrides);
@@ -636,7 +662,9 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
         PHINode * const enoughInputPhi = PHINode::Create(b.getInt1Ty(), 4, "", lastTestExit);
 
         Value * enoughInput = b.CreateAnd(notAtSegmentLimit, nonFinal);
-
+        if (delayReleaseOfPreInvocationLock) {
+            enoughInput = b.CreateAnd(enoughInput, delayReleaseOfPreInvocationLock);
+        }
         Value * const nextStrideIndex = b.CreateAdd(mNumOfLinearStrides, mStrideStepSize);
 
         bool isFirstCheck = true;
@@ -963,75 +991,6 @@ Value * PipelineCompiler::getNumOfWritableStrides(KernelBuilder & b,
     return numOfStrides;
 }
 
-#if 0
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getWritableOutputItems
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const BufferPort & port, const bool force) {
-
-    const auto outputPort = port.Port;
-    assert (outputPort.Type == PortType::Output);
-
-    Value * const alreadyComputed = mInternalWritableOutputItems[outputPort];
-    if (alreadyComputed && !force) {
-        return alreadyComputed;
-    }
-
-    const auto output = getOutput(mKernelId, outputPort);
-    const auto streamSet = target(output, mBufferGraph);
-    const BufferNode & bn = mBufferGraph[streamSet];
-    assert (bn.isNonThreadLocal());
-    const StreamSetBuffer * const buffer = bn.Buffer;
-
-    Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
-
-    #ifdef PRINT_DEBUG_MESSAGES
-    const auto prefix = makeBufferName(mKernelId, outputPort);
-    debugPrint(b, prefix + "_produced = %" PRIu64, produced);
-    #endif
-
-    Value * writable = nullptr;
-
-    if (LLVM_UNLIKELY(bn.isTruncated())) {
-        const auto id = getTruncatedStreamSetSourceId(streamSet);
-        Value * const avail = mLocallyAvailableItems[id];
-        writable = b.CreateUnsignedSaturatingSub(avail, produced);
-    } else if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
-        const auto src = parent(streamSet, InOutStreamSetReplacement);
-        assert (FirstStreamSet <= src && src <= LastStreamSet);
-        Value * const avail = mLocallyAvailableItems[src];
-        writable = b.CreateUnsignedSaturatingSub(avail, produced);
-    } else {
-
-        Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);
-
-        if (LLVM_UNLIKELY(CheckAssertions())) {
-            const Binding & output = getOutputBinding(outputPort);
-            Value * const sanityCheck = b.CreateICmpULE(consumed, produced);
-            b.CreateAssert(sanityCheck,
-                            "%s.%s: consumed count (%" PRIu64 ") exceeds produced count (%" PRIu64 ")",
-                            mCurrentKernelName,
-                            b.GetString(output.getName()),
-                            consumed, produced);
-        }
-
-        Value * p = produced;
-        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
-            p = b.CreateAdd(produced, b.getSize(port.EmptyOverflow));
-        }
-        Value * c = consumed;
-        if (bn.hasNonFixedRateConsumer()) {
-            c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
-        }
-        writable = buffer->getLinearlyWritableItems(b, p, c);
-    }
-
-    // cache the values for later use
-    mInternalWritableOutputItems[outputPort] = writable;
-    return writable;
-}
-#endif
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getWritableOutputItems
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1175,6 +1134,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                                                 Value *& finalStrideRemainder) {
 
     Value * principalFixedRateFactor = nullptr;
+    size_t principalPartitionId = 0;
     for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
         assert (port.Port.Type == PortType::Input);
@@ -1199,6 +1159,11 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             assert (rate.isFixed());
             const auto factor = mFixedRateLCM / rate.getRate();
             principalFixedRateFactor = b.CreateMulRational(accessible, factor);
+            const auto streamSet = source(e, mBufferGraph);
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const auto producer = parent(streamSet, mBufferGraph);
+            assert (PipelineInput <= producer && producer < mKernelId);
+            principalPartitionId = KernelPartitionId[producer];
         }
         accessibleItems[port.Port.Number] = accessible;
     }
@@ -1232,19 +1197,10 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
     if (principalFixedRateFactor) {
         minFixedRateFactor = principalFixedRateFactor;
     } else {
-        bool checkFirstThreadLocal = true;
         for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[e];
             assert (port.Port.Type == PortType::Input);
             if (port.isFixed()) {
-                const auto & bn = mBufferGraph[source(e, mBufferGraph)];
-                if (bn.isThreadLocal()) {
-                    if (checkFirstThreadLocal) {
-                        checkFirstThreadLocal = false;
-                    } else {
-                        continue;
-                    }
-                }
                 const Binding & input = port.Binding;
                 const ProcessingRate & rate = input.getRate();
                 Value * const fixedRateFactor =
@@ -1253,27 +1209,9 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                     b.CreateUMin(minFixedRateFactor, fixedRateFactor);
             }
         }
-#if 0
-        flat_set<unsigned> encountered;
-        for (auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-            const BufferPort & port = mBufferGraph[e];
-            assert (port.Port.Type == PortType::Input);
-            if (port.isFixed()) {
-                if (encountered.insert(port.SymbolicRateId).second) {
-                    const Binding & input = port.Binding;
-                    const ProcessingRate & rate = input.getRate();
-                    Value * const fixedRateFactor =
-                        b.CreateMulRational(accessibleItems[port.Port.Number], mFixedRateLCM / rate.getRate());
-                    minFixedRateFactor =
-                        b.CreateUMin(minFixedRateFactor, fixedRateFactor);
-                }
-            }
-        }
-#endif
     }
 
     assert (minFixedRateFactor || mFixedRateFactorPhi == nullptr);
-
 
     if (minFixedRateFactor) {
         // truncate any fixed rate input down to the length of the shortest stream
@@ -1309,7 +1247,21 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                     calculated = b.CreateSelect(isClosed(b, inputPort, true), z, calculated);
                 }
 
+                #if 1
+                if (principalFixedRateFactor && !port.isPrincipal()) {
+                    const auto streamSet = source(e, mBufferGraph);
+                    assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+                    const auto producer = parent(streamSet, mBufferGraph);
+                    assert (PipelineInput <= producer && producer < mKernelId);
+                    const auto inputPartitionId = KernelPartitionId[producer];
+                    if (inputPartitionId != principalPartitionId && inputPartitionId != mCurrentPartitionId) {
+                        calculated = b.CreateUMin(calculated, accessibleItems[inputPort.Number]);
+                    }
+                }
+                #endif
                 accessibleItems[inputPort.Number] = calculated;
+
+
                 #ifdef PRINT_DEBUG_MESSAGES
                 const auto prefix = makeBufferName(mKernelId, inputPort);
                 debugPrint(b, prefix + ".accessible' = %" PRIu64, accessibleItems[inputPort.Number]);
@@ -1344,7 +1296,6 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
         } else {
             writable = calculateNumOfLinearItems(b, port, sz_ONE, "calculateFinal");
         }
-
         const auto k = port.Add;
         if (k > 0) {
             writable = b.CreateAdd(writable, b.getSize(k));
@@ -1381,6 +1332,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
 Value * PipelineCompiler::revertTransitiveAddCalculation(KernelBuilder & b, const ProcessingRate & rate, Value * expectedItemCount, Value * rejectedTerminationSignal) {
 
     assert (mFixedRateFactorPhi);
+    assert (rate.isFixed());
 
     const auto factor = rate.getRate() / mFixedRateLCM;
     Value * calculated = b.CreateCeilUMulRational(mFixedRateFactorPhi, factor);

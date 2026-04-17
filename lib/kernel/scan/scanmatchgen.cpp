@@ -474,6 +474,7 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * matchWordPos = b.CreateAdd(stridePos, b.CreateMul(matchWordIdx, sw.WIDTH));
     Value * matchEndPosInWord = b.CreateCountForwardZeroes(theMatchWord);
     Value * matchEndPos = b.CreateAdd(matchWordPos, matchEndPosInWord, "matchEndPos");
+
     // Find the prior line break.  There are three possibilities.
     // (a) a prior break in the break word corresponding to the current match word.
     // (b) the last break in a prior word within the current stride.
@@ -495,6 +496,7 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * lineStartInWord = b.CreateSub(sz_BITS, b.CreateCountReverseZeroes(breakWord));
     Value * lineStartBase = b.CreateAdd(stridePos, b.CreateMul(breakWordIdx, sw.WIDTH));
     Value * lineStartPos = b.CreateAdd(lineStartBase, lineStartInWord);
+
     // The break position is the line start for cases (a), (b); otherwise use the pending value.
     Value * const matchStart = b.CreateSelect(b.CreateOr(inWordCond, inStrideCond), lineStartPos, pendingLineStart, "matchStart");
     Value * matchRecordNum = nullptr;

@@ -302,15 +302,6 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
 
     ConstantInt * const i1_TRUE = b.getTrue();
 
-    if (LLVM_LIKELY(!mAllowDataParallelExecution)) {
-        #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
-        assert (!mKernelIsInternallySynchronized);
-        #endif
-        mHasMoreInput = hasMoreInput(b);
-    }
-
-    assert (mHasMoreInput);
-
     BasicBlock * const exitBlockAfterLoopAgainTest = b.GetInsertBlock();
     if (mStrideStepSizeAtLoopEntryPhi) {
         mStrideStepSizeAtLoopEntryPhi->addIncoming(mStrideStepSize, exitBlockAfterLoopAgainTest);
@@ -532,6 +523,7 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(KernelBuilder & b) {
     if (mIsPartitionRoot) {
         mFinalPartialStrideFixedRateRemainderPhi = b.CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesPhi");
     }
+    mPenultimateSubSegmentPhi = b.CreatePHI(b.getInt1Ty(), 2, prefix + "_isPenultimateSubSegmentPhi");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -237,9 +237,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
 
-    Value * terminated = nullptr;
-
-
     #ifdef PHASES_RUN_TO_COMPLETION
     const auto checkProgress = CheckAssertions();
     #else
@@ -521,7 +518,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
             Value * done = b.CreateIsNotNull(terminated);
             Value * doNextSegment = nullptr;
-            if (LLVM_UNLIKELY(checkProgress)) {
+            if (checkProgress) {
                 Value * const madeProgress = b.CreateExtractValue(csRetVal, {1});
                 doNextSegment = b.CreateAnd(madeProgress, b.CreateIsNull(terminated));
                 if (LLVM_UNLIKELY(CheckAssertions())) {
@@ -709,7 +706,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 }
             }
 
-            if (mIsNestedPipeline) {
+            if (mIsNestedPipeline || (doNextSegment == nullptr)) {
                 b.CreateBr(pipelineEnd);
             } else {
                 BasicBlock * const exitBlock = b.GetInsertBlock();
@@ -1320,7 +1317,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
             }
             b.CreateBr(mPipelineEnd);
         } else {
-            terminated = hasPipelineTerminated(b);
+            terminated = hasPipelineTerminated(b); assert (terminated);
             obtainNextSegmentNumber(b);
             Value * const done = b.CreateIsNotNull(terminated);
             if (LLVM_UNLIKELY(CheckAssertions())) {

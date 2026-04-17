@@ -868,6 +868,16 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         buffer->setHandle(localHandle); assert (localHandle);
         buffer->setBaseAddress(b, virtualBaseAddress);
 
+        if (LLVM_UNLIKELY(checkStreamSet)) {
+            auto & dl = b.getModule()->getDataLayout();
+            Type * intPtrTy = dl.getIntPtrType(b.getContext());
+            Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
+            Constant * typeSizeInt = ConstantInt::get(intPtrTy, b.getTypeSize(dl, buffer->getType()));
+            Value * modVBA = b.CreateURem(vbaInt, typeSizeInt);
+            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of type size 0x%" PRIx64,
+                               b.GetString(mInputStreamSets[i].getName()), vbaInt, typeSizeInt);
+        }
+
         if (LLVM_UNLIKELY(internallySynchronized)) {
             Value * const closed = nextArg();
             mInputIsClosed[i] = b.CreateIsNotNull(closed);
@@ -961,6 +971,15 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setBaseAddress(b, virtualBaseAddress);
         }
 
+        if (LLVM_UNLIKELY(checkStreamSet)) {
+            auto & dl = b.getModule()->getDataLayout();
+            Type * intPtrTy = dl.getIntPtrType(b.getContext());
+            Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
+            Constant * typeSizeInt = ConstantInt::get(intPtrTy, b.getTypeSize(dl, buffer->getType()));
+            Value * modVBA = b.CreateURem(vbaInt, typeSizeInt);
+            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of type size 0x%" PRIx64,
+                               b.GetString(mOutputStreamSets[i].getName()), vbaInt, typeSizeInt);
+        }
 
         /// ----------------------------------------------------
         /// produced item count
@@ -2282,7 +2301,6 @@ KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, V
                     indices[0] = b.getInt32(0);
                     indices[1] = b.getInt32(i);
                     Value * ptr0 = b.CreateGEP(stateTy, handle, indices); assert (ptr0);
-                    b.CallPrintInt("ptr0:" + std::to_string(i), ptr0);
                 }
 
                 FixedArray<Value *, 3> indices;
@@ -2297,8 +2315,6 @@ KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, V
                 assert (isFromCurrentFunction(b, handle, false));
                 Value * ptr = b.CreateGEP(stateTy, handle, indices); assert (ptr);
                 Type * ty = stateTy->getStructElementType(g)->getStructElementType(c);
-
-                b.CallPrintInt("ptr:" + name.str() + ":" + std::to_string(g) + "." + std::to_string(c), ptr);
 
                 return ScalarRef{ptr, ty};
             }

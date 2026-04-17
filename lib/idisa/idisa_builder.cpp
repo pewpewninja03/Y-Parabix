@@ -19,7 +19,7 @@
 
 using boost::intrusive::detail::floor_log2;
 
-#define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+// #define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
 
 using namespace llvm;
 

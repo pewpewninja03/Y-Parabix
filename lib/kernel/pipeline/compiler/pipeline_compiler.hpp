@@ -288,14 +288,14 @@ public:
     void checkForSufficientOutputSpace(KernelBuilder & b, const BufferPort & outputPort, const unsigned streamSet);
     void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet);
 
-    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides);
+    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const potentialNumOfLinearStrides);
 
     enum class InputExhaustionReturnType {
         Conjunction, Disjunction
     };
 
     Value * checkIfInputIsExhausted(KernelBuilder & b, InputExhaustionReturnType returnValType);
-    Value * hasMoreInput(KernelBuilder & b);
+    Value * hasMoreInput(KernelBuilder & b, Value * const delayReleaseOfPreInvocationLock = nullptr);
 
     struct FinalItemCount {
         Value * minFixedRateFactor;
@@ -313,6 +313,7 @@ public:
 
     void writeKernelCall(KernelBuilder & b);
     void buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args);
+    Value * updateCountableProcessedItemCounts(KernelBuilder & b);
     void updateProcessedAndProducedItemCounts(KernelBuilder & b, Value * rejectedTermSignal);
     void writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination);
     void readAndUpdateInternalProcessedAndProducedItemCounts(KernelBuilder & b);
@@ -746,6 +747,8 @@ protected:
     unsigned                                    LastKernelInPartition = 0;
 
     Rational                                    mPartitionStrideRateScalingFactor;
+
+    PHINode *                                   mPenultimateSubSegmentPhi = nullptr;
 
     Value *                                     mFinalPartitionSegment = nullptr;
     PHINode *                                   mFinalPartitionSegmentAtLoopExitPhi = nullptr;
