@@ -909,9 +909,9 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
         assert (expr);
         assert (value);
         mMarker[expr] = value;
-        if (DebugOptionIsSet(DumpTrace)) {
-            dumpValueToConsole(b, expr, value);
-        }
+        //if (DebugOptionIsSet(DumpTrace)) {
+        //    dumpValueToConsole(b, expr, value);
+        //}
     }
 }
 

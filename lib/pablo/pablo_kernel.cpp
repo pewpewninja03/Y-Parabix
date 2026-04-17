@@ -323,9 +323,9 @@ llvm::IntegerType * PabloKernel::getInt1Ty() const {
 
 std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     assert (name.length() > 0);
-    if (DebugOptionIsSet(DumpTrace)) {
-        name += "+Dump";
-    }
+    //if (DebugOptionIsSet(DumpTrace)) {
+    //    name += "+Dump";
+    //}
     if (CompileOptionIsSet(Flatten)) {
         name += "+Flatten";
     }
@@ -360,7 +360,7 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     default:
         llvm_unreachable("Illegal PabloCarryMode");
     }
-    if (PabloUseLLVMOptimizationPasses) {
+    if (CompileOptionIsSet(PabloUseLLVMOptimizationPasses)) {
         name += "+LLVM-opt";
     }
     return std::move(name);
@@ -371,7 +371,7 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
 void PabloKernel::addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const {
-    if (PabloUseLLVMOptimizationPasses) {
+    if (CompileOptionIsSet(PabloUseLLVMOptimizationPasses)) {
         passes.push_back(OptimizationPass::EarlyCSEPass);
         passes.push_back(OptimizationPass::AggressiveInstCombinePass);
         passes.push_back(OptimizationPass::NewGVNPass);

@@ -15,7 +15,6 @@
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/raw_ostream.h>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/locale/encoding_utf.hpp>
@@ -204,7 +203,7 @@ const char32_t TAB = U'\t';
 
 void InitializeCommandLineInterface(int argc, char *argv[]) {
     llvm::install_fatal_error_handler(&csv_error_handler);
-    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
     // Set the delimiter and quote characters.
     if (TabDelimiter) {

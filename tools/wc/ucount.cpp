@@ -91,7 +91,7 @@ UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
         if (U21) {
             StreamSet * const u21_Basis = P.CreateStreamSet(21, 1);
-            P.CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
+            P.CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis);
             Source = u21_Basis;
             if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
                 P.captureByteData("bytedata", ByteStream, '.');
@@ -145,7 +145,7 @@ uint64_t ucount1(UCountFunctionType fn_ptr, const uint32_t fileIdx) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ucFlags, codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&ucFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

@@ -12,9 +12,8 @@ namespace llvm { namespace cl { class OptionCategory; } }
 
 namespace pablo {
 
-enum PabloDebugFlags {
-    VerifyPablo, DumpTrace
-};
+const llvm::cl::OptionCategory * pablo_toolchain_flags();
+
 extern std::string ShowOptimizedPabloOption;
 extern std::string ShowPabloOption;
 
@@ -25,7 +24,9 @@ enum PabloCompilationFlags {
     EnableDistribution,
     EnableSchedulingPrePass,
     EnableProfiling,
-    EnableTernaryOpt
+    EnableTernaryOpt,
+    PabloUseLLVMOptimizationPasses,
+    VerifyPablo
 };
 
 enum class PabloCarryMode {
@@ -38,7 +39,6 @@ enum class BitMovementMode {
     Advance,
     LookAhead
 };
-extern BitMovementMode MovementMode;
 
 std::string BitMovementMode_string(BitMovementMode m);
 
@@ -47,12 +47,6 @@ extern llvm::sys::fs::OpenFlags PabloOptimizedOutputFileFlag;
 
 extern std::string PabloIllustrateKernelRegEx;
 extern std::string PabloIllustrateBitstreamRegEx;
-
-const llvm::cl::OptionCategory * pablo_toolchain_flags();
-
-extern bool PabloUseLLVMOptimizationPasses;
-
-bool DebugOptionIsSet(const PabloDebugFlags flag);
 
 bool CompileOptionIsSet(const PabloCompilationFlags flag);
 

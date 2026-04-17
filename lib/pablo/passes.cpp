@@ -52,7 +52,7 @@ void pablo_function_passes(PabloKernel * kernel) {
     }
 
 #ifdef NDEBUG
-    const auto verify = pablo::DebugOptionIsSet(VerifyPablo);
+    const auto verify = pablo::CompileOptionIsSet(VerifyPablo);
 #else
     const auto verify = true;
 #endif

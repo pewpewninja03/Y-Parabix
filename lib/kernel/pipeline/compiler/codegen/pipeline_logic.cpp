@@ -285,7 +285,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         }
     }
 
-    if (LLVM_UNLIKELY(isRoot && DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(isRoot && StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
         LLVMContext & C = b.getContext();
 //        FixedArray<Type *, 2> recordStruct;
 //        recordStruct[0] = sizeTy; // segment num
