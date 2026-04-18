@@ -504,7 +504,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, strThreadLocal, false);
                 assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
             }
-            if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::PrintKernelSizes))) {
+            if (LLVM_UNLIKELY(InfoOptionIsSet(codegen::PrintKernelSizes))) {
                 errs() << "KERNEL: " << mKernelName
                        << " SHARED STATE: " << CBuilder::getTypeSize(dl, mSharedStateType) << " bytes"
                           ", THREAD LOCAL STATE: "  << CBuilder::getTypeSize(dl, mThreadLocalStateType) << " bytes\n";
@@ -809,7 +809,7 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
                 params.push_back(getSharedStateType()->getPointerTo());
             }
             params.push_back(b.getSizeTy());
-            const auto tdb = (getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet) && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+            const auto tdb = (getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet) && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers);
             if (LLVM_UNLIKELY(tdb)) {
                 PointerType * const voidPtrTy = b.getVoidPtrTy();
                 params.push_back(voidPtrTy);
@@ -1044,7 +1044,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         }
     }
 
-    if (LLVM_UNLIKELY((getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet) && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+    if (LLVM_UNLIKELY((getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet) && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
         fields.push_back(voidPtrTy); // reportExpansionCallback
         fields.push_back(voidPtrTy); // pipelineHandle
     }
@@ -1156,7 +1156,7 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
 
         const auto hasManagedOutput = (getKernelFlags() & KernelFlags::HasInternallyManagedStreamSet);
 
-        if (LLVM_UNLIKELY(hasManagedOutput && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(hasManagedOutput && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
             setNextArgName("reportExpansionCallback");
             setNextArgName("pipelineHandle");
         }
@@ -1657,7 +1657,7 @@ std::string Kernel::getFamilyName() const {
         if (LLVM_UNLIKELY(((flags & KernelFlags::HasInOutStreamSet) != 0) && codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
             buffer << "_NoIOAttr";
         }
-        if (LLVM_UNLIKELY(((flags & KernelFlags::HasInternallyManagedStreamSet) != 0) && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(((flags & KernelFlags::HasInternallyManagedStreamSet) != 0) && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
             buffer << "_TDB";
         }
         if (flags & Kernel::KernelFlags::RequiresIllustratorObject) {

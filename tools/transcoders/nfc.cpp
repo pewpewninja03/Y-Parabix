@@ -35,7 +35,6 @@
 #include <kernel/unicode/utf8_support.h>
 #include <toolchain/fileutil.h>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <unicode/core/unicode_set.h>
 #include <unicode/algo/normalization.h>
@@ -436,7 +435,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&NFC_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&NFC_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
     bool useMMap = PreferMMap && canMMap(inputFile);
     AlignedFileBuffer buf;

@@ -47,7 +47,7 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         mTarget->addInternalScalar(cycleCounterTy, name, groupId);
     }
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableBlockingIOCounter))) {
 
         const auto prefix = makeKernelName(kernelId);
         IntegerType * const int64Ty = b.getInt64Ty();
@@ -68,7 +68,7 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         }
     }
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceBlockedIO))) {
 
         FixedArray<Type *, 3> fields;
         IntegerType * const sizeTy = b.getSizeTy();
@@ -623,7 +623,7 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
  * @brief recordBlockingIO
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort port) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableBlockingIOCounter))) {
         const auto prefix = makeBufferName(mKernelId, port);
         Value * counterPtr; Type * ty;
         std::tie(counterPtr, ty) = b.getScalarFieldPtr(prefix + STATISTICS_BLOCKING_IO_SUFFIX);
@@ -631,7 +631,7 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort p
         Value * const updatedCount = b.CreateAdd(runningCount, b.getSize(1));
         b.CreateAlignedStore(updatedCount, counterPtr, Int64TyABIAlignment);
     }
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceBlockedIO))) {
 
         const auto prefix = makeBufferName(mKernelId, port);
         Value * historyPtr; Type * ty;
@@ -685,7 +685,7 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const StreamSetPort p
  * @brief printOptionalBlockingIOStatistics
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalBlockingIOStatistics(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableBlockingIOCounter))) {
 
         // Print the title line
         Function * Dprintf = b.GetDprintf();
@@ -857,7 +857,7 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(KernelBuilder & b) {
  * @brief printOptionalStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalBlockedIOPerSegment(KernelBuilder & b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceBlockedIO))) {
 
         IntegerType * const sizeTy = b.getSizeTy();
         PointerType * const sizePtrTy = sizeTy->getPointerTo();
@@ -1143,7 +1143,7 @@ has_ports:
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeStridesPerSegment(KernelBuilder & b) const {
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
 
         const auto prefix = makeKernelName(mKernelId);
 
@@ -1176,7 +1176,7 @@ void PipelineCompiler::initializeStridesPerSegment(KernelBuilder & b) const {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned kernelId, Value * const totalStrides) const {
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
         // NOTE: this records only the change to attempt to reduce the memory usage of this log.
         assert (KernelPartitionId[kernelId - 1] != KernelPartitionId[kernelId]);
         const auto prefix = makeKernelName(kernelId);
@@ -1287,7 +1287,7 @@ void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned
  * @brief concludeStridesPerSegmentRecording
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::concludeStridesPerSegmentRecording(KernelBuilder & b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
         auto currentPartitionId = KernelPartitionId[PipelineInput];
         Constant * const sz_ZERO = b.getSize(0);
         for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
@@ -1304,7 +1304,7 @@ void PipelineCompiler::concludeStridesPerSegmentRecording(KernelBuilder & b) con
  * @brief printOptionalStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalStridesPerSegment(KernelBuilder & b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
 
         IntegerType * const sizeTy = b.getSizeTy();
 

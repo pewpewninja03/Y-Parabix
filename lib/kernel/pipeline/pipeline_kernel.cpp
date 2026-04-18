@@ -783,7 +783,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         }
         // pass in the desired number of segments
         allocArgs.push_back(sz_BufferSize);
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
             Constant * nil = ConstantPointerNull::get(b.getVoidPtrTy());
             allocArgs.push_back(nil);
             allocArgs.push_back(nil);
@@ -900,34 +900,34 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
     }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableCycleCounter))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableCycleCounter))) {
             out << "+CYC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableBlockingIOCounter))) {
             out << "+BIC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceBlockedIO))) {
             out << "+TBIO";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
             out << "+TDB";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicMultithreading))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceDynamicMultithreading))) {
             out << "+TDM";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceProducedItemCounts))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceProducedItemCounts))) {
             out << "+TPIC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceUnconsumedItemCounts))) {
             out << "+TUIC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
             out << "+TSS";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
             out << "+GTH";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
             out << "+GDH";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
@@ -939,7 +939,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
         out << "+PAPI";
         out << (std::count_if(S.begin(), S.end(), [](std::string::value_type c){return c == ',';}) + 1);
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
             out << "+T";
         }
     }

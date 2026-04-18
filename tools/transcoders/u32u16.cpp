@@ -18,7 +18,6 @@
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
 #include <llvm/Support/Debug.h>                    // for dbgs
 #include <pablo/pablo_kernel.h>                    // for PabloKernel
-#include <pablo/pablo_toolchain.h>
 #include <kernel/core/kernel_builder.h>
 #include <pablo/pe_zeroes.h>
 #include <toolchain/toolchain.h>
@@ -96,7 +95,7 @@ u32u16FunctionType u32u16_gen (CPUDriver & driver, cc::ByteNumbering byteNumberi
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&u32u16Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&u32u16Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     cc::ByteNumbering byteNumbering = cc::ByteNumbering::BigEndian;
 
     if ((OutputEncoding == "UTF16LE") || (OutputEncoding == "UTF-16LE")) {

@@ -37,7 +37,6 @@
 #include <re/cc/cc_compiler.h>
 #include <re/transforms/re_transformer.h>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 using namespace kernel;
 using namespace llvm;

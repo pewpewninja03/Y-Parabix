@@ -583,7 +583,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
     assert ("unspecified module" && b.getModule());
 
-    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+    const auto traceDynamicBuffer = codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers);
 
     name << "__ManagedDynamicBuffer";
     if (mLinear) {
@@ -1306,7 +1306,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
     Module * const m = b.getModule();
     auto & DL = m->getDataLayout();
 
-    const auto traceDynamicBuffer = codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers);
+    const auto traceDynamicBuffer = codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers);
 
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);

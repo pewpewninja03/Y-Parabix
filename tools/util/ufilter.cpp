@@ -30,7 +30,6 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <toolchain/toolchain.h>
 #include <fileselect/file_select.h>
@@ -108,7 +107,7 @@ UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     CPUDriver driver("ufilter");
 
     UFiltertFunctionType fnPtr = nullptr;

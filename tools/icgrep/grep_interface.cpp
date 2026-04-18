@@ -17,8 +17,6 @@
 #include <fstream>
 #include <string>
 
-#include <pablo/pablo_toolchain.h>
-
 using namespace llvm;
 
 namespace argv {
@@ -211,7 +209,7 @@ static void icgrep_error_handler(void *UserData, const std::string &Message, boo
 
 void InitializeCommandLineInterface(int argc, char *argv[]) {
     llvm::install_fatal_error_handler(&icgrep_error_handler);
-    codegen::ParseCommandLineOptions(argc, argv, {&RE_Options, &Input_Options, &Output_Options, re::re_toolchain_flags(), pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&RE_Options, &Input_Options, &Output_Options, re::re_toolchain_flags(), &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

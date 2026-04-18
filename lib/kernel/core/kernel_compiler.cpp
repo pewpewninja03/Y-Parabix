@@ -693,7 +693,7 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelB
         }
         Value * const expectedNumOfStrides = nextArg();
         const auto imss = (mTarget->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet);
-        if (LLVM_UNLIKELY(imss && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(imss && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
             mReportExpansionCallback = nextArg();
             mPipelineHandle = nextArg();
         }
@@ -1033,7 +1033,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
 
     const auto hasManagedOutput = (mTarget->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet);
 
-    if (LLVM_UNLIKELY(hasManagedOutput && codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+    if (LLVM_UNLIKELY(hasManagedOutput && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
         mReportExpansionCallback = nextArg();
         mPipelineHandle = nextArg();
     }
@@ -1182,7 +1182,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         }
     }
     if (LLVM_UNLIKELY(mReportExpansionCallback != nullptr)) {
-        assert (codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers));
+        assert (codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers));
         props.push_back(mReportExpansionCallback);
         assert (mPipelineHandle);
         props.push_back(mPipelineHandle);

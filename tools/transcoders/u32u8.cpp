@@ -17,7 +17,6 @@
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
 #include <llvm/Support/Debug.h>                    // for dbgs
 #include <pablo/pablo_kernel.h>                    // for PabloKernel
-#include <pablo/pablo_toolchain.h>
 #include <kernel/core/kernel_builder.h>
 #include <pablo/pe_zeroes.h>
 #include <toolchain/toolchain.h>
@@ -75,7 +74,7 @@ u32u8FunctionType u32u8_gen (CPUDriver & driver) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&u32u8Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&u32u8Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     CPUDriver driver("u32u8");
     auto u32u8Function = u32u8_gen(driver);
     const int fd = open(inputFile.c_str(), O_RDONLY);
