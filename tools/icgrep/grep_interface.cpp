@@ -25,8 +25,6 @@ namespace argv {
  *  A.  Regular expression syntax, interpretation and processing.
  */
 
-static cl::OptionCategory RE_Options("A. Regular Expression Interpretation", "These options control regular expression parsing and interpretation");
-
 re::RE_Syntax RegexpSyntax;
 static cl::opt<re::RE_Syntax, true> RegexpSyntaxOption(cl::desc("Regular expression syntax: (default PCRE)"),
     cl::values(
@@ -40,30 +38,30 @@ static cl::opt<re::RE_Syntax, true> RegexpSyntaxOption(cl::desc("Regular express
         clEnumValN(re::RE_Syntax::PCRE, "perl-regexp", "Alias for -P"),
         clEnumValN(re::RE_Syntax::FileGLOB, "GLOB", "Posix GLOB syntax for file name patterns"),
         clEnumValN(re::RE_Syntax::PROSITE, "PROSITE", "PROSITE protein patterns syntax")),
-            cl::cat(RE_Options), cl::location(RegexpSyntax), cl::init(re::RE_Syntax::PCRE));
+            cl::cat(re::RE_Options), cl::location(RegexpSyntax), cl::init(re::RE_Syntax::PCRE));
 
 bool IgnoreCaseFlag;
-static cl::opt<bool, true> IgnoreCaseOption("i", cl::location(IgnoreCaseFlag), cl::desc("Ignore case distinctions in the pattern and the file."), cl::cat(RE_Options), cl::Grouping);
+static cl::opt<bool, true> IgnoreCaseOption("i", cl::location(IgnoreCaseFlag), cl::desc("Ignore case distinctions in the pattern and the file."), cl::cat(re::RE_Options), cl::Grouping);
 static cl::alias IgnoreCaseAlias("ignore-case", cl::desc("Alias for -i"), cl::aliasopt(IgnoreCaseOption));
 
 bool InvertMatchFlag;
-static cl::opt<bool, true> InvertMatchOption("v", cl::location(InvertMatchFlag), cl::desc("Invert match results: select non-matching lines."), cl::cat(RE_Options), cl::Grouping);
+static cl::opt<bool, true> InvertMatchOption("v", cl::location(InvertMatchFlag), cl::desc("Invert match results: select non-matching lines."), cl::cat(re::RE_Options), cl::Grouping);
 static cl::alias InvertMatchAlias("invert-match", cl::desc("Alias for -v"), cl::aliasopt(InvertMatchOption));
 
 bool LineRegexpFlag;
-static cl::opt<bool, true> LineRegexpOption("x", cl::location(LineRegexpFlag), cl::desc("Require that entire lines be matched."), cl::cat(RE_Options), cl::Grouping);
+static cl::opt<bool, true> LineRegexpOption("x", cl::location(LineRegexpFlag), cl::desc("Require that entire lines be matched."), cl::cat(re::RE_Options), cl::Grouping);
 static cl::alias LineRegexpAlias("line-regexp", cl::desc("Alias for -x"), cl::aliasopt(LineRegexpOption));
 
 bool WordRegexpFlag;
-static cl::opt<bool, true> WordRegexpOption("w", cl::location(WordRegexpFlag), cl::desc("Require that that whole words be matched."), cl::cat(RE_Options), cl::Grouping);
+static cl::opt<bool, true> WordRegexpOption("w", cl::location(WordRegexpFlag), cl::desc("Require that that whole words be matched."), cl::cat(re::RE_Options), cl::Grouping);
 static cl::alias WordRegexpAlias("word-regexp", cl::desc("Alias for -w"), cl::aliasopt(WordRegexpOption));
 
 std::vector<std::string> RegexpVector;
-static cl::list<std::string, std::vector<std::string>> RegexpOption("e", cl::location(RegexpVector), cl::desc("Regular expression"), cl::ZeroOrMore, cl::cat(RE_Options));
+static cl::list<std::string, std::vector<std::string>> RegexpOption("e", cl::location(RegexpVector), cl::desc("Regular expression"), cl::ZeroOrMore, cl::cat(re::RE_Options));
 static cl::alias RegexpAlias("regexp", cl::desc("Alias for -e"), cl::aliasopt(RegexpOption));
 
 std::string FileFlag;
-static cl::opt<std::string, true> FileOption("f", cl::location(FileFlag), cl::desc("Take regular expressions (one per line) from a file."), cl::cat(RE_Options));
+static cl::opt<std::string, true> FileOption("f", cl::location(FileFlag), cl::desc("Take regular expressions (one per line) from a file."), cl::cat(re::RE_Options));
 static cl::alias FileAlias("file", cl::desc("Alias for -f"), cl::aliasopt(FileOption));
     
 /*
@@ -209,7 +207,7 @@ static void icgrep_error_handler(void *UserData, const std::string &Message, boo
 
 void InitializeCommandLineInterface(int argc, char *argv[]) {
     llvm::install_fatal_error_handler(&icgrep_error_handler);
-    codegen::ParseCommandLineOptions(argc, argv, {&RE_Options, &Input_Options, &Output_Options, re::re_toolchain_flags(), &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
+    codegen::ParseCommandLineOptions(argc, argv, {&re::RE_Options, &Input_Options, &Output_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

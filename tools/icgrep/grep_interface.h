@@ -14,8 +14,6 @@
 
 namespace re { class CC; }
 namespace re { class RE; }
-namespace llvm { namespace cl { class OptionCategory; } }
-
 
 namespace argv {
     
