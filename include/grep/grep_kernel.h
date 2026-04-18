@@ -5,7 +5,6 @@
 #pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
-#include <pablo/pablo_toolchain.h>
 #include <re/alphabet/alphabet.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/analysis/capture-ref.h>

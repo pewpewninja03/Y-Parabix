@@ -14,7 +14,6 @@
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
 #include <llvm/Support/Debug.h>                    // for dbgs
 #include <pablo/pablo_kernel.h>                    // for PabloKernel
-#include <pablo/pablo_toolchain.h>
 #include <pablo/parse/pablo_source_kernel.h>
 #include <pablo/parse/pablo_parser.h>
 #include <pablo/parse/simple_lexer.h>
@@ -127,7 +126,7 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ztf1Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&ztf1Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     
     CPUDriver driver("ztf1");
     auto em = ErrorManager::Create();

@@ -8,11 +8,7 @@
 #include <string>
 #include <llvm/Support/FileSystem.h>
 
-namespace llvm { namespace cl { class OptionCategory; } }
-
 namespace pablo {
-
-const llvm::cl::OptionCategory * pablo_toolchain_flags();
 
 extern std::string ShowOptimizedPabloOption;
 extern std::string ShowPabloOption;

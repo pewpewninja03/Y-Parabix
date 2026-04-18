@@ -22,7 +22,6 @@
 #include <pablo/builder.hpp>
 #include <pablo/pablo_kernel.h>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/pe_zeroes.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <toolchain/toolchain.h>
@@ -199,7 +198,7 @@ size_t file_size(const int fd) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&x8u16Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&x8u16Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     CPUDriver driver("x8u16");
     x8u16FunctionType x8u16Function = generatePipeline(driver);
     const int fd = open(inputFile.c_str(), O_RDONLY);

@@ -25,7 +25,6 @@
 #include <pablo/boolean.h>
 #include <pablo/pablo_kernel.h>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 #include <pablo/pe_zeroes.h>
 #include <pablo/pe_ones.h>
@@ -715,7 +714,7 @@ size_t file_size(const int fd) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&gb18030Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&gb18030Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
     // Default output UTF-8
     unsigned encodingBits = 8;

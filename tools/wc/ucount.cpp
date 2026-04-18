@@ -27,7 +27,6 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_kernel.h>
 #include <toolchain/toolchain.h>

@@ -21,7 +21,6 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/program_builder.h>
 #include <toolchain/toolchain.h>
@@ -288,7 +287,7 @@ void wc(WordCountFunctionType fn_ptr, const uint32_t fileIdx) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&wcFlags, pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&wcFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

@@ -18,13 +18,6 @@ using namespace llvm;
 
 namespace pablo {
 
-static cl::OptionCategory PabloOptions("Pablo Options", "These options control printing, generation and instrumentation of Pablo intermediate code.");
-
-const cl::OptionCategory * pablo_toolchain_flags() {
-    return &PabloOptions;
-}
-
-
 std::string ShowPabloOption = codegen::OmittedOption;
 static cl::opt<std::string, true> PabloOutputOption("ShowPablo", cl::location(ShowPabloOption), cl::ValueOptional,
     cl::desc("Print generated Pablo code to stderr (by omitting =<filename>) or a file"),

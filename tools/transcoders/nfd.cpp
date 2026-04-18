@@ -43,7 +43,6 @@
 #include <re/unicode/resolve_properties.h>
 #include <string>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
@@ -940,7 +939,7 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver, NFD_BixData & NFD
 
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing.\n";
