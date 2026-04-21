@@ -55,7 +55,7 @@ void Add_immediate::generatePabloMethod() {
     while(a.size() < mBixBits) {
         a.push_back(pb.createZeroes());
     }
-    pablo::BixNum sum = bnc.SubModular(a, mImmediate & mask);
+    pablo::BixNum sum = bnc.AddModular(a, mImmediate & mask);
     for (unsigned i = 0; i < mBixBits; i++) {
         pb.createAssign(pb.createExtract(sumVar, i), sum[i]);
     }
