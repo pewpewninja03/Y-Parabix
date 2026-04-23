@@ -400,17 +400,6 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         P.CreateKernelCall<LineStartsKernel>(mU21_LB, lineStarts);
         mCtxt.setMatchRegions(lineStarts, mU21_LB);
     }
-    if (re::matchesEmptyString(mRE)) {
-        mEmptyMatches = P.CreateStreamSet(1);
-        if (mIndexAlphabet == &cc::UTF8) {
-            P.CreateKernelCall<FindEmptyBreaks>(mLineBreakStream, mEmptyMatches, mU8index);
-        } else {
-            P.CreateKernelCall<FindEmptyBreaks>(mU21_LB, mEmptyMatches);
-        }
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureBitstream("mEmptyMatches", mEmptyMatches);
-        }
-    }
 }
 
 StreamSet * GrepEngine::initialMatches(RE_PipelineBuilder & RE_PB, StreamSet * InputStream) {
