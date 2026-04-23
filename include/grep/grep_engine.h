@@ -167,7 +167,6 @@ protected:
     const cc::Alphabet * mLengthAlphabet;
     kernel::StreamSet * mLineBreakStream;
     kernel::StreamSet * mU8index;
-    kernel::StreamSet * mEmptyMatches;
     kernel::StreamSet * mU21;
     kernel::StreamSet * mU21_LB;
     std::vector<std::string> mSpanNames;

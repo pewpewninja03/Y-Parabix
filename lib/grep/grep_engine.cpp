@@ -162,7 +162,6 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mIndexAlphabet(&cc::UTF8),
     mLineBreakStream(nullptr),
     mU8index(nullptr),
-    mEmptyMatches(nullptr),
     mU21(nullptr),
     mU21_LB(nullptr),
     mEngineThread(pthread_self()) {
@@ -406,11 +405,6 @@ StreamSet * GrepEngine::initialMatches(RE_PipelineBuilder & RE_PB, StreamSet * I
     kernel::PipelineBuilder & P = RE_PB.getPipelineBuilder();
     StreamSet * Matches = P.CreateStreamSet();
     RE_PB.matchSearchPipeline(mRE, Matches);
-    if (mEmptyMatches) {
-        StreamSet * combined = P.CreateStreamSet();
-        OrCombine(P, Matches, mEmptyMatches, combined);
-        Matches = combined;
-    }
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
         P.captureBitstream("initial matches", Matches);
     }
@@ -697,11 +691,6 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureBitstream("Matches", Matches);
         }
-    }
-    if (mEmptyMatches) {
-        StreamSet * combined = P.CreateStreamSet();
-        OrCombine(P, Matches, mEmptyMatches, combined);
-        Matches = combined;
     }
 
     StreamSet * lbs = (mIndexAlphabet == &cc::Unicode) ? mU21_LB : mLineBreakStream;

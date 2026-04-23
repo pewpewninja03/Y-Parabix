@@ -256,17 +256,6 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     RE_PipelineBuilder RE_PB(P, ctxt);
     RE_PB.matchSearchPipeline(searchRE, Matches);
 
-    if (re::matchesEmptyString(searchRE)) {
-        StreamSet * Empties = P.CreateStreamSet(1);
-        csv::GetEmptyFields(P, csvCCs, fieldSeparators, Empties);
-        SHOW_STREAM(Empties);
-        StreamSet * emptyMatches = P.CreateStreamSet(1);
-        AndCombine(P, Empties, Selected, emptyMatches);
-        StreamSet * combined = P.CreateStreamSet(1);
-        OrCombine(P, Matches, emptyMatches, combined);
-        Matches = combined;
-    }
-
     StreamSet * MatchedLineEnds = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<MatchedLinesKernel>(Matches, recordSeparators, MatchedLineEnds);
     
