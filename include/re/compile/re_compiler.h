@@ -124,7 +124,8 @@ class RE_Compiler {
     void addPrecompiled(std::string externalName, ExternalStream s);
 
     RE_Compiler(pablo::PabloBlock * scope,
-                pablo::PabloAST * barrierStream,
+                pablo::PabloAST * regionStartStream,
+                pablo::PabloAST * regionFollowStream,
                 const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
 
     void setIndexing(const cc::Alphabet * indexingAlphabet, pablo::PabloAST * idxStream);
@@ -159,7 +160,9 @@ private:
     const cc::Alphabet *                            mCodeUnitAlphabet;
     const cc::Alphabet *                            mIndexingAlphabet;
     pablo::PabloAST *                               mIndexStream;
-    pablo::PabloAST *                               mBarrier;
+    pablo::PabloAST *                               mRegionStart;
+    pablo::PabloAST *                               mRegionFollow;
+    pablo::PabloAST *                               mMatchable;
     std::vector<const cc::Alphabet *>               mAlphabets;
     std::vector<std::vector<pablo::PabloAST *>>     mBasisSets;
     std::vector<std::unique_ptr<cc::CC_Compiler>>   mAlphabetCompilers;

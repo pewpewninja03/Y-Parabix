@@ -147,6 +147,34 @@ void RegexBarrier::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("barrier"), pb.getInteger(0)), barrier);
 }
 
+class RegexRegions : public PabloKernel {
+public:
+    RegexRegions(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldSeparators, StreamSet * selected,
+                 StreamSet * regionStart, StreamSet * regionFollow)
+    : PabloKernel(ts, "RegexRegions",
+                      {Binding{"csvMarks", csvMarks},
+                       Binding{"fieldSeparators", fieldSeparators, FixedRate(), LookAhead(1)},
+                       Binding{"selected", selected}},
+                      {Binding{"regionStart", regionStart}, Binding{"regionFollow", regionFollow}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void RegexRegions::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
+    PabloAST * fieldSeparators = pb.createExtract(getInputStreamVar("fieldSeparators"), pb.getInteger(0));
+    PabloAST * selectedFields = pb.createExtract(getInputStreamVar("selected"), pb.getInteger(0));
+    PabloAST * regionStart = pb.createAnd(pb.createAdvance(fieldSeparators, 1), selectedFields);
+    PabloAST * fieldStartQuote = pb.createAnd(regionStart, csvMarks[csv::markDQ]);
+    regionStart = pb.createOr(pb.createXor(regionStart, fieldStartQuote), pb.createAdvance(fieldStartQuote, 1));
+    PabloAST * regionFollow = pb.createAnd(fieldSeparators, selectedFields);
+    PabloAST * fieldEndQuote = pb.createAnd(pb.createLookahead(fieldSeparators, 1), csvMarks[csv::markDQ]);
+    regionFollow = pb.createOr(fieldEndQuote, pb.createXor(regionFollow, pb.createAdvance(fieldEndQuote, 1)));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("regionStart"), pb.getInteger(0)), regionStart);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("regionFollow"), pb.getInteger(0)), regionFollow);
+}
+
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
@@ -219,12 +247,12 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     SHOW_STREAM(Selected);
 
 
-    StreamSet * Matches = P.CreateStreamSet(1);
-    StreamSet * Barrier = P.CreateStreamSet(1);
-    P.CreateKernelCall<RegexBarrier>(csvCCs, fieldSeparators, Selected, Barrier);
-    SHOW_STREAM(Barrier);
+    StreamSet * fieldStarts = P.CreateStreamSet(1);
+    StreamSet * fieldFollows = P.CreateStreamSet(1);
+    P.CreateKernelCall<RegexRegions>(csvCCs, fieldSeparators, Selected, fieldStarts, fieldFollows);
+    ctxt.setMatchRegions(fieldStarts, fieldFollows);
 
-    ctxt.setBarrier(Barrier);
+    StreamSet * Matches = P.CreateStreamSet(1);
     RE_PipelineBuilder RE_PB(P, ctxt);
     RE_PB.matchSearchPipeline(searchRE, Matches);
 

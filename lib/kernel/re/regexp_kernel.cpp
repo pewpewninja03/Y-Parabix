@@ -47,7 +47,7 @@ using namespace kernel;
 using namespace llvm;
 
 RE_CompilerContext::RE_CompilerContext() : mCodeUnitAlphabet(nullptr), mCodeUnitStream(nullptr),
-    mBarrierStream(nullptr), mLengthAlphabet(nullptr), mIndexStream(nullptr),
+    mMatchStarts(nullptr), mMatchFollows(nullptr), mLengthAlphabet(nullptr), mIndexStream(nullptr),
     mCombiningType(RE_CombiningType::None), mCombiningStream(nullptr) {}
 
 void RE_CompilerContext::setCodeUnitContext(const cc::Alphabet * a, StreamSet * basis) {
@@ -57,8 +57,9 @@ void RE_CompilerContext::setCodeUnitContext(const cc::Alphabet * a, StreamSet * 
     addAlphabet(a, basis);
 }
 
-void RE_CompilerContext::setBarrier(kernel::StreamSet * s) {
-    mBarrierStream = s;
+void RE_CompilerContext::setMatchRegions(StreamSet * starts, StreamSet * follows) {
+    mMatchStarts = starts;
+    mMatchFollows = follows;
 }
 
 void RE_CompilerContext::setIndexingContext(const cc::Alphabet * a, StreamSet * s) {
@@ -90,14 +91,14 @@ std::string RE_Kernel::makeSignature(RE_CompilerContext & ctxt, RE * re) {
     std::string signature;
     llvm::raw_string_ostream sigstrm(signature);
     sigstrm << AnnotateWithREflags("RE");
-    if (ctxt.mBarrierStream) {
-        // A barrier stream is normally expected.
+    if (ctxt.mMatchStarts) {
+        // Match start and follow streams to mark regions are normally expected.
         if (anyEndAnchor(re)) {
             // For end anchors, a lookahead attribute is added.
-            sigstrm << "+B";
+            sigstrm << "+R";
         }
     } else {
-        sigstrm << "-B";
+        sigstrm << "-R";
     }
     if (ctxt.mIndexStream) {
         sigstrm << "+X";
@@ -156,11 +157,12 @@ Bindings RE_Kernel::makeInputBindings(RE_CompilerContext & ctxt, RE * re) {
     std::set<std::string> localAlphabets;
     gatherExternals(re, localExternals, localAlphabets);
     Bindings externalBindings;
-    if (ctxt.mBarrierStream) {
+    if (ctxt.mMatchStarts) {
+        externalBindings.emplace_back("mStarts", ctxt.mMatchStarts);
         if (anyEndAnchor(re)) {
-            externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream, FixedRate(), LookAhead(1));
+            externalBindings.emplace_back("mFollows", ctxt.mMatchFollows, FixedRate(), LookAhead(1));
         } else {
-            externalBindings.emplace_back("mBarrier", ctxt.mBarrierStream);
+            externalBindings.emplace_back("mFollows", ctxt.mMatchFollows);
         }
     }
     if (ctxt.mIndexStream) {
@@ -205,11 +207,13 @@ void RE_Kernel::generatePabloMethod() {
     std::set<std::string> localExternals;
     std::set<std::string> localAlphabets;
     gatherExternals(mRE, localExternals, localAlphabets);
-    PabloAST * barrier = nullptr;
-    if (mContext.mBarrierStream) {
-        barrier = pb.createExtract(getInputStreamVar("mBarrier"), pb.getInteger(0));
+    PabloAST * matchStarts = nullptr;
+    PabloAST * matchFollows = nullptr;
+    if (mContext.mMatchStarts) {
+        matchStarts = pb.createExtract(getInputStreamVar("mStarts"), pb.getInteger(0));
+        matchFollows = pb.createExtract(getInputStreamVar("mFollows"), pb.getInteger(0));
     }
-    RE_Compiler re_compiler(getEntryScope(), barrier, mContext.mCodeUnitAlphabet);
+    RE_Compiler re_compiler(getEntryScope(), matchStarts, matchFollows, mContext.mCodeUnitAlphabet);
     for (auto & a : mContext.mAlphabets) {
         auto alphaName = a.first->getName();
         if (localAlphabets.count(alphaName) == 1) {

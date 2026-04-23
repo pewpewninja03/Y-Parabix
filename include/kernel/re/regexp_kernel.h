@@ -37,7 +37,7 @@ public:
 
     void setCodeUnitContext(const cc::Alphabet * a, kernel::StreamSet * s);
 
-    void setBarrier(kernel::StreamSet * s);
+    void setMatchRegions(kernel::StreamSet * starts, kernel::StreamSet * follows);
 
     void setIndexingContext(const cc::Alphabet * a, kernel::StreamSet * s);
 
@@ -50,7 +50,8 @@ public:
 private:
     const cc::Alphabet * mCodeUnitAlphabet;
     kernel::StreamSet * mCodeUnitStream;
-    kernel::StreamSet * mBarrierStream;
+    kernel::StreamSet * mMatchStarts;
+    kernel::StreamSet * mMatchFollows;
     const cc::Alphabet * mLengthAlphabet;
     kernel::StreamSet * mIndexStream;
     RE_CombiningType mCombiningType;

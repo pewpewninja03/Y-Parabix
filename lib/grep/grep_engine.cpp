@@ -358,7 +358,9 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
     }
     if (mIndexAlphabet == &cc::UTF8) {
         mCtxt.setCodeUnitContext(mIndexAlphabet, Source);
-        mCtxt.setBarrier(mLineBreakStream);
+        StreamSet * lineStarts = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
+        mCtxt.setMatchRegions(lineStarts, mLineBreakStream);
         if (mLengthAlphabet == &cc::Unicode) {
             mCtxt.setIndexingContext(&cc::Unicode, mU8index);
         }
@@ -394,7 +396,9 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * ByteStrea
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             P.captureBitstream("mU21_LB", mU21_LB);
         }
-        mCtxt.setBarrier(mU21_LB);
+        StreamSet * lineStarts = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<LineStartsKernel>(mU21_LB, lineStarts);
+        mCtxt.setMatchRegions(lineStarts, mU21_LB);
     }
     if (re::matchesEmptyString(mRE)) {
         mEmptyMatches = P.CreateStreamSet(1);
@@ -1176,6 +1180,8 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     StreamSet * BasisBits = E.CreateStreamSet(8);
     E.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
+    StreamSet * matchStarts = E.CreateStreamSet(1, 1);
+    E.CreateKernelCall<LineStartsKernel>(RecordBreakStream, matchStarts);
 
     StreamSet * u8index = E.CreateStreamSet();
     E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
@@ -1184,7 +1190,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     RE_CompilerContext ctxt;
     ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     ctxt.setIndexingContext(&cc::Unicode, u8index);
-    ctxt.setBarrier(RecordBreakStream);
+    ctxt.setMatchRegions(matchStarts, RecordBreakStream);
 
     RE_PipelineBuilder RE_PB(E, ctxt);
     RE_PB.matchSearchPipeline(matchingRE, MatchResults);
@@ -1250,6 +1256,8 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     StreamSet * BasisBits = E.CreateStreamSet(8);
     E.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
+    StreamSet * matchStarts = E.CreateStreamSet(1, 1);
+    E.CreateKernelCall<LineStartsKernel>(RecordBreakStream, matchStarts);
 
     StreamSet * u8index = E.CreateStreamSet();
     E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
@@ -1261,7 +1269,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     RE_CompilerContext ctxt;
     ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     ctxt.setIndexingContext(&cc::Unicode, u8index);
-    ctxt.setBarrier(RecordBreakStream);
+    ctxt.setMatchRegions(matchStarts, RecordBreakStream);
     RE_PipelineBuilder RE_PB(E, ctxt);
 
     for (unsigned i = 0; i < n; i++) {
