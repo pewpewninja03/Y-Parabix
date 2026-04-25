@@ -51,7 +51,7 @@ void Hangul_Composables::generatePabloMethod() {
     for (unsigned i = 0; i < Hangul::LCount * Hangul::VCount; i++) {
         Hangul_uset[HC_Kind::LV].insert(Hangul::SBase + i * Hangul::TCount);
     }
-    Hangul_uset[HC_Kind::T] = UCD::UnicodeSet(Hangul::TBase, Hangul::TBase + Hangul::TCount - 1);
+    Hangul_uset[HC_Kind::T] = UCD::UnicodeSet(Hangul::TBase + 1, Hangul::TBase + Hangul::TCount - 1);
     unicodeCompiler.compile(Hangul_var, Hangul_uset);
     writeOutputStreamSet("L_V_T_Composables", Hangul_var);
 }
@@ -97,11 +97,11 @@ void Hangul_Composition::generatePabloMethod() {
     // For Unicode or UTF-16, only a single code unit is needed.
     unsigned codeUnitsPerChar = Basis.size() > 8 ? 1 : 3;
     PabloAST * V_ahead = nested.createLookahead(Hangul_V, codeUnitsPerChar);
-    PabloAST * L_prefix = nested.createAnd(Hangul_L, V_ahead);
-    PabloAST * V_suffix = nested.createAdvance(L_prefix, codeUnitsPerChar);
+    PabloAST * L_prefix = nested.createAnd(Hangul_L, V_ahead, "L_prefix");
+    PabloAST * V_suffix = nested.createAdvance(L_prefix, codeUnitsPerChar, "V_suffix");
     PabloAST * T_ahead = nested.createLookahead(Hangul_T, codeUnitsPerChar);
-    PabloAST * LV_sequence = nested.createOr(Hangul_LV, V_suffix);
-    PabloAST * LVT_sequence = nested.createAnd(LV_sequence, T_ahead);
+    PabloAST * LV_sequence = nested.createOr(Hangul_LV, V_suffix, "LV_sequence");
+    PabloAST * LVT_sequence = nested.createAnd(LV_sequence, T_ahead, "LVT_sequence");
     PabloAST * T_suffix = nested.createAdvance(LVT_sequence, codeUnitsPerChar);
     //
     // Given LV/LVT combinations, character replacement will be performed at
