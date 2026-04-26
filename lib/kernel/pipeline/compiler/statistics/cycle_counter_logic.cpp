@@ -46,7 +46,6 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         const auto name = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
         mTarget->addInternalScalar(cycleCounterTy, name, groupId);
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -561,7 +560,7 @@ void PipelineCompiler::printOptionalCycleCounter(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeStridesPerSegment(KernelBuilder & b) const {
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
 
         const auto prefix = makeKernelName(mKernelId);
 
@@ -594,7 +593,7 @@ void PipelineCompiler::initializeStridesPerSegment(KernelBuilder & b) const {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned kernelId, Value * const totalStrides) const {
 
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
         // NOTE: this records only the change to attempt to reduce the memory usage of this log.
         assert (KernelPartitionId[kernelId - 1] != KernelPartitionId[kernelId]);
         const auto prefix = makeKernelName(kernelId);
@@ -705,7 +704,7 @@ void PipelineCompiler::recordStridesPerSegment(KernelBuilder & b, const unsigned
  * @brief concludeStridesPerSegmentRecording
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::concludeStridesPerSegmentRecording(KernelBuilder & b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
         auto currentPartitionId = KernelPartitionId[PipelineInput];
         Constant * const sz_ZERO = b.getSize(0);
         for (auto kernelId = FirstKernel; kernelId <= LastKernel; ++kernelId) {
@@ -722,7 +721,7 @@ void PipelineCompiler::concludeStridesPerSegmentRecording(KernelBuilder & b) con
  * @brief printOptionalStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalStridesPerSegment(KernelBuilder & b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
 
         IntegerType * const sizeTy = b.getSizeTy();
 

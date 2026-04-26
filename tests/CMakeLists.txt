@@ -1,5 +1,7 @@
-# Copyright (c) 2019 International Characters.
-# This software is licensed to the public under the Open Software License 3.0.
+#
+#  Part of the Parabix Project, under the Open Software License 3.0.
+#  SPDX-License-Identifier: OSL-3.0
+#
 
 # Place test executables in build/tests/bin
 set(TEST_BIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/bin)
@@ -30,6 +32,7 @@ parabix_add_kernel_test(index_test kernel.streamutils)
 parabix_add_kernel_test(nesting_tests kernel.util)
 parabix_add_kernel_test(everynth_tests pablo)
 parabix_add_kernel_test(test_repeatingstreamset kernel.io)
+parabix_add_kernel_test(test_bitwise_kernels kernel.bitwise)
 parabix_add_kernel_test(test_bytefilterandspread kernel.io kernel.streamutils)
 parabix_add_kernel_test(test_emptyprogram kernel.io)
 parabix_add_kernel_test(test_truncatedstreamset kernel.io)

@@ -36,7 +36,6 @@
 #include <re/cc/cc_compiler_target.h>
 #include <string>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <iostream>
@@ -595,7 +594,7 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
     unicode::BitTranslationSets xfrms;
     unicode::BitTranslationSets insertion_bixnum;

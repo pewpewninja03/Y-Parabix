@@ -98,7 +98,7 @@ public:
 
         P.gatherInfo();
 
-        if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
+        if (codegen::InfoOptionIsSet(codegen::PrintPipelineGraph)) {
             assert (b.getModule() == pipelineKernel->getModule());
             P.printBufferGraph(b, errs());
         }
@@ -114,8 +114,8 @@ private:
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
     , mKernels(pipelineKernel->mKernels)
-    , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
-    , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
+    , mTraceProcessedProducedItemCounts(codegen::StatisticsOptionIsSet(codegen::TraceCounts))
+    , mTraceDynamicBuffers(codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))
     , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
     , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
     , PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions)) {

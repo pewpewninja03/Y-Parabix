@@ -35,24 +35,28 @@ inline unsigned getPageSize() {
     return boost::interprocess::mapped_region::get_page_size();
 }
 
-cl::OptionCategory CodeGenOptions("Code Generation Options", "These options control code generation.");
+cl::OptionCategory JIT_InfoOptions("J.  JIT Information Options", 
+    "These options control production of information reports during JIT compilation.");
+
+cl::OptionCategory CodeGenOptions("K.  Kernel and Pipeline Compilation Options", 
+    "These options control how kernel and pipeline code is generated.");
+
+cl::OptionCategory InstrumentationOptions("X.  Execution Time Instrumentation Options", 
+    "These options instrument executed code for tracing or statistics gathering.");
+
+static cl::bits<InfoFlags>
+JIT_InfoFlags(cl::desc("JIT Info Flags"),
+              cl::values(clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
+                         clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr.")),
+              cl::cat(JIT_InfoOptions));
 
 static cl::bits<DebugFlags>
-DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run the IR verification pass."),
-                        clEnumVal(SerializeThreads, "Force segment threads to run sequentially."),
-                        clEnumVal(TraceCounts, "Trace kernel processed, consumed and produced item counts."),
-                        clEnumVal(TraceDynamicBuffers, "Trace dynamic buffer allocations and deallocations."),
-                        clEnumVal(TraceDynamicMultithreading, "Trace dynamic multithreading thread count state."),
-                        clEnumVal(TraceBlockedIO, "Trace kernels prevented from processing any strides "
-                                                  "due to insufficient input items / output space."),
-                        clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),
-                        clEnumVal(TraceProducedItemCounts, "Trace produced item count deltas over segments."),
-                        clEnumVal(TraceUnconsumedItemCounts, "Trace unconsumed item counts over segments."),
-                        clEnumVal(GenerateTransferredItemCountHistogram, "Generate a histogram CSV of each non-Fixed port detailing "
-                                                                         "the transfered item count per executed stride."),
-                        clEnumVal(GenerateDeferredItemCountHistogram, "Generate a histogram CSV of each deferred port detailing "
-                                                                      "the difference between the deferred and total item count "
-                                                                      "per executed stride."),
+KernelFlags(cl::desc("Flags controlling kernel/pipeline compilation"), 
+            cl::values(clEnumVal(SerializeThreads, "Force segment threads to run sequentially."),
+                        clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
+                        clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
+                        clEnumVal(DisableCacheAlignedKernelStructs, "Disable cache alignment of kernel state memory."),
+                        clEnumVal(DisableInOutAttributes, "Disable In/Out attributes for streamset data buffers."),
                         clEnumVal(EnableAsserts, "Enable built-in Parabix framework asserts in all generated IR."),
 
                         clEnumVal(EnableStreamSetAsserts, "Enable built-in Parabix framework asserts for streamset I/O IR."),
@@ -60,59 +64,74 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                         clEnumVal(EnablePipelineAsserts, "Enable built-in Parabix framework asserts in generated pipeline IR."),
                         clEnumVal(EnableMProtect, "Use mprotect to cause a write fault when erroneously "
                                                   "overwriting kernel state / stream space."),
-                        clEnumVal(EnableCycleCounter, "Count and report CPU cycles per kernel."),
-                        clEnumVal(EnableBlockingIOCounter, "Count and report the number of blocked kernel "
-                                                           "executions due to insufficient data/space of a "
-                                                           "particular stream."),
-                        clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
-                        clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
+                        clEnumVal(ForcePipelineRecompilation, "Disable object cache lookup for any PipelineKernel."),
+                        clEnumVal(VerifyIR, "Run the IR verification pass.")),
+            cl::cat(CodeGenOptions));
 
+static cl::bits<StatisticsFlags>
+StatisticsOptions(cl::desc("Statistics gathering options"), 
+             cl::values(clEnumVal(EnableCycleCounter, "Count and report CPU cycles per kernel."),
+                        clEnumVal(GenerateTransferredItemCountHistogram, "Generate a histogram CSV of each non-Fixed port detailing "
+                                                                         "the transfered item count per executed stride."),
+                        clEnumVal(GenerateDeferredItemCountHistogram, "Generate a histogram CSV of each deferred port detailing "
+                                                                      "the difference between the deferred and total item count "
+                                                                      "per executed stride."),
                         #ifdef ENABLE_PAPI
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
                         #endif
-
-                        clEnumVal(DisableCacheAlignedKernelStructs, "Disable cache alignment of kernel state memory."),
-
-                        clEnumVal(DisableInOutAttributes, "Disable In/Out attributes for streamset data buffers."),
-
-                        clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
-                        clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr."),
-                        clEnumVal(ForcePipelineRecompilation, "Disable object cache lookup for any PipelineKernel.")), cl::cat(CodeGenOptions));
+                        clEnumVal(EnableBlockingIOCounter, "Count and report the number of blocked kernel "
+                                                           "executions due to insufficient data/space of a "
+                                                           "particular stream."),
+                        clEnumVal(TraceCounts, "Trace kernel processed, consumed and produced item counts."),
+                        clEnumVal(TraceDynamicBuffers, "Trace dynamic buffer allocations and deallocations."),
+                        clEnumVal(TraceDynamicMultithreading, "Trace dynamic multithreading thread count state."),
+                        clEnumVal(TraceBlockedIO, "Trace kernels prevented from processing any strides "
+                                                  "due to insufficient input items / output space."),
+                        clEnumVal(TraceStridesPerSegment, "Trace number of strides executed over segments."),
+                        clEnumVal(TraceProducedItemCounts, "Trace produced item count deltas over segments."),
+                        clEnumVal(TraceUnconsumedItemCounts, "Trace unconsumed item counts over segments.")),
+             cl::cat(InstrumentationOptions));
 
 std::string ShowIROption = OmittedOption;
 static cl::opt<std::string, true> IROutputOption("ShowIR", cl::location(ShowIROption), cl::ValueOptional,
-                                                         cl::desc("Print optimized LLVM IR to stderr (by omitting =<filename>) or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
+  cl::desc("Print optimized LLVM IR to stderr (by omitting =<filename>) or a file"),
+  cl::value_desc("filename"), cl::cat(JIT_InfoOptions));
 
 
 std::string ShowUnoptimizedIROption = OmittedOption;
 static cl::opt<std::string, true> UnoptimizedIROutputOption("ShowUnoptimizedIR", cl::location(ShowUnoptimizedIROption), cl::ValueOptional,
-                                                         cl::desc("Print generated LLVM IR to stderr (by omitting =<filename> or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
+  cl::desc("Print generated LLVM IR to stderr (by omitting =<filename> or a file"),
+  cl::value_desc("filename"), cl::cat(JIT_InfoOptions));
 
 
 std::string ShowIRFilter = "";
 static cl::opt<std::string, true> ToShowIRFilerOption("ToShow", cl::location(ShowIRFilter), cl::ValueOptional,
-                                                            cl::desc("Regex filter to choose which kernels to display when showing LLVM IR"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+  cl::desc("Regex filter to choose which kernels to display when showing LLVM IR"),
+  cl::value_desc("regex"), cl::cat(JIT_InfoOptions));
 
 
 std::string ThreadLocalPermittedOptions = "";
 static cl::opt<std::string, true> optThreadLocalPermittedOption("permitted-thread-local-streamsets", cl::location(ThreadLocalPermittedOptions), cl::ValueOptional,
-                                                            cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+  cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"),
+  cl::value_desc("regex"), cl::cat(CodeGenOptions));
 
 std::string PreserveAllStreamSetDataOptions = "";
 static cl::opt<std::string, true> optPreserveAllStreamSetDataOption("preserve-all-streamset-data", cl::location(PreserveAllStreamSetDataOptions), cl::ValueOptional,
-                                                            cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"), cl::value_desc("regex"), cl::cat(CodeGenOptions));
+  cl::desc("Comma delimited list of which streamsets to permit to be thread local (default=all)"),
+  cl::value_desc("regex"), cl::cat(CodeGenOptions));
 
 
 #ifdef ENABLE_PAPI
 std::string PapiCounterOptions = OmittedOption;
 static cl::opt<std::string, true> clPapiCounterOptions("PapiCounters", cl::location(PapiCounterOptions), cl::ValueOptional,
                                                        cl::desc("comma delimited list of PAPI event names (run papi_avail for options)"),
-                                                       cl::value_desc("comma delimited list"), cl::cat(CodeGenOptions));
+                                                       cl::value_desc("comma delimited list"), cl::cat(InstrumentationOptions));
 #endif
 
 std::string ShowASMOption = OmittedOption;
 static cl::opt<std::string, true> ASMOutputFilenameOption("ShowASM", cl::location(ShowASMOption), cl::ValueOptional,
-                                                         cl::desc("Print generated assembly code to stderr (by omitting =<filename> or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
+  cl::desc("Print generated assembly code to stderr (by omitting =<filename> or a file"),
+  cl::value_desc("filename"), cl::cat(JIT_InfoOptions));
 
 // Enable Debug Options to be specified on the command line
 
@@ -142,7 +161,7 @@ static cl::opt<bool, true> EnableObjectCacheOption("enable-object-cache", cl::lo
                                                    cl::desc("Enable object caching"), cl::cat(CodeGenOptions));
 
 static cl::opt<bool, true> TraceObjectCacheOption("trace-object-cache", cl::location(TraceObjectCache), cl::init(false),
-                                                   cl::desc("Trace object cache retrieval."), cl::cat(CodeGenOptions));
+                                                   cl::desc("Trace object cache retrieval."), cl::cat(JIT_InfoOptions));
 
 static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""),
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
@@ -202,22 +221,12 @@ MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
                      cl::value_desc("positive integer"));
 
 static cl::opt<unsigned, true>
-ThreadNumOption("thread-num", cl::location(SegmentThreads),
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
-                cl::init(std::thread::hardware_concurrency() - 1),
-#else
-                // If we have more than 2 cores, leave one for other processes,
-                // and use the rest for multithreading of the pipeline.
-                cl::init(std::max(llvm::sys::getHostNumPhysicalCores() - 1, 2)),
-#endif
+ThreadNumOption("thread-num", cl::location(SegmentThreads), cl::init(2),
                 cl::desc("Number of threads used for segment pipeline parallel"),
                 cl::value_desc("positive integer"));
 
 static cl::opt<unsigned, true> ScanBlocksOption("scan-blocks", cl::location(ScanBlocks), cl::init(4),
                                           cl::desc("Number of blocks per stride for scanning kernels"), cl::value_desc("positive initeger"));
-
-static cl::opt<unsigned, true> GroupNumOption("group-num", cl::location(GroupNum), cl::init(256),
-                                         cl::desc("NUmber of groups declared on GPU"), cl::value_desc("positive integer"), cl::cat(CodeGenOptions));
 
 std::string TraceOption = "";
 static cl::opt<std::string, true> TraceValueOption("trace", cl::location(TraceOption),
@@ -279,7 +288,7 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag) {
     #ifdef FORCE_ASSERTIONS
     if (flag == DebugFlags::EnableAsserts) return true;
     #endif
-    return DebugOptions.isSet(flag);
+    return KernelFlags.isSet(flag);
 }
 
 bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag1, const DebugFlags flag2) {
@@ -287,31 +296,39 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag1, const DebugFlags fla
     if (flag1 == DebugFlags::EnableAsserts) return true;
     if (flag2 == DebugFlags::EnableAsserts) return true;
     #endif
-    return DebugOptions.isSet(flag1) || DebugOptions.isSet(flag2);
+    return KernelFlags.isSet(flag1) || KernelFlags.isSet(flag2);
 }
 
+bool LLVM_READONLY StatisticsOptionIsSet(const StatisticsFlags flag) {
+    return StatisticsOptions.isSet(flag);
+}
 
+bool LLVM_READONLY InfoOptionIsSet(const InfoFlags flag) {
+    return JIT_InfoFlags.isSet(flag);
+}
 
 bool LLVM_READONLY AnyDebugOptionIsSet() {
     #ifdef FORCE_ASSERTIONS
     return true;
     #endif
-    return DebugOptions.getBits() != 0;
+    return (KernelFlags.getBits() != 0) || 
+           (JIT_InfoFlags.getBits() != 0) || 
+           (StatisticsOptions.getBits() != 0);
 }
 
 bool LLVM_READONLY AnyAssertionOptionIsSet() {
     #ifdef FORCE_ASSERTIONS
     return true;
     #endif
-    return DebugOptions.isSet(DebugFlags::EnableAsserts) || DebugOptions.isSet(DebugFlags::EnableStreamSetAsserts) || DebugOptions.isSet(DebugFlags::EnablePipelineAsserts);
+    return KernelFlags.isSet(DebugFlags::EnableAsserts) || KernelFlags.isSet(DebugFlags::EnableStreamSetAsserts) || KernelFlags.isSet(DebugFlags::EnablePipelineAsserts);
 }
 
 const char * ProgramName;
 
 inline bool disableObjectCacheDueToCommandLineOptions() {
     if (!TraceOption.empty()) return true;
-    if (DebugOptions.isSet(PrintKernelSizes)) return true;
-    if (DebugOptions.isSet(PrintPipelineGraph)) return true;
+    if (JIT_InfoFlags.isSet(PrintKernelSizes)) return true;
+    if (JIT_InfoFlags.isSet(PrintPipelineGraph)) return true;
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;
     if (ShowASMOption != OmittedOption) return true;
@@ -321,10 +338,10 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
 }
 
 inline bool disablePipelineObjectCacheDueToCommandLineOptions() {
-    if (DebugOptions.isSet(PrintPipelineGraph)) return true;
-    if (DebugOptions.isSet(EnablePipelineAsserts)) return true;
-    if (DebugOptions.isSet(DisableThreadLocalStreamSets)) return true;
-    if (DebugOptions.isSet(ForcePipelineRecompilation)) return true;
+    if (JIT_InfoFlags.isSet(PrintPipelineGraph)) return true;
+    if (KernelFlags.isSet(EnablePipelineAsserts)) return true;
+    if (KernelFlags.isSet(DisableThreadLocalStreamSets)) return true;
+    if (KernelFlags.isSet(ForcePipelineRecompilation)) return true;
     return false;
 }
 
@@ -347,6 +364,7 @@ void ParseCommandLineOptions(int argc, const char * const *argv, std::initialize
     }
     ObjectCacheDir = ObjectCacheDirOption.empty() ? nullptr : ObjectCacheDirOption.data();
     target_Options.MCOptions.AsmVerbose = true;
+
 }
 
 void printParabixVersion (raw_ostream & outs) {

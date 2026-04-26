@@ -71,8 +71,8 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
     const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
 
-    const auto trackIOSummary = DebugOptionIsSet(codegen::EnableBlockingIOCounter);
-    const auto trackIOHistory = DebugOptionIsSet(codegen::TraceBlockedIO);
+    const auto trackIOSummary = StatisticsOptionIsSet(codegen::EnableBlockingIOCounter);
+    const auto trackIOHistory = StatisticsOptionIsSet(codegen::TraceBlockedIO);
 
     for (size_t phase = 1; phase < numOfPhases; ++phase) {
 
@@ -251,7 +251,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         addHistogramProperties(b, kernelId, groupId);
     }
 
-    if (LLVM_UNLIKELY(isRoot && DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+    if (LLVM_UNLIKELY(isRoot && StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
         LLVMContext & C = b.getContext();
 //        FixedArray<Type *, 2> recordStruct;
 //        recordStruct[0] = sizeTy; // segment num

@@ -148,7 +148,9 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
         RE_CompilerContext ctxt;
         ctxt.setCodeUnitContext(&cc::UTF8, basisBits);
         ctxt.setIndexingContext(&cc::Unicode, U8index);
-        ctxt.setBarrier(breaks);
+        StreamSet * matchStarts = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<LineStartsKernel>(breaks, matchStarts);
+        ctxt.setMatchRegions(matchStarts, breaks);
         RE_PipelineBuilder RE_PB(E, ctxt);
 
         for (unsigned i = 0; i != n; ++i) {

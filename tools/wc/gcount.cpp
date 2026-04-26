@@ -24,7 +24,6 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_kernel.h>
 #include <kernel/re/regexp_kernel.h>
@@ -109,7 +108,7 @@ uint64_t gcount1(GCountFunctionType fn_ptr, const uint32_t fileIdx) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&gcFlags, codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&gcFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

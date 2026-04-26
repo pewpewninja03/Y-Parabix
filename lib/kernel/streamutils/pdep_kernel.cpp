@@ -16,7 +16,6 @@
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/bitwise/bixlogic.h>
 #include <pablo/pablo_kernel.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 #include <boost/intrusive/detail/math.hpp>
 #include <toolchain/toolchain.h>

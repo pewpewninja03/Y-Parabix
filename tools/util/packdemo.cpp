@@ -131,7 +131,7 @@ PackDemoFunctionType packdemo_gen (CPUDriver & driver) {
 
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&PackDemoOptions, codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&PackDemoOptions, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     CPUDriver driver("packdemo");
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {

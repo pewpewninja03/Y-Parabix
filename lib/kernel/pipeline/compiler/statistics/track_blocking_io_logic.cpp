@@ -9,7 +9,7 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addTrackBlockingIOSummaryProperties(KernelBuilder & b, const unsigned kernelId, const unsigned groupId) {
 
-    assert (DebugOptionIsSet(codegen::EnableBlockingIOCounter));
+    assert (codegen::StatisticsOptionIsSet(codegen::EnableBlockingIOCounter));
 
     IntegerType * const int64Ty = b.getInt64Ty();
 
@@ -38,7 +38,7 @@ void PipelineCompiler::addTrackBlockingIOSummaryProperties(KernelBuilder & b, co
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addTrackBlockingIOHistoryProperties(KernelBuilder & b, const unsigned kernelId, const unsigned groupId) {
 
-    assert (DebugOptionIsSet(codegen::TraceBlockedIO));
+    assert (codegen::StatisticsOptionIsSet(codegen::TraceBlockedIO));
 
     FixedArray<Type *, 3> fields;
     IntegerType * const sizeTy = b.getSizeTy();
@@ -131,7 +131,7 @@ void PipelineCompiler::recordBlockingIO(KernelBuilder & b, const BufferPort & po
  * @brief printOptionalBlockingIOStatistics
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalBlockingIOStatistics(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+    if (LLVM_UNLIKELY(codegen::StatisticsOptionIsSet(codegen::EnableBlockingIOCounter))) {
 
         // Print the title line
         Function * Dprintf = b.GetDprintf();
@@ -303,7 +303,7 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(KernelBuilder & b) {
  * @brief printOptionalStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printOptionalBlockedIOPerSegment(KernelBuilder & b) const {
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+    if (LLVM_UNLIKELY(codegen::StatisticsOptionIsSet(codegen::TraceBlockedIO))) {
 
         IntegerType * const sizeTy = b.getSizeTy();
         PointerType * const sizePtrTy = sizeTy->getPointerTo();

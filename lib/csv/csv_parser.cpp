@@ -7,7 +7,6 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/bixnum/bixnum.h>
 #include <pablo/pe_ones.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>

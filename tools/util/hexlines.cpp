@@ -98,7 +98,6 @@
 #include <re/cc/cc_compiler_target.h>
 #include <string>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>
@@ -247,7 +246,7 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&HexLinesOptions, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&HexLinesOptions, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("hexlines");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.

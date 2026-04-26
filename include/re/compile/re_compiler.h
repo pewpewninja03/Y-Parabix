@@ -25,16 +25,18 @@ class RE_Compiler {
     public:
 
 /*   The regular expression compiler works in terms of three fundamental bit stream
-     concepts: barrier streams, index streams and marker streams.
+     concepts: region streams, index streams and marker streams.
 
      It is often desirable to consider that the input stream is divided
      into separate matching regions, such that any matched string must be
      wholly contained within one region.   For example, in grep-style
      matching, the matching regions are the individual lines of the line,
      and matches do not extend across more than one line.
-     A barrier stream is used to separate the input into regions broken by
-     positions marked by 1 bits.   Thus a matched substring will always
-     correspond to a consecutive run of 0 bits in the barrier stream.
+     Two region streams are used to separate the input into regions broken by
+     positions marked by 1 bits.   Region start streams mark the first
+     matchable position of a region and region follow streams mark the position
+     immediately after a region.   Regions may be empty, indicated by
+     positions at which both the region start and region follow bits are 1.
 
      Index streams mark positions corresponding to whole matching units.
      For example, if the matching units are UTF-8 sequences, then the index
@@ -124,7 +126,8 @@ class RE_Compiler {
     void addPrecompiled(std::string externalName, ExternalStream s);
 
     RE_Compiler(pablo::PabloBlock * scope,
-                pablo::PabloAST * barrierStream,
+                pablo::PabloAST * regionStartStream,
+                pablo::PabloAST * regionFollowStream,
                 const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
 
     void setIndexing(const cc::Alphabet * indexingAlphabet, pablo::PabloAST * idxStream);
@@ -159,7 +162,9 @@ private:
     const cc::Alphabet *                            mCodeUnitAlphabet;
     const cc::Alphabet *                            mIndexingAlphabet;
     pablo::PabloAST *                               mIndexStream;
-    pablo::PabloAST *                               mBarrier;
+    pablo::PabloAST *                               mRegionStart;
+    pablo::PabloAST *                               mRegionFollow;
+    pablo::PabloAST *                               mMatchable;
     std::vector<const cc::Alphabet *>               mAlphabets;
     std::vector<std::vector<pablo::PabloAST *>>     mBasisSets;
     std::vector<std::unique_ptr<cc::CC_Compiler>>   mAlphabetCompilers;

@@ -520,7 +520,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
             SmallVector<char, 200> buf;
             raw_svector_ostream name(buf);
 
-            const auto traceDynamicBuffers = codegen::DebugOptionIsSet(codegen::DebugFlags::TraceDynamicBuffers);
+            const auto traceDynamicBuffers = codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers);
 
             name << "__KB_ManagedDynamicBuffer";
             if (buffer->isLinear()) {

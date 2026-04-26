@@ -940,7 +940,7 @@ inline PipelineCompiler::PipelineCompiler(KernelBuilder & b, PipelineKernel * co
 }
 
 #define TRANSFERRED_ITEMS \
-    DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram)
+    StatisticsOptionIsSet(codegen::GenerateTransferredItemCountHistogram)
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
@@ -953,8 +953,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mTraceProcessedProducedItemCounts(P.mTraceProcessedProducedItemCounts)
 , mTraceDynamicBuffers(P.mTraceDynamicBuffers)
 , mTraceIndividualConsumedItemCounts(P.mTraceIndividualConsumedItemCounts)
-, mGenerateTransferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
-, mGenerateDeferredItemCountHistogram(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
+, mGenerateTransferredItemCountHistogram(StatisticsOptionIsSet(codegen::GenerateTransferredItemCountHistogram))
+, mGenerateDeferredItemCountHistogram(StatisticsOptionIsSet(codegen::GenerateDeferredItemCountHistogram))
 , mIsNestedPipeline(P.IsNestedPipeline)
 , mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline)
 , PipelineRequiresIllustratorObject(P.RequiresIllustratorObject)
@@ -984,11 +984,11 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 #endif
 , PipelineHasTerminationSignal(pipelineKernel->canSetTerminateSignal())
 , HasZeroExtendedStream(P.HasZeroExtendedStream)
-, EnableCycleCounter(DebugOptionIsSet(codegen::EnableCycleCounter))
-, TraceIO(DebugOptionIsSet(codegen::EnableBlockingIOCounter) || DebugOptionIsSet(codegen::TraceBlockedIO))
-, TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
-, TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
-, TraceDynamicMultithreading(mUseDynamicMultithreading && DebugOptionIsSet(codegen::TraceDynamicMultithreading))
+, EnableCycleCounter(StatisticsOptionIsSet(codegen::EnableCycleCounter))
+, TraceIO(StatisticsOptionIsSet(codegen::EnableBlockingIOCounter) || StatisticsOptionIsSet(codegen::TraceBlockedIO))
+, TraceUnconsumedItemCounts(StatisticsOptionIsSet(codegen::TraceUnconsumedItemCounts))
+, TraceProducedItemCounts(StatisticsOptionIsSet(codegen::TraceProducedItemCounts))
+, TraceDynamicMultithreading(mUseDynamicMultithreading && StatisticsOptionIsSet(codegen::TraceDynamicMultithreading))
 , PartitionPhaseBoundaries(std::move(P.PartitionPhaseBoundaries))
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))
