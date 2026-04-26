@@ -524,6 +524,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
 
         if (LLVM_UNLIKELY(ea)) {
             auto & dl = b.getModule()->getDataLayout();
+
             const auto align = CBuilder::getAlignOf(dl, mTarget->getSharedStateType());
             if (LLVM_LIKELY(align > 1U)) {
             Value * handleInt = b.CreatePtrToInt(getHandle(), b.getSizeTy());
@@ -872,10 +873,10 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             auto & dl = b.getModule()->getDataLayout();
             Type * intPtrTy = dl.getIntPtrType(b.getContext());
             Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
-            Constant * typeSizeInt = ConstantInt::get(intPtrTy, b.getTypeSize(dl, buffer->getType()));
-            Value * modVBA = b.CreateURem(vbaInt, typeSizeInt);
-            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of type size 0x%" PRIx64,
-                               b.GetString(mInputStreamSets[i].getName()), vbaInt, typeSizeInt);
+            Constant * alignInt = ConstantInt::get(intPtrTy, b.getAlignOf(dl, buffer->getType()));
+            Value * modVBA = b.CreateURem(vbaInt, alignInt);
+            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of alignment 0x%" PRIx64,
+                               b.GetString(mInputStreamSets[i].getName()), vbaInt, alignInt);
         }
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
@@ -975,10 +976,10 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             auto & dl = b.getModule()->getDataLayout();
             Type * intPtrTy = dl.getIntPtrType(b.getContext());
             Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
-            Constant * typeSizeInt = ConstantInt::get(intPtrTy, b.getTypeSize(dl, buffer->getType()));
-            Value * modVBA = b.CreateURem(vbaInt, typeSizeInt);
-            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of type size 0x%" PRIx64,
-                               b.GetString(mOutputStreamSets[i].getName()), vbaInt, typeSizeInt);
+            Constant * alignInt = ConstantInt::get(intPtrTy, b.getAlignOf(dl, buffer->getType()));
+            Value * modVBA = b.CreateURem(vbaInt, alignInt);
+            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of alignment 0x%" PRIx64,
+                               b.GetString(mOutputStreamSets[i].getName()), vbaInt, alignInt);
         }
 
         /// ----------------------------------------------------

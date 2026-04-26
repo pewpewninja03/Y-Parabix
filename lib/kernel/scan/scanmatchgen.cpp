@@ -659,8 +659,8 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
 ScanBatchKernel::ScanBatchKernel(LLVMTypeSystemInterface & ts, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
     : MultiBlockKernel(ts, "scanBatch" + std::to_string(strideBlocks),
 // inputs
-{Binding{"matchResult", Matches}
-,Binding{"lineBreak", LineBreakStream, FixedRate(), ZeroExtended()}
+{Binding{"matchResult", Matches }
+,Binding{"lineBreak", LineBreakStream, FixedRate(), ZeroExtended() }
 ,Binding{"InputStream", ByteStream, FixedRate(), { ZeroExtended(), Deferred() }}},
 // outputs
 {},

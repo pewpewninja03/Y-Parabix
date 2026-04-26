@@ -714,27 +714,35 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
         // Zero out any blocks we could potentially touch
         const auto blocksPerStride = ceiling(Rational{rt.Maximum.numerator() * StrideStepLength[mKernelId], rt.Maximum.denominator() * blockWidth});
         assert (blocksPerStride > 0);
-        const auto blocksToZero = blocksPerStride + bn.NumOfOverflowStrides;
+       // const auto blocksToZero = blocksPerStride + bn.NumOfOverflowStrides;
 
         const auto doUnaryPack = (isUnary && itemWidth > 1);
 
-        if (doUnaryPack || blocksToZero > 1) {
+        if (doUnaryPack || blocksPerStride > 1 || bn.NumOfOverflowStrides > 0) {
 
             Value * startPtr = nullptr;
             Value * endPtr = nullptr;
+
+            auto getEndOffset = [&](Value * current) {
+                if (blocksPerStride > 1) {
+                    current = b.CreateRoundUpRational(current, blocksPerStride);
+                }
+                if (bn.NumOfOverflowStrides > 0) {
+                    current = b.CreateAdd(current, b.getSize(bn.NumOfOverflowStrides));
+                }
+                return current;
+            };
 
             if (doUnaryPack) {
                 Value * const nextPackIndex = b.CreateAdd(packIndex, ONE);
                 Value * const currentBlockIndex = buffer->modByCapacity(b, blockIndex);
                 startPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, currentBlockIndex, nextPackIndex);
-                Value * const nextBlockIndex = b.CreateRoundUpRational(currentBlockIndex, blocksToZero);
-                endPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, nextBlockIndex, ITEM_WIDTH);
+                endPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, getEndOffset(currentBlockIndex), ITEM_WIDTH);
             }  else {
                 Value * const nextBlockIndex = b.CreateAdd(blockIndex, ONE);
                 Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
                 startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, nextOffset);
-                Value * const endOffset = b.CreateRoundUp(nextOffset, b.getSize(blocksToZero));
-                endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, endOffset);
+                endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, getEndOffset(nextOffset));
             }
 
             Value * const startPtrInt = b.CreatePtrToInt(startPtr, intPtrTy);
@@ -743,7 +751,8 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
 
             #ifdef PRINT_DEBUG_MESSAGES
             #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
-            debugPrint(b, prefix + "_zeroUnwritten_clearRange = [0x%" PRIx64 ",0x%" PRIx64 ")", startPtrInt, endPtrInt);
+            debugPrint(b, prefix + "_zeroUnwritten_clearRange%" PRIu8 ",%" PRIu64 ",%" PRIu64 " = [0x%" PRIx64 ",0x%" PRIx64 ")",
+                       b.getInt8(doUnaryPack), b.getInt64(blocksPerStride), b.getInt64(bn.NumOfOverflowStrides), startPtrInt, endPtrInt);
             #endif
             debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
             #endif

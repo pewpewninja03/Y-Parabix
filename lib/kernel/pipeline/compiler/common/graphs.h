@@ -365,6 +365,10 @@ struct BufferNode {
         return (Type & BufferType::PreserveEntireStreamSet) != 0;
     }
 
+    bool requiresConsumedItemCount() const {
+        return (Type & BufferType::RequiresConsumedItemCount) != 0;
+    }
+
     bool crossesPhaseBoundary() const {
         return (Type & BufferType::CrossesPhaseBoundary) != 0;
     }

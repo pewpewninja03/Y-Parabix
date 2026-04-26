@@ -349,13 +349,6 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         terminationSignal = mTerminatedExplicitly;
     } else {
         terminationSignal = mIsFinalInvocationPhi; assert (terminationSignal);
-        if (!mIsPartitionRoot) {
-            const auto root = FirstKernelInPartition[mCurrentPartitionId];
-            assert (KernelPartitionId[root] == mCurrentPartitionId);
-            Value * const rootSignal = mKernelTerminationSignal[root];
-            Value * const isFinal = b.CreateIsNotNull(terminationSignal);
-            terminationSignal = b.CreateSelect(isFinal, terminationSignal, rootSignal);
-        }
     }
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);

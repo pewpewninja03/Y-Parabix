@@ -164,8 +164,11 @@ skip_phase_check:
             continue;
         }
 
+        assert (in_degree(id, mConsumerGraph) == 1);
+
         const BufferNode & sn = mBufferGraph[id];
         BufferNode & bn = mBufferGraph[streamSet];
+        assert (bn.isNonThreadLocal());
         assert (id == streamSet || (bn.Type & propogatedFlagSet) == 0);
         bn.Type |= (sn.Type & propogatedFlagSet);
 
@@ -182,11 +185,6 @@ skip_phase_check:
                 continue;
             }
         }
-
-        #ifndef NDEBUG
-        assert (!(bn.isThreadLocal() || bn.isConstant() || bn.isTruncated()));
-        assert (in_degree(id, mConsumerGraph) == 1);
-        #endif
 
         bn.Type |= BufferType::RequiresConsumedItemCount;
 

@@ -383,7 +383,6 @@ void MemorySourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     Value * const fileItems = b.getScalarField("fileItems");
     Value * const producedItems = b.getProducedItemCount("sourceBuffer");
-    b.CallPrintInt("ptr", b.getRawOutputPointer("sourceBuffer", b.getSize(0)));
     Value * const nextProducedItems = b.CreateAdd(producedItems, segmentItems);
     Value * const lastPage = b.CreateICmpULE(fileItems, nextProducedItems);
     b.CreateUnlikelyCondBr(lastPage, createTemporary, exit);

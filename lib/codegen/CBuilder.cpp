@@ -1604,7 +1604,6 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     #endif
     auto & DL = getModule()->getDataLayout();
     const auto len = getTypeSize(DL, Val->getType());
-    // CallPrintInt("u.store:ptr+" + std::to_string(len), Ptr);
     return IRBuilder<>::CreateStore(Val, Ptr, isVolatile);
 }
 
@@ -1665,7 +1664,6 @@ StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigne
     }
     auto & DL = getModule()->getDataLayout();
     const auto len = getTypeSize(DL, Val->getType());
-    // CallPrintInt("a.storeptr+" + std::to_string(len), Ptr);
     StoreInst * SI = CreateStore(Val, Ptr, isVolatile);
     SI->setAlignment(AlignType{Align});
     return SI;
@@ -1736,8 +1734,6 @@ CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, const uns
     }
     auto & DL = getModule()->getDataLayout();
     Value * const intDst = CreatePtrToInt(Dst, Size->getType());
-//    CallPrintInt("memcpystart", intDst);
-//    CallPrintInt("memcpyend", CreateAdd(intDst, Size));
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
     return IRBuilder<>::CreateMemCpy(Dst, AlignType{Align}, Src, AlignType{Align}, Size, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
 #else
@@ -2449,21 +2445,23 @@ uintptr_t LLVM_READNONE CBuilder::getTypeSize(const llvm::DataLayout & DL, llvm:
 
 uintptr_t LLVM_READNONE CBuilder::getAlignOf(const llvm::DataLayout & DL, llvm::Type * type) {
     assert (type);
-//    if (isa<StructType>(type)) {
-//        const auto l = cast<StructType>(type)->getStructNumElements();
-//        auto align = DL.getABITypeAlign(type).value();
-//        for (unsigned j = 0; j != l; ++j) {
-//            align = boost::lcm(align, getAlignOf(DL, type->getStructElementType(j)));
-//        }
-//        assert (align > 0);
-//        return align;
-//    } else if (isa<ArrayType>(type)) {
-//        return getAlignOf(DL, type->getArrayElementType());
-//    } else {
+    if (isa<StructType>(type)) {
+        const auto l = cast<StructType>(type)->getStructNumElements();
+        if (l == 0) {
+            return 1;
+        }
+        auto align = getAlignOf(DL, type->getStructElementType(0));
+        for (unsigned j = 1; j < l; ++j) {
+            align = boost::lcm(align, getAlignOf(DL, type->getStructElementType(j)));
+        }
+        return align;
+    } else if (isa<ArrayType>(type)) {
+        return getAlignOf(DL, type->getArrayElementType());
+    } else {
         const auto align = DL.getABITypeAlign(type).value();
         assert (align > 0);
         return align;
-//    }
+    }
 }
 
 void CBuilder::linkAllNecessaryExternalFunctions() const {

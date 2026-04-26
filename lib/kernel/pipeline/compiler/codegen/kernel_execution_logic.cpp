@@ -44,30 +44,13 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
-
-
-//        if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-
-
-//        } else {
-
-//            // If this is the final subsegment before termination, we do not release the
-//            // pre-invocation synchronization until *after* we've written the termination
-//            // status. Although most of the time, this would not be a severe issue ---
-//            // assuming the internal kernel can safely execute a 0-item segment --- when
-//            // inputs to a kernel have differing lengths, this could mean we might produce
-//            // output data that wouldn't be observed in a single-threaded run.
-
-//            updateProcessedAndProducedItemCounts(b, nullptr);
-//            // mHasMoreInput = hasMoreInput(b);
-//        }
         delayReleaseOfPreInvocationLock = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));
 
         const auto prefix = makeKernelName(mKernelId);
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "* " + prefix + "_finalInvoc = %" PRIu64, mIsFinalInvocation);
-        debugPrint(b, "* " + prefix + "_waitToRelease = %" PRIu64, delayReleaseOfPreInvocationLock);
+        debugPrint(b, "* " + prefix + "_delayReleaseOfPreInvocationLock = %" PRIu64, delayReleaseOfPreInvocationLock);
         #endif
 
         BasicBlock * const releaseSyncLock =
@@ -287,26 +270,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     }
 
     updateProcessedAndProducedItemCounts(b, terminationRequestRejected);
-
-//    if (LLVM_UNLIKELY(delayReleaseOfPreInvocationLock)) {
-
-//        assert (mAllowDataParallelExecution);
-
-//        // TODO: may need to rethink termination of internally synchronized kernels?
-//        BasicBlock * releasePreLock = b.CreateBasicBlock("", mKernelCompletionCheck);
-//        BasicBlock * afterRelease = b.CreateBasicBlock("", mKernelCompletionCheck);
-//        Value * releaseLock = delayReleaseOfPreInvocationLock;
-//        if (terminationRequestRejected) {
-//            releaseLock = b.CreateAnd(releaseLock, b.CreateNot(terminationRequestRejected));
-//        }
-//        b.CreateUnlikelyCondBr(releaseLock, releasePreLock, afterRelease);
-
-//        b.SetInsertPoint(releasePreLock);
-//        releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-//        b.CreateBr(afterRelease);
-
-//        b.SetInsertPoint(afterRelease);
-//    }
 
     if (LLVM_LIKELY(mRecordHistogramData)) {
         updateTransferredItemsForHistogramData(b);

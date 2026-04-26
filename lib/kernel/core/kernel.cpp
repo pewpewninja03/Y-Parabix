@@ -449,7 +449,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             IntegerType * const int8Ty = b.getInt8Ty();
 
-            const auto cacheAlignment = b.getCacheAlignment();
+            const uintptr_t cacheAlignment = b.getCacheAlignment();
 
             auto & dl = m->getDataLayout();
 
@@ -472,35 +472,16 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                     const auto m = L.size();
                     for (size_t j = 0; j != m; ++j) {
                         Type * const type = L[j]; assert(type);
-                        size_t align;
+                        uintptr_t align = CBuilder::getAlignOf(dl, type);
+                        assert (align > 0);
                         if (j == 0 && addGroupCacheLinePadding) {
-                            align = cacheAlignment;
-                        } else {
-                            Type * ty = type;
-                            redo_struct_check:
-                            if (isa<StructType>(ty)) {
-                                const auto l = ty->getStructNumElements();
-                                for (unsigned p = 0; p < l; ++p) {
-                                    Type * inner = ty->getStructElementType(p);
-                                    if (LLVM_LIKELY(!inner->isEmptyTy())) {
-                                        ty = inner;
-                                        goto redo_struct_check;
-                                    }
-                                }
-                            }
-                            align = dl.getABITypeAlign(ty).value();
-                            assert (align > 0);
+                            align = boost::lcm(align, cacheAlignment);
                         }
+
                         const auto offset = (byteOffset % align);
-                        const auto padding = (offset == 0U) ? 0U : (align - offset);
-                        #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-                        const auto size = dl.getTypeStoreSize(type);
-                        #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
-                        const auto size = dl.getTypeStoreSize(type).getFixedSize();
-                        #else
-                        const auto size = dl.getTypeStoreSize(type).getFixedValue();
-                        #endif
-                        byteOffset += padding + size;
+                        assert (i != 0 || j != 0 || offset == 0);
+                        const auto padding = (offset == 0ULL) ? 0ULL : (align - offset);
+                        byteOffset += padding + CBuilder::getTypeSize(dl, type);
                         Type * const paddingTy = ArrayType::get(int8Ty, padding);
                         assert (k < fields.size());
                         fields[k++] = paddingTy;
@@ -508,6 +489,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                         fields[k++] = type;
                     }
                 }
+
 
                 assert (k == fields.size());
 
@@ -518,15 +500,19 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 } else {
                     assert (st->isOpaque());
                     st->setBody(fields);
+                    assert (!st->isOpaque() && st->isPacked());
                 }
-                assert (!st->isOpaque());
-                assert (st->isPacked());
 
                 #ifndef NDEBUG
+                assert (st->getStructNumElements() == k);
                 const StructLayout * const sl = dl.getStructLayout(st);
                 const auto structTypeSize = CBuilder::getTypeSize(dl, st);
                 assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() == structTypeSize);
-                assert ("expected stuct size does not match byte offset?" && structTypeSize >= byteOffset);
+                assert ("expected stuct size does not match byte offset?" && structTypeSize == byteOffset);
+                for (size_t i = 0; i < k; ++i) {
+                    const auto align = dl.getABITypeAlign(st->getElementType(i)).value();
+                    assert ((sl->getElementOffset(i) %  align) == 0);
+                }
                 #endif
 
                 return st;

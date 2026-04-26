@@ -918,7 +918,11 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
             currentNode.RequiresUnderflow = !currentNode.IsLinear;
         }
 
-        currentNode.NumOfOverflowStrides = std::max(currentNode.NumOfOverflowStrides, maxOverflow);
+        if (maxOverflow) {
+            const auto bw = b.getBitBlockWidth();
+            const auto r = (maxOverflow + bw - 1) / bw;
+            currentNode.NumOfOverflowStrides = std::max(currentNode.NumOfOverflowStrides, r);
+        }
 
         END_SCOPED_REGION
 

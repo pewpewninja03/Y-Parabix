@@ -512,15 +512,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 csRetVal = b.CreateCall(doSegmentComputeFuncType, doSegmentComputeThreadFunc, args);
             }
 
-
-
             terminated = b.CreateExtractValue(csRetVal, {0});
 
-            Value * done = b.CreateIsNotNull(terminated);
-            Value * doNextSegment = nullptr;
+            Value * doNextSegment = b.CreateIsNull(terminated);
             if (checkProgress) {
                 Value * const madeProgress = b.CreateExtractValue(csRetVal, {1});
-                doNextSegment = b.CreateAnd(madeProgress, b.CreateIsNull(terminated));
+                doNextSegment = b.CreateAnd(madeProgress, doNextSegment);
                 if (LLVM_UNLIKELY(CheckAssertions())) {
                     assert (madeProgressInLastSegment);
                     Value * const live = b.CreateOr(madeProgressInLastSegment, madeProgress);
@@ -706,7 +703,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 }
             }
 
-            if (mIsNestedPipeline || (doNextSegment == nullptr)) {
+            if (mIsNestedPipeline) {
                 b.CreateBr(pipelineEnd);
             } else {
                 BasicBlock * const exitBlock = b.GetInsertBlock();
@@ -742,6 +739,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             b.SetInsertPoint(pipelineEnd);
             assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
             assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
+            Value * done = b.CreateIsNotNull(terminated);
             if (allPhasesDone) {
                 assert (numOfPhases > 2);
                 allPhasesDone = b.CreateAnd(allPhasesDone, done);

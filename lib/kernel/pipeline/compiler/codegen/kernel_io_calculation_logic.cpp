@@ -62,10 +62,12 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     /// full stride step, allow it to single strides when necessary when the buffer does
     /// not support a full step before wrapping around. Resize the overflow appropriately.
 
+
     ConstantInt * const sz_ONE = b.getSize(1);
-    if (mHasExhaustedClosedInput) { assert (mStrideStepSize);
+    if (mStrideStepSize) {
+        assert (mHasExhaustedClosedInput);
         mStrideStepSize = b.CreateSelect(mHasExhaustedClosedInput, sz_ONE, mStrideStepSize);
-    } else if (mStrideStepSize == nullptr) {
+    } else {
         mStrideStepSize = sz_ONE;
     }
 
@@ -202,11 +204,11 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
     // --- lambda function end
 
-
-
     ConstantInt * const sz_ZERO = b.getSize(0);
 
     Constant * const i1_False = b.getFalse();
+
+    Constant * const i1_True = b.getTrue();
 
     Vec<Value *> accessibleItems(numOfInputs);
 
@@ -238,6 +240,15 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             isFinalSegment = mAnyClosed ? mAnyClosed : i1_False;
         } else {
             isFinalSegment = mFinalPartitionSegment;
+
+//            if (!mIsPartitionRoot) {
+//                const auto root = FirstKernelInPartition[mCurrentPartitionId];
+//                assert (KernelPartitionId[root] == mCurrentPartitionId);
+//                Value * const rootSignal = mKernelTerminationSignal[root];
+//                Value * const isFinal = b.CreateIsNotNull(terminationSignal);
+//                b.CallPrintInt("isFinal", isFinal);
+//                terminationSignal = b.CreateSelect(isFinal, terminationSignal, rootSignal);
+//            }
         }
 
         BasicBlock * const nonZeroExtendExit = b.GetInsertBlock();
@@ -324,22 +335,21 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         /// -------------------------------------------------------------------------------------
 
         b.SetInsertPoint(enteringPenultimateSubSegment);
-
         Value * penultimateNumOfStrides = numOfLinearStrides;
-
-        if (mHasExhaustedClosedInput && (numOfLinearStrides != nonFinalNumOfLinearStrides)) {
-            penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
-        }
-
-        if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides)) {
-            inPenultimateSubSegment = b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides);
+        if (mIsPartitionRoot) {
+            inPenultimateSubSegment = mHasZeroExtendedInput ? isFinalSegment : i1_True;
+            if (mHasExhaustedClosedInput) {
+                inPenultimateSubSegment = b.CreateAnd(inPenultimateSubSegment, mHasExhaustedClosedInput);
+                if (numOfLinearStrides != nonFinalNumOfLinearStrides) {
+                    penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
+                }
+            }
+            if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides)) {
+                inPenultimateSubSegment = b.CreateAnd(b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides), inPenultimateSubSegment);
+            }
         } else {
-            inPenultimateSubSegment = b.getTrue();
+            inPenultimateSubSegment = isFinalSegment;
         }
-        if (mHasZeroExtendedInput) {
-            inPenultimateSubSegment = mIsPartitionRoot ? b.CreateAnd(isFinalSegment, inPenultimateSubSegment) : isFinalSegment;
-        }
-
         BasicBlock * const penultimateSegmentExit = b.GetInsertBlock();
         b.CreateBr(enteringNonFinalSegment);
 
@@ -473,7 +483,7 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
         }
     }
 
-    Value * const isExhausted = b.CreateNot(hasEnough);
+    Value * const isExhausted = b.CreateAnd(closed, b.CreateNot(hasEnough));
 
     if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
         if (LLVM_UNLIKELY(port.getRate().isGreedy())) {
@@ -484,12 +494,10 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
         assert (mExhaustedInputPort[inputPort]);
     }
 
-    if (mStrideStepSize) {
-        if (mHasExhaustedClosedInput) {
-            mHasExhaustedClosedInput = b.CreateOr(mHasExhaustedClosedInput, isExhausted);
-        } else {
-            mHasExhaustedClosedInput = isExhausted;
-        }
+    if (mHasExhaustedClosedInput) {
+        mHasExhaustedClosedInput = b.CreateOr(mHasExhaustedClosedInput, isExhausted);
+    } else {
+        mHasExhaustedClosedInput = isExhausted;
     }
 
 
@@ -572,22 +580,20 @@ void PipelineCompiler::checkForSufficientOutputSpace(KernelBuilder & b, const Bu
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * closed = isClosed(b, id);
-        if (LLVM_LIKELY(mIsPartitionRoot)) {
-            if (mAnyClosed) {
-                mAnyClosed = b.CreateOr(mAnyClosed, closed);
-            } else {
-                mAnyClosed = closed;
-            }
-        }
+//        if (LLVM_LIKELY(mIsPartitionRoot)) {
+//            if (mAnyClosed) {
+//                mAnyClosed = b.CreateOr(mAnyClosed, closed);
+//            } else {
+//                mAnyClosed = closed;
+//            }
+//        }
 
-        if (mStrideStepSize) {
-            Value * const isExhausted = b.CreateNot(hasEnough);
-            if (mHasExhaustedClosedInput) {
-                mHasExhaustedClosedInput = b.CreateOr(mHasExhaustedClosedInput, isExhausted);
-            } else {
-                mHasExhaustedClosedInput = isExhausted;
-            }
-        }
+//        Value * const isExhausted = b.CreateAnd(closed, b.CreateNot(hasEnough));
+//        if (mHasExhaustedClosedInput) {
+//            mHasExhaustedClosedInput = b.CreateOr(mHasExhaustedClosedInput, isExhausted);
+//        } else {
+//            mHasExhaustedClosedInput = isExhausted;
+//        }
 
         hasEnough = b.CreateOr(hasEnough, closed);
     }
@@ -640,108 +646,7 @@ Value * PipelineCompiler::checkIfInputIsExhausted(KernelBuilder & b, InputExhaus
  * @brief hasMoreInput
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::hasMoreInput(KernelBuilder & b, Value * const delayReleaseOfPreInvocationLock) {
-
-    assert (false);
-
-    Value * const nonFinal = b.CreateIsNull(mIsFinalInvocation);
-    assert (mMaximumNumOfStrides);
-    Value * const notAtSegmentLimit = b.CreateICmpNE(mUpdatedNumOfStrides, mMaximumNumOfStrides);
-    if (mIsPartitionRoot) {
-
-        ConstantInt * const i1_TRUE = b.getTrue();
-        ConstantInt * const i1_FALSE = b.getFalse();
-
-        graph_traits<BufferGraph>::in_edge_iterator ei_begin, ei_end;
-        std::tie(ei_begin, ei_end) = in_edges(mKernelId, mBufferGraph);
-
-        Constant * const MAX_INT = ConstantInt::getAllOnesValue(b.getSizeTy());
-
-        BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
-
-        BasicBlock * const lastTestExit = b.CreateBasicBlock("", nextNode);
-        PHINode * const enoughInputPhi = PHINode::Create(b.getInt1Ty(), 4, "", lastTestExit);
-
-        Value * enoughInput = b.CreateAnd(notAtSegmentLimit, nonFinal);
-        if (delayReleaseOfPreInvocationLock) {
-            enoughInput = b.CreateAnd(enoughInput, delayReleaseOfPreInvocationLock);
-        }
-        Value * const nextStrideIndex = b.CreateAdd(mNumOfLinearStrides, mStrideStepSize);
-
-        bool isFirstCheck = true;
-
-        for (auto ei = ei_begin; ei != ei_end; ++ei) {
-            const BufferPort & port =  mBufferGraph[*ei];
-            if (port.isLoopAgainConstraint()) {
-                const auto streamSet = source(*ei, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-
-                const Binding & binding = port.Binding;
-                const ProcessingRate & rate = binding.getRate();
-
-                // If the next rate we check is a PartialSum, always check it; otherwise we expect that
-                // if this test passes the first check, it will pass the remaining ones so don't bother
-                // creating a branch for the remaining checks.
-
-                Value * const processed = mProcessedItemCount[port.Port]; assert (processed);
-                Value * avail = mLocallyAvailableItems[streamSet]; assert (avail);
-
-                if ((rate.isPartialSum() && enoughInput) || isFirstCheck) {
-
-                    BasicBlock * const nextTest = b.CreateBasicBlock("", lastTestExit);
-                    enoughInputPhi->addIncoming(i1_FALSE, b.GetInsertBlock());
-                    assert (enoughInput);
-                    b.CreateUnlikelyCondBr(enoughInput, nextTest, lastTestExit);
-
-                    b.SetInsertPoint(nextTest);
-                    enoughInput = nullptr;
-                    isFirstCheck = false;
-                }
-
-
-                Value * const closed = isClosed(b, streamSet);
-
-                if (LLVM_UNLIKELY(port.isZeroExtended())) {
-                    avail = b.CreateSelect(closed, MAX_INT, avail);
-                } else if (port.Add) {
-                    ConstantInt * const ADD = b.getSize(port.Add);
-                    ConstantInt * const ZERO = b.getSize(0);
-                    Value * const added = b.CreateSelect(closed, ADD, ZERO);
-                    avail = b.CreateAdd(avail, added);
-                }
-
-                if (LLVM_UNLIKELY(CheckAssertions())) {
-                    const Binding & inputBinding = port.Binding;
-                    Value * valid = b.CreateOr(b.CreateICmpULE(processed, avail), isClosed(b, streamSet));
-                    b.CreateAssert(valid,
-                                    "%s.%s: processed count (%" PRIu64 ") exceeds total count (%" PRIu64 ") @ %s",
-                                    mCurrentKernelName,
-                                    b.GetString(inputBinding.getName()),
-                                    processed, avail,
-                                    b.GetString("hasMoreInput"));
-                }
-
-                Value * const remaining = b.CreateSub(avail, processed, "remaining");
-                Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
-                Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
-                Value * const hasMore = b.CreateOr(closed, b.CreateICmpUGE(remaining, required));
-                if (enoughInput) {
-                    enoughInput = b.CreateAnd(enoughInput, hasMore);
-                } else {
-                    enoughInput = hasMore;
-                }
-            }
-        }
-        enoughInputPhi->addIncoming(enoughInput ? enoughInput : i1_TRUE, b.GetInsertBlock());
-        b.CreateBr(lastTestExit);
-
-        b.SetInsertPoint(lastTestExit);
-        return enoughInputPhi;
-
-    } else {
-        //  (final segment OR up<max) AND NOT final stride
-        return b.CreateAnd(b.CreateOr(mFinalPartitionSegment, notAtSegmentLimit), nonFinal);
-   }
-
+    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1147,10 +1052,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             } else  {
                 selected = b.CreateUnsignedSaturatingSub(accessible, b.getSize(k));
             }
-            Value * closed = mHasExhaustedClosedInput;
-            if (closed == nullptr) {
-                closed = isClosed(b, port.Port, true);
-            }
+            Value * closed = isClosed(b, port.Port, true);
             accessible = b.CreateSelect(closed, selected, accessible, "accessible");
         }
         if (LLVM_UNLIKELY(port.isPrincipal())) {

@@ -33,34 +33,37 @@ void PipelineCompiler::addConsumerKernelProperties(KernelBuilder & b, const unsi
     const auto groupId = getCacheLineGroupId(kernelId);
     for (const auto e : make_iterator_range(out_edges(kernelId, mConsumerGraph))) {
         const auto streamSet = target(e, mConsumerGraph);
+
         // If the out-degree for this buffer is zero, then we've proven that its consumption rate
         // is identical to its production rate.
-        const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);
-        #ifndef NDEBUG
+
+
         const auto id = mConsumerGraph[streamSet];
-        assert (id != 0 || numOfIndependentConsumers == 0);
-        assert ((numOfIndependentConsumers == 0) == ((mBufferGraph[streamSet].Type & BufferType::RequiresConsumedItemCount) == 0));
-        #endif
-        if (LLVM_UNLIKELY(numOfIndependentConsumers != 0)) {
-
-            assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
-
-            // Although we can PHI out the thread's current min. consumed summary count for each
-            // buffer, in any complex program, we'll inevitably have general register spill/reloads.
-            // By keeping these as stack-allocated variables, the LLVM compiler will hopefully be
-            // able to make better decisions whether it should PHI-out these variables.
-            mTarget->addNonPersistentScalar(sizeTy, TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
-
-            // If we're tracing the consumer item counts, we need to store one for each
-            // (non-nested) consumer. Any nested consumers will have their own trace.
-            Type * countTy = sizeTy;
-            if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-                countTy = ArrayType::get(sizeTy, numOfIndependentConsumers + 1);
-            }
-
-            const auto name = CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet);
-            mTarget->addInternalScalar(countTy, name, groupId);
+        if (id != streamSet) {
+            continue;
         }
+
+        const auto numOfIndependentConsumers = out_degree(streamSet, mConsumerGraph);
+        if (LLVM_UNLIKELY(numOfIndependentConsumers == 0)) {
+           continue;
+        }
+
+        // Although we can PHI out the thread's current min. consumed summary count for each
+        // buffer, in any complex program, we'll inevitably have general register spill/reloads.
+        // By keeping these as stack-allocated variables, the LLVM compiler will hopefully be
+        // able to make better decisions whether it should PHI-out these variables.
+        mTarget->addNonPersistentScalar(sizeTy, TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet));
+
+        // If we're tracing the consumer item counts, we need to store one for each
+        // (non-nested) consumer. Any nested consumers will have their own trace.
+        Type * countTy = sizeTy;
+        if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
+            countTy = ArrayType::get(sizeTy, numOfIndependentConsumers + 1);
+        }
+
+        const auto name = CONSUMED_ITEM_COUNT_PREFIX + std::to_string(streamSet);
+        mTarget->addInternalScalar(countTy, name, groupId);
+
     }
 }
 
