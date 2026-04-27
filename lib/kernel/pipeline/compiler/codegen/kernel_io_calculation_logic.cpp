@@ -240,15 +240,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
             isFinalSegment = mAnyClosed ? mAnyClosed : i1_False;
         } else {
             isFinalSegment = mFinalPartitionSegment;
-
-//            if (!mIsPartitionRoot) {
-//                const auto root = FirstKernelInPartition[mCurrentPartitionId];
-//                assert (KernelPartitionId[root] == mCurrentPartitionId);
-//                Value * const rootSignal = mKernelTerminationSignal[root];
-//                Value * const isFinal = b.CreateIsNotNull(terminationSignal);
-//                b.CallPrintInt("isFinal", isFinal);
-//                terminationSignal = b.CreateSelect(isFinal, terminationSignal, rootSignal);
-//            }
         }
 
         BasicBlock * const nonZeroExtendExit = b.GetInsertBlock();
@@ -308,15 +299,15 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         // if we have a potentially zero-extended buffer, use that; otherwise select the normal buffer
         Vec<Value *> truncatedInputVirtualBaseAddress(zeroExtendedInputVirtualBaseAddress);
 
-        /// -------------------------------------------------------------------------------------
-        /// KERNEL ENTERING FINAL STRIDE
-        /// -------------------------------------------------------------------------------------
-
         Value * const isFinal = b.CreateICmpEQ(numOfLinearStrides, sz_ZERO);
 
         BasicBlock * const enteringPenultimateSubSegment = b.CreateBasicBlock(prefix + "_penultimateSubSegment", mKernelCheckOutputSpace);
         BasicBlock * const enteringFinalStride = b.CreateBasicBlock(prefix + "_finalStride", mKernelCheckOutputSpace);
         b.CreateUnlikelyCondBr(isFinal, enteringFinalStride, enteringPenultimateSubSegment);
+
+        /// -------------------------------------------------------------------------------------
+        /// KERNEL ENTERING FINAL STRIDE
+        /// -------------------------------------------------------------------------------------
 
         b.SetInsertPoint(enteringFinalStride);
         Value * fixedItemFactor = nullptr;
@@ -331,7 +322,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         b.CreateBr(mKernelCheckOutputSpace);
 
         /// -------------------------------------------------------------------------------------
-        /// KERNEL ENTERING PENULTIMATE SEGMENT
+        /// KERNEL IN FINAL SEGMENT
         /// -------------------------------------------------------------------------------------
 
         b.SetInsertPoint(enteringPenultimateSubSegment);
@@ -427,7 +418,6 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
         const BufferPort & br = mBufferGraph[e];
         accessibleItems[br.Port.Number] = calculateNumOfLinearItems(b, br, nonFinalNumOfLinearStrides, "calculateNonFinal");
     }
-
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
@@ -580,21 +570,6 @@ void PipelineCompiler::checkForSufficientOutputSpace(KernelBuilder & b, const Bu
     if (LLVM_UNLIKELY(bn.isTruncated())) {
         const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * closed = isClosed(b, id);
-//        if (LLVM_LIKELY(mIsPartitionRoot)) {
-//            if (mAnyClosed) {
-//                mAnyClosed = b.CreateOr(mAnyClosed, closed);
-//            } else {
-//                mAnyClosed = closed;
-//            }
-//        }
-
-//        Value * const isExhausted = b.CreateAnd(closed, b.CreateNot(hasEnough));
-//        if (mHasExhaustedClosedInput) {
-//            mHasExhaustedClosedInput = b.CreateOr(mHasExhaustedClosedInput, isExhausted);
-//        } else {
-//            mHasExhaustedClosedInput = isExhausted;
-//        }
-
         hasEnough = b.CreateOr(hasEnough, closed);
     }
 
@@ -640,13 +615,6 @@ Value * PipelineCompiler::checkIfInputIsExhausted(KernelBuilder & b, InputExhaus
     } else {
         return mFinalPartitionSegment;
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasMoreInput
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::hasMoreInput(KernelBuilder & b, Value * const delayReleaseOfPreInvocationLock) {
-    return nullptr;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1443,9 +1411,6 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     const auto ref = getReference(port);
     assert (ref.Type == PortType::Input);
     const auto prefix = makeBufferName(mKernelId, ref) + "_readPartialSum";
-
-//    const auto refInput = getInput(mKernelId, ref);
-//    const BufferPort & refInputRate = mBufferGraph[refInput];
     const auto refBufferVertex = getInputBufferVertex(ref);
     const auto & bn = mBufferGraph[refBufferVertex];
     const StreamSetBuffer * const popCountBuffer = bn.Buffer;

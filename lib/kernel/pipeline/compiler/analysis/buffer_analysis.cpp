@@ -779,7 +779,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
 
     const auto trackBlockIOSummaryFlag = codegen::StatisticsOptionIsSet(codegen::EnableBlockingIOCounter) ? TrackBlockedIOSummary : 0U;
     const auto trackBlockIOFlag = codegen::StatisticsOptionIsSet(codegen::TraceBlockedIO) ? TrackBlockedIO : 0U;
-    const auto partitionRootIOFlag = BufferPortType::CanModifySegmentLength | BufferPortType::LoopAgainConstraint | trackBlockIOSummaryFlag | trackBlockIOFlag;
+    const auto partitionRootIOFlag = BufferPortType::CanModifySegmentLength | trackBlockIOSummaryFlag | trackBlockIOFlag;
 
     for (size_t currentPhase = 1U; currentPhase < numOfPhases; ++currentPhase) {
         const auto firstPartition = PartitionPhaseBoundaries[currentPhase - 1];

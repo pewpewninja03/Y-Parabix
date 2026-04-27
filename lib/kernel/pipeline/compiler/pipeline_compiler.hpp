@@ -245,9 +245,6 @@ public:
 
     void determinePartitionStrideRateScalingFactor();
 
-    void writePartitionEntryIOGuard(KernelBuilder & b);
-    Value * calculatePartitionSegmentLength(KernelBuilder & b);
-
     void phiOutPartitionItemCounts(KernelBuilder & b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
     void phiOutPartitionStatusFlags(KernelBuilder & b, const unsigned targetPartitionId, const bool fromKernelEntry);
 
@@ -295,7 +292,6 @@ public:
     };
 
     Value * checkIfInputIsExhausted(KernelBuilder & b, InputExhaustionReturnType returnValType);
-    Value * hasMoreInput(KernelBuilder & b, Value * const delayReleaseOfPreInvocationLock = nullptr);
 
     struct FinalItemCount {
         Value * minFixedRateFactor;

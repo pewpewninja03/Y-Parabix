@@ -272,7 +272,7 @@ enum BufferType : unsigned {
     , Shared = 4
     , Returned = 8
     , Truncated = 16
-    , CrossThreaded = 32
+    , CrossesPhaseBoundary = 32
     , InOutRedirect = 64
     , ManagedOutput = 128
     , PreserveEntireStreamSet = 256
@@ -281,7 +281,6 @@ enum BufferType : unsigned {
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
     , RequiresConsumedItemCount = 8192
-    , CrossesPhaseBoundary = 16384
     // ------------------
     , CanTrackBufferExpansionData = 32768
 };
@@ -377,10 +376,6 @@ struct BufferNode {
         return (Type & BufferType::Truncated) != 0;
     }
 
-    bool isCrossThreaded() const {
-        return (Type & BufferType::CrossThreaded) != 0;
-    }
-
     bool isInOutRedirect() const {
         return (Type & BufferType::InOutRedirect) != 0;
     }
@@ -431,7 +426,6 @@ enum BufferPortType : unsigned {
     IsShared = 32,
     IsManaged = 64,
     CanModifySegmentLength = 128,
-    LoopAgainConstraint = 256,
     Illustrated = 512,
     InputMayBeTruncated = 1024,
     InputMayBeImplicitlyZeroExtended = 2048,
@@ -489,10 +483,6 @@ struct BufferPort {
 
     bool canModifySegmentLength() const {
         return (Flags & BufferPortType::CanModifySegmentLength) != 0;
-    }
-
-    bool isLoopAgainConstraint() const {
-        return (Flags & BufferPortType::LoopAgainConstraint) != 0;
     }
 
     bool isIllustrated() const {
