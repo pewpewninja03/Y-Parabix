@@ -8,6 +8,7 @@ NAME
     kernel.unicode
 SRC
     charclasses.cpp
+    char_replacement.cpp
     boundary_kernels.cpp
     normalization.cpp
     nfd.cpp

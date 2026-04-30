@@ -21,6 +21,7 @@
 #include <kernel/streamutils/run_index.h>
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/streamutils/stream_shift.h>
+#include <kernel/unicode/char_replacement.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/bitwise/bixlogic.h>
@@ -478,57 +479,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     FilterByMask(P, u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
-    unsigned bix_bits = ins_bixnum.size();
-
-    StreamSet * SpreadMask = nullptr;
-    if (bix_bits > 0) {
-        std::vector<re::CC *> insertion_ccs;
-        for (auto & b : ins_bixnum) {
-            insertion_ccs.push_back(re::makeCC(b, &cc::Unicode));
-        }
-        StreamSet * InsertBixNum = P.CreateStreamSet(bix_bits);
-        P.CreateKernelCall<CharClassesKernel>(insertion_ccs, U21, InsertBixNum);
-        SHOW_BIXNUM(InsertBixNum);
-
-        SpreadMask = P.CreateStreamSet(1);
-        InsertionSpreadMask(P, InsertBixNum, SpreadMask, kernel::InsertPosition::After);
-        SHOW_STREAM(SpreadMask);
-
-        StreamSet * ExpandedBasis = P.CreateStreamSet(21, 1);
-        SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
-        SHOW_BIXNUM(ExpandedBasis);
-        U21 = ExpandedBasis;
-    }
-
-    StreamSet * ResultBasis = U21;
-    for (unsigned i = 0; i < tr.size(); i++) {
-        std::vector<re::CC *> xfrm_ccs;
-        for (auto & b : tr[i]) {
-            xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
-        }
-        StreamSet * XfrmBasis = P.CreateStreamSet(xfrm_ccs.size());
-        P.CreateKernelCall<CharClassesKernel>(xfrm_ccs, U21, XfrmBasis);
-        SHOW_BIXNUM(XfrmBasis);
-
-        if (i == 0) {
-            StreamSet * u32basis = P.CreateStreamSet(21, 1);
-            XorCombine(P, ResultBasis, XfrmBasis, u32basis);
-            SHOW_BIXNUM(u32basis);
-
-            ResultBasis = u32basis;
-        } else {
-            StreamSet * ForwardBasis = P.CreateStreamSet(xfrm_ccs.size());
-            P.CreateKernelCall<ShiftForward>(XfrmBasis, ForwardBasis, i);
-            SHOW_BIXNUM(ForwardBasis);
-
-            StreamSet * u32basis = P.CreateStreamSet(21, 1);
-            OrCombine(P, ResultBasis, ForwardBasis, u32basis);
-            SHOW_BIXNUM(u32basis);
-
-            ResultBasis = u32basis;
-        }
-
-    }
+    StreamSet * ResultBasis = U21_CharToShortStringPipeline(P, ins_bixnum, tr, U21);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
     U21_to_UTF8(P, ResultBasis, OutputBasis);
