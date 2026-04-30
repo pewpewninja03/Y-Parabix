@@ -500,6 +500,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
         U21 = ExpandedBasis;
     }
 
+    StreamSet * ResultBasis = U21;
     for (unsigned i = 0; i < tr.size(); i++) {
         std::vector<re::CC *> xfrm_ccs;
         for (auto & b : tr[i]) {
@@ -511,26 +512,26 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
 
         if (i == 0) {
             StreamSet * u32basis = P.CreateStreamSet(21, 1);
-            XorCombine(P, U21, XfrmBasis, u32basis);
+            XorCombine(P, ResultBasis, XfrmBasis, u32basis);
             SHOW_BIXNUM(u32basis);
 
-            U21 = u32basis;
+            ResultBasis = u32basis;
         } else {
             StreamSet * ForwardBasis = P.CreateStreamSet(xfrm_ccs.size());
             P.CreateKernelCall<ShiftForward>(XfrmBasis, ForwardBasis, i);
             SHOW_BIXNUM(ForwardBasis);
 
             StreamSet * u32basis = P.CreateStreamSet(21, 1);
-            OrCombine(P, U21, ForwardBasis, u32basis);
+            OrCombine(P, ResultBasis, ForwardBasis, u32basis);
             SHOW_BIXNUM(u32basis);
 
-            U21 = u32basis;
+            ResultBasis = u32basis;
         }
 
     }
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
-    U21_to_UTF8(P, U21, OutputBasis);
+    U21_to_UTF8(P, ResultBasis, OutputBasis);
 
     SHOW_BIXNUM(OutputBasis);
     StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
