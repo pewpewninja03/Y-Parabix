@@ -612,6 +612,57 @@ const UnicodeSet StringOverridePropertyObject::GetCodepointSetMatchingPattern(re
     return s;
 }
 
+unsigned StringOverridePropertyObject::MaxUnicodeInsertLength() {return mMaxLength;}
+
+std::vector<UnicodeSet> & StringOverridePropertyObject::GetUnicodeInsertLengthBixNumSets() {
+    // Return the previously computed vector of bit transformation sets, if it exists.
+    if (mUnicodeInsertLengthBixNumSets.empty()) {
+        for (unsigned i = 0; i < mExplicitCps.size(); i++) {
+            codepoint_t cp = mExplicitCps[i];
+            unsigned diff = GetU32StringValue(cp).size() - 1;
+            unsigned bit = 0;
+            while (diff > 0) {
+                if ((diff & 1UL) == 1UL) {
+                    while (mUnicodeInsertLengthBixNumSets.size() <= bit) {
+                        mUnicodeInsertLengthBixNumSets.push_back(UnicodeSet());
+                    }
+                    mUnicodeInsertLengthBixNumSets[bit].insert(cp);
+                }
+                diff >>= 1;
+                bit++;
+            }
+        }
+    }
+    return mUnicodeInsertLengthBixNumSets;
+}
+
+std::vector<UnicodeSet> & StringOverridePropertyObject::GetBitTransformSets(unsigned pos) {
+    // Return the previously computed vector of bit transformation sets, if it exists.
+    if (mBitXfrmSets.size() == 0) {
+        mBitXfrmSets.resize(mMaxLength);
+        std::vector<unicode::TranslationMap> xmaps(mMaxLength);
+        for (unsigned i = 0; i < mExplicitCps.size(); i++) {
+            codepoint_t cp = mExplicitCps[i];
+            auto & s = GetU32StringValue(cp);
+            for (unsigned j = 0; j < s.size(); j++) {
+                xmaps[j].emplace(cp, static_cast<codepoint_t>(s[j]));
+            };
+        }
+        mBitXfrmSets[0] = unicode::ComputeBitTranslationSets(xmaps[0], unicode::XlateMode::XorBit);
+        for (unsigned j = 1; j < mMaxLength; j++) {
+            mBitXfrmSets[j] = unicode::ComputeBitTranslationSets(xmaps[j], unicode::XlateMode::LiteralBit);
+        }
+        CodePointPropertyObject * baseObj = cast<CodePointPropertyObject>(getPropertyObject(mBaseProperty));
+        unicode::BitTranslationSets baseSets = baseObj->GetBitTransformSets();
+        for (unsigned i = mBitXfrmSets[0].size(); i < baseSets.size(); i++) {
+            mBitXfrmSets[0].push_back(UnicodeSet());
+        }
+        for (unsigned i = 0; i < baseSets.size(); i++) {
+            mBitXfrmSets[0][i] = mBitXfrmSets[0][i] + (baseSets[i] - mOverriddenSet);
+        }
+    }
+    return mBitXfrmSets[pos];
+}
 
 re::RE * BoundaryPropertyObject::GetBoundaryExpression() {
     return mBoundaryExpression;
