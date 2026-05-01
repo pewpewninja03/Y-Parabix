@@ -11,6 +11,8 @@
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/bitwise/bixlogic.h>
+#include <unicode/data/PropertyObjects.h>
+#include <unicode/data/PropertyObjectTable.h>
 #include <re/adt/re_cc.h>
 
 using namespace kernel;
@@ -19,6 +21,26 @@ using namespace llvm;
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
+
+StreamSet * U21_StringOverridePipeline(PipelineBuilder & P,
+                                       UCD::property_t string_map_property,
+                                       StreamSet * U21_basis) {
+    std::vector<unicode::BitTranslationSets> xfrms;
+    unicode::BitTranslationSets insertion_bixnum;
+    UCD::PropertyObject * propObj = UCD::getPropertyObject(string_map_property);
+    if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
+        xfrms.resize(1);
+        xfrms[0] = p->GetBitTransformSets();
+    } else if (UCD::StringOverridePropertyObject * p = dyn_cast<UCD::StringOverridePropertyObject>(propObj)) {
+        for (unsigned i = 0; i < p->MaxUnicodeInsertLength(); i++) {
+            xfrms.push_back(p->GetBitTransformSets(i));
+        }
+        insertion_bixnum = p->GetUnicodeInsertLengthBixNumSets();
+    } else {
+        llvm::report_fatal_error("Specified property is neither codepoint nor string override property.");
+    }
+    return U21_CharToShortStringPipeline(P, insertion_bixnum, xfrms, U21_basis);
+}
 
 StreamSet * U21_CharToShortStringPipeline(PipelineBuilder & P,
     unicode::BitTranslationSets & insert_length_bixnum,
