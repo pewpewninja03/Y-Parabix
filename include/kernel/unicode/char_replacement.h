@@ -4,8 +4,10 @@
  */
 #pragma once
 
+#include <map>
 #include <vector>
 #include <kernel/pipeline/pipeline_builder.h>
+#include <unicode/core/unicode_set.h>
 #include <unicode/data/PropertyAliases.h>
 #include <unicode/utf/transchar.h>
 
@@ -22,6 +24,17 @@ kernel::StreamSet * U21_StringOverridePipeline(
     UCD::property_t stringOverrideProperty,
     kernel::StreamSet * U21_basis);
 
+//
+//  Given a Unicode character stream represented by a
+//  full set of (21) parallel basis bit streams, apply the
+//  given replacementMap to each relevant charater of the
+//  stream, producing an updated (expanded) character stream 
+//  in parallel bit stream form.
+
+kernel::StreamSet * U21_CharMapPipeline(
+    kernel::PipelineBuilder & P,
+    std::map<UCD::codepoint_t, std::u32string> replacementMap,
+    kernel::StreamSet * U21_basis);
 
 //
 //  Given a Unicode character stream represented by a
