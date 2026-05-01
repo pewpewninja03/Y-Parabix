@@ -311,9 +311,9 @@ struct BufferNode {
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
     unsigned LookBehind = 0;
-    unsigned RequiredOverflowSpace = 0;
+//    unsigned RequiredOverflowSpace = 0;
 
-    unsigned NumOfOverflowStrides = 0;
+//    unsigned NumOfOverflowStrides = 0;
 
     bool RequiresUnderflow = false;
 
@@ -447,7 +447,7 @@ struct BufferPort {
 
     // binding attributes
     int Add = 0;
-    int OverflowSlackSpace = 0;
+    int RequiredOverflowSpace = 0;
     int Delay = 0;
     int LookAhead = 0;
     int LookBehind = 0;

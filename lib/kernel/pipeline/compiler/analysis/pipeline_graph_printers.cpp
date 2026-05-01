@@ -308,10 +308,9 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         if (bn.LookBehind) {
             out << "|LB:" << bn.LookBehind;
         }
-        if (bn.RequiredOverflowSpace) {
-            out << "|+" << bn.RequiredOverflowSpace;
-        }
-
+//        if (bn.RequiredOverflowSpace) {
+//            out << "|+" << bn.RequiredOverflowSpace;
+//        }
         #endif
 
         out << "}}\"];\n";
@@ -626,6 +625,12 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             }
             out << port.Add;
         }
+
+        if (port.RequiredOverflowSpace) {
+            out << " +O:";
+            out << port.RequiredOverflowSpace;
+        }
+
         if (isZeroExtended) {
             if (port.isZeroExtended()) {
                 out << " [Z]";

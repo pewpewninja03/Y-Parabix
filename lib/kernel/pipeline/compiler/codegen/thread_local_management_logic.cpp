@@ -23,6 +23,8 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
 
     const auto n = (LastStreamSet - FirstStreamSet) + 1;
 
+    const auto bw = b.getBitBlockWidth();
+
     std::vector<Value *> precalculatedOffset(n, nullptr);
 
     std::function<Value *(Vertex)> calculatePlacement = [&](const Vertex v) -> Value * {
@@ -58,8 +60,10 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         const auto & bn = mBufferGraph[streamSet];
         assert (bn.isThreadLocal());
         Value * maxStrides = b.CreateCeilUMulRational(segmentSize, bn.RelativeIORate * scale);
-        if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
-            maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.NumOfOverflowStrides));
+        const BufferPort & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
+        if (LLVM_UNLIKELY(bp.RequiredOverflowSpace)) {
+            const auto k = ceiling(Rational{bp.RequiredOverflowSpace, bw});
+            maxStrides = b.CreateAdd(maxStrides, b.getSize(k));
         }
         Value * off = b.CreateCeilUMulRational(maxStrides, ThreadLocalPlacement[*begin]);
         if (max) {
@@ -164,6 +168,9 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     visited.emplace(mCurrentPartitionId);
     #endif
 
+
+    const auto bw = b.getBitBlockWidth();
+
     Value * memoryForSegment = nullptr;
     for (auto u = mCurrentPartitionId;;) {
         for (auto e : make_iterator_range(out_edges(u, ThreadLocalPlacement))) {
@@ -184,8 +191,11 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 Value * start = nullptr;
                 Value * end = nullptr;
                 Value * maxStrides = mMaximumNumOfStrides;
-                if (LLVM_UNLIKELY(bn.NumOfOverflowStrides)) {
-                    maxStrides = b.CreateAdd(maxStrides, b.getSize(bn.NumOfOverflowStrides));
+
+                const BufferPort & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
+                if (LLVM_UNLIKELY(bp.RequiredOverflowSpace)) {
+                    const auto k = ceiling(Rational{bp.RequiredOverflowSpace, bw});
+                    maxStrides = b.CreateAdd(maxStrides, b.getSize(k));
                 }
                 const auto & P = ThreadLocalPlacement[e];
                 Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, P * THREAD_LOCAL_ALLOC_SCALE), LOG_2_PAGE_SIZE);
@@ -207,7 +217,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                     auto & dl = b.getModule()->getDataLayout();
                     ExternalBuffer * const buf = cast<ExternalBuffer>(bn.Buffer);
                     const auto ts = b.getTypeSize(dl, buf->getType());
-                    buf->setCapacity(b, b.CreateMulRational(off, Rational{b.getBitBlockWidth(), ts}));
+                    buf->setCapacity(b, b.CreateMulRational(off, Rational{bw, ts}));
                 }
 
                 for (auto inOut = streamSet; LLVM_UNLIKELY(out_degree(inOut, InOutStreamSetReplacement)); ) {

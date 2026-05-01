@@ -89,12 +89,19 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         numOfLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
     }
 
+    Value * numOfLinearStridesForConstants = nullptr;
+
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
         for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & port = mBufferGraph[input];
             if (port.canModifySegmentLength()) {
                 Value * const strides = getNumOfAccessibleStrides(b, port, numOfLinearStrides);
-                numOfLinearStrides = b.CreateUMin(numOfLinearStrides, strides);
+                const BufferNode & bn = mBufferGraph[source(input, mBufferGraph)];
+                if (LLVM_UNLIKELY(bn.isConstant())) {
+                    numOfLinearStridesForConstants = b.CreateUMin(numOfLinearStridesForConstants, strides);
+                } else {
+                    numOfLinearStrides = b.CreateUMin(numOfLinearStrides, strides);
+                }
             }
         }
     } else if (!isSourceKernel) {
@@ -102,9 +109,17 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         numOfLinearStrides = b.CreateZExt(b.CreateNot(exhausted), b.getSizeTy());
     }
 
+    if (LLVM_UNLIKELY(numOfLinearStridesForConstants)) {
+        mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
+        numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
+    } else {
+        mHasMoreInput = nullptr;
+    }
+
+
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
-        if (port.canModifySegmentLength()) {
+        if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
             Value * const strides = getNumOfWritableStrides(b, port, numOfLinearStrides);
             numOfLinearStrides = b.CreateUMin(numOfLinearStrides, strides);
         }
@@ -429,6 +444,14 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
 
     b.CreateBr(mKernelCheckOutputSpace);
     b.SetInsertPoint(mKernelCheckOutputSpace);
+
+    assert (mPenultimateSubSegmentPhi);
+    if (mHasMoreInput) {
+        mHasMoreInput = b.CreateOr(mHasMoreInput, mPenultimateSubSegmentPhi);
+    } else {
+        mHasMoreInput = mPenultimateSubSegmentPhi;
+    }
+
     return mNumOfLinearStridesPhi;
 }
 
@@ -845,9 +868,7 @@ Value * PipelineCompiler::getNumOfWritableStrides(KernelBuilder & b,
     assert (outputPort.Type == PortType::Output);
     const auto bufferVertex = getOutputBufferVertex(outputPort);
     const BufferNode & bn = mBufferGraph[bufferVertex];
-    if (LLVM_UNLIKELY(bn.isUnowned())) {
-        return nullptr;
-    }
+    assert (bn.isOwned());
     const Binding & output = port.Binding;
     Value * numOfStrides = nullptr;
     if (LLVM_UNLIKELY(output.getRate().isPartialSum())) {

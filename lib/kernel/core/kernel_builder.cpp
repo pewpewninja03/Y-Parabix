@@ -600,7 +600,10 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
                 Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
-                Value * const capacityChunks = CreateExactUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
+
+                Value * const currentCapacity = buffer->getInternalCapacity(*this);
+                CallPrintInt("currentCapacity", currentCapacity);
+                Value * const capacityChunks = CreateExactUDiv(currentCapacity, BLOCK_WIDTH);
                 Value * const newCapacityChunks = CreateAdd(consumedChunks, capacityChunks);
                 CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, newCapacityChunks), expandInternalBuffer, exit);
 
@@ -625,6 +628,12 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 args[5] = COMPILER->getPipelineHandle();
                 args[6] = getSize(port.Number);
             }
+
+
+            CallPrintInt("consumedItems", consumedItems);
+            CallPrintInt("producedItems", producedItems);
+            CallPrintInt("required", capacity);
+
 
             CreateCall(f, args);
             return;

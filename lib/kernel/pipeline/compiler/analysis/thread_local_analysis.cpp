@@ -270,6 +270,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     auto & dl = b.getModule()->getDataLayout();
 
+    const auto bw = b.getBitBlockWidth();
+
     size_t numOfThreadLocalStreamSets = 0U;
     size_t packedPartitionCount = 0;
 
@@ -309,7 +311,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                         const auto W = bp.Maximum * typeSize * StrideRepetitionVector[kernel];
                         assert (W.denominator() == 1);
                         unitWeight[numOfThreadLocalStreamSets] = W.numerator();
-                        overflowWeight[numOfThreadLocalStreamSets] = bn.NumOfOverflowStrides;
+                        overflowWeight[numOfThreadLocalStreamSets] = ceiling(Rational{bp.RequiredOverflowSpace, bw});
                         ++numOfThreadLocalStreamSets;
                     }
 
@@ -487,7 +489,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         assert (intervals.size() == numOfThreadLocalStreamSets);
 
         const auto pageSize = getPageSize();
-        const auto bw = b.getBitBlockWidth();
+
 
 
         Rational::int_type denomLCM = 1U;

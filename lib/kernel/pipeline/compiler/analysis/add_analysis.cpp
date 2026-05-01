@@ -23,33 +23,36 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
 
 
         if (LLVM_LIKELY(d > 0)) {
-            bool noPrincipal = true;
-            minAddK = std::numeric_limits<int>::max();
-            int principalK = 0;
-            if (inputAdd.size() < d) {
+
+            if (LLVM_UNLIKELY(inputAdd.size() < d)) {
                 inputAdd.resize(d);
             }
+
+            bool hasPrincipal = false;
+            bool noFixed = true;
+            minAddK = std::numeric_limits<int>::max();
+            int principalK = 0;
 
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
                 const auto streamSet = source(e, mBufferGraph);
                 BufferPort & br = mBufferGraph[e];
+                int k = 0;
                 if (br.isFixed()) {
-                    const int k = transitiveAdd[streamSet - FirstStreamSet] + br.Add;
+                    noFixed = false;
+                    k = transitiveAdd[streamSet - FirstStreamSet] + br.Add;
                     minAddK = std::min(minAddK, k);
                     if (LLVM_UNLIKELY(br.isPrincipal())) {
                         principalK = k;
-                        noPrincipal = false;
+                        hasPrincipal = true;
                         break;
                     }
-                    inputAdd[br.Port.Number] = k;
                 }
+                inputAdd[br.Port.Number] = k;
             }
 
-            if (noPrincipal) {
-                if (minAddK == std::numeric_limits<int>::max()) {
-                    minAddK = 0;
-                }
-            } else {
+            if (noFixed) {
+                minAddK = 0;
+            } else if (hasPrincipal) {
                 minAddK = principalK;
             }
 
@@ -59,11 +62,11 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
                 if (br.isFixed()) {
                     assert (minAddK < std::numeric_limits<int>::max());
                     const int k = inputAdd[br.Port.Number] - minAddK;
-                    br.OverflowSlackSpace = k;
-                    BufferNode & bn = mBufferGraph[streamSet];
-                    if (LLVM_LIKELY(k > bn.RequiredOverflowSpace)) {
-                        bn.RequiredOverflowSpace = k;
-                    }
+                    br.RequiredOverflowSpace = k;
+//                    BufferNode & bn = mBufferGraph[streamSet];
+//                    if (LLVM_LIKELY(k > bn.RequiredOverflowSpace)) {
+//                        bn.RequiredOverflowSpace = k;
+//                    }
                 }
             }
 
@@ -74,10 +77,11 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
             const auto k = minAddK + br.Add;
             const auto streamSet = target(e, mBufferGraph);
             transitiveAdd[streamSet - FirstStreamSet] = k;
-            BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_LIKELY(k > bn.RequiredOverflowSpace)) {
-                bn.RequiredOverflowSpace = k;
-            }
+            br.RequiredOverflowSpace = k;
+//            BufferNode & bn = mBufferGraph[streamSet];
+//            if (LLVM_LIKELY(k > bn.RequiredOverflowSpace)) {
+//                bn.RequiredOverflowSpace = k;
+//            }
         }
     }
 
@@ -87,80 +91,50 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_LIKELY(bn.isOwned() && !bn.isConstant())) {
 
-            if (LLVM_LIKELY(in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
+        int maxOverflowSpace = 0;
 
-                int maxOverflowSpace = 0;
+        if (LLVM_UNLIKELY(bn.isUnowned() || bn.isConstant())) {
 
-                for (auto id = streamSet;;) {
+            maxOverflowSpace = 0;
 
-                    const BufferNode & sn = mBufferGraph[id];
-                    int required = sn.RequiredOverflowSpace;
+        } else if (LLVM_LIKELY(in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
 
-                    const auto output = in_edge(id, mBufferGraph);
-                    BufferPort & br = mBufferGraph[output];
-                    const auto c = std::max<int>(br.OverflowSlackSpace, br.EmptyOverflow);
-                    required = std::max<int>(required, c);
+            for (auto id = streamSet;;) {
 
-                    for (const auto input : make_iterator_range(out_edges(id, mBufferGraph))) {
-                        const BufferPort & br = mBufferGraph[input];
-                        const auto a = std::max<int>(br.OverflowSlackSpace, br.EmptyOverflow);
-                        const auto b = std::max<int>(a, br.LookAhead);
-                        required = std::max<int>(required, b);
-                    }
+//                const BufferNode & sn = mBufferGraph[id];
+//                int required = sn.RequiredOverflowSpace;
 
-                    const auto ta = transitiveAdd[id - FirstStreamSet];
-                    maxOverflowSpace = std::max<int>(maxOverflowSpace, ta + required);
+                const auto output = in_edge(id, mBufferGraph);
+                BufferPort & br = mBufferGraph[output];
+                const auto c = std::max<int>(br.RequiredOverflowSpace, br.EmptyOverflow);
+                maxOverflowSpace = std::max<int>(maxOverflowSpace, c);
 
-                    if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
-                        break;
-                    }
-                    id = child(id, InOutStreamSetReplacement);
+                for (const auto input : make_iterator_range(out_edges(id, mBufferGraph))) {
+                    BufferPort & br = mBufferGraph[input];
+                    const auto a = std::max<int>(br.RequiredOverflowSpace, br.EmptyOverflow);
+                    const auto b = std::max<int>(a, br.LookAhead);
+                    br.RequiredOverflowSpace = b;
+                    maxOverflowSpace = std::max<int>(maxOverflowSpace, b);
                 }
 
-                for (auto id = streamSet;;) {
+//                const auto ta = transitiveAdd[id - FirstStreamSet];
+//                maxOverflowSpace = std::max<int>(maxOverflowSpace, ta + required);
+//                maxOverflowSpace = std::max<int>(maxOverflowSpace, required);
 
-                    const auto output = in_edge(id, mBufferGraph);
-                    BufferPort & br = mBufferGraph[output];
-                    assert (maxOverflowSpace >= br.OverflowSlackSpace);
-                    br.OverflowSlackSpace = maxOverflowSpace - br.OverflowSlackSpace;
-                    assert (br.OverflowSlackSpace >= 0);
-                    maxOverflowSpace = std::max<int>(maxOverflowSpace, br.OverflowSlackSpace);
-
-                    for (const auto input : make_iterator_range(out_edges(id, mBufferGraph))) {
-                        BufferPort & br = mBufferGraph[input];
-                        assert (maxOverflowSpace >= br.OverflowSlackSpace);
-                        br.OverflowSlackSpace = maxOverflowSpace - br.OverflowSlackSpace;
-                        assert (br.OverflowSlackSpace >= 0);
-                        maxOverflowSpace = std::max<int>(maxOverflowSpace, br.OverflowSlackSpace);
-                    }
-
-                    bn.RequiredOverflowSpace = maxOverflowSpace;
-
-                    if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
-                        break;
-                    }
-                    id = child(id, InOutStreamSetReplacement);
-
+                if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
+                    break;
                 }
-
-            }
-
-
-
-        } else { // if (bn.isUnowned()) {
-
-            bn.RequiredOverflowSpace = 0;
-            const auto output = in_edge(streamSet, mBufferGraph);
-            BufferPort & br = mBufferGraph[output];
-            br.OverflowSlackSpace = 0;
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                BufferPort & br = mBufferGraph[input];
-                br.OverflowSlackSpace = 0;
+                id = child(id, InOutStreamSetReplacement);
             }
 
         }
+
+//        bn.RequiredOverflowSpace = maxOverflowSpace;
+        const auto output = in_edge(streamSet, mBufferGraph);
+        BufferPort & br = mBufferGraph[output];
+        br.RequiredOverflowSpace = maxOverflowSpace;
+
     }
 
 }

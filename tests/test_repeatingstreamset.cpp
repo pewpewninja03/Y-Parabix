@@ -76,7 +76,7 @@ std::string RepeatingSourceKernel::makeSignature(const std::vector<std::vector<u
 }
 
 RepeatingSourceKernel::RepeatingSourceKernel(LLVMTypeSystemInterface & ts, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
-: SegmentOrientedKernel(ts, getStringHash(makeSignature(pattern, output, fillSize)),
+: SegmentOrientedKernel(ts, "RS_" + getStringHash(makeSignature(pattern, output, fillSize)),
 // input streams
 {},
 // output stream
@@ -158,6 +158,11 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     Module & mod = *b.getModule();
 
+    assert ((fieldWidth * blockWidth) % 8 == 0);
+    assert ((fieldWidth * blockWidth) >= 8);
+
+    const auto copyLength = (fieldWidth * blockWidth) / 8;
+
     for (unsigned p = 0; p < numElements; ++p) {
         const auto & vec = Pattern[p];
         const auto L = vec.size();
@@ -200,6 +205,8 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     Value * const produced = b.getProducedItemCount("output");
     Value * const consumed = b.getConsumedItemCount("output");
 
+    b.CallPrintInt("strides", b.getNumOfStrides());
+
     Value * const fillSize = b.CreateMul(sz_strideFillSize, b.getNumOfStrides());
 
     b.reserveCapacity("output", fillSize);
@@ -208,6 +215,12 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     Value * const total = b.CreateAdd(fillSize, consumed); // produced + (fillSize - (produced - consumed))
 
+    b.CallPrintInt("total", total);
+
+    ConstantInt * const elementSize = b.getSize(copyLength);
+
+    b.CallPrintInt("elementSize", elementSize);
+
     BasicBlock * const prepareBufferExit = b.GetInsertBlock();
     b.CreateBr(generateData);
 
@@ -215,18 +228,25 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     PHINode * const producedPhi = b.CreatePHI(b.getSizeTy(), 3);
     producedPhi->addIncoming(produced, prepareBufferExit);
 
+    b.CallPrintInt("producedPhi", producedPhi);
+
     FixedArray<Value *,2> offset;
     offset[0] = sz_ZERO;
 
     Value * const currentIndex = b.CreateExactUDiv(producedPhi, sz_BlockWidth);
-    const auto length = (fieldWidth * blockWidth) / 8;
-    ConstantInt * const elementSize = b.getSize(length);
     for (unsigned i = 0; i < numElements; ++i) {
         const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
         const auto runLength = (patternLength / blockWidth);
         offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
         Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
         Value * const dst = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), currentIndex);
+        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+            Value * const start = b.CreateRoundDownRational(consumed, blockWidth);
+            Value * const end = outputBuffer->getCapacity(b);
+            outputBuffer->assertAccessIsWithinStreamSetMemory(b, b.GetString("dst"), dst, copyLength, start, end);
+        }
+        b.CallPrintInt("src", src);
+        b.CallPrintInt("dst", dst);
         b.CreateMemCpy(dst, src, elementSize, 1U);
     }
 

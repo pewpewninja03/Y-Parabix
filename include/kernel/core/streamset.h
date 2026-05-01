@@ -133,7 +133,7 @@ public:
 
     static void linkFunctions(kernel::KernelBuilder & b); // temporary function
 
-    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
+    virtual void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
 
 protected:
 
@@ -270,6 +270,8 @@ public:
     void freePendingDeletions(kernel::KernelBuilder & b, llvm::Value * consumed) const override;
 
     llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
+
+    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const override;
 
 };
 

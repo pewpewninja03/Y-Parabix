@@ -40,8 +40,9 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b,
             Rational scaleFactor{ts * br.Maximum.numerator(), blockWidth * blockWidth * br.Maximum.denominator()};
 
             Value * ns = numOfStrides;
-            if (bn.NumOfOverflowStrides) {
-                ns = b.CreateAdd(ns, b.getSize(bn.NumOfOverflowStrides));
+            if (br.RequiredOverflowSpace) {
+                const auto k = ceiling(Rational{br.RequiredOverflowSpace, blockWidth});
+                ns = b.CreateAdd(ns, b.getSize(k));
             }
             zeroExtended = b.CreateZExt(zeroExtended, sizeTy);
             Value * const requiredBytes = b.CreateCeilUMulRational(b.CreateMul(ns, zeroExtended), scaleFactor);
@@ -244,38 +245,35 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
 
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
-        Value * const selected = accessibleItems[inputPort.Number];
-        Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
+        Value * const availableItems = mLocallyAvailableItems[streamSet];
+
 
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
         if (LLVM_UNLIKELY(alwaysTruncate)) {
             b.CreateBr(maskedInput);
         } else {
-            constexpr auto ALLFLAGS = BufferPortType::InputMayBeTruncated | BufferPortType::InputMayBeImplicitlyZeroExtended;
-            const auto flags = port.Flags & ALLFLAGS; assert (flags);
-            if (flags == ALLFLAGS) {
-                Value * const exactMatch = b.CreateICmpNE(selected, totalNumOfItems);
-                b.CreateUnlikelyCondBr(exactMatch, maskedInput, selectedInput);
-            } else if (flags == BufferPortType::InputMayBeTruncated) {
-                Value * total = totalNumOfItems;
-                if (bn.RequiredOverflowSpace > 0) {
-                    assert (port.OverflowSlackSpace <= bn.RequiredOverflowSpace);
-                    total = b.CreateAdd(total, b.getSize(bn.RequiredOverflowSpace - port.OverflowSlackSpace));
-                }
-                Value * tooMany = b.CreateICmpULT(selected, totalNumOfItems);
-                if (mIsInputZeroExtended[inputPort]) {
-                    tooMany = b.CreateAnd(tooMany, b.CreateNot(mIsInputZeroExtended[inputPort]));
-                }
-                b.CreateUnlikelyCondBr(tooMany, maskedInput, selectedInput);
+
+            Value * selectedItems = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], accessibleItems[inputPort.Number]);
+            const auto output = in_edge(streamSet, mBufferGraph);
+            const BufferPort & out = mBufferGraph[output];
+
+            Value * cond = nullptr;
+            if (port.RequiredOverflowSpace == 0 && out.RequiredOverflowSpace == 0) {
+                cond = b.CreateICmpNE(selectedItems, availableItems);
             } else {
-                Value * total = totalNumOfItems;
-                if (bn.RequiredOverflowSpace > 0) {
-                    total = b.CreateAdd(total, b.getSize(port.OverflowSlackSpace));
+                Value * tooMany = b.CreateICmpULT(selectedItems, availableItems);
+                Value * totalItems = availableItems;
+                if (out.RequiredOverflowSpace) {
+                    totalItems = b.CreateAdd(totalItems, b.getSize(out.RequiredOverflowSpace));
                 }
-                Value * tooFew = b.CreateICmpUGT(selected, total);
-                b.CreateUnlikelyCondBr(tooFew, maskedInput, selectedInput);
+                if (port.RequiredOverflowSpace) {
+                    selectedItems = b.CreateAdd(selectedItems, b.getSize(port.RequiredOverflowSpace));
+                }
+                Value * tooFew = b.CreateICmpUGT(selectedItems, totalItems);
+                cond = b.CreateOr(tooMany, tooFew);
             }
+            b.CreateUnlikelyCondBr(cond, maskedInput, selectedInput);
         }
 
         b.SetInsertPoint(maskedInput);
@@ -510,28 +508,27 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
         ConstantInt * const itemsPerSegment = b.getSize(ic.numerator());
 
         args[1] = itemsPerSegment;
-        Value * processed = nullptr;
 
-
-
-        Value * max = mCurrentProcessedItemCountPhi[inputPort];
+        Value * processedItems = nullptr;
         if (port.isDeferred()) {
-            processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
+            processedItems = mCurrentProcessedDeferredItemCountPhi[inputPort];
         } else {
-            processed = max;
+            processedItems = mCurrentProcessedItemCountPhi[inputPort];
         }
-        max = b.CreateAdd(max, selected);
 
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, prefix + " truncating input item count from %" PRIu64 " to %" PRIu64, totalNumOfItems, max);
-        #endif
+        Value * maxItems = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], accessibleItems[inputPort.Number]);
+        if (port.RequiredOverflowSpace) {
+            maxItems = b.CreateAdd(maxItems, b.getSize(port.RequiredOverflowSpace));
+        }
 
-        args[2] = processed;
-        args[3] = max;
+        args[2] = processedItems;
+        args[3] = maxItems;
         args[4] = buffer->getStreamSetCount(b);
         args[5] = b.CreateGEP(traceArTy, base, indices);
 
-        Value * const capacity = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], itemsPerSegment);
+        #ifdef PRINT_DEBUG_MESSAGES
+        debugPrint(b, prefix + " truncating input to [%" PRIu64 ",%" PRIu64 ")", processedItems, maxItems);
+        #endif
 
         Value * const maskVal = b.CreateCall(maskInput->getFunctionType(), maskInput, args);
 
@@ -543,7 +540,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             const auto & DL = m->getDataLayout();
             const auto ts = b.getTypeSize(DL, buffer->getType());
             maskedCapacity = b.CreateMulRational(maskedBytes, Rational{b.getBitBlockWidth(), ts});
-            maskedCapacity = b.CreateAdd(processed, maskedCapacity);
+            maskedCapacity = b.CreateAdd(processedItems, maskedCapacity);
         }
         assert (maskedAddress->getType()->isPointerTy());
         maskedAddress = b.CreatePointerCast(maskedAddress, bufferType);
@@ -617,6 +614,8 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
         if (LLVM_UNLIKELY(bn.isUnowned() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth())) {
             continue;
         }
+
+        // TODO: don't do this for popcount outputs
 
         const StreamSetBuffer * const buffer = bn.Buffer;
 
@@ -712,38 +711,40 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
         b.SetInsertPoint(maskExit);
 
         // Zero out any blocks we could potentially touch
-        const auto blocksPerStride = ceiling(Rational{rt.Maximum.numerator() * StrideStepLength[mKernelId], rt.Maximum.denominator() * blockWidth});
+        const auto blocksPerStride = ceiling(rt.Maximum * Rational{StrideStepLength[mKernelId], blockWidth});
         assert (blocksPerStride > 0);
        // const auto blocksToZero = blocksPerStride + bn.NumOfOverflowStrides;
 
         const auto doUnaryPack = (isUnary && itemWidth > 1);
 
-        if (doUnaryPack || blocksPerStride > 1 || bn.NumOfOverflowStrides > 0) {
+        if (doUnaryPack || blocksPerStride > 1 || rt.RequiredOverflowSpace > 0) {
 
-            Value * startPtr = nullptr;
-            Value * endPtr = nullptr;
+//            Value * startPtr = nullptr;
+//            Value * endPtr = nullptr;
 
             auto getEndOffset = [&](Value * current) {
                 if (blocksPerStride > 1) {
                     current = b.CreateRoundUpRational(current, blocksPerStride);
                 }
-                if (bn.NumOfOverflowStrides > 0) {
-                    current = b.CreateAdd(current, b.getSize(bn.NumOfOverflowStrides));
+                if (rt.RequiredOverflowSpace) {
+                    const auto k = ceiling(Rational{rt.RequiredOverflowSpace, blockWidth});
+                    current = b.CreateAdd(current, b.getSize(k));
                 }
                 return current;
             };
 
-            if (doUnaryPack) {
-                Value * const nextPackIndex = b.CreateAdd(packIndex, ONE);
-                Value * const currentBlockIndex = buffer->modByCapacity(b, blockIndex);
-                startPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, currentBlockIndex, nextPackIndex);
-                endPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, getEndOffset(currentBlockIndex), ITEM_WIDTH);
-            }  else {
+//            if (doUnaryPack) {
+//                Value * const nextPackIndex = b.CreateAdd(packIndex, ONE);
+//                Value * const nextBlockIndex = b.CreateAdd(blockIndex, ONE);
+//                Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
+//                startPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, nextOffset, nextPackIndex);
+//                endPtr = buffer->StreamSetBuffer::getStreamPackPtr(b, baseAddress, sz_ZERO, getEndOffset(nextOffset), ITEM_WIDTH);
+//            }  else {
                 Value * const nextBlockIndex = b.CreateAdd(blockIndex, ONE);
                 Value * const nextOffset = buffer->modByCapacity(b, nextBlockIndex);
-                startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, nextOffset);
-                endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, getEndOffset(nextOffset));
-            }
+                Value * const startPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, nextOffset);
+                Value * const endPtr = buffer->StreamSetBuffer::getStreamBlockPtr(b, baseAddress, sz_ZERO, getEndOffset(nextOffset));
+//            }
 
             Value * const startPtrInt = b.CreatePtrToInt(startPtr, intPtrTy);
             Value * const endPtrInt = b.CreatePtrToInt(endPtr, intPtrTy);
@@ -752,7 +753,7 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
             #ifdef PRINT_DEBUG_MESSAGES
             #ifndef PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY
             debugPrint(b, prefix + "_zeroUnwritten_clearRange%" PRIu8 ",%" PRIu64 ",%" PRIu64 " = [0x%" PRIx64 ",0x%" PRIx64 ")",
-                       b.getInt8(doUnaryPack), b.getInt64(blocksPerStride), b.getInt64(bn.NumOfOverflowStrides), startPtrInt, endPtrInt);
+                       b.getInt8(doUnaryPack), b.getInt64(blocksPerStride), b.getInt64(rt.RequiredOverflowSpace), startPtrInt, endPtrInt);
             #endif
             debugPrint(b, prefix + "_zeroUnwritten_remainingBufferBytes = %" PRIu64, remainingBytes);
             #endif

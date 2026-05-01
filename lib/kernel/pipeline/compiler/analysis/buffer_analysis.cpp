@@ -215,7 +215,7 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         }
                         bp.EmptyOverflow = std::max<int>(bp.EmptyOverflow, width);
                         bn.Type |= BufferType::RequiresEmptyOverflow;
-                        bn.NumOfOverflowStrides = std::max(bn.NumOfOverflowStrides, 1U);
+//                        bn.NumOfOverflowStrides = std::max(bn.NumOfOverflowStrides, 1U);
                         END_SCOPED_REGION
                         break;
                     case AttrId::InOut:
@@ -815,14 +815,12 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                 const auto streamSet = target(output, mBufferGraph);
                 const BufferNode & N = mBufferGraph[streamSet];
 
-                if (N.isThreadLocal()) {
+                if (N.isThreadLocal() || N.isUnowned()) {
                     continue;
                 }
 
-                BufferPort & outputRate = mBufferGraph[output];
-                if (N.isUnowned()) {
-                    outputRate.Flags |= BufferPortType::CanModifySegmentLength;
-                } else if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+                if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+                    BufferPort & outputRate = mBufferGraph[output];
                     const auto srcStreamSet = parent(streamSet, InOutStreamSetReplacement);
                     for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                         if (source(input, mBufferGraph) == srcStreamSet) {
@@ -918,11 +916,11 @@ void PipelineAnalysis::estimateInitialBufferSizes(KernelBuilder & b) {
             currentNode.RequiresUnderflow = !currentNode.IsLinear;
         }
 
-        if (maxOverflow) {
-            const auto bw = b.getBitBlockWidth();
-            const auto r = (maxOverflow + bw - 1) / bw;
-            currentNode.NumOfOverflowStrides = std::max(currentNode.NumOfOverflowStrides, r);
-        }
+//        if (maxOverflow) {
+//            const auto bw = b.getBitBlockWidth();
+//            const auto r = (maxOverflow + bw - 1) / bw;
+//            currentNode.NumOfOverflowStrides = std::max(currentNode.NumOfOverflowStrides, r);
+//        }
 
         END_SCOPED_REGION
 

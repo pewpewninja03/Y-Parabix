@@ -1872,6 +1872,44 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
     }
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief isItemAlignedAccessWithinStreamSetMemory
+ ** ------------------------------------------------------------------------------------------------------------- */
+void ManagedDynamicBuffer::assertAccessIsWithinStreamSetMemory(KernelBuilder & b, Constant * name, Value * ptr, const size_t size, Value * const start, Value * const end) const {
+
+    assert (codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts));
+
+    ConstantInt * sz_ZERO = b.getSize(0);
+    ConstantInt * sz_LOG_2_BW = b.getSize(floor_log2(b.getBitBlockWidth()));
+
+    Value * const ba = getBaseAddress(b);
+
+    Value * const startIndex = b.CreateLShr(start, sz_LOG_2_BW);
+
+    Value * startPtr = getStreamBlockPtr(b, ba, sz_ZERO, startIndex);
+
+    Value * const endIndex = b.CreateLShr(end, sz_LOG_2_BW);
+
+    Value * endPtr = nullptr;
+    if (mLinear) {
+        endPtr = getStreamBlockPtr(b, ba, sz_ZERO, endIndex);
+    } else {
+        endPtr = StreamSetBuffer::getStreamBlockPtr(b, b.CreatePointerCast(startPtr, ba->getType()), sz_ZERO, b.CreateSub(endIndex, startIndex));
+    }
+
+    auto & dl = b.getModule()->getDataLayout();
+    IntegerType * const intPtrTy = dl.getIntPtrType(b.getContext());
+    startPtr = b.CreatePtrToInt(startPtr, intPtrTy);
+    Value * ptrInt = b.CreatePtrToInt(ptr, intPtrTy);
+    Value * valid = b.CreateICmpULE(startPtr, ptrInt);
+    Value * outPtr = b.CreateAdd(ptrInt, ConstantInt::get(intPtrTy, size)); assert (size > 0);
+    endPtr = b.CreatePtrToInt(endPtr, intPtrTy);
+    valid = b.CreateAnd(valid, b.CreateICmpULE(outPtr, endPtr));
+    b.CreateAssert(valid, "streamset \"%s\" memory access [%" PRIx64 ",%" PRIx64 ") is outside of valid memory boundaries [%" PRIx64 ",%" PRIx64 ")",
+                   name, ptr, outPtr, startPtr, endPtr);
+
+}
+
 // Fd-Backed Dynamic Buffer
 
 StructType * FdBackedDynamicBuffer::getHandleType(KernelBuilder & b) const {
