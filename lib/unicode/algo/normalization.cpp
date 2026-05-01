@@ -88,4 +88,60 @@ std::u32string NFD_Engine::decompose (std::u32string to_decompose) {
     NFD_append(rslt, to_decompose);
     return rslt;
 }
+
+void NFD_Engine::prepareUnicodeBitTranslationData() {
+    auto cps = decompMappingObj->GetExplicitCps();
+    std::vector<unicode::TranslationMap> xmaps;
+    for (auto cp : cps) {
+        std::u32string decomp;
+        NFD_append1(decomp, cp);
+        while (xmaps.size() < decomp.length()) {
+            xmaps.push_back(unicode::TranslationMap());
+        }
+        unsigned diff = decomp.length() - 1;
+        unsigned bit = 0;
+        while (diff > 0) {
+            if ((diff & 1UL) == 1UL) {
+                while (decomposition_insert_length_bixnum_sets.size() <= bit) {
+                    decomposition_insert_length_bixnum_sets.push_back(UnicodeSet());
+                }
+                decomposition_insert_length_bixnum_sets[bit].insert(cp);
+            }
+            diff >>= 1;
+            bit++;
+        }
+        for (unsigned i = 0; i < decomp.length(); i++) {
+            xmaps[i].emplace(cp, decomp[i]);
+        }
+    }
+    UCD::UnicodeSet Hangul_Precomposed(Hangul::SBase, Hangul::MaxPrecomposed);
+    UCD::UnicodeSet Hangul_Precomposed_LV;
+    for (UCD::codepoint_t cp = Hangul::SBase; cp <= Hangul::MaxPrecomposed; cp += Hangul::TCount) {
+        Hangul_Precomposed_LV.insert(cp);
+    }
+    UCD::UnicodeSet Hangul_Precomposed_LVT = Hangul_Precomposed - Hangul_Precomposed_LV;
+    // Each LV requires expansion by a single position, each LVT by two positions.
+    decomposition_insert_length_bixnum_sets[0] = decomposition_insert_length_bixnum_sets[0] + Hangul_Precomposed_LV;
+    decomposition_insert_length_bixnum_sets[1] = decomposition_insert_length_bixnum_sets[1] + Hangul_Precomposed_LVT;
+    bitXlatSets.resize(xmaps.size());
+    bitXlatSets[0] = unicode::ComputeBitTranslationSets(xmaps[0], unicode::XlateMode::XorBit);
+    for (unsigned j = 1; j < xmaps.size(); j++) {
+        bitXlatSets[j] = unicode::ComputeBitTranslationSets(xmaps[j], unicode::XlateMode::LiteralBit);
+    }
+}
+
+unicode::BitTranslationSets NFD_Engine::UnicodeInsertLengthBixNumSets() {
+    if (decomposition_insert_length_bixnum_sets.size() == 0) {
+        prepareUnicodeBitTranslationData();
+    }
+    return decomposition_insert_length_bixnum_sets;
+}
+
+std::vector<unicode::BitTranslationSets> NFD_Engine::UnicodeBitTransformSets() {
+    if (decomposition_insert_length_bixnum_sets.size() == 0) {
+        prepareUnicodeBitTranslationData();
+    }
+    return bitXlatSets;
+}
+
 } // end namespace UCD

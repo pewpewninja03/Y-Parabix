@@ -118,6 +118,24 @@ DEPS
 
 parabix_add_executable(
 NAME
+    nfkd
+SRC
+    nfkd.cpp
+DEPS
+    pablo
+    pablo.bixnum
+    kernel.basis
+    kernel.bitwise
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.unicode
+    re.cc
+    toolchain
+)
+
+parabix_add_executable(
+NAME
     nfc
 SRC
     nfc.cpp
