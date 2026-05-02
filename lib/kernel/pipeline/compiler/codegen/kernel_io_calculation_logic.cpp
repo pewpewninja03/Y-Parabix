@@ -109,13 +109,15 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         numOfLinearStrides = b.CreateZExt(b.CreateNot(exhausted), b.getSizeTy());
     }
 
+    mHasMoreInput = nullptr;
     if (LLVM_UNLIKELY(numOfLinearStridesForConstants)) {
-        mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
-        numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
-    } else {
-        mHasMoreInput = nullptr;
+        if (LLVM_LIKELY(numOfLinearStrides)) {
+            mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
+            numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
+        } else {
+            numOfLinearStrides = numOfLinearStridesForConstants;
+        }
     }
-
 
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];

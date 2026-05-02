@@ -175,7 +175,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
             for (uint64_t i = 0; i < fieldWidth; ++i) {
                 for (uint64_t j = 0; j < numLanes; ++j) {
                     uint64_t V = 0;
-                    for (uint64_t k = 0; k != laneWidth; k += fieldWidth) {
+                    for (uint64_t k = 0; k < laneWidth; k += fieldWidth) {
                         const auto v = vec[pos % L];
                         V |= (v << k);
                         ++pos;
@@ -225,10 +225,12 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     const auto align = (blockWidth / 8);
 
+    FixedArray<Value *, 3> offset;
+    offset[0] = sz_ZERO;
+
     if (fieldWidth == 1) {
 
-        FixedArray<Value *,2> offset;
-        offset[0] = sz_ZERO;
+        offset[2] = sz_ZERO; // fieldwidth = 0
 
         for (unsigned i = 0; i < numElements; ++i) {
             const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
@@ -243,8 +245,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     } else {
 
-        FixedArray<Value *, 3> offset;
-        offset[0] = sz_ZERO;
+
 
         SmallVector<Constant *, 16> fieldOffset(fieldWidth);
         for (unsigned j = 0; j < fieldWidth; ++j) {
