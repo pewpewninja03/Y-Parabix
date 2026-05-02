@@ -693,6 +693,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
 
         Value * const baseAddressField = b.CreateInBoundsGEP(handleTy, handle, indices);
         Value * currentAddr = b.CreateAlignedLoad(addrPtrTy, baseAddressField, voidPtrTyAlign);
+
         // If the user has filled in a base address in the init function, assume they're handling all
         // memory management.
         b.CreateCondBr(b.CreateICmpEQ(currentAddr, nullVoidPtr), allocBuffer, exit);
@@ -700,7 +701,6 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         // --------------------------------------------------------
 
         b.SetInsertPoint(allocBuffer);
-
         Value * capacityBytes = b.CreateMul(typeSize, capacity);
 
         if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {

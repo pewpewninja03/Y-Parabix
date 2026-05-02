@@ -151,6 +151,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     ArrayType * const elementTy = ArrayType::get(vecTy, fieldWidth);
 
 
+
     SmallVector<Constant *, 16> laneVal(numLanes);
     SmallVector<Constant *, 16> packVal(fieldWidth);
     SmallVector<GlobalVariable *, 16> streamVal(numElements);
@@ -160,8 +161,6 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     assert ((fieldWidth * blockWidth) % 8 == 0);
     assert ((fieldWidth * blockWidth) >= 8);
-
-    const auto copyLength = (fieldWidth * blockWidth) / 8;
 
     for (unsigned p = 0; p < numElements; ++p) {
         const auto & vec = Pattern[p];
@@ -186,6 +185,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
                 packVal[i] = ConstantVector::get(laneVal);
             }
             dataVectorArray[r] = ConstantArray::get(elementTy, packVal);
+            assert (b.getTypeSize(mod.getDataLayout(), dataVectorArray[r]->getType()) == (fieldWidth * blockWidth) / 8);
         }
 
         ArrayType * const streamTy = ArrayType::get(elementTy, runLength);
@@ -204,22 +204,15 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     Value * const produced = b.getProducedItemCount("output");
     Value * const consumed = b.getConsumedItemCount("output");
-
-    b.CallPrintInt("strides", b.getNumOfStrides());
-
     Value * const fillSize = b.CreateMul(sz_strideFillSize, b.getNumOfStrides());
 
     b.reserveCapacity("output", fillSize);
 
     Value * const baseAddress = b.getBaseAddress("output");
 
-    Value * const total = b.CreateAdd(fillSize, consumed); // produced + (fillSize - (produced - consumed))
+    Value * const MAX = b.getScalarField("repLength");
 
-    b.CallPrintInt("total", total);
-
-    ConstantInt * const elementSize = b.getSize(copyLength);
-
-    b.CallPrintInt("elementSize", elementSize);
+    Value * const total = b.CreateUMin(MAX, b.CreateAdd(fillSize, consumed)); // produced + (fillSize - (produced - consumed))
 
     BasicBlock * const prepareBufferExit = b.GetInsertBlock();
     b.CreateBr(generateData);
@@ -228,27 +221,50 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     PHINode * const producedPhi = b.CreatePHI(b.getSizeTy(), 3);
     producedPhi->addIncoming(produced, prepareBufferExit);
 
-    b.CallPrintInt("producedPhi", producedPhi);
-
-    FixedArray<Value *,2> offset;
-    offset[0] = sz_ZERO;
-
     Value * const currentIndex = b.CreateExactUDiv(producedPhi, sz_BlockWidth);
-    for (unsigned i = 0; i < numElements; ++i) {
-        const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
-        const auto runLength = (patternLength / blockWidth);
-        offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
-        Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
-        Value * const dst = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), currentIndex);
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
-            Value * const start = b.CreateRoundDownRational(consumed, blockWidth);
-            Value * const end = outputBuffer->getCapacity(b);
-            outputBuffer->assertAccessIsWithinStreamSetMemory(b, b.GetString("dst"), dst, copyLength, start, end);
+
+    const auto align = (blockWidth / 8);
+
+    if (fieldWidth == 1) {
+
+        FixedArray<Value *,2> offset;
+        offset[0] = sz_ZERO;
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
+            const auto runLength = (patternLength / blockWidth);
+            offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
+            Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
+            Value * const srcVal = b.CreateAlignedLoad(vecTy, src, blockWidth / 8);
+            Value * const dst = outputBuffer->getStreamBlockPtr(b, baseAddress, b.getInt32(i), currentIndex);
+            b.CreateAlignedStore(srcVal, dst, align);
         }
-        b.CallPrintInt("src", src);
-        b.CallPrintInt("dst", dst);
-        b.CreateMemCpy(dst, src, elementSize, 1U);
+
+
+    } else {
+
+        FixedArray<Value *, 3> offset;
+        offset[0] = sz_ZERO;
+
+        SmallVector<Constant *, 16> fieldOffset(fieldWidth);
+        for (unsigned j = 0; j < fieldWidth; ++j) {
+            fieldOffset[j] = b.getSize(j);
+        }
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            const auto patternLength = boost::lcm<size_t>(blockWidth, Pattern[i].size());
+            const auto runLength = (patternLength / blockWidth);
+            offset[1] = b.CreateURem(currentIndex, b.getSize(runLength));
+            for (unsigned j = 0; j < fieldWidth; ++j) {
+                offset[2] = fieldOffset[j];
+                Value * const src = b.CreateGEP(streamValTy[i], streamVal[i], offset);
+                Value * const srcVal = b.CreateAlignedLoad(vecTy, src, blockWidth / 8);
+                Value * const dst = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), currentIndex, fieldOffset[j]);
+                b.CreateAlignedStore(srcVal, dst, align);
+            }
+        }
     }
+
 
     Value * const currentProduced = b.CreateAdd(producedPhi, sz_BlockWidth);
     BasicBlock * const generateDataExit = b.GetInsertBlock();
@@ -257,7 +273,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
     b.SetInsertPoint(finishedDataLoop);
     b.setProducedItemCount("output", currentProduced);
-    Value * const MAX = b.getScalarField("repLength");
+
     Value * const finishedGenerating = b.CreateICmpUGE(currentProduced, MAX);
     b.CreateUnlikelyCondBr(finishedGenerating, zeroExtraneousBytes, exit);
 
@@ -286,10 +302,11 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         } else {
             ptr = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), startIndex, packIndex);
         }
-        Value * const val = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr);
+        Value * const val = b.CreateBlockAlignedLoad(vecTy, ptr);
         Value * const maskedVal = b.CreateAnd(val, mask);
-        b.CreateBlockAlignedStore(maskedVal, ptr);
+        b.CreateAlignedStore(maskedVal, ptr, align);
     }
+
 
     ConstantInt * const sz_ONE = b.getSize(1);
 
@@ -297,7 +314,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         BasicBlock * const clearRemainingPacks = b.CreateBasicBlock("clearRemainingPacks", zeroExtraneousBlocks);
         BasicBlock * const clearRemainingPacksExit = b.CreateBasicBlock("clearRemainingPacksExit", zeroExtraneousBlocks);
 
-        Constant * const vec_ZERO = ConstantVector::getNullValue(b.getBitBlockType());
+        Constant * const vec_ZERO = ConstantVector::getNullValue(vecTy);
 
         Value * const firstPackIndex = b.CreateAdd(packIndex, sz_ONE);
 
@@ -308,7 +325,7 @@ void RepeatingSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
         packIndexPhi->addIncoming(firstPackIndex, zeroExtraneousBytes);
         for (unsigned i = 0; i < numElements; ++i) {
             Value * ptr = outputBuffer->getStreamPackPtr(b, baseAddress, b.getInt32(i), startIndex, packIndexPhi);
-            b.CreateBlockAlignedStore(vec_ZERO, ptr);
+            b.CreateAlignedStore(vec_ZERO, ptr, align);
         }
         Value * const nextPackIndex = b.CreateAdd(packIndexPhi, sz_ONE);
         packIndexPhi->addIncoming(nextPackIndex, clearRemainingPacks);

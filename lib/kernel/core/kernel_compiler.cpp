@@ -869,7 +869,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         buffer->setHandle(localHandle); assert (localHandle);
         buffer->setBaseAddress(b, virtualBaseAddress);
 
-        if (LLVM_UNLIKELY(checkStreamSet)) {
+        if (LLVM_UNLIKELY(checkStreamSet) && LLVM_LIKELY(!input.hasAttribute(AttrId::AllowsUnalignedAccess))) {
             auto & dl = b.getModule()->getDataLayout();
             Type * intPtrTy = dl.getIntPtrType(b.getContext());
             Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
@@ -972,7 +972,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setBaseAddress(b, virtualBaseAddress);
         }
 
-        if (LLVM_UNLIKELY(checkStreamSet)) {
+        if (LLVM_UNLIKELY(checkStreamSet) && LLVM_LIKELY(!output.hasAttribute(AttrId::AllowsUnalignedAccess))) {
             auto & dl = b.getModule()->getDataLayout();
             Type * intPtrTy = dl.getIntPtrType(b.getContext());
             Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
