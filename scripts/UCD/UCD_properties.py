@@ -158,7 +158,7 @@ def emit_codepoint_property(f, property_code, null_set, reflexive_set, cp_value_
                          explicit_cp_data = explicit_cp_map
                          ))
 
-def emit_string_override_property(f, property_code, overridden_code, override_set, cp_value_map):
+def emit_string_override_property(f, property_code, overridden_code, override_set, maxLgth, cp_value_map):
     s = string.Template(r"""    namespace ${prop_enum_up}_ns {
         /* Code Point Ranges for ${prop_enum} (possibly overriding values from ${overridden})
         ${overridden_set_ranges}*/
@@ -168,7 +168,7 @@ def emit_string_override_property(f, property_code, overridden_code, override_se
         const static std::vector<unsigned> buffer_offsets = {
         ${buffer_offsets}};
         const static char string_buffer alignas(64) [${allocation_length}] = u8R"__(${string_buffer})__";
-
+        const unsigned maxLgth = ${maxLgth};
         const static std::vector<codepoint_t> defined_cps{
         ${explicitly_defined_cps}};
         static StringOverridePropertyObject property_object(${prop_enum},
@@ -176,6 +176,7 @@ def emit_string_override_property(f, property_code, overridden_code, override_se
                                                     std::move(explicitly_defined_set),
                                                     static_cast<const char *>(string_buffer),
                                                     std::move(buffer_offsets),
+                                                    maxLgth,
                                                     std::move(defined_cps));
     }
 """)
@@ -192,6 +193,7 @@ def emit_string_override_property(f, property_code, overridden_code, override_se
                          string_buffer = string_buffer,
                          buffer_offsets = cformat.multiline_fill(['%i' % o for o in buffer_offsets], ',', 8),
                          allocation_length = buffer_allocation_length(buffer_length),
+                         maxLgth = maxLgth,
                          overridden_set_ranges = cformat.multiline_fill(['[%04x, %04x]' % (lo, hi) for (lo, hi) in uset_to_range_list(override_set)], ',', 8),
                          overridden_set_value = override_set.generate("explicitly_defined_set", 8),
                          explicitly_defined_cp_count = len(cps),
@@ -483,7 +485,7 @@ class UCD_generator():
         elif isinstance(property_object, StringPropertyObject):
             emit_string_property(f, property_code, property_object.null_str_set, property_object.reflexive_set, property_object.cp_value_map)
         elif isinstance(property_object, StringOverridePropertyObject):
-            emit_string_override_property(f, property_code, property_object.overridden_code, property_object.overridden_set, property_object.cp_value_map)
+            emit_string_override_property(f, property_code, property_object.overridden_code, property_object.overridden_set, property_object.maxLgth, property_object.cp_value_map)
         elif isinstance(property_object, NumericPropertyObject):
             emit_numeric_property(f, property_code, property_object.NaN_set, property_object.cp_value_map)
         elif isinstance(property_object, BoundaryPropertyObject):

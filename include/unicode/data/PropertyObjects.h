@@ -298,12 +298,13 @@ public:
         return false;
     }
     StringOverridePropertyObject(UCD::property_t p, UCD::property_t baseProp, const UnicodeSet && overriddenSet, const char * string_buffer,
-                                 const std::vector<unsigned> && offsets, const std::vector<UCD::codepoint_t> && cps)
+                                 const std::vector<unsigned> && offsets, unsigned maxLgth, const std::vector<UCD::codepoint_t> && cps)
     : PropertyObject(p, ClassTypeId::StringOverrideProperty)
     , mBaseProperty(baseProp)
     , mOverriddenSet(std::move(overriddenSet))
     , mStringBuffer(string_buffer)
     , mStringOffsets(offsets)
+    , mMaxLength(maxLgth)
     , mExplicitCps(cps)
     {
 
@@ -317,14 +318,20 @@ public:
     const std::u32string GetU32StringValue(UCD::codepoint_t cp) const override;
     const std::string GetStringValue(UCD::codepoint_t cp) const override;
     const UnicodeSet GetPropertyIntersection(PropertyObject * p) override;
+    unsigned MaxUnicodeInsertLength();
+    std::vector<UnicodeSet> & GetUnicodeInsertLengthBixNumSets();
+    std::vector<UnicodeSet> & GetBitTransformSets(unsigned pos);
 
 private:
     UCD::property_t mBaseProperty;  // the base object that provides default values for this property unless overridden.
     const UnicodeSet mOverriddenSet;   // codepoints for which the baseObject value is overridden.
     const char * mStringBuffer;  // buffer holding all string values for overridden codepoints, in sorted order.
     const std::vector<unsigned> mStringOffsets;        // the offsets of each string within the buffer.
-    //unsigned mBufSize;                               // mStringOffsets has one extra element for buffer size.
+    //unsigned mBufSize;                                // mStringOffsets has one extra element for buffer size.
+    const unsigned mMaxLength;
     const std::vector<codepoint_t> mExplicitCps;
+    unicode::BitTranslationSets mUnicodeInsertLengthBixNumSets;
+    std::vector<unicode::BitTranslationSets> mBitXfrmSets;
 };
 
 PropertyObject * get_G_PropertyObject();

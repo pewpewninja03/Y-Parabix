@@ -276,6 +276,8 @@ public:
 
     StreamSet * NFD_U21_Pipeline(StreamSet * U21_Basis);
 
+    StreamSet * NFKD_U21_Pipeline(StreamSet * U21_Basis);
+
     void DetermineNFD_WorkItems(StreamSet * U8_Basis, StreamSet * u8index, StreamSet * workItems);
 
     void NFD_FilterStage(StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * WorkingBasis);

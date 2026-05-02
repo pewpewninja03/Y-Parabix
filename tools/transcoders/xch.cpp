@@ -20,6 +20,8 @@
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
 #include <kernel/streamutils/string_insert.h>
+#include <kernel/streamutils/stream_shift.h>
+#include <kernel/unicode/char_replacement.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/bitwise/bixlogic.h>
@@ -447,6 +449,48 @@ typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
 
 
 XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
+                                      std::vector<unicode::BitTranslationSets> tr,
+                                      unicode::BitTranslationSets ins_bixnum) {
+
+    auto P = CreatePipeline(driver, Output<streamset_t>("OutputBytes",  1, 8, ReturnedBuffer(1)), Input<uint32_t>("inputFileDecriptor"));
+
+    //  The program will use a file descriptor as an input.
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    // File data from mmap
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  from a file descriptor.
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
+
+    //  The Parabix basis bits representation is created by the Parabix S2P kernel.
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
+
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
+
+    StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+
+    StreamSet * U21 = P.CreateStreamSet(21, 1);
+    FilterByMask(P, u8index, U21_u8indexed, U21);
+    SHOW_BIXNUM(U21);
+
+    StreamSet * ResultBasis = U21_CharToShortStringPipeline(P, ins_bixnum, tr, U21);
+
+    StreamSet * const OutputBasis = P.CreateStreamSet(8);
+    U21_to_UTF8(P, ResultBasis, OutputBasis);
+
+    SHOW_BIXNUM(OutputBasis);
+    StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
+    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    return P.compile();
+}
+
+XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
                                       unicode::BitTranslationSets tr) {
 
     auto P = CreatePipeline(driver, Output<streamset_t>("OutputBytes",  1, 8, ReturnedBuffer(1)), Input<uint32_t>("inputFileDecriptor"));
@@ -596,18 +640,27 @@ int main(int argc, char *argv[]) {
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
     codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
-    unicode::BitTranslationSets xfrms;
+    std::vector<unicode::BitTranslationSets> xfrms;
     unicode::BitTranslationSets insertion_bixnum;
     unicode::BitTranslationSets deletion_bixnum;
     if (XfrmProperty != "") {
         UCD::property_t prop = UCD::getPropertyCode(XfrmProperty);
         UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
         if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
-            xfrms = p->GetBitTransformSets();
+            xfrms.resize(1);
+            xfrms[0] = p->GetBitTransformSets();
             if (!U21) {
                 insertion_bixnum = p->GetUTF8insertionBixNum();
                 deletion_bixnum = p->GetUTF8deletionBixNum();
             }
+        } else if (UCD::StringOverridePropertyObject * p = dyn_cast<UCD::StringOverridePropertyObject>(propObj)) {
+            U21 = true;
+            for (unsigned i = 0; i < p->MaxUnicodeInsertLength(); i++) {
+                xfrms.push_back(p->GetBitTransformSets(i));
+            }
+            insertion_bixnum = p->GetUnicodeInsertLengthBixNumSets();
+        } else {
+            llvm::report_fatal_error("Specified property is neither codepoint nor string override property.");
         }
     } else if (SrcChars != "" && TgtChars != "") {
         unicode::TranslationMap charmap;
@@ -619,7 +672,8 @@ int main(int argc, char *argv[]) {
             } else {
                 charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[tgt.size()-1]));
             }
-            xfrms = unicode::ComputeBitTranslationSets(charmap);
+            xfrms.resize(1);
+            xfrms[0] = unicode::ComputeBitTranslationSets(charmap);
             if (!U21) {
                 insertion_bixnum = unicode::ComputeUTF8_insertionBixNum(charmap);
                 deletion_bixnum = unicode::ComputeUTF8_deletionBixNum(charmap);
@@ -633,9 +687,9 @@ int main(int argc, char *argv[]) {
     XfrmFunctionType fn;
     StreamSetPtr xlated;
     if (U21) {
-        fn = generateU21_pipeline(driver, xfrms);
+        fn = generateU21_pipeline(driver, xfrms, insertion_bixnum);
     } else {
-        fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum);
+        fn = generateUTF8_pipeline(driver, xfrms[0], insertion_bixnum, deletion_bixnum);
     }
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {

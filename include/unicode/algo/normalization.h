@@ -5,7 +5,10 @@
 
 #pragma once
 #include <string>
+#include <vector>
 #include <unicode/core/UCD_Config.h>
+#include <unicode/core/unicode_set.h>
+#include <unicode/utf/transchar.h>
 #include <unicode/data/PropertyObjects.h>
 
 //
@@ -45,7 +48,16 @@ public:
     void NFD_append1(std::u32string & NFD_string, codepoint_t cp);
     void NFD_append(std::u32string & NFD_string, std::u32string & to_convert);
     bool reordering_needed(std::u32string & prefix, codepoint_t suffix_cp);
+
+    // Return the sets that can be used to produce an insert length bixnum
+    // for the given NFD or NFKD transform.
+    unicode::BitTranslationSets UnicodeInsertLengthBixNumSets();
+    // Determine the bit transformations required to make characters
+    // into their decompositions.
+    std::vector<unicode::BitTranslationSets> UnicodeBitTransformSets();
 protected:
+    void prepareUnicodeBitTranslationData();
+private:
     DecompositionOptions mOptions;
     EnumeratedPropertyObject * decompTypeObj;
     StringPropertyObject * decompMappingObj;
@@ -56,5 +68,7 @@ protected:
     const UnicodeSet selfNFKD;
     const UnicodeSet selfCaseFold;
     const UnicodeSet HangulPrecomposed;
+    unicode::BitTranslationSets decomposition_insert_length_bixnum_sets;
+    std::vector<unicode::BitTranslationSets> bitXlatSets;
 };
 }

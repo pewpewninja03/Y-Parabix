@@ -306,6 +306,7 @@ class StringOverridePropertyObject(PropertyObject):
         self.cp_value_map = {}
         self.overridden_code = overridden_code
         self.overridden_set = empty_uset()
+        self.maxLgth = 0
 
     def setBaseObject(self, base_object):
         self.base_object = base_object
@@ -319,6 +320,7 @@ class StringOverridePropertyObject(PropertyObject):
             for cp in [int(x, 16) for x in stringValue.split(' ')]:
                 s += chr(cp)
             stringValue = s
+            if len(stringValue) > self.maxLgth: self.maxLgth = len(stringValue)
         else:
             raise Exception("Expecting codepoint string, but got " + stringValue)
         for cp in range(cp_lo, cp_hi+1):
