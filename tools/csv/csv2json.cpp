@@ -126,37 +126,57 @@ void CSVdataFieldMask::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
 }
 
-class CSV_Char_Replacement : public PabloKernel {
+class QuoteEscape2Backslash : public PabloKernel {
 public:
-    CSV_Char_Replacement(LLVMTypeSystemInterface & ts, StreamSet * quoteEscape, StreamSet * basis,
+    QuoteEscape2Backslash(LLVMTypeSystemInterface & ts, StreamSet * quoteEscape, StreamSet * basis,
                          StreamSet * translatedBasis)
-        : PabloKernel(ts, "CSV_Char_Replacement",
+        : PabloKernel(ts, std::string("QuoteEscape2Backslash") + (codegen::DebugOptionIsSet(codegen::DisableInOutAttributes) ? "-InOut" : ""),
                       {Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
-                      {Binding{"translatedBasis", translatedBasis}}) {}
+                      {}) {
+    mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
+    if (mUseInOut) {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis, FixedRate(), InOut("basis")});
+    } else {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis});
+    }
+}
 protected:
     void generatePabloMethod() override;
+private:
+    bool mUseInOut;
 };
 
-void CSV_Char_Replacement::generatePabloMethod() {
+void QuoteEscape2Backslash::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
+    auto nested = pb.createScope();
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    Var * outputVar = getOutputStreamVar("translatedBasis");
+    pb.createIf(quoteEscape, nested);
     //
     // Replace the quote escape character with \ = 0x5C
     std::vector<PabloAST *> translated_basis(8, nullptr);
     PabloAST * notQuoteEscape = pb.createNot(quoteEscape);
     // Low 2 bits zeroed out whenever we have quoteEscape
-    translated_basis[0] = pb.createAnd(basis[0], notQuoteEscape);
-    translated_basis[1] = pb.createAnd(basis[1], notQuoteEscape);
+    translated_basis[0] = nested.createAnd(basis[0], notQuoteEscape);
+    translated_basis[1] = nested.createAnd(basis[1], notQuoteEscape);
     // Next 2 bits set whenever we have quoteEscape
-    translated_basis[2] = pb.createOr(basis[2], quoteEscape);
-    translated_basis[3] = pb.createOr(basis[3], quoteEscape);
+    translated_basis[2] = nested.createOr(basis[2], quoteEscape);
+    translated_basis[3] = nested.createOr(basis[3], quoteEscape);
 
-    translated_basis[4] = pb.createOr(basis[4], quoteEscape);
-    translated_basis[5] = pb.createAnd(basis[5], notQuoteEscape);
-    translated_basis[6] = pb.createOr(basis[6], quoteEscape);
-    translated_basis[7] = pb.createAnd(basis[7], notQuoteEscape);
-    writeOutputStreamSet("translatedBasis", translated_basis);
+    translated_basis[4] = nested.createOr(basis[4], quoteEscape);
+    translated_basis[5] = nested.createAnd(basis[5], notQuoteEscape);
+    translated_basis[6] = nested.createOr(basis[6], quoteEscape);
+    translated_basis[7] = nested.createAnd(basis[7], notQuoteEscape);
+    if (mUseInOut) {
+        for (unsigned i = 0; i < 8; i++) {
+            nested.createAssign(nested.createExtract(outputVar, nested.getInteger(i)), translated_basis[i]);
+        } 
+    } else {
+        for (unsigned i = 0; i < 8; i++) {
+            pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), translated_basis[i]);
+        } 
+    }
 }
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
@@ -202,7 +222,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     SHOW_STREAM(recordsByField);
 
     StreamSet * translatedBasis = P.CreateStreamSet(8);
-    P.CreateKernelCall<CSV_Char_Replacement>(quoteEscape, BasisBits, translatedBasis);
+    P.CreateKernelCall<QuoteEscape2Backslash>(quoteEscape, BasisBits, translatedBasis);
     SHOW_BIXNUM(translatedBasis);
 
     StreamSet * filteredBasis = P.CreateStreamSet(8);
