@@ -1,5 +1,5 @@
-# Copyright (c) 2019 International Characters.
-# This software is licensed to the public under the Open Software License 3.0.
+#  Part of the Parabix Project, under the Open Software License 3.0.
+#  SPDX-License-Identifier: OSL-3.0
 
 # IMPORTANT:
 #
@@ -407,10 +407,10 @@ add_subdirectory(lib/re/transforms)
 add_subdirectory(lib/re/unicode)
 add_subdirectory(lib/testing)
 add_subdirectory(lib/toolchain)
-add_subdirectory(lib/unicode/algo)
-add_subdirectory(lib/unicode/core)
-add_subdirectory(lib/unicode/data)
-add_subdirectory(lib/unicode/utf)
+add_subdirectory(lib/ucd/algo)
+add_subdirectory(lib/ucd/core)
+add_subdirectory(lib/ucd/data)
+add_subdirectory(lib/ucd/utf)
 add_subdirectory(lib/audio)
 add_subdirectory(lib/csv)
 
