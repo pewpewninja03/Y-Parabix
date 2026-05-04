@@ -267,7 +267,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
-    StreamSet * InsertBixNum = P.CreateStreamSet(insertLengthBits);
+    StreamSet * InsertBixNum = P.CreateStreamSet(ceil_log2(maxInsertAmt+suffixLgthBits+1));
     P.CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
 
