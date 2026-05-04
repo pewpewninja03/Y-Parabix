@@ -9,9 +9,9 @@
 #include <re/adt/re_name.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
-#include <unicode/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjects.h>
 #include <re/unicode/resolve_properties.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>

@@ -103,8 +103,8 @@ def generate_Radical_Set_Map():
     return gen
 
 RadicalSets_cpp_template = r"""#include <map>
-#include <unicode/data/RadicalSets.h>
-#include <unicode/core/unicode_set.h>
+#include <ucd/data/RadicalSets.h>
+#include <ucd/core/unicode_set.h>
 
 namespace UCD {
 

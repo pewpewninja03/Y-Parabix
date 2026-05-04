@@ -22,7 +22,7 @@
 #include <re/adt/re_group.h>
 #include <re/adt/re_permute.h>
 #include <re/alphabet/alphabet.h>
-#include <unicode/data/PropertyAliases.h>
+#include <ucd/data/PropertyAliases.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace re;

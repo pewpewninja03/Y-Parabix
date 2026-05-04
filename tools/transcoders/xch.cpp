@@ -42,11 +42,11 @@
 #include <unistd.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_compiler.h>
-#include <unicode/utf/transchar.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/utf/utf_compiler.h>
+#include <ucd/utf/transchar.h>
 #include <boost/locale/encoding_utf.hpp>
 #include <re/toolchain/toolchain.h>
 

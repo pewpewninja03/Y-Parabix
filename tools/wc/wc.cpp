@@ -9,7 +9,7 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/adt/adt.h>
 #include <re/unicode/resolve_properties.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>

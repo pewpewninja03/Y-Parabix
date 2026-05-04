@@ -7,8 +7,8 @@
 #include <re/transforms/re_transformer.h>
 #include <re/unicode/re_name_resolve.h>
 #include <re/unicode/resolve_properties.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
 
 #include <vector>                  // for vector, allocator
 #include <llvm/Support/Casting.h>  // for dyn_cast, isa

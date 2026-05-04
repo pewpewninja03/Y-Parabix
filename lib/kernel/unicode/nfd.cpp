@@ -45,14 +45,14 @@
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <unicode/algo/normalization.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_compiler.h>
-#include <unicode/utf/utf_encoder.h>
-#include <unicode/utf/transchar.h>
+#include <ucd/algo/normalization.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/utf/utf_compiler.h>
+#include <ucd/utf/utf_encoder.h>
+#include <ucd/utf/transchar.h>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -680,6 +680,26 @@ void NFD_PipelineBuilder::NFD_U8_Pipeline(StreamSet * WorkingBasis, StreamSet * 
     SHOW_BIXNUM(U21_focus);
 
     StreamSet * NFD_U21_Results = NFD_U21_Pipeline(U21_focus);
+
+    U21_to_UTF8(mPB, NFD_U21_Results, TransformedBasis);
+    SHOW_BIXNUM(TransformedBasis);
+}
+
+void NFD_PipelineBuilder::NFKD_U8_Pipeline(StreamSet * WorkingBasis, StreamSet * TransformedBasis) {
+
+    StreamSet * const U21_u8indexed = mPB.CreateStreamSet(21, 1);
+    mPB.CreateKernelCall<UTF8_Decoder>(WorkingBasis, U21_u8indexed);
+    SHOW_BIXNUM(U21_u8indexed);
+
+    StreamSet * const WorkingU8index = mPB.CreateStreamSet(1, 1);
+    mPB.CreateKernelCall<UTF8_index>(WorkingBasis, WorkingU8index);
+    SHOW_STREAM(WorkingU8index);
+
+    StreamSet * const U21_focus = mPB.CreateStreamSet(21, 1);
+    FilterByMask(mPB, WorkingU8index, U21_u8indexed, U21_focus);
+    SHOW_BIXNUM(U21_focus);
+
+    StreamSet * NFD_U21_Results = NFKD_U21_Pipeline(U21_focus);
 
     U21_to_UTF8(mPB, NFD_U21_Results, TransformedBasis);
     SHOW_BIXNUM(TransformedBasis);

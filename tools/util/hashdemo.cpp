@@ -41,7 +41,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/utf/utf_compiler.h>
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>

@@ -10,12 +10,12 @@
 #include <vector>
 #include <csv/csv_cmdline.h>
 #include <csv/csv_parser.h>
-#include <unicode/utf/utf_encoder.h>
+#include <ucd/utf/utf_encoder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/ManagedStatic.h>
-#include <unicode/core/unicode_set.h>
+#include <ucd/core/unicode_set.h>
 #include <re/adt/adt.h>
 #include <re/adt/re_re.h>
 #include <re/parse/parser.h>
