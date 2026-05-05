@@ -10,9 +10,9 @@
 #include <re/analysis/validation.h>
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/utf/utf_encoder.h>
-#include <unicode/data/PropertyObjectTable.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/utf/utf_encoder.h>
+#include <ucd/data/PropertyObjectTable.h>
 #include <util/small_flat_set.hpp>
 
 using namespace llvm;

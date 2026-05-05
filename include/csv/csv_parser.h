@@ -9,7 +9,7 @@
 
 #include <string>
 #include <vector>
-#include <unicode/core/unicode_set.h>
+#include <ucd/core/unicode_set.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/program_builder.h>
 

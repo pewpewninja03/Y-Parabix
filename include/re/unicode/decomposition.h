@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <unicode/algo/normalization.h>
+#include <ucd/algo/normalization.h>
 
 namespace re { class RE; }
 

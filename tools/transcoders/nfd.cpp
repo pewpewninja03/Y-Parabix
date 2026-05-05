@@ -46,12 +46,12 @@
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <unicode/algo/normalization.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/algo/normalization.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/utf/utf_compiler.h>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;

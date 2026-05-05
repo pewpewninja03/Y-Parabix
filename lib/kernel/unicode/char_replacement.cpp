@@ -11,8 +11,8 @@
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/bitwise/bixlogic.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
 #include <re/adt/re_cc.h>
 
 using namespace kernel;

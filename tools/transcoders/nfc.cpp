@@ -36,10 +36,10 @@
 #include <toolchain/fileutil.h>
 #include <toolchain/toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/algo/normalization.h>
-#include <unicode/utf/utf_compiler.h>
-#include <unicode/data/PropertyObjectTable.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/algo/normalization.h>
+#include <ucd/utf/utf_compiler.h>
+#include <ucd/data/PropertyObjectTable.h>
 #include <re/toolchain/toolchain.h>
 #include <re/unicode/resolve_properties.h>
 #include <kernel/unicode/UCD_property_kernel.h>

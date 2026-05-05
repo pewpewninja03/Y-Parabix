@@ -37,9 +37,9 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/compile/re_compiler.h>
 #include <re/transforms/name_intro.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/utf/utf_compiler.h>
 
 using namespace re;
 using namespace pablo;

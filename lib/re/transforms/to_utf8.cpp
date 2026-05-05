@@ -6,7 +6,7 @@
 #include <re/transforms/to_utf8.h>
 #include <re/transforms/re_transformer.h>
 #include <re/adt/adt.h>
-#include <unicode/core/unicode_set.h>
+#include <ucd/core/unicode_set.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
