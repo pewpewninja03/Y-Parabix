@@ -10,6 +10,7 @@
 #include <vector>
 #include <csv/csv_cmdline.h>
 #include <csv/csv_parser.h>
+#include <csv/csv_support.h>
 #include <ucd/utf/utf_encoder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
@@ -35,7 +36,6 @@
 #include <kernel/unicode/utf8_decoder.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>
-#include <re/transforms/re_transformer.h>
 #include <toolchain/toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 using namespace kernel;
@@ -51,100 +51,13 @@ static cl::opt<bool> U21("u21", cl::desc("force work to be carried out in Unicod
 static cl::opt<bool> FieldMatch("field-match", cl::desc("require that entire field be matched"), cl::init(false), cl::cat(csv::CSV_Options));
 static cl::alias FieldMatchA("x", cl::desc("Alias for --field-match"), cl::aliasopt(FieldMatch), cl::cat(csv::CSV_Options), cl::NotHidden);
 
-//
-//  When match CSV fields, any double quote character within the
-//  field will be doubled up to represent and escaped double quote.
-//  So we transform the RE to match a pair of double quotes whenever
-//  a single one is desired.
-
-struct DoubleQuoteEscape : public re::RE_Transformer {
-    DoubleQuoteEscape(codepoint_t dqChar) : RE_Transformer("DoubleQuoteEscape"),
-       mDQ(dqChar), mDQ_CC(nullptr), mDoubleEscape(nullptr) {}
-    re::CC * getDQ_CC() {
-        if (mDQ_CC == nullptr) {
-            mDQ_CC = re::makeCC(mDQ, &cc::Unicode);
-        }
-        return mDQ_CC;
-    }
-    re::RE * getDoubleEscape() {
-        if (mDoubleEscape == nullptr) {
-            re::CC * DQ_CC = getDQ_CC();
-            mDoubleEscape = re::makeSeq({DQ_CC, DQ_CC});
-        }
-        return mDoubleEscape;
-    }
-    re::RE * transformCC (re::CC * cc) override {
-        if (cc->contains(mDQ)) {
-            auto dblEsc = getDoubleEscape();
-            if (cc->count() == 1) {
-                return dblEsc;
-            }
-            return re::makeAlt({dblEsc, subtractCC(cc, mDQ_CC)});
-        }
-        return cc;
-    }
-    re::RE * transformAny (re::Any * a) override {
-        auto dblEsc = getDoubleEscape();
-        return re::makeAlt({dblEsc, re::makeDiff(a, getDQ_CC())});
-    }
-    re::RE * transformName (re::Name * name) override {
-        re::RE * defn = name->getDefinition();
-        if (!defn) return makeDiff(name, getDQ_CC());
-        re::RE * d = transform(defn);
-        if (d == defn) return name;
-        return d;
-    }
-    re::RE * transformPropertyExpression (re::PropertyExpression * pe) override {
-        re::RE * defn = pe->getResolvedRE();
-        if (!defn) return makeDiff(pe, getDQ_CC());
-        re::RE * d = transform(defn);
-        if (d == defn) return pe;
-        return d;
-    }
-private:
-    codepoint_t mDQ;
-    re::CC * mDQ_CC;
-    re::RE * mDoubleEscape;
-};
-
 re::RE * csvRE(re::RE * re) {
     re::RE * xfrmedRE = resolveModesAndExternalSymbols(re, false, grep::lineNumGrep);
-    xfrmedRE = DoubleQuoteEscape(csv::QuoteChar).transformRE(xfrmedRE);
+    xfrmedRE = csv::DoubleQuoteEscape(csv::QuoteChar).transformRE(xfrmedRE);
     if (FieldMatch) {
         xfrmedRE = re::makeSeq({re::makeStart(), xfrmedRE, re::makeEnd()});
     }
     return xfrmedRE;
-}
-
-// The barrier stream marks with 1 bits positions that do not
-// participate in matching.   For csvgrep, the barrier consists
-// of all positions outside of the selected columns, all 
-// field separators (including the final record separator), and
-// quote marks that surround fields.
-
-class RegexBarrier : public PabloKernel {
-public:
-    RegexBarrier(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldSeparators, StreamSet * selected,
-                 StreamSet * barrier)
-    : PabloKernel(ts, "RegexBarrier",
-                      {Binding{"csvMarks", csvMarks},
-                       Binding{"fieldSeparators", fieldSeparators, FixedRate(), LookAhead(1)},
-                       Binding{"selected", selected}},
-                      {Binding{"barrier", barrier}}) {}
-protected:
-    void generatePabloMethod() override;
-};
-
-void RegexBarrier::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
-    PabloAST * fieldSeparators = pb.createExtract(getInputStreamVar("fieldSeparators"), pb.getInteger(0));
-    PabloAST * selectedFields = pb.createExtract(getInputStreamVar("selected"), pb.getInteger(0));
-    PabloAST * barrier = pb.createOr(pb.createNot(selectedFields), fieldSeparators);
-    PabloAST * fieldStartQuote = pb.createAnd(pb.createAdvance(fieldSeparators, 1), csvMarks[csv::markDQ]);
-    PabloAST * fieldEndQuote = pb.createAnd(pb.createLookahead(fieldSeparators, 1), csvMarks[csv::markDQ]);
-    barrier = pb.createOr3(barrier, fieldStartQuote, fieldEndQuote);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("barrier"), pb.getInteger(0)), barrier);
 }
 
 class RegexRegions : public PabloKernel {
@@ -245,7 +158,6 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     StreamSet * Selected = P.CreateStreamSet(1);
     csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos);
     SHOW_STREAM(Selected);
-
 
     StreamSet * fieldStarts = P.CreateStreamSet(1);
     StreamSet * fieldFollows = P.CreateStreamSet(1);

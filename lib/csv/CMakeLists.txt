@@ -9,6 +9,9 @@ NAME
 SRC
     csv_cmdline.cpp
     csv_parser.cpp
+    csv_support.cpp
 DEPS
+    re.adt
+    re.transforms
     kernel.unicode
 )
