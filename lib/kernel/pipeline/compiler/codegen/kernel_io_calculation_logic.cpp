@@ -1598,6 +1598,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
         Value * const vecAddr = b.CreatePointerCast(addr, vecPtrTy);
         Value * const baseValue = b.CreateBlockAlignedLoad(vecTy, vecAddr);
         Value * const total = b.CreateExtractElement(baseValue, offset);
+
         Value * const splat = b.simd_fill(fw, total);
         Value * const mask = b.mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
         Value * const maskedSplat = b.CreateAnd(splat, mask);

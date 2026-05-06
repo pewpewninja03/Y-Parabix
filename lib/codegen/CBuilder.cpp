@@ -1076,7 +1076,7 @@ void __report_failure_v(const char * name, const char * fmt, const __backtrace_d
     // colourize the output if and only if stderr is piped to the terminal
     const auto colourize = isatty(STDERR_FILENO) == 1;
     raw_fd_ostream out(STDERR_FILENO, false);
-
+    out << "Assertion Failure: ";
     if (trace) {
 
         SmallVector<char, 4096> tmp;
@@ -1105,7 +1105,7 @@ void __report_failure_v(const char * name, const char * fmt, const __backtrace_d
         if (colourize) {
             out.changeColor(raw_fd_ostream::RED, true);
         }
-        out << name << ": ";
+        out << name;
     }
     if (colourize) {
         out.changeColor(raw_fd_ostream::WHITE, true);
@@ -1132,6 +1132,7 @@ void __report_failure_v(const char * name, const char * fmt, const __backtrace_d
     }
     out << "\n\n";
     out.flush();
+    exit (-1);
 }
 
 extern "C"

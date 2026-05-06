@@ -205,8 +205,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
-    clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
+    clearUnwrittenOutputData(b);
+
     if (LLVM_UNLIKELY(mAllowDataParallelExecution && !mKernelIsInternallySynchronized)) {
         writeInternalProcessedAndProducedItemCounts(b, true);
     }

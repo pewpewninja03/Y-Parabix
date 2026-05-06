@@ -272,15 +272,16 @@ enum BufferType : unsigned {
     , Shared = 4
     , Returned = 8
     , Truncated = 16
-    , CrossesPhaseBoundary = 32
-    , InOutRedirect = 64
-    , ManagedOutput = 128
-    , PreserveEntireStreamSet = 256
+    , PopCountPartialSumStream = 32
+    , CrossesPhaseBoundary = 64
+    , InOutRedirect = 128
+    , ManagedOutput = 256
     // ------------------
     , HasIllustratedStreamset = 512
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
     , RequiresConsumedItemCount = 8192
+    , PreserveEntireStreamSet = 16384
     // ------------------
     , CanTrackBufferExpansionData = 32768
 };
@@ -382,6 +383,10 @@ struct BufferNode {
 
     bool isManagedOutput() const {
         return (Type & BufferType::ManagedOutput) != 0;
+    }
+
+    bool isPopCountPartialSumStream() const {
+        return (Type & BufferType::PopCountPartialSumStream) != 0;
     }
 
     bool requiresEmptyOverflow() const {

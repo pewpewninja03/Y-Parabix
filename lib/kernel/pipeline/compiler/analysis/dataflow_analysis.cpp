@@ -348,6 +348,7 @@ void PipelineAnalysis::calculatePartialSumStepFactors(KernelBuilder & b) {
 
                 BufferNode & bn = mBufferGraph[streamSet];
                 bn.PartialSumSpanLength = std::max(bn.PartialSumSpanLength, spanLength + 1);
+                bn.Type |= BufferType::PopCountPartialSumStream;
             }
         }
 

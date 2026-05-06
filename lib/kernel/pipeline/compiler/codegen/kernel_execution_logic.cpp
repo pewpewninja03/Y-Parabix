@@ -38,8 +38,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
 
     Value * delayReleaseOfPreInvocationLock = nullptr;
 
-    assert  (!mKernelIsInternallySynchronized || mAllowDataParallelExecution);
-
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         delayReleaseOfPreInvocationLock = b.CreateOr(mHasMoreInput, b.CreateIsNotNull(mIsFinalInvocation));

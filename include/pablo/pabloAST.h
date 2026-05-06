@@ -179,7 +179,16 @@ protected:
     , mNodeId(__AST_NODE_COUNT++)
     #endif
     , mType(type)
-    , mSideEffecting(false)
+    , mSideEffecting([&]() -> bool {
+        switch (id) {
+            case ClassTypeId::TerminateAt:
+            case ClassTypeId::DebugPrint:
+            case ClassTypeId::Illustrator:
+                return true;
+            default:
+                return false;
+        }
+    }())
     , mUsers(allocator) {
         #ifndef NDEBUG
         // is nullary type?

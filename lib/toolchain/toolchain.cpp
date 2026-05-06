@@ -288,7 +288,6 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag) {
     #ifdef FORCE_ASSERTIONS
     if (flag == DebugFlags::EnableAsserts) return true;
     #endif
-    if (flag == DebugFlags::EnableStreamSetAsserts) return true;
     return KernelFlags.isSet(flag);
 }
 
@@ -297,8 +296,6 @@ bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag1, const DebugFlags fla
     if (flag1 == DebugFlags::EnableAsserts) return true;
     if (flag2 == DebugFlags::EnableAsserts) return true;
     #endif
-    if (flag1 == DebugFlags::EnableStreamSetAsserts) return true;
-    if (flag2 == DebugFlags::EnableStreamSetAsserts) return true;
     return KernelFlags.isSet(flag1) || KernelFlags.isSet(flag2);
 }
 
