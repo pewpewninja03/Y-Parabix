@@ -58,9 +58,9 @@
 #include <re/cc/cc_kernel.h>
 #include <re/alphabet/multiplex_CCs.h>
 #include <re/compile/re_compiler.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/utf/utf_compiler.h>
 
 using namespace kernel;
 using namespace pablo;

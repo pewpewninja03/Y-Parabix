@@ -4,9 +4,9 @@
  */
 
 #include <kernel/unicode/normalization.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/algo/normalization.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/algo/normalization.h>
+#include <ucd/utf/utf_compiler.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>

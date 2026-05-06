@@ -7,9 +7,9 @@
 #include <map>
 #include <vector>
 #include <kernel/pipeline/pipeline_builder.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/utf/transchar.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/utf/transchar.h>
 
 //
 //  Given a Unicode character stream represented by a

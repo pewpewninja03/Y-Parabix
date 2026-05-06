@@ -13,10 +13,10 @@
 #include <re/parse/parser.h>
 #include <re/compile/re_compiler.h>
 #include <re/unicode/boundaries.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/data/PropertyValueAliases.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyValueAliases.h>
 #include <util/aligned_allocator.h>
 
 using namespace UCD;

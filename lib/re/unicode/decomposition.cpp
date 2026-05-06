@@ -10,11 +10,11 @@
 #include <llvm/Support/Casting.h>
 #include <re/adt/adt.h>
 #include <re/transforms/re_transformer.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/data/PropertyValueAliases.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyValueAliases.h>
 
 
 using namespace llvm;

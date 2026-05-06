@@ -4,7 +4,7 @@
  */
 
 #include <toolchain/toolchain.h>
-#include <unicode/core/UCD_Config.h>
+#include <ucd/core/UCD_Config.h>
 #include <llvm/Support/CommandLine.h>
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
 #include <llvm/TargetParser/Host.h>

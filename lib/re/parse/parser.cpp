@@ -22,8 +22,8 @@
 #include <re/adt/adt.h>
 #include <re/adt/re_utility.h>
 #include <re/printer/re_printer.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/RadicalSets.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/RadicalSets.h>
 
 using namespace llvm;
 

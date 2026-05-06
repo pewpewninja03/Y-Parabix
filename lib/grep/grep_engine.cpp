@@ -73,7 +73,7 @@
 #include <re/unicode/casing.h>
 #include <re/unicode/boundaries.h>
 #include <re/unicode/re_name_resolve.h>
-#include <unicode/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyObjectTable.h>
 #include <sys/stat.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_toolchain.h>

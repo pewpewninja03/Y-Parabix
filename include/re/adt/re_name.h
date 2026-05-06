@@ -4,7 +4,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <re/adt/re_cc.h>
 #include <re/adt/re_re.h>
-#include <unicode/data/PropertyAliases.h>
+#include <ucd/data/PropertyAliases.h>
 #include <llvm/ADT/Twine.h>
 #include <sstream>
 namespace UCD {
