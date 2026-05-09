@@ -78,7 +78,8 @@ void RegexRegions::generatePabloMethod() {
     std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
     PabloAST * fieldSeparators = pb.createExtract(getInputStreamVar("fieldSeparators"), pb.getInteger(0));
     PabloAST * selectedFields = pb.createExtract(getInputStreamVar("selected"), pb.getInteger(0));
-    PabloAST * regionStart = pb.createAnd(pb.createAdvance(fieldSeparators, 1), selectedFields);
+    PabloAST * regionStart = pb.createNot(pb.createAdvance(pb.createNot(fieldSeparators), 1));
+    regionStart = pb.createAnd(regionStart, selectedFields);
     PabloAST * fieldStartQuote = pb.createAnd(regionStart, csvMarks[csv::markDQ]);
     regionStart = pb.createOr(pb.createXor(regionStart, fieldStartQuote), pb.createAdvance(fieldStartQuote, 1));
     PabloAST * regionFollow = pb.createAnd(fieldSeparators, selectedFields);
