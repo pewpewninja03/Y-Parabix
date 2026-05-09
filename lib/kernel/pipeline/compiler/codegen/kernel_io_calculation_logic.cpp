@@ -1118,7 +1118,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
                 assert (rate.isFixed());
                 const auto factor = rate.getRate() / mFixedRateLCM;
                 Value * calculated = b.CreateCeilUMulRational(minFixedRateFactor, factor);
-                const auto k = port.Add;
+                const auto k = std::max(port.Add, port.LookAhead);
 
                 // ... but ensure that it reflects whether it was produced with an
                 // Add/Truncate attributed rate.

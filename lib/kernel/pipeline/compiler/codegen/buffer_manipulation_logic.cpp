@@ -208,6 +208,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
 
     indices[0] = i32_ZERO;
 
+    const auto blockWidth = b.getBitBlockWidth();
+
     for (auto p : make_iterator_range(out_edges(mKernelId - FirstKernel, mZeroInputGraph))) {
         const auto portNum = mZeroInputGraph[p];
 
@@ -246,15 +248,13 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
         BasicBlock * const entryBlock = b.GetInsertBlock();
 
         Value * const availableItems = mLocallyAvailableItems[streamSet];
-
-
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
         if (LLVM_UNLIKELY(alwaysTruncate)) {
             b.CreateBr(maskedInput);
         } else {
 
-            Value * selectedItems = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], accessibleItems[inputPort.Number]);
+            Value * const selectedItems = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], accessibleItems[inputPort.Number]);
             const auto output = in_edge(streamSet, mBufferGraph);
             const BufferPort & out = mBufferGraph[output];
 
@@ -262,15 +262,16 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             if (port.RequiredOverflowSpace == 0 && out.RequiredOverflowSpace == 0) {
                 cond = b.CreateICmpNE(selectedItems, availableItems);
             } else {
-                Value * tooMany = b.CreateICmpULT(selectedItems, availableItems);
+                Value * unprocessedItems = selectedItems;
+                if (port.RequiredOverflowSpace) {
+                    unprocessedItems = b.CreateAdd(selectedItems, b.getSize(port.RequiredOverflowSpace));
+                }
+                Value * const tooMany = b.CreateICmpULT(unprocessedItems, availableItems);
                 Value * totalItems = availableItems;
                 if (out.RequiredOverflowSpace) {
                     totalItems = b.CreateAdd(totalItems, b.getSize(out.RequiredOverflowSpace));
                 }
-                if (port.RequiredOverflowSpace) {
-                    selectedItems = b.CreateAdd(selectedItems, b.getSize(port.RequiredOverflowSpace));
-                }
-                Value * tooFew = b.CreateICmpUGT(selectedItems, totalItems);
+                Value * const tooFew = b.CreateICmpUGT(selectedItems, totalItems);
                 cond = b.CreateOr(tooMany, tooFew);
             }
             b.CreateUnlikelyCondBr(cond, maskedInput, selectedInput);
@@ -301,7 +302,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
 
         if (maskInput == nullptr) {
 
-            const auto blockWidth = b.getBitBlockWidth();
             const auto log2BlockWidth = floor_log2(blockWidth);
             Constant * const BLOCK_MASK = b.getSize(blockWidth - 1);
             Constant * const LOG_2_BLOCK_WIDTH = b.getSize(log2BlockWidth);
@@ -315,7 +315,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             } else {
                 retTy = int8PtrTy;
             }
-
 
             const auto ip = b.saveIP();
 
@@ -357,7 +356,6 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
                 return v;
             };
 
-
             auto & DL = m->getDataLayout();
             Type * const intPtrTy = DL.getIntPtrType(int8PtrTy);
 
@@ -377,10 +375,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             bufferStorage->setName("bufferStorage");
             assert (arg == maskInput->arg_end());
 
-
             Type * const singleElementStreamSetTy = ArrayType::get(FixedVectorType::get(IntegerType::get(C, itemWidth), 0U), 1U);
             ExternalBuffer tmp(0, b, singleElementStreamSetTy, 0);
-
 
             PointerType * const bufferPtrTy = tmp.getPointerType();
 
@@ -389,7 +385,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             Value * const initialPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, initial);
             Value * const initialPtrInt = b.CreatePtrToInt(initialPtr, intPtrTy);
             Value * const adjEnd = b.CreateRoundUp(b.CreateAdd(end, overflow), itemsPerSegment);
-            Value * const last = b.CreateMul(b.CreateLShr(adjEnd, LOG_2_BLOCK_WIDTH), numOfStreams);
+            Value * const last = b.CreateMul(b.CreateCeilUDivRational(adjEnd, blockWidth), numOfStreams);
+
             Value * const lastPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, last);
             Value * const lastPtrInt = b.CreatePtrToInt(lastPtr, intPtrTy);
 
@@ -423,23 +420,25 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             maskedBuffer->addIncoming(existingBuffer, entry);
             maskedBuffer->addIncoming(newBuffer, allocateNewBuffer);
             PHINode * const maskedBufferSize = b.CreatePHI(sizeTy, 2);
-            maskedBufferSize->addIncoming(mallocBytes, entry);
+            maskedBufferSize->addIncoming(existingSize, entry);
             maskedBufferSize->addIncoming(allocedBytes, allocateNewBuffer);
 
             Value * const mallocedAddress = b.CreatePointerCast(maskedBuffer, bufferPtrTy);
             Value * const outputVBA = tmp.getStreamBlockPtr(b, mallocedAddress, sz_ZERO, b.CreateNeg(initial));
             Value * const maskedAddress = b.CreatePointerCast(outputVBA, bufferPtrTy);
             assert (maskedAddress->getType() == inputAddress->getType());
-            b.CreateCondBr(b.CreateIsNull(maskedBufferSize), maskedInputExit, hasDataToCopy);
+            b.CreateCondBr(b.CreateIsNull(mallocBytes), maskedInputExit, hasDataToCopy);
 
             b.SetInsertPoint(hasDataToCopy);
-            b.CreateMemZero(maskedBuffer, maskedBufferSize, blockSize);
+
             Value * const total = b.CreateLShr(end, LOG_2_BLOCK_WIDTH);
             Value * const fullCopyEnd = b.CreateMul(total, numOfStreams);
             Value * const fullCopyEndPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, fullCopyEnd);
             Value * const fullCopyEndPtrInt = b.CreatePtrToInt(fullCopyEndPtr, intPtrTy);
             Value * const fullBytesToCopy = b.CreateSub(fullCopyEndPtrInt, initialPtrInt);
-            b.CreateMemCpy(mallocedAddress, initialPtr, fullBytesToCopy, alignment);
+            b.CreateMemCpy(maskedBuffer, initialPtr, fullBytesToCopy, alignment);
+            Value * const remainingBytes = b.CreateSub(mallocBytes, fullBytesToCopy);
+            b.CreateMemZero(b.CreateGEP(b.getInt8Ty(), maskedBuffer, fullBytesToCopy), remainingBytes, blockSize);
 
             Value * packIndex = nullptr;
             Value * maskOffset = b.CreateAnd(end, BLOCK_MASK);
@@ -505,7 +504,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             if (LLVM_UNLIKELY(mCheckStreamSets)) {
                 FixedArray<Value *, 2> fields;
                 fields[0] = retAddress;
-                fields[1] = maskedBufferSize;
+                fields[1] = mallocBytes;
                 b.CreateAggregateRet(fields.data(), 2);
             } else {
                 b.CreateRet(retAddress);
@@ -517,10 +516,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
 
         args[0] = b.CreatePointerCast(inputBaseAddresses[inputPort.Number], int8PtrTy);
 
-        const auto ic = port.Maximum; // * StrideStepLength[mKernelId];
+        const auto ic = port.Maximum * StrideStepLength[mKernelId];
         assert (ic.denominator() == 1);
         assert (ic.numerator() > 0);
-        ConstantInt * const itemsPerSegment = b.getSize(ic.numerator());
+        const auto minimumSize = round_up_to<size_t>(ic.numerator(), blockWidth);
+        ConstantInt * const itemsPerSegment = b.getSize(minimumSize);
 
         args[1] = itemsPerSegment;
         Value * processedItems = nullptr;
@@ -532,7 +532,8 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
         args[2] = processedItems;
         Value * const maxItems = b.CreateAdd(mCurrentProcessedItemCountPhi[inputPort], accessibleItems[inputPort.Number]);
         args[3] = maxItems;
-        args[4] = b.getSize(port.RequiredOverflowSpace + 1);
+        assert (port.RequiredOverflowSpace >= 0);
+        args[4] = b.getSize(std::max<size_t>(port.RequiredOverflowSpace, minimumSize));
         args[5] = buffer->getStreamSetCount(b);
         args[6] = b.CreateGEP(traceArTy, base, indices);
 
