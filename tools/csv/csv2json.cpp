@@ -8,6 +8,7 @@
 #include <vector>
 #include <csv/csv_cmdline.h>
 #include <csv/csv_parser.h>
+#include <json/json_support.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
@@ -156,7 +157,7 @@ void QuoteEscape2Backslash::generatePabloMethod() {
     //
     // Replace the quote escape character with \ = 0x5C
     std::vector<PabloAST *> translated_basis(8, nullptr);
-    PabloAST * notQuoteEscape = pb.createNot(quoteEscape);
+    PabloAST * notQuoteEscape = nested.createNot(quoteEscape);
     // Low 2 bits zeroed out whenever we have quoteEscape
     translated_basis[0] = nested.createAnd(basis[0], notQuoteEscape);
     translated_basis[1] = nested.createAnd(basis[1], notQuoteEscape);

@@ -10,6 +10,7 @@ SRC
     csv2json.cpp
 DEPS
     csv
+    jsonlib
     pablo
     kernel.basis
     kernel.bitwise
