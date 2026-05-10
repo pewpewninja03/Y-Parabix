@@ -722,9 +722,25 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
         b.SetInsertPoint(maskExit);
 
         // Zero out any blocks we could potentially touch
-        const auto blocksPerStride = ceiling(rt.Maximum * Rational{StrideStepLength[mKernelId], blockWidth});
+        Rational maxVal = rt.Maximum * StrideStepLength[mKernelId];
+
+        if (bn.isNonThreadLocal()) {
+            for (auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+                for (auto input : make_iterator_range(out_edges(target(output, mBufferGraph), mBufferGraph))) {
+                    const auto consumer = target(input, mBufferGraph);
+                    if (KernelPartitionId[consumer] != mCurrentPartitionId) {
+                        const auto & port = mBufferGraph[input];
+                        const auto m = port.Maximum * StrideStepLength[consumer];
+                        if (maxVal < m) {
+                            maxVal = m;
+                        }
+                    }
+                }
+            }
+        }
+
+        const auto blocksPerStride = ceiling(maxVal / blockWidth);
         assert (blocksPerStride > 0);
-       // const auto blocksToZero = blocksPerStride + bn.NumOfOverflowStrides;
 
         const auto doUnaryPack = (isUnary && itemWidth > 1);
 

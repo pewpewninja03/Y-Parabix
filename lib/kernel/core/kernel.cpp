@@ -1657,7 +1657,7 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
     } else {
-        if (LLVM_UNLIKELY(id == Kernel::TypeId::Pipeline)) {
+        if (LLVM_UNLIKELY(id == TypeId::Pipeline || id == TypeId::PopCountKernel)) {
             // TODO: look into cleaner method for this
             if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
                 buffer << "_EP";
