@@ -63,10 +63,6 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
                     assert (minAddK < std::numeric_limits<int>::max());
                     const int k = inputAdd[br.Port.Number] - minAddK;
                     br.RequiredOverflowSpace = k;
-//                    BufferNode & bn = mBufferGraph[streamSet];
-//                    if (LLVM_LIKELY(k > bn.RequiredOverflowSpace)) {
-//                        bn.RequiredOverflowSpace = k;
-//                    }
                 }
             }
 
@@ -78,10 +74,6 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
             const auto streamSet = target(e, mBufferGraph);
             transitiveAdd[streamSet - FirstStreamSet] = k;
             br.RequiredOverflowSpace = k;
-//            BufferNode & bn = mBufferGraph[streamSet];
-//            if (LLVM_LIKELY(k > bn.RequiredOverflowSpace)) {
-//                bn.RequiredOverflowSpace = k;
-//            }
         }
     }
 
@@ -102,9 +94,6 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
 
             for (auto id = streamSet;;) {
 
-//                const BufferNode & sn = mBufferGraph[id];
-//                int required = sn.RequiredOverflowSpace;
-
                 const auto output = in_edge(id, mBufferGraph);
                 BufferPort & br = mBufferGraph[output];
                 const auto c = std::max<int>(br.RequiredOverflowSpace, br.EmptyOverflow);
@@ -117,11 +106,6 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
                     br.RequiredOverflowSpace = b;
                     maxOverflowSpace = std::max<int>(maxOverflowSpace, b);
                 }
-
-//                const auto ta = transitiveAdd[id - FirstStreamSet];
-//                maxOverflowSpace = std::max<int>(maxOverflowSpace, ta + required);
-//                maxOverflowSpace = std::max<int>(maxOverflowSpace, required);
-
                 if (LLVM_LIKELY(out_degree(id, InOutStreamSetReplacement) == 0)) {
                     break;
                 }
@@ -130,7 +114,6 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
 
         }
 
-//        bn.RequiredOverflowSpace = maxOverflowSpace;
         const auto output = in_edge(streamSet, mBufferGraph);
         BufferPort & br = mBufferGraph[output];
         br.RequiredOverflowSpace = maxOverflowSpace;
