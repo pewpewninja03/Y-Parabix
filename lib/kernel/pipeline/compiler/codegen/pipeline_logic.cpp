@@ -98,7 +98,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
             #endif
             addProducedItemCountDeltaProperties(b, i);
             addUnconsumedItemCountProperties(b, i);
-            if (LLVM_UNLIKELY(trackIOSummary)) {
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
                 addCycleCounterProperties(b, i, ((i + 1) == oneAfterLastKernelInCurrentPhase) | isRoot, isRoot, i);
             }
             if (LLVM_UNLIKELY(trackIOSummary)) {
