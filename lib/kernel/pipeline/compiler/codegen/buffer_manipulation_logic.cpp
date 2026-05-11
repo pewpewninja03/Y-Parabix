@@ -37,7 +37,7 @@ Value * PipelineCompiler::allocateLocalZeroExtensionSpace(KernelBuilder & b,
 
             const auto ts = b.getTypeSize(dl, bn.Buffer->getType());
 
-            Rational scaleFactor{ts * br.Maximum.numerator(), blockWidth * blockWidth * br.Maximum.denominator()};
+            Rational scaleFactor{ts * br.Maximum.numerator(), blockWidth * br.Maximum.denominator()};
 
             Value * ns = numOfStrides;
             if (br.RequiredOverflowSpace) {
@@ -384,12 +384,11 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b,
             Value * const initial = b.CreateMul(b.CreateLShr(start, LOG_2_BLOCK_WIDTH), numOfStreams);
             Value * const initialPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, initial);
             Value * const initialPtrInt = b.CreatePtrToInt(initialPtr, intPtrTy);
-            Value * const adjEnd = b.CreateRoundUp(b.CreateAdd(end, overflow), itemsPerSegment);
+            Value * const adjEnd = b.CreateUMax(b.CreateRoundUp(b.CreateAdd(end, overflow), itemsPerSegment), itemsPerSegment);
             Value * const last = b.CreateMul(b.CreateCeilUDivRational(adjEnd, blockWidth), numOfStreams);
 
             Value * const lastPtr = tmp.getStreamBlockPtr(b, inputAddress, sz_ZERO, last);
             Value * const lastPtrInt = b.CreatePtrToInt(lastPtr, intPtrTy);
-
             Value * const mallocBytes = b.CreateSub(lastPtrInt, initialPtrInt);
 
             const auto blockSize = b.getBitBlockWidth() / 8U;
