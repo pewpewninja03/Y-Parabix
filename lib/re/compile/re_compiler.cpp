@@ -58,7 +58,7 @@ private:
     Marker compileRep(int LB, int UB, RE * repeated, Marker marker);
     Marker compileDiff(Diff * diff, Marker marker);
     Marker compileIntersect(Intersect * x, Marker marker);
-    pablo::PabloAST * consecutive_matches(pablo::PabloAST * repeated_j, int j, int repeat_count, const int match_length, pablo::PabloAST * indexStream);
+    pablo::PabloAST * consecutive_matches(pablo::PabloAST * repeated_j, int j, int repeat_count, const int match_length, pablo::PabloAST * indexStream, int ifGap);
     pablo::PabloAST * reachable(pablo::PabloAST * repeated, int length, int repeat_count, pablo::PabloAST * indexStream);
     std::pair<int, int> lengthRange(RE * regexp);
     Marker expandLowerBound(RE * repeated,  int lb, Marker marker, int ifGroupSize);
@@ -492,7 +492,7 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
         if ((lengths.first == 1) && (lengths.second == 1)) {
             PabloAST * cc = compile(repeated).stream();
             if (lb > 0) {
-                PabloAST * cc_lb = consecutive_matches(cc, 1, rpt, lengths.first, nullptr);
+                PabloAST * cc_lb = consecutive_matches(cc, 1, rpt, lengths.first, nullptr, IfInsertionGap);
                 auto lb_lgth = lengths.first * rpt;
                 if (marker.position() != Position::AtEnd) {
                     marker = Marker(NextCharacter(marker, mPB));
@@ -523,7 +523,7 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
                     cursor = mPB.createAnd(cc, NextCharacter(marker, mPB));
                     rpt -= 1;
                 }
-                PabloAST * cc_lb = consecutive_matches(cc, 1, rpt, 1, mMain.mIndexStream);
+                PabloAST * cc_lb = consecutive_matches(cc, 1, rpt, 1, mMain.mIndexStream, IfInsertionGap);
                 PabloAST * marker_fwd = mPB.createIndexedAdvance(cursor, mMain.mIndexStream, rpt);
                 PabloAST * at_lb = mPB.createAnd(marker_fwd, cc_lb, "lowerbound");
                 if (ub == Rep::UNBOUNDED_REP) {
@@ -557,7 +557,7 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
             //
             //  Restrict to positions with at least lb-1 iterations.
             if (lb > 1) {
-                PabloAST * at_least_lb = consecutive_matches(iteration_marks, 1, lb - 1, 1, idx);
+                PabloAST * at_least_lb = consecutive_matches(iteration_marks, 1, lb - 1, 1, idx, IfInsertionGap);
                 PabloAST * marker_fwd = mPB.createIndexedAdvance(half_mark.stream(), idx, lb - 1);
                 half_mark = Marker(mPB.createAnd(marker_fwd, at_least_lb, "lower_bound"));
             }
@@ -594,25 +594,25 @@ Marker RE_Block_Compiler::compileRep(int lb, int ub, RE * repeated, Marker marke
    of length |match_length| compute a stream marking |repeat_count| consecutive occurrences of such items.
 */
 
-PabloAST * RE_Block_Compiler::consecutive_matches(PabloAST * const repeated_j, const int j, const int repeat_count, const int match_length, PabloAST * const indexStream) {
+PabloAST * RE_Block_Compiler::consecutive_matches(PabloAST * const repeated_j, const int j, const int repeat_count, const int match_length, PabloAST * const indexStream, int ifGap) {
     if (j == repeat_count) {
         return repeated_j;
     }
     const int i = std::min(j, repeat_count - j);
     const int k = j + i;
-    if (j > IfInsertionGap) {
+    if (j > ifGap) {
         Var * repeated = mPB.createVar("repeated", mPB.createZeroes());
         auto nested = mPB.createScope();
         RE_Block_Compiler subcompiler(mMain, nested);
         PabloAST * adv_i = nested.createIndexedAdvance(repeated_j, indexStream, i * match_length);
         PabloAST * repeated_k = nested.createAnd(repeated_j, adv_i, "at" + std::to_string(k) + "of" + std::to_string(repeat_count));
-        nested.createAssign(repeated, subcompiler.consecutive_matches(repeated_k, k, repeat_count, match_length, indexStream));
+        nested.createAssign(repeated, subcompiler.consecutive_matches(repeated_k, k, repeat_count, match_length, indexStream, ifGap * ifGap));
         mPB.createIf(repeated_j, nested);
         return repeated;
     } else {
         PabloAST * adv_i = mPB.createIndexedAdvance(repeated_j, indexStream, i * match_length);
         PabloAST * repeated_k = mPB.createAnd(repeated_j, adv_i, "at" + std::to_string(k) + "of" + std::to_string(repeat_count));
-        return consecutive_matches(repeated_k, k, repeat_count, match_length, indexStream);
+        return consecutive_matches(repeated_k, k, repeat_count, match_length, indexStream, ifGap);
     }
 }
 
