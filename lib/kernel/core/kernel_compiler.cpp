@@ -494,8 +494,8 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
         Value * const correctSharedTySize = b.CreateICmpUGE(providedSharedStateTySize, sharedStateTySize);
 
         b.CreateAssert(correctSharedTySize,
-                       "%s expected state type object of size %" PRIu64 " but received one of size %" PRIu64,
-                       b.GetString(getName()), sharedStateTySize, providedSharedStateTySize);
+                       " expected state type object of size %" PRIu64 " but received one of size %" PRIu64,
+                       sharedStateTySize, providedSharedStateTySize);
 
         Value * const providedThreadLocalTySize = nextArg();
 
@@ -509,11 +509,8 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
         Value * const correctThreadLocalTySize = b.CreateICmpUGE(providedThreadLocalTySize, threadLocalTySize);
 
         b.CreateAssert(correctThreadLocalTySize,
-                       "%s expected state type object of size %" PRIu64 " but received one of size %" PRIu64,
-                       b.GetString(getName()), threadLocalTySize, providedThreadLocalTySize);
-
-
-
+                       " expected state type object of size %" PRIu64 " but received one of size %" PRIu64,
+                       threadLocalTySize, providedThreadLocalTySize);
     }
 
 

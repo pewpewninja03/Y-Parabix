@@ -2459,6 +2459,7 @@ uintptr_t LLVM_READNONE CBuilder::getAlignOf(const llvm::DataLayout & DL, llvm::
     } else if (isa<ArrayType>(type)) {
         return getAlignOf(DL, type->getArrayElementType());
     } else {
+        //    return DL.getPrefTypeAlign(type).value();
         const auto align = DL.getABITypeAlign(type).value();
         assert (align > 0);
         return align;

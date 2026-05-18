@@ -499,7 +499,7 @@ public:
 // thread local buffer management
 
     void initializeThreadLocalMemory(KernelBuilder & b, Value * const segmentSize);
-    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b);
+    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b, const bool hasSlidingWindow);
     void remapThreadLocalBufferMemory(KernelBuilder & b);
 
 // optimization branch functions

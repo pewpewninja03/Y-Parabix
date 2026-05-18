@@ -104,7 +104,7 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(kernel::KernelBuilder
         if (LLVM_UNLIKELY(codegen::TraceObjectCache)) {
             const auto moduleId = kernel->makeCacheName(b);
             errs() << "Already compiled: " << moduleId << KERNEL_FILE_EXTENSION << "\n";
-        }        
+        }
         kernel->setModule(f->second);
         kernel->setCompilationStatus(kernel::Kernel::CompilationStatus::UnownedModule);
         return CacheObjectResult::COMPILED;
@@ -243,12 +243,13 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
 
         // Clone the function prototypes and metadata to minimize the size of the stored .kernel file.
         std::unique_ptr<Module> H(new Module(moduleId, M->getContext()));
+        H->setTargetTriple(M->getTargetTriple());
+        H->setDataLayout(M->getDataLayout());
         for (const Function & f : M->getFunctionList()) {
             if (f.hasExternalLinkage() && !f.empty()) {
                 Function::Create(f.getFunctionType(), Function::ExternalLinkage, f.getName(), H.get());
             }
         }
-
         for (const auto & og : M->named_metadata()) {
             NamedMDNode * const md = H->getOrInsertNamedMetadata(og.getName());
             const auto n = og.getNumOperands();

@@ -105,8 +105,10 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
             // that the outer pipeline will feed data to this at a fixed rate.
 
             const auto & bn = mBufferGraph[mKernelId];
+            bool hasSlidingWindow = false;
             if (bn.controlsSlidingWindow() || bn.permitSlidingWindow()) {
                 mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
+                hasSlidingWindow = true;
             } else {
                 const auto factor = calculateBufferScalingFactor(mKernelId);
                 mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
@@ -118,12 +120,13 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
                         const auto streamSet = source(input, mBufferGraph);
                         Value * potential = b.CreateCeilUDivRational(mLocallyAvailableItems[streamSet], bp.Minimum);
                         mMaximumNumOfStrides = b.CreateUMax(mMaximumNumOfStrides, potential);
+                        hasSlidingWindow = true;
                     }
                 }
 
                 mMaximumNumOfStrides = b.CreateRoundUpRational(mMaximumNumOfStrides, StrideStepLength[mKernelId]);
             }
-            allocateThreadLocalMemoryForMaximumNumOfStrides(b);
+            allocateThreadLocalMemoryForMaximumNumOfStrides(b, hasSlidingWindow);
         //}
     } else {
         const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
