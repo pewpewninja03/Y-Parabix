@@ -1462,13 +1462,13 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     // check on the rightmost entry?
 
     b.SetInsertPoint(popCountLoop);
-    PHINode * const numOfStrides = b.CreatePHI(sizeTy, 2);
-    numOfStrides->addIncoming(numOfLinearStrides, popCountEntry);
-    PHINode * const nextRequiredItems = b.CreatePHI(sizeTy, 2);
-    nextRequiredItems->addIncoming(MAX_INT, popCountEntry);
+    PHINode * const popCountStrideCountPhi = b.CreatePHI(sizeTy, 2);
+    popCountStrideCountPhi->addIncoming(numOfLinearStrides, popCountEntry);
+    PHINode * const nextRequiredItemsPhi = b.CreatePHI(sizeTy, 2);
+    nextRequiredItemsPhi->addIncoming(MAX_INT, popCountEntry);
 
 
-    Value * const strideIndex = b.CreateSub(numOfStrides, sz_ONE);
+    Value * const strideIndex = b.CreateSub(popCountStrideCountPhi, sz_ONE);
 
     Value * offset = strideIndex;
 
@@ -1477,7 +1477,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     // stream.
     const auto step = getPopCountStepSize(ref);
     if (LLVM_UNLIKELY(step > 1)) {
-        offset = b.CreateSub(b.CreateMul(numOfStrides, b.getSize(step)), sz_ONE);
+        offset = b.CreateSub(b.CreateMul(popCountStrideCountPhi, b.getSize(step)), sz_ONE);
     }
 
     Value * const pos = b.CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
@@ -1507,29 +1507,28 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & input = getInputBinding(ref);
         Value * const inputName = b.GetString(input.getName());
-        b.CreateAssert(b.CreateICmpULE(requiredItems, nextRequiredItems),
+        b.CreateAssert(b.CreateICmpULE(requiredItems, nextRequiredItemsPhi),
                         "%s.%s: partial sum is not non-decreasing at %" PRIu64
                         " (prior %" PRIu64 " > current %" PRIu64 ") @ getMaximumNumOfPartialSumStrides",
                         mCurrentKernelName, inputName,
-                        pos, requiredItems, nextRequiredItems);
+                        pos, requiredItems, nextRequiredItemsPhi);
     }
 
-    nextRequiredItems->addIncoming(requiredItems, popCountLoop);
-    numOfStrides->addIncoming(strideIndex, popCountLoop);
+    nextRequiredItemsPhi->addIncoming(requiredItems, popCountLoop);
+    popCountStrideCountPhi->addIncoming(strideIndex, popCountLoop);
     b.CreateCondBr(repeat, popCountLoop, popCountLoopExit);
 
     b.SetInsertPoint(popCountLoopExit);
-    PHINode * const numOfStridesPhi = b.CreatePHI(sizeTy, 2);
-    numOfStridesPhi->addIncoming(sz_ZERO, popCountEntry);
-    numOfStridesPhi->addIncoming(numOfStrides, popCountLoop);
-    PHINode * const requiredItemsPhi = b.CreatePHI(sizeTy, 2);
-    requiredItemsPhi->addIncoming(sz_ZERO, popCountEntry);
-    requiredItemsPhi->addIncoming(requiredItems, popCountLoop);
-    PHINode * const nextRequiredItemsPhi = b.CreatePHI(sizeTy, 2);
-    nextRequiredItemsPhi->addIncoming(minimumItemCount, popCountEntry);
-    nextRequiredItemsPhi->addIncoming(nextRequiredItems, popCountLoop);
+    PHINode * const finalNumOfStridesPhi = b.CreatePHI(sizeTy, 2);
+    finalNumOfStridesPhi->addIncoming(sz_ZERO, popCountEntry);
+    finalNumOfStridesPhi->addIncoming(popCountStrideCountPhi, popCountLoop);
+    PHINode * const finalNotEnoughPhi = b.CreatePHI(b.getInt1Ty(), 2);
+    finalNotEnoughPhi->addIncoming(b.getFalse(), popCountEntry);
+    finalNotEnoughPhi->addIncoming(notEnough, popCountLoop);
 
-    Value * finalNumOfStrides = numOfStridesPhi;
+    // TODO: only needed if we cannot statically prove we'll have enough input for the popcount marker stream
+    Value * const finalNumOfStrides = b.CreateSub(finalNumOfStridesPhi, b.CreateZExt(finalNotEnoughPhi, sizeTy));
+
     if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & binding = getInputBinding(ref);
         b.CreateAssert(b.CreateICmpNE(finalNumOfStrides, MAX_INT),
