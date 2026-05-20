@@ -11,5 +11,10 @@ SRC
 DEPS
     re.adt
     pablo
+    grep
+    kernel.bitwise
+    kernel.io
+    kernel.pipeline
+    kernel.re
     kernel.unicode
 )

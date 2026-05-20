@@ -24,12 +24,22 @@ namespace json {
 // Other controls generate 6-character escape sequences of the form \u00xy
 // where xy are the two hexadecimal digits of the control sequence value.
 //
-// Inputs:  
-//    Basis - a set of basis bit streams 
+// Inputs:
+//    Basis - a set of basis bit streams
 //    stringmask - a mask marking data to be included in JSON strings
 //    EscapedBasis - a newly created StreamSet of the same number of
 //	      streams as basis.
 
 void EscapeStringSpecials(PipelineBuilder & P, StreamSet * Basis, StreamSet * stringMask, StreamSet * EscapedBasis);
 
+//
+// JSON atomic values are the special values null, true, false as well as
+// numeric values following JSON integer, fixed point or floating point syntax.
+enum JSON_Atomic : unsigned {NullLiteral = 1, TrueLiteral = 2, FalseLiteral = 4, NumericLiteral = 8};
+
+// Given a set of JSON atomic types, such as static_cast<JSON_Atomic>(NullLiteral|NumericLiteral),
+// for example, determine all field values that validate according to the require syntax,
+// given the specified field start and field follow markers.
+
+void JSON_Value_Matching(PipelineBuilder & P, JSON_Atomic atom_bitset, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * matches);
 }

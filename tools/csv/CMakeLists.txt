@@ -12,10 +12,12 @@ DEPS
     csv
     jsonlib
     pablo
+    grep
     kernel.basis
     kernel.bitwise
     kernel.io
     kernel.pipeline
+    kernel.re
     kernel.streamutils
     kernel.util
     toolchain

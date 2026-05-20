@@ -12,6 +12,13 @@
 #include <re/adt/re_re.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
+#include <kernel/re/regexp_kernel.h>
+#include <re/adt/adt.h>
+#include <re/adt/re_re.h>
+#include <re/parse/parser.h>
+#include <re/unicode/regex_passes.h>
+#include <grep/grep_engine.h>
+#include <grep/grep_kernel.h>
 #include <kernel/streamutils/pdep_kernel.h>
 
 //
@@ -244,6 +251,33 @@ void EscapeStringSpecials(PipelineBuilder & P, StreamSet * BasisBits, StreamSet 
 
     P.CreateKernelCall<JSON_Escape_Sequence_Translation>(ExpandedBasis, EscapeSpreadMask, EscapedBasis);
     SHOW_BIXNUM(EscapedBasis);
+}
+
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+
+const std::vector<std::string> AtomicREs = {"null", "true", "false", "-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?(?:[Ee][-+][0-9]+)?"};
+
+void JSON_Value_Matching(PipelineBuilder & P, JSON_Atomic atom_bitset, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * matches) {
+    RE_CompilerContext ctxt;
+    ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
+    ctxt.setMatchRegions(fieldStarts, fieldFollows);
+    std::string matchRegex = "";
+    unsigned i = 0;
+    for (JSON_Atomic k = NullLiteral; k <= NumericLiteral; k = static_cast<JSON_Atomic>(k << 1)) {
+        if ((k & atom_bitset) == k) {
+            if (matchRegex != "") {
+                matchRegex += "|";
+            }
+            matchRegex += AtomicREs[i];
+        }
+        i++;
+    }
+    re::RE * matchRE = toUTF8(re::RE_Parser::parse("^(?:" + matchRegex + ")$"));
+    RE_PipelineBuilder RE_PB(P, ctxt);
+    StreamSet * const atomicMatches = P.CreateStreamSet(1);
+    RE_PB.matchSearchPipeline(matchRE, atomicMatches);
+    P.CreateKernelCall<MatchedLinesKernel>(atomicMatches, fieldFollows, matches);
+    SHOW_STREAM(matches);
 }
 
 }
