@@ -255,29 +255,41 @@ void EscapeStringSpecials(PipelineBuilder & P, StreamSet * BasisBits, StreamSet 
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 
-const std::vector<std::string> AtomicREs = {"null", "true", "false", "-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?(?:[Ee][-+][0-9]+)?"};
+const std::vector<std::string> JSON_Kind_REs = {"null", "true", "false", "-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?(?:[Ee][-+][0-9]+)?", "\".*\""};
 
-void JSON_Value_Matching(PipelineBuilder & P, JSON_Atomic atom_bitset, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * matches) {
+void JSON_Value_Matching(PipelineBuilder & P, JSON_ValueKind val_bitset, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * matches) {
     RE_CompilerContext ctxt;
     ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
     ctxt.setMatchRegions(fieldStarts, fieldFollows);
     std::string matchRegex = "";
     unsigned i = 0;
-    for (JSON_Atomic k = NullLiteral; k <= NumericLiteral; k = static_cast<JSON_Atomic>(k << 1)) {
-        if ((k & atom_bitset) == k) {
+    for (JSON_ValueKind k = NullLiteral; k <= QuotedString; k = static_cast<JSON_ValueKind>(k << 1)) {
+        if ((k & val_bitset) == k) {
             if (matchRegex != "") {
                 matchRegex += "|";
             }
-            matchRegex += AtomicREs[i];
+            matchRegex += JSON_Kind_REs[i];
         }
         i++;
     }
     re::RE * matchRE = toUTF8(re::RE_Parser::parse("^(?:" + matchRegex + ")$"));
     RE_PipelineBuilder RE_PB(P, ctxt);
-    StreamSet * const atomicMatches = P.CreateStreamSet(1);
-    RE_PB.matchSearchPipeline(matchRE, atomicMatches);
-    P.CreateKernelCall<MatchedLinesKernel>(atomicMatches, fieldFollows, matches);
+    StreamSet * const val_matches = P.CreateStreamSet(1);
+    RE_PB.matchSearchPipeline(matchRE, val_matches);
+    P.CreateKernelCall<MatchedLinesKernel>(val_matches, fieldFollows, matches);
     SHOW_STREAM(matches);
+}
+
+void JSON_Value_Quoted(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * quoted) {
+    RE_CompilerContext ctxt;
+    ctxt.setCodeUnitContext(&cc::UTF8, BasisBits);
+    ctxt.setMatchRegions(fieldStarts, fieldFollows);
+    re::RE * quotedRE = toUTF8(re::RE_Parser::parse("^\".*\"$"));
+    RE_PipelineBuilder RE_PB(P, ctxt);
+    StreamSet * const quotedValues = P.CreateStreamSet(1);
+    RE_PB.matchSearchPipeline(quotedRE, quotedValues);
+    P.CreateKernelCall<MatchedLinesKernel>(quotedValues, fieldFollows, quoted);
+    SHOW_STREAM(quoted);
 }
 
 }

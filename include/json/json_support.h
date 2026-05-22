@@ -35,11 +35,12 @@ void EscapeStringSpecials(PipelineBuilder & P, StreamSet * Basis, StreamSet * st
 //
 // JSON atomic values are the special values null, true, false as well as
 // numeric values following JSON integer, fixed point or floating point syntax.
-enum JSON_Atomic : unsigned {NullLiteral = 1, TrueLiteral = 2, FalseLiteral = 4, NumericLiteral = 8};
+enum JSON_ValueKind : unsigned {NullLiteral = 1, TrueLiteral = 2, FalseLiteral = 4, NumericLiteral = 8, QuotedString = 16};
 
-// Given a set of JSON atomic types, such as static_cast<JSON_Atomic>(NullLiteral|NumericLiteral),
+// Given a set of JSON value types, such as static_cast<JSON_Atomic>(NullLiteral|NumericLiteral),
 // for example, determine all field values that validate according to the require syntax,
 // given the specified field start and field follow markers.
 
-void JSON_Value_Matching(PipelineBuilder & P, JSON_Atomic atom_bitset, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * matches);
+void JSON_Value_Matching(PipelineBuilder & P, JSON_ValueKind kind_bitset, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * matches);
+
 }

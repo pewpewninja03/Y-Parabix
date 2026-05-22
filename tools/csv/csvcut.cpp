@@ -75,12 +75,13 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     StreamSet * recordSeparators = P.CreateStreamSet(1);
-    StreamSet * fieldSeparators = P.CreateStreamSet(1);
+    StreamSet * fieldStarts = P.CreateStreamSet(1);
+    StreamSet * fieldFollows = P.CreateStreamSet(1);
     StreamSet * quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
 
     StreamSet * Selected = P.CreateStreamSet(1);
-    csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos, /*forCut = */ true);
+    csv::ColumnSelectionMask(P, recordSeparators, fieldStarts, fieldFollows, Selected, colNos, /*forCut = */ true);
     SHOW_STREAM(Selected);
 
     StreamSet * Filtered = P.CreateStreamSet(1, 8);

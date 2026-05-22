@@ -62,13 +62,14 @@ re::RE * csvRE(re::RE * re) {
 
 class RegexRegions : public PabloKernel {
 public:
-    RegexRegions(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldSeparators, StreamSet * selected,
-                 StreamSet * regionStart, StreamSet * regionFollow)
+    RegexRegions(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * selected,
+                 StreamSet * regionStarts, StreamSet * regionFollows)
     : PabloKernel(ts, "RegexRegions",
                       {Binding{"csvMarks", csvMarks},
-                       Binding{"fieldSeparators", fieldSeparators, FixedRate(), LookAhead(1)},
+                       Binding{"fieldStarts", fieldStarts},
+                       Binding{"fieldFollows", fieldFollows, FixedRate(), LookAhead(1)},
                        Binding{"selected", selected}},
-                      {Binding{"regionStart", regionStart}, Binding{"regionFollow", regionFollow}}) {}
+                      {Binding{"regionStarts", regionStarts}, Binding{"regionFollows", regionFollows}}) {}
 protected:
     void generatePabloMethod() override;
 };
@@ -76,17 +77,17 @@ protected:
 void RegexRegions::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
-    PabloAST * fieldSeparators = pb.createExtract(getInputStreamVar("fieldSeparators"), pb.getInteger(0));
+    PabloAST * fieldStarts = pb.createExtract(getInputStreamVar("fieldStarts"), pb.getInteger(0));
+    PabloAST * fieldFollows = pb.createExtract(getInputStreamVar("fieldFollows"), pb.getInteger(0));
     PabloAST * selectedFields = pb.createExtract(getInputStreamVar("selected"), pb.getInteger(0));
-    PabloAST * regionStart = pb.createNot(pb.createAdvance(pb.createNot(fieldSeparators), 1));
-    regionStart = pb.createAnd(regionStart, selectedFields);
-    PabloAST * fieldStartQuote = pb.createAnd(regionStart, csvMarks[csv::markDQ]);
-    regionStart = pb.createOr(pb.createXor(regionStart, fieldStartQuote), pb.createAdvance(fieldStartQuote, 1));
-    PabloAST * regionFollow = pb.createAnd(fieldSeparators, selectedFields);
-    PabloAST * fieldEndQuote = pb.createAnd(pb.createLookahead(fieldSeparators, 1), csvMarks[csv::markDQ]);
-    regionFollow = pb.createOr(fieldEndQuote, pb.createXor(regionFollow, pb.createAdvance(fieldEndQuote, 1)));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("regionStart"), pb.getInteger(0)), regionStart);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("regionFollow"), pb.getInteger(0)), regionFollow);
+    PabloAST * regionStarts = pb.createAnd(fieldStarts, selectedFields);
+    PabloAST * fieldStartQuote = pb.createAnd(regionStarts, csvMarks[csv::markDQ]);
+    regionStarts = pb.createOr(pb.createXor(regionStarts, fieldStartQuote), pb.createAdvance(fieldStartQuote, 1));
+    PabloAST * regionFollows = pb.createAnd(fieldFollows, selectedFields);
+    PabloAST * fieldEndQuote = pb.createAnd(pb.createLookahead(fieldFollows, 1), csvMarks[csv::markDQ]);
+    regionFollows = pb.createOr(fieldEndQuote, pb.createXor(regionFollows, pb.createAdvance(fieldEndQuote, 1)));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("regionStarts"), pb.getInteger(0)), regionStarts);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("regionFollows"), pb.getInteger(0)), regionFollows);
 }
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
@@ -152,18 +153,19 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<unsigned>
     csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     StreamSet * recordSeparators = P.CreateStreamSet(1);
-    StreamSet * fieldSeparators = P.CreateStreamSet(1);
-    StreamSet * quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
-
-    StreamSet * Selected = P.CreateStreamSet(1);
-    csv::ColumnSelectionMask(P, recordSeparators, fieldSeparators, Selected, colNos);
-    SHOW_STREAM(Selected);
-
     StreamSet * fieldStarts = P.CreateStreamSet(1);
     StreamSet * fieldFollows = P.CreateStreamSet(1);
-    P.CreateKernelCall<RegexRegions>(csvCCs, fieldSeparators, Selected, fieldStarts, fieldFollows);
-    ctxt.setMatchRegions(fieldStarts, fieldFollows);
+    StreamSet * quoteEscape = P.CreateStreamSet(1);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
+
+    StreamSet * Selected = P.CreateStreamSet(1);
+    csv::ColumnSelectionMask(P, recordSeparators, fieldStarts, fieldFollows, Selected, colNos);
+    SHOW_STREAM(Selected);
+
+    StreamSet * regionStarts = P.CreateStreamSet(1);
+    StreamSet * regionFollows = P.CreateStreamSet(1);
+    P.CreateKernelCall<RegexRegions>(csvCCs, fieldStarts, fieldFollows, Selected, regionStarts, regionFollows);
+    ctxt.setMatchRegions(regionStarts, regionFollows);
 
     StreamSet * Matches = P.CreateStreamSet(1);
     RE_PipelineBuilder RE_PB(P, ctxt);

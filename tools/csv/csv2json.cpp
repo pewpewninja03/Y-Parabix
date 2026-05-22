@@ -231,24 +231,27 @@ void EnQuote::generatePabloMethod() {
 }
 
 
-void JSON_Value_Quoting(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldSeparators, StreamSet * QuotedBasis) {
-    StreamSet * fieldStarts = P.CreateStreamSet(1);
-    P.CreateKernelCall<LineStartsKernel>(fieldSeparators, fieldStarts);
-    SHOW_STREAM(fieldStarts);
-
+void JSON_Value_Quoting(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * QuotedBasis) {
     StreamSet * literalMatches = P.CreateStreamSet(1);
-    json::JSON_Value_Matching(P, static_cast<json::JSON_Atomic>(json::NullLiteral|json::NumericLiteral), BasisBits, fieldStarts, fieldSeparators, literalMatches);
+    json::JSON_ValueKind no_quotes_needed_set =
+        static_cast<json::JSON_ValueKind>(json::NullLiteral|
+                                          json::NumericLiteral|
+                                          json::TrueLiteral|
+                                          json::FalseLiteral|
+                                          json::QuotedString);
+
+    JSON_Value_Matching(P, no_quotes_needed_set, BasisBits, fieldStarts, fieldFollows, literalMatches);
 
     StreamSet * const literalFollows = P.CreateStreamSet(1);
-    P.CreateKernelCall<MatchedLinesKernel>(literalMatches, fieldSeparators, literalFollows);
+    P.CreateKernelCall<MatchedLinesKernel>(literalMatches, fieldFollows, literalFollows);
     SHOW_STREAM(literalFollows);
 
     StreamSet * stringFollows = P.CreateStreamSet(1);
-    XorCombine(P, literalFollows, fieldSeparators, stringFollows);
+    XorCombine(P, literalFollows, fieldFollows, stringFollows);
     SHOW_STREAM(stringFollows);
 
     StreamSet * stringsByField = P.CreateStreamSet(1);
-    FilterByMask(P, fieldSeparators, stringFollows, stringsByField);
+    FilterByMask(P, fieldFollows, stringFollows, stringsByField);
     SHOW_STREAM(stringsByField);
 
     StreamSet * const stringStarts = P.CreateStreamSet(1);
@@ -293,9 +296,10 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     StreamSet * recordSeparators = P.CreateStreamSet(1);
-    StreamSet * fieldSeparators = P.CreateStreamSet(1);
+    StreamSet * fieldStarts = P.CreateStreamSet(1);
+    StreamSet * fieldFollows = P.CreateStreamSet(1);
     StreamSet * quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
     StreamSet * EOFmark = P.CreateStreamSet(1);
     P.CreateKernelCall<EOFbit>(BasisBits, EOFmark);
 
@@ -325,12 +329,13 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     recordSeparators = P.CreateStreamSet(1);
-    fieldSeparators = P.CreateStreamSet(1);
+    fieldStarts = P.CreateStreamSet(1);
+    fieldFollows = P.CreateStreamSet(1);
     quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
 
     StreamSet * QuotedBasis = P.CreateStreamSet(BasisBits->getNumElements());
-    JSON_Value_Quoting(P, BasisBits, fieldSeparators, QuotedBasis);
+    JSON_Value_Quoting(P, BasisBits, fieldStarts, fieldFollows, QuotedBasis);
 
     // Reset Basis bits and reparse.
     BasisBits = QuotedBasis;
@@ -338,9 +343,10 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     csv::CSV_Lexer(P, BasisBits, csvCCs);
 
     recordSeparators = P.CreateStreamSet(1);
-    fieldSeparators = P.CreateStreamSet(1);
+    fieldStarts = P.CreateStreamSet(1);
+    fieldFollows = P.CreateStreamSet(1);
     quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
 
     std::vector<uint64_t> insertionAmts;
     unsigned maxInsertAmt = 0;
@@ -352,10 +358,6 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
     StreamSet * PrefixLgths = P.CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
-
-    StreamSet * fieldStarts = P.CreateStreamSet(1);
-    P.CreateKernelCall<LineStartsKernel>(fieldSeparators, fieldStarts);
-    SHOW_STREAM(fieldStarts);
 
     StreamSet * PrefixInsertBixNum = P.CreateStreamSet(insertLengthBits);
     SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
@@ -372,7 +374,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     StreamSet * RepeatingSuffixLgths = P.CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
     StreamSet * SuffixInsertBixNum = P.CreateStreamSet(suffixLgthBits);
-    SpreadByMask(P, fieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
+    SpreadByMask(P, fieldFollows, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
     StreamSet * InsertBixNum = P.CreateStreamSet(ceil_log2(maxInsertAmt+suffixLgthBits+1));
