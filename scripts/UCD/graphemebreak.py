@@ -9,7 +9,7 @@
 import string, os.path, re, random
 import UCD_config
 
-version_regexp = re.compile(".*Version\s+([0-9.]*)\s+of the Unicode Standard.*")
+version_regexp = re.compile(".*Version\\s+([0-9.]*)\\s+of the Unicode Standard.*")
 
 def setVersionfromReadMe_txt():
     f = open(UCD_config.UCD_src_dir + "/" + 'ReadMe.txt')
@@ -24,11 +24,11 @@ def setVersionfromReadMe_txt():
 #  Processing files of the UCD
 #
 #  General format for skippable comments, blank lines
-UCD_skip = re.compile("^#.*$|^\s*$")
+UCD_skip = re.compile("^#.*$|^\\s*$")
 
 #
 #  Grapheme Break Format
-Grapheme_break_regexp = re.compile("^÷\s*((?:[0-9A-F]+\s*[÷×]\s*)+)\s*#.*$")
+Grapheme_break_regexp = re.compile("^÷\\s*((?:[0-9A-F]+\\s*[÷×]\\s*)+)\\s*#.*$")
 
 
 def parse_grapheme_break_txt():
