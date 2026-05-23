@@ -84,8 +84,16 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     Value * numOfLinearStrides = nullptr;
 
     if (isSourceKernel) {
+        const auto factor = calculateBufferScalingFactor(mKernelId);
+        mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
+
         numOfLinearStrides = mMaximumNumOfStrides;
     } else if (!mIsPartitionRoot) {
+        const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
+        const auto factor = ratio / mPartitionStrideRateScalingFactor;
+        assert (factor.numerator() > 0);
+        mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
+
         numOfLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
     }
 
@@ -109,16 +117,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         numOfLinearStrides = b.CreateZExt(b.CreateNot(exhausted), b.getSizeTy());
     }
 
-    mHasMoreInput = nullptr;
-    if (LLVM_UNLIKELY(numOfLinearStridesForConstants)) {
-        if (LLVM_LIKELY(numOfLinearStrides)) {
-            mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
-            numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
-        } else {
-            numOfLinearStrides = numOfLinearStridesForConstants;
-        }
-    }
-
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
         if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
@@ -129,14 +127,25 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 
     Value * const potentialNumOfLinearStrides = numOfLinearStrides;
 
-    if (mIsPartitionRoot) {
-        if (isSourceKernel) {
-            mPotentialSegmentLength = mMaximumNumOfStrides;
+    mHasMoreInput = nullptr;
+    if (LLVM_UNLIKELY(numOfLinearStridesForConstants)) {
+        if (LLVM_LIKELY(numOfLinearStrides)) {
+            mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
+            numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
         } else {
-            mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
-            Value * remainingLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, remainingLinearStrides);
+            numOfLinearStrides = numOfLinearStridesForConstants;
         }
+    }
+
+    if (mIsPartitionRoot) {
+//        if (isSourceKernel) {
+//            mPotentialSegmentLength = mMaximumNumOfStrides;
+//        } else {
+            mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
+            mMaximumNumOfStrides = mPotentialSegmentLength;
+//            Value * remainingLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+//            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, remainingLinearStrides);
+//        }
     } else {
         mPotentialSegmentLength = nullptr;
     }
@@ -155,6 +164,10 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
             const auto streamSet = target(e, mBufferGraph);
             ensureSufficientOutputSpace(b, port, streamSet);
         }
+    }
+
+    if (mIsPartitionRoot) {
+        allocateThreadLocalMemoryForMaximumNumOfStrides(b, potentialNumOfLinearStrides);
     }
 
 }
@@ -352,8 +365,9 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                     penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
                 }
             }
-            if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides)) {
-                inPenultimateSubSegment = b.CreateAnd(b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides), inPenultimateSubSegment);
+            if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides) && potentialNumOfLinearStrides) {
+                Value * finalPenultimateSegment = b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides);
+                inPenultimateSubSegment = b.CreateAnd(finalPenultimateSegment, inPenultimateSubSegment);
             }
         } else {
             inPenultimateSubSegment = isFinalSegment;
@@ -445,6 +459,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                      fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO, inPenultimateSubSegment, false);
 
     b.CreateBr(mKernelCheckOutputSpace);
+
     b.SetInsertPoint(mKernelCheckOutputSpace);
 
     assert (mPenultimateSubSegmentPhi);

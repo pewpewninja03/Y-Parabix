@@ -581,7 +581,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
             mProducedAtJumpPhi[port]->addIncoming(produced, mKernelInitiallyTerminatedExit);
         }
 
-        mMaximumNumOfStridesAtJumpPhi->addIncoming(b.getSize(0), mKernelInitiallyTerminatedExit);
+//        mMaximumNumOfStridesAtJumpPhi->addIncoming(b.getSize(0), mKernelInitiallyTerminatedExit);
         b.CreateBr(mKernelJumpToNextUsefulPartition);
     } else {
         #ifdef PRINT_DEBUG_MESSAGES
@@ -619,7 +619,7 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
     #endif
 
-    updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b.getSize(0));
+//    updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b.getSize(0));
 
     if (targetKernelId != firstKernelInNextPhase) {
         acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);

@@ -15,11 +15,13 @@ namespace kernel {
  * @brief addSegmentLengthSlidingWindowKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId) {
+#if 0
     assert (FirstKernel <= kernelId && kernelId <= LastKernel);
     assert ("not root?" && (FirstKernelInPartition[KernelPartitionId[kernelId]] == kernelId));
     if (mBufferGraph[kernelId].controlsSlidingWindow()) {
         mTarget->addInternalScalar(b.getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -56,6 +58,7 @@ Rational PipelineCompiler::calculateBufferScalingFactor(const unsigned kernelId)
  * @brief initializeInitialSlidingWindowSegmentLengths
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor) {
+#if 0
     if (LLVM_UNLIKELY(CheckAssertions())) {
         b.CreateAssert(segmentLengthScalingFactor, "segmentLengthScalingFactor cannot be zero %s", mCurrentKernelName);
     }
@@ -70,6 +73,7 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilde
             assert (!b.hasScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f)));
         }
     }
+#endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -87,6 +91,7 @@ void PipelineCompiler::initializeFlowControl(KernelBuilder & b) {
  * @brief detemineMaximumNumberOfStrides
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
+#if 0
     // The partition root kernel determines the amount of data processed based on the partition input.
     // During normal execution, it always performs max num of strides worth of work. However, if this
     // segment is the last segment, mPartitionSegmentLength is artificially raised to a value of ONE
@@ -134,7 +139,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         assert (factor.numerator() > 0);
         mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
     }
-
+#endif
 }
 
 
@@ -142,6 +147,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
  * @brief updateNextSlidingWindowSize
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateNextSlidingWindowSize(KernelBuilder & b, Value * const maxNumOfStrides, Value * const potentialNumOfStrides) {
+#if 0
     assert (mIsPartitionRoot);
     const auto & bn = mBufferGraph[mKernelId];
     if (bn.controlsSlidingWindow()) {
@@ -155,7 +161,8 @@ void PipelineCompiler::updateNextSlidingWindowSize(KernelBuilder & b, Value * co
         Value * const higher = b.CreateICmpUGT(potentialNumOfStrides, maxNumOfStrides);
         Value * const nextMaxNumOfStrides = b.CreateSelect(higher, A, D);
         b.setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId), nextMaxNumOfStrides);
-    }
+    }    
+#endif
 }
 
 } // end of namespace
