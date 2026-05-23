@@ -1429,7 +1429,6 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     Value * initialItemCount = nullptr;
     Value * sourceItemCount = nullptr;
-    Value * minimumItemCount = MAX_INT;
 
     const auto port = partialSumPort.Port;
 
@@ -1437,13 +1436,11 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
         initialItemCount = mCurrentProcessedItemCountPhi[port];
         Value * const accessible = getAccessibleInputItems(b, partialSumPort);
         sourceItemCount = b.CreateAdd(initialItemCount, accessible);
-        minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
         Value * const writable = getWritableOutputItems(b, partialSumPort);
         sourceItemCount = b.CreateAdd(initialItemCount, writable);
-        minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
     }
 
     const auto ref = getReference(port);

@@ -619,8 +619,6 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
     debugPrint(b, "** " + makeKernelName(mKernelId) + ".jumping = %" PRIu64, mSegNo);
     #endif
 
-//    updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b.getSize(0));
-
     if (targetKernelId != firstKernelInNextPhase) {
         acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);
         phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, jumpPartitionId, false);

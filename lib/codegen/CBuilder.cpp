@@ -1603,8 +1603,6 @@ StoreInst * CBuilder::CreateStore(Value * Val, Value * Ptr, bool isVolatile) {
     #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
     Val = IRBuilder<>::CreateBitCast(Val, Ptr->getType()->getPointerElementType());
     #endif
-    auto & DL = getModule()->getDataLayout();
-    const auto len = getTypeSize(DL, Val->getType());
     return IRBuilder<>::CreateStore(Val, Ptr, isVolatile);
 }
 
@@ -1663,8 +1661,6 @@ StoreInst * CBuilder::CreateAlignedStore(Value * Val, Value * Ptr, const unsigne
         Value * alignmentOffset = CreateURem(CreatePtrToInt(Ptr, intPtrTy), align);
         CreateAssertZero(alignmentOffset, "CreateAlignedStore: pointer (%" PRIxsz ") is misaligned (%" PRIdsz ")", Ptr, align);
     }
-    auto & DL = getModule()->getDataLayout();
-    const auto len = getTypeSize(DL, Val->getType());
     StoreInst * SI = CreateStore(Val, Ptr, isVolatile);
     SI->setAlignment(AlignType{Align});
     return SI;
@@ -1733,8 +1729,6 @@ CallInst * CBuilder::CreateMemCpy(Value *Dst, Value *Src, Value *Size, const uns
         Value * const nonOverlapping = CreateOr(srcEndsBeforeDst, dstEndsBeforeSrc);
         CreateAssert(nonOverlapping, "CreateMemCpy: overlapping ranges is undefined");
     }
-    auto & DL = getModule()->getDataLayout();
-    Value * const intDst = CreatePtrToInt(Dst, Size->getType());
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
     return IRBuilder<>::CreateMemCpy(Dst, AlignType{Align}, Src, AlignType{Align}, Size, isVolatile, TBAATag, TBAAStructTag, ScopeTag, NoAliasTag);
 #else

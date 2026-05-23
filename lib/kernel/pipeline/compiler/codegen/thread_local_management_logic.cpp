@@ -204,13 +204,11 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     #endif
 
     Value * const sz_ZERO = b.getSize(0);
-    Value * const sz_ONE = b.getSize(1);
 
     #ifndef NDEBUG
     flat_set<unsigned> visited;
     visited.emplace(mCurrentPartitionId);
     #endif
-
 
     const auto bw = b.getBitBlockWidth();
 
@@ -301,9 +299,11 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
 
     mThreadLocalStreamSetBaseAddress = b.CreateAlignedLoad(int8PtrTy, threadLocalPtr, PtrTyABIAlignment);
 
+    Value * const threadLocalMemorySizePtr = b.getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES).first;
+
     BasicBlock * const expandThreadLocalMemory = b.CreateBasicBlock("expandThreadLocalMemory", allocateThreadLocalExit);
     BasicBlock * const afterExpansion = b.CreateBasicBlock("afterExpansion", allocateThreadLocalExit);
-    Value * currentMem = b.CreateAlignedLoad(b.getSizeTy(), mThreadLocalMemorySizePtr, SizeTyABIAlignment);
+    Value * currentMem = b.CreateAlignedLoad(b.getSizeTy(), threadLocalMemorySizePtr, SizeTyABIAlignment);
     Value * const needsExpansion = b.CreateICmpUGT(memoryForSegment, currentMem);
     b.CreateUnlikelyCondBr(needsExpansion, expandThreadLocalMemory, afterExpansion);
 
@@ -311,7 +311,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     b.CreateFree(mThreadLocalStreamSetBaseAddress);
     // At minimum, we want to double the required space to minimize future reallocs
     Value * const newSize = b.CreateRoundUpRational(b.CreateRoundUp(memoryForSegment, currentMem), pageSize);
-    b.CreateAlignedStore(newSize, mThreadLocalMemorySizePtr, SizeTyABIAlignment);
+    b.CreateAlignedStore(newSize, threadLocalMemorySizePtr, SizeTyABIAlignment);
     Value * const newThreadLocalBaseAddress = b.CreateAlignedMalloc(newSize, pageSize);
     b.CreateAlignedStore(newThreadLocalBaseAddress, threadLocalPtr, PtrTyABIAlignment);
     b.CreateBr(afterExpansion);
@@ -406,7 +406,7 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
                 Rational bytesPerItem{typeWidth, blockWidth};
                 offsetBytes = b.CreateMulRational(produced, bytesPerItem);
             } else {
-                // NOTE: these multiplications effectively compute the floor of each equation and are not
+                // NOTE: these multiplications compute the floor of each equation and are not
                 // equivalent to the fieldWidth=1 calculation despite appearing so.
                 Rational fieldsPerBlock{fieldWidth, blockWidth};
                 Value * const offsetVecOffset = b.CreateMulRational(produced, fieldsPerBlock);
@@ -422,6 +422,5 @@ void PipelineCompiler::remapThreadLocalBufferMemory(KernelBuilder & b) {
         }
     }
 }
-
 
 }

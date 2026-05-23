@@ -256,15 +256,6 @@ public:
     void writeInitiallyTerminatedPartitionExit(KernelBuilder & b);
     void checkForPartitionExit(KernelBuilder & b);
 
-// flow control functions
-
-    void addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId);
-    Rational calculateBufferScalingFactor(const unsigned kernelId) const;
-    void initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor);
-    void initializeFlowControl(KernelBuilder & b);
-    void detemineMaximumNumberOfStrides(KernelBuilder & b);
-    void updateNextSlidingWindowSize(KernelBuilder & b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
-
 // inter-kernel codegen functions
 
     void readAvailableItemCounts(KernelBuilder & b);
@@ -405,6 +396,8 @@ public:
     void getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & b, const Vec<Value *> & baseAddresses, Value * const zeroExtendAddress, Vec<Value *> & zeroExtendedVirtualBaseAddress) const;
 
     void addZeroInputStructProperties(KernelBuilder & b) const;
+
+    Rational calculateBufferScalingFactor(const unsigned kernelId) const;
 
 // repeating streamset functions
 
@@ -706,7 +699,6 @@ protected:
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
     Value *                                     mPipelineProgress = nullptr;
-    Value *                                     mThreadLocalMemorySizePtr = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
     BasicBlock *                                mKernelCheckOutputSpace = nullptr;

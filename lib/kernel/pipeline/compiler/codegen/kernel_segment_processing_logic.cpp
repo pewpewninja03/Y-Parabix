@@ -110,7 +110,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     readProducedItemCounts(b);
     readAvailableItemCounts(b);
     recordUnconsumedItemCounts(b);
-    // detemineMaximumNumberOfStrides(b);
     if (!mIsPartitionRoot) {
         remapThreadLocalBufferMemory(b);
     }
