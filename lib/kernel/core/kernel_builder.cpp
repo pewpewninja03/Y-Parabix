@@ -127,7 +127,6 @@ void KernelBuilder::setTerminationSignal(Value * const value) {
 }
 
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    auto & dl = getModule()->getDataLayout();
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
     Module * const m = getModule();
@@ -145,7 +144,6 @@ Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * cons
 }
 
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    auto & dl = getModule()->getDataLayout();
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
     Module * const m = getModule();
@@ -185,7 +183,7 @@ Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const 
         Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(processed, bw);
-        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(entry.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
     }
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
@@ -220,7 +218,7 @@ Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const s
         Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(processed, bw);
-        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(entry.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
     }
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
@@ -292,7 +290,7 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
         Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
-        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
     }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
@@ -327,7 +325,7 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
         Value * const sanityCheck = CreateICmpULE(index, count);
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
-        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(entry.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
     }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
@@ -367,7 +365,7 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
         CreateAssert(sanityCheck, "stream index must be explicit");
         Value * startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(binding.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     const auto fw = buf->getFieldWidth();
@@ -402,7 +400,7 @@ Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Valu
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        Value * const end = COMPILER->getStreamSetAssertionInputItemCapacity(binding.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
 
@@ -453,7 +451,7 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * absol
         CreateAssert(sanityCheck, "stream index must be explicit");
         Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(binding.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
@@ -476,7 +474,7 @@ Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const
         CreateAssert(sanityCheck, "stream index exceeds stream set count");
         Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
         Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
-        Value * const end = COMPILER->getStreamSetAssertionOutputItemCapacity(binding.Index);
+        Value * const end = buf->getCapacity(*this);
         buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
     }
     ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
@@ -506,9 +504,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
     const auto port = COMPILER->getStreamPort(name);
     if (LLVM_LIKELY(port.Type == PortType::Output)) {
         StreamSetBuffer * const buffer = COMPILER->getOutputStreamSetBuffer(port.Number);
-        if (LLVM_LIKELY(isa<ManagedDynamicBuffer>(buffer))) {
-
-            auto managedBuffer = cast<ManagedDynamicBuffer>(buffer);
+        if (LLVM_LIKELY(buffer->isDynamic())) {
 
             Module * const m = getModule();
             assert ("unspecified module" && m);
@@ -559,7 +555,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 FunctionType * funcTy = FunctionType::get(getVoidTy(), paramTypes, false);
 
                 const auto ip = saveIP();
-                auto currentSharedHandle = managedBuffer->getHandle();
+                auto currentSharedHandle = buffer->getHandle();
                 f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
                 f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
 
@@ -578,7 +574,7 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 };
 
                 Value * const handle = CreatePointerCast(nextArg(), handlePtrTy);
-                managedBuffer->setHandle(handle);
+                buffer->setHandle(handle);
                 handle->setName("handle");
                 Value * const produced = nextArg();
                 produced->setName("produced");
@@ -601,31 +597,28 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
 
                 ConstantInt * const BLOCK_WIDTH = getSize(getBitBlockWidth());
 
-                if (buffer->isLinear()) {
-                    Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
-                    Value * const capacityChunks = CreateUDiv(buffer->getCapacity(*this), BLOCK_WIDTH);
-                    Value * const needsExpansion = CreateICmpUGT(requiredChunks, capacityChunks);
-                    CreateUnlikelyCondBr(needsExpansion, expandInternalBuffer, exit);
-                } else {
-                    Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
-                    Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
-                    Value * const capacityChunks = CreateUDiv(buffer->getInternalCapacity(*this), BLOCK_WIDTH);
-                    CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, CreateAdd(capacityChunks, consumedChunks)), expandInternalBuffer, exit);
-                }
+
+                Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
+                Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
+
+                Value * const currentCapacity = buffer->getInternalCapacity(*this);
+                Value * const capacityChunks = CreateExactUDiv(currentCapacity, BLOCK_WIDTH);
+                Value * const newCapacityChunks = CreateAdd(consumedChunks, capacityChunks);
+                CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, newCapacityChunks), expandInternalBuffer, exit);
 
                 SetInsertPoint(expandInternalBuffer);
-                managedBuffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
+                buffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
                 CreateBr(exit);
 
                 SetInsertPoint(exit);
                 CreateRetVoid();
 
                 restoreIP(ip);
-                managedBuffer->setHandle(currentSharedHandle);
+                buffer->setHandle(currentSharedHandle);
             }
 
             SmallVector<Value *, 7> args(traceDynamicBuffers ? 7 : 4);
-            args[0] = CreatePointerCast(managedBuffer->getHandle(), voidPtrTy);
+            args[0] = CreatePointerCast(buffer->getHandle(), voidPtrTy);
             args[1] = producedItems;
             args[2] = consumedItems;
             args[3] = capacity;
@@ -634,7 +627,6 @@ void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
                 args[5] = COMPILER->getPipelineHandle();
                 args[6] = getSize(port.Number);
             }
-
             CreateCall(f, args);
             return;
         }
@@ -1110,35 +1102,5 @@ std::string KernelBuilder::getKernelName() const noexcept {
 }
 
 
-#ifndef NDEBUG
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isFromCurrentFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-bool isFromCurrentFunction(const KernelBuilder & b, const Value * const value, const bool allowNull) {
-    if (value == nullptr) {
-        assert ("value is null?" && allowNull);
-        return allowNull;
-    }
-    if (LLVM_UNLIKELY(&b.getContext() != &value->getContext())) {
-        assert (!"not from same context?");
-        return false;
-    }
-    BasicBlock * const ip = b.GetInsertBlock(); assert (ip);
-    if (isa<Constant>(value)) {
-        return true;
-    }
-    const Function * const builderFunction = ip->getParent();
-    assert (builderFunction);
-    const Function * function = builderFunction;
-    if (isa<Argument>(value)) {
-        function = cast<Argument>(value)->getParent();
-    } else if (isa<Instruction>(value)) {
-        function = cast<Instruction>(value)->getParent()->getParent();
-    }
-    assert (function);
-    assert ("not from same function?" && (builderFunction == function));
-    return (builderFunction == function);
-}
-#endif
 
 }

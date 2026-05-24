@@ -837,9 +837,10 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
 
                 Value * addr = b.CreateAllocaAtEntryPoint(op->getType());
                 b.CreateStore(op, addr);
+                Value * adjAddr = b.CreateGEP(op->getType(), addr, b.CreateNeg(mIllustratorStrideNum));
 
                 captureStreamData(b, kernelName, streamName, getHandle(),
-                                  mIllustratorStrideNum, op->getType(), MemoryOrdering::RowMajor, addr, from, to);
+                                  mIllustratorStrideNum, op->getType(), MemoryOrdering::RowMajor, adjAddr, from, to);
             }
             return;
         } else if (const IntrinsicCall * const call = dyn_cast<IntrinsicCall>(stmt)) {

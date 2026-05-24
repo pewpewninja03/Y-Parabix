@@ -26,6 +26,7 @@ public:
         ExternalBuffer
         , RepeatingBuffer
         , ManagedDynamicBuffer
+        , FdBackedDynamicBuffer
     };
 
     using Rational = boost::rational<size_t>;
@@ -67,7 +68,7 @@ public:
     bool isSingleElementStreamSet() const;
 
     bool isDynamic() const {
-        return (mBufferKind == BufferKind::ManagedDynamicBuffer);
+        return (mBufferKind == BufferKind::ManagedDynamicBuffer || mBufferKind == BufferKind::FdBackedDynamicBuffer);
     }
 
     virtual ~StreamSetBuffer() = 0;
@@ -132,7 +133,7 @@ public:
 
     static void linkFunctions(kernel::KernelBuilder & b); // temporary function
 
-    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
+    virtual void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const;
 
 protected:
 
@@ -234,16 +235,8 @@ public:
         LinearMallocedAddress = 0,
         LinearInternalCapacity = 1,
         LinearBaseAddress = 2,
-        LinearEffectiveCapacity = 3,
-        PendingDeletionStruct = 4,
-        PendingDeletionAdditionalStructPointer = 5
-    };
-
-    enum PendingDeletionField {
-        PendingDeletionAddress = 0,
-        PendingDeletionCapacity = 1,
-        PendingDeletionConsumed = 2,
-        PendingDeletionNextLink = 3,
+        PendingDeletionStruct = 3,
+        PendingDeletionAdditionalStructPointer = 4
     };
 
     static inline bool classof(const StreamSetBuffer * b) {
@@ -278,9 +271,54 @@ public:
 
     llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
 
-    void updateLocalHandleValues(kernel::KernelBuilder & b, llvm::Value * localHandle) const;
+    void assertAccessIsWithinStreamSetMemory(kernel::KernelBuilder & b, llvm::Constant * name, llvm::Value * ptr, const size_t size, llvm::Value * const start, llvm::Value * const end) const override;
 
 };
+
+class FdBackedDynamicBuffer final : public InternalBuffer {
+public:
+
+    enum FDDB_Field {
+        LinearMallocedAddress = 0,
+        LinearCapacity = 1,
+        PendingDeletionStruct = 2,
+        Fd = 3,
+    };
+
+    static inline bool classof(const StreamSetBuffer * b) {
+        return b->getBufferKind() == BufferKind::FdBackedDynamicBuffer;
+    }
+
+    FdBackedDynamicBuffer(const unsigned id, kernel::KernelBuilder & b, llvm::Type * const type, const unsigned AddressSpace);
+
+    llvm::StructType * getHandleType(kernel::KernelBuilder & b) const override;
+
+    void allocateBuffer(kernel::KernelBuilder & b, llvm::Value * const capacityMultiplier, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) override;
+
+    void releaseBuffer(kernel::KernelBuilder & b) const override;
+
+    llvm::Value * getMallocAddress(kernel::KernelBuilder & b) const override;
+
+    llvm::Value * getCapacity(kernel::KernelBuilder & b) const override;
+
+    llvm::Value * getInternalCapacity(kernel::KernelBuilder & b) const override;
+
+    void setCapacity(kernel::KernelBuilder & b, llvm::Value * capacity) const override;
+
+    llvm::Value * modByCapacity(kernel::KernelBuilder & b, llvm::Value * const offset) const override;
+
+    llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
+
+    llvm::Value * getBaseAddress(kernel::KernelBuilder & b) const override;
+
+    void setBaseAddress(kernel::KernelBuilder & b, llvm::Value * addr) const override;
+
+    void freePendingDeletions(kernel::KernelBuilder & b, llvm::Value * consumed) const override;
+
+    llvm::Value * reserveCapacity(kernel::KernelBuilder & b, llvm::Value * produced, llvm::Value * consumed, llvm::Value * required, llvm::Value * reportCallback, llvm::Value * pipelineHandle, llvm::Value * portNum) const override;
+
+};
+
 
 class RepeatingBuffer final : public InternalBuffer {
 public:

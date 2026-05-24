@@ -1,5 +1,7 @@
 #include "../pipeline_compiler.hpp"
 
+#define ALLOW_REALLOC
+
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -23,36 +25,20 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
         return b.CreatePointerCast(f0, voidPtrTy);
     }
 
-    bool noManagedBuffer = true;
-
-    GlobalValue::LinkageTypes linkage = Function::InternalLinkage;
-
-    for (auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-        const BufferPort & bp = mBufferGraph[output];
-        if (LLVM_UNLIKELY(bp.isManaged())) {
-            assert (getKernel(kernelId)->getKernelFlags() & Kernel::KernelFlags::HasInternallyManagedStreamSet);
-            linkage = Function::ExternalLinkage;
-            noManagedBuffer = false;
-        }
+    for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
-            noManagedBuffer = false;
+        if (bn.canTrackBufferExpansionData()) {
+            goto generate_function;
         }
     }
+    return nullptr;
 
-    if (noManagedBuffer) {
-        return nullptr;
-    }
+generate_function:
 
     Value * const initialSharedState = getHandle();
-    Value * const initialThreadLocal = getThreadLocalHandle();
 
     auto ip = b.saveIP();
-
-    ScalarValueMap originalScalarFieldMap(mScalarFieldMap);
-    ScalarAliasMap originalScalarFieldMapScalarAliasMap(mScalarAliasMap);
-    BindingMap originalBindingMap(mBindingMap);
 
     auto & DL = m->getDataLayout();
 
@@ -77,7 +63,7 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
     FunctionType * funcTy = FunctionType::get(b.getVoidTy(), paramTypes, false);
 
-    Function * const f = Function::Create(funcTy, linkage, name.str(), m);
+    Function * const f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
         f->setHasUWTable();
@@ -89,11 +75,12 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
     LLVMContext & C = m->getContext();
     BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
     const auto outputPorts = out_degree(kernelId, mBufferGraph);
-    SmallVector<BasicBlock *, 8> outputPortHandler(outputPorts);
+    SmallVector<BasicBlock *, 8> outputPortHandler(outputPorts + 1);
     for (unsigned i = 0; i < outputPorts; ++i) {
         outputPortHandler[i] = BasicBlock::Create(C, "port" + std::to_string(i), f);
     }
     BasicBlock * const exit = BasicBlock::Create(C, "exit", f);
+    outputPortHandler[outputPorts] = exit;
 
     b.SetInsertPoint(entry);
 
@@ -116,12 +103,9 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
     newCapacity->setName("capacity");
     assert (arg == f->arg_end());
 
-    setHandle(handle);
-    setThreadLocalHandle(nullptr);
-    initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
-
+    const auto ts = b.getTypeSize(DL, mTarget->getSharedStateType());
     const auto type = isDataParallel(kernelId) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-    Value * const syncLockPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
+    Value * syncLockPtr = getScalarFieldPtr(b, handle, ScalarType::Internal, makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]).first;
     Value * const currentSegNo = b.CreateAlignedLoad(sizeTy, syncLockPtr, sizeTyAlign);
 
     if (LLVM_LIKELY(b.supportsIndirectBr())) {
@@ -135,11 +119,16 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
         Constant * const jumpAddrTable = ConstantArray::get(jumpAddrTableTy, jumpAddr);
 
         GlobalVariable * const jumpTargetArray =
-            new GlobalVariable(*m, jumpAddrTableTy, true, linkage, jumpAddrTable);
+            new GlobalVariable(*m, jumpAddrTableTy, true, Function::InternalLinkage, jumpAddrTable);
 
         FixedArray<Value *, 2> jumpIndex;
         jumpIndex[0] = b.getSize(0);
         jumpIndex[1] = outputPortNum;
+
+        if (LLVM_UNLIKELY(mCheckAssertions)) {
+            Value * const valid = b.CreateICmpULT(outputPortNum, b.getSize(outputPorts));
+            b.CreateAssert(valid, "Unhandled port number %" PRIu64 " given to %s", outputPortNum, b.GetString(name.str()));
+        }
 
         Value * const targetPtr = b.CreateGEP(jumpAddrTableTy, jumpTargetArray, jumpIndex);
         Value * const target = b.CreateAlignedLoad(i8PtrTy, targetPtr, int8PtrTyAlign);
@@ -154,10 +143,9 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
         SmallVector<BasicBlock *, 8> condCheckBlock(outputPorts + 1);
 
         condCheckBlock[0] = entry;
-        for (unsigned i = 1; i < outputPorts; ++i) {
+        for (unsigned i = 1; i <= outputPorts; ++i) {
             condCheckBlock[i] = BasicBlock::Create(C, "", f, outputPortHandler[i]);
         }
-        condCheckBlock[outputPorts] = b.CreateBasicBlock("", exit);
 
         for (unsigned i = 0; i < outputPorts; ++i) {
 
@@ -171,7 +159,10 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
         b.CreateUnreachable();
     }
 
+    ConstantInt * sz_ZERO = b.getSize(0);
     ConstantInt * sz_ONE = b.getSize(1);
+    ConstantInt * sz_FIFTEEN = b.getSize(15);
+    ConstantInt * sz_SIXTEEN = b.getSize(16);
 
     ConstantInt * i32_ZERO = b.getInt32(0);
     ConstantInt * i32_ONE = b.getInt32(1);
@@ -185,11 +176,16 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
         const auto streamSet = target(output, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+        if (bn.canTrackBufferExpansionData()) {
 
             const auto prefix = makeBufferName(kernelId, bp.Port);
             Value * traceData; Type * traceDataTy;
-            std::tie(traceData, traceDataTy) = b.getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+            std::tie(traceData, traceDataTy) = getScalarFieldPtr(b, handle, ScalarType::Internal, prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+
+
+            assert (traceDataTy->getStructNumElements() == 2);
+            assert (traceDataTy->getStructElementType(0)->isPointerTy());
+            assert (traceDataTy->getStructElementType(1)->isIntegerTy());
 
             const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
             Type * const entryTy = ArrayType::get(sizeTy, numOfConsumers + 3);
@@ -199,7 +195,10 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
             indices[1] = i32_ZERO;
 
             Value * const traceLogArrayField = b.CreateGEP(traceDataTy, traceData, indices);
-            Value * entryArray = b.CreateAlignedLoad(entryTy->getPointerTo(), traceLogArrayField, PtrTyABIAlignment);
+            PointerType * const entryPtrTy = entryTy->getPointerTo();
+            assert (traceDataTy->getStructElementType(0) == entryPtrTy);
+
+            Value * const entryArray = b.CreateAlignedLoad(entryPtrTy, traceLogArrayField, PtrTyABIAlignment);
 
             indices[1] = i32_ONE;
 
@@ -207,43 +206,67 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
             Value * const traceIndex = b.CreateAlignedLoad(sizeTy, traceLogCountField, SizeTyABIAlignment);
             Value * const traceCount = b.CreateAdd(traceIndex, sz_ONE);
 
-            entryArray = b.CreateRealloc(entryTy, entryArray, traceCount);
-            b.CreateAlignedStore(entryArray, traceLogArrayField, PtrTyABIAlignment);
+
+            BasicBlock * const needsRealloc = b.CreateBasicBlock("", outputPortHandler[bp.Port.Number + 1]);
+            BasicBlock * const afterRealloc = b.CreateBasicBlock("", outputPortHandler[bp.Port.Number + 1]);
+
+            b.CreateCondBr(b.CreateICmpEQ(b.CreateAnd(traceIndex, sz_FIFTEEN), sz_ZERO), needsRealloc, afterRealloc);
+
+            b.SetInsertPoint(needsRealloc);
+            Value * const newTraceSize = b.CreateRoundUp(traceCount, sz_SIXTEEN);
+            const auto traceDataTyAlign = DL.getABITypeAlign(traceDataTy).value(); assert (traceDataTyAlign > 0);
+            const auto traceDataTySize = b.getTypeSize(DL, traceDataTy); assert (traceDataTySize > 0);
+
+            // b.CreateRealloc()
+
+
+            Constant * const sz_TraceDataTySize = b.getSize(traceDataTySize);
+            Value * const newTraceSizeBytes = b.CreateMul(newTraceSize, sz_TraceDataTySize);
+            Value * newEntryArray = b.CreateAlignedMalloc(newTraceSizeBytes, traceDataTyAlign);
+            b.CreateMemCpy(newEntryArray, entryArray, b.CreateMul(traceIndex, sz_TraceDataTySize), traceDataTyAlign);
+            newEntryArray = b.CreatePointerCast(newEntryArray, entryPtrTy);
+            b.CreateAlignedStore(newEntryArray, traceLogArrayField, PtrTyABIAlignment);
+            b.CreateFree(entryArray);
+
+            b.CreateBr(afterRealloc);
+
+            b.SetInsertPoint(afterRealloc);
+            PHINode * const entryArrayPhi = b.CreatePHI(entryPtrTy, 2);
+            entryArrayPhi->addIncoming(entryArray, outputPortHandler[bp.Port.Number]);
+            entryArrayPhi->addIncoming(newEntryArray, needsRealloc);
             b.CreateAlignedStore(traceCount, traceLogCountField, SizeTyABIAlignment);
 
-            entryArray = b.CreateRealloc(entryTy, entryArray, traceCount);
-            b.CreateAlignedStore(entryArray, traceLogArrayField, PtrTyABIAlignment);
-            b.CreateAlignedStore(traceCount, traceLogCountField, SizeTyABIAlignment);
 
             indices[0] = traceIndex;
 
             // segment num  0
             indices[1] = i32_ZERO;
-            b.CreateAlignedStore(currentSegNo, b.CreateGEP(entryTy, entryArray, indices), SizeTyABIAlignment);
+            b.CreateAlignedStore(currentSegNo, b.CreateGEP(entryTy, entryArrayPhi, indices), SizeTyABIAlignment);
             // new capacity 1
             indices[1] = i32_ONE;
-            b.CreateAlignedStore(newCapacity, b.CreateGEP(entryTy, entryArray, indices), SizeTyABIAlignment);
+            b.CreateAlignedStore(newCapacity, b.CreateGEP(entryTy, entryArrayPhi, indices), SizeTyABIAlignment);
             // produced item count 2
             indices[1] = i32_TWO;
-            b.CreateAlignedStore(produced, b.CreateGEP(entryTy, entryArray, indices), SizeTyABIAlignment);
+            b.CreateAlignedStore(produced, b.CreateGEP(entryTy, entryArrayPhi, indices), SizeTyABIAlignment);
 
             // consumer processed item count [3,n)
             const auto id = getTruncatedStreamSetSourceId(streamSet);
-            assert (out_degree(id, mConsumerGraph) > 0);
-            Value * consumerDataPtr; Type * consumerTy;
-            std::tie(consumerDataPtr, consumerTy) = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
+            if (LLVM_LIKELY(out_degree(id, mConsumerGraph) > 0)) {
+                Value * consumerDataPtr; Type * consumerTy;
+                std::tie(consumerDataPtr, consumerTy) = getScalarFieldPtr(b, handle, ScalarType::Internal, CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
 
-            indices[0] = i32_ZERO;
-            indices[1] = i32_ONE;
+                indices[0] = i32_ZERO;
+                indices[1] = i32_ONE;
 
-            Value * const processedPtr = b.CreateGEP(consumerTy, consumerDataPtr, indices);
+                Value * const processedPtr = b.CreateGEP(consumerTy, consumerDataPtr, indices);
 
-            indices[0] = traceIndex;
-            indices[1] = i32_THREE;
+                indices[0] = traceIndex;
+                indices[1] = i32_THREE;
 
-            Value * const logPtr = b.CreateGEP(entryTy, entryArray, indices);
-            Constant * const length = b.getSize(sizeTyWidth * numOfConsumers);
-            b.CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+                Value * const logPtr = b.CreateGEP(entryTy, entryArrayPhi, indices);
+                Constant * const length = b.getSize(sizeTyWidth * numOfConsumers);
+                b.CreateMemCpy(logPtr, processedPtr, length, sizeTyWidth);
+            }
 
             // TODO: if this was a maanged output, ideally we'd let the outer pipeline report it but that'd require us
             // to pass in the outer function pointer which might not have the same output portnum as the kernel does.
@@ -263,13 +286,6 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
     b.CreateRetVoid();
 
     b.restoreIP(ip);
-
-    setHandle(initialSharedState);
-    setThreadLocalHandle(initialThreadLocal);
-
-    mScalarFieldMap = originalScalarFieldMap;
-    mScalarAliasMap = originalScalarFieldMapScalarAliasMap;
-    mBindingMap = originalBindingMap;
 
     return b.CreatePointerCast(f, voidPtrTy);
 }
@@ -388,22 +404,25 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
         itemCountArgs[0] = STDERR;
         itemCountArgs[1] = itemCountFormat;
 
-        Constant * const ZERO = b.getInt32(0);
-        Constant * const ONE = b.getInt32(1);
+        Constant * const i32_ZERO = b.getInt32(0);
+        Constant * const i32_ONE = b.getInt32(1);
         Constant * const TWO = b.getInt32(2);
 
-        Constant * const SZ_ZERO = b.getSize(0);
-        Constant * const SZ_ONE = b.getSize(1);
+        Constant * const sz_ZERO = b.getSize(0);
+        Constant * const sz_ONE = b.getSize(1);
 
         IntegerType * sizeTy = b.getSizeTy();
+
+        auto & DL = b.getModule()->getDataLayout();
+        const auto ts = b.getTypeSize(DL, mTarget->getSharedStateType());
 
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
 
             for (const auto output : make_iterator_range(out_edges(i, mBufferGraph))) {
                 const BufferPort & br = mBufferGraph[output];
-                const auto buffer = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[buffer];
-                if (br.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.canTrackBufferExpansionData()) {
 
                     //  # KERNEL                      PORT                      BUFFER         SEG #      ITEM CAPACITY
 
@@ -413,20 +432,26 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
                     expansionArgs[4] = b.getInt32(outputPort);
                     const Binding & binding = br.Binding;
                     expansionArgs[5] = b.GetString(binding.getName());
-                    expansionArgs[6] = b.getInt32(buffer);
+                    expansionArgs[6] = b.getInt32(streamSet);
 
                     const auto prefix = makeBufferName(i, br.Port);
 
+                    auto ref = getScalarFieldPtr(b, getHandle(), ScalarType::Internal, prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                     Value * traceData; Type * traceTy;
                     std::tie(traceData, traceTy) = b.getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
+                    FixedArray<Value *, 2> indices;
+                    indices[0] = i32_ZERO;
+                    indices[1] = i32_ZERO;
 
-                    Value * const traceArrayField = b.CreateGEP(traceTy, traceData, {ZERO, ZERO});
-                    const auto numOfConsumers = std::max(out_degree(buffer, mConsumerGraph), 1UL);
+                    Value * const traceArrayField = b.CreateGEP(traceTy, traceData, indices);
+                    const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
 
                     Type * const arrayTy = ArrayType::get(sizeTy, numOfConsumers + 3);
                     Value * const entryArray = b.CreateAlignedLoad(arrayTy->getPointerTo(), traceArrayField, PtrTyABIAlignment);
 
-                    Value * const traceCountField = b.CreateGEP(traceTy, traceData, {ZERO, ONE});
+                    indices[1] = i32_ONE;
+
+                    Value * const traceCountField = b.CreateGEP(traceTy, traceData, indices);
                     Value * const traceCount = b.CreateAlignedLoad(sizeTy, traceCountField, SizeTyABIAlignment);
 
                     BasicBlock * const outputEntry = b.GetInsertBlock();
@@ -441,20 +466,20 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
 
                     b.SetInsertPoint(outputLoop);
                     PHINode * const index = b.CreatePHI(b.getSizeTy(), 2);
-                    index->addIncoming(SZ_ZERO, outputEntry);
+                    index->addIncoming(sz_ZERO, outputEntry);
 
-                    Value * const isFirst = b.CreateICmpEQ(index, SZ_ZERO);
-                    Value * const nextIndex = b.CreateAdd(index, SZ_ONE);
+                    Value * const isFirst = b.CreateICmpEQ(index, sz_ZERO);
+                    Value * const nextIndex = b.CreateAdd(index, sz_ONE);
                     Value * const isLast = b.CreateICmpEQ(nextIndex, traceCount);
-                    Value * const onlyEntry = b.CreateICmpEQ(traceCount, SZ_ONE);
+                    Value * const onlyEntry = b.CreateICmpEQ(traceCount, sz_ONE);
 
                     Value * const openingBar = b.CreateSelect(onlyEntry, doubleBar, singleBar);
 
-                    Value * const segmentNumField = b.CreateGEP(arrayTy, entryArray, {index, ZERO});
+                    Value * const segmentNumField = b.CreateGEP(arrayTy, entryArray, {index, i32_ZERO});
                     Value * const segmentNum = b.CreateAlignedLoad(sizeTy, segmentNumField, SizeTyABIAlignment);
                     expansionArgs[7] = segmentNum;
 
-                    Value * const newBufferSizeField = b.CreateGEP(arrayTy, entryArray, {index, ONE});
+                    Value * const newBufferSizeField = b.CreateGEP(arrayTy, entryArray, {index, i32_ONE});
                     Value * const newBufferSize = b.CreateAlignedLoad(sizeTy, newBufferSizeField, SizeTyABIAlignment);
                     expansionArgs[8] = newBufferSize;
 
@@ -484,7 +509,7 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
 
                     b.CreateCall(fTy, Dprintf, itemCountArgs);
                     itemCountArgs[4] = b.getInt8('I');
-                    for (const auto e : make_iterator_range(out_edges(buffer, mConsumerGraph))) {
+                    for (const auto e : make_iterator_range(out_edges(streamSet, mConsumerGraph))) {
                         const ConsumerEdge & c = mConsumerGraph[e];
                         const auto consumer = target(e, mConsumerGraph);
                         if (LLVM_UNLIKELY(consumer == PipelineOutput)) {

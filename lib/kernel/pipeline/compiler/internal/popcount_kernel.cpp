@@ -78,7 +78,9 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         pthreadSelfFn = b.LinkFunction("pthread_self", funTy, (void*)&pthread_self);
     }
 
+    #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
     Value * const _pThreadNum = b.CreateCall(pthreadSelfFn);
+    #endif
 
     auto debugPrint = [&](const StringRef label, auto &&... params) {
         std::string tmp;
@@ -139,6 +141,18 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
         #endif
     }
 
+//    Value * inputMaskArray = nullptr;
+
+//    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnablePipelineAsserts))) {
+//        Type * const partSumVecTy = FixedVectorType::get(b.getIntNTy(sizeWidth), b.getBitBlockWidth() / sizeWidth);
+//        Value * const allOnes = ConstantVector::getAllOnesValue(partSumVecTy);
+//        Value * const allZeros = ConstantVector::getNullValue(partSumVecTy);
+
+
+
+
+//    }
+
     BasicBlock * const entry = b.GetInsertBlock();
     BasicBlock * const popCountLoop = b.CreateBasicBlock("Loop");
     BasicBlock * const popCountExit = b.CreateBasicBlock("Exit");
@@ -175,6 +189,9 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
                 Constant * const I = b.getSize(i);
                 Value * const idx = b.CreateAdd(baseIndex, I);
                 Value * value = b.loadInputStreamBlock(INPUT, ZERO, idx);
+
+
+
                 if (LLVM_UNLIKELY(positiveSum == nullptr)) { // only negative count
                     value = b.CreateNot(value);
                 }

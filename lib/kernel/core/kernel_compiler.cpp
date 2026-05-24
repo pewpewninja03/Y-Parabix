@@ -437,7 +437,7 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
     for (unsigned i = 0; i < n; ++i) {
         const Binding & output = mOutputStreamSets[i];
         Type * const handleTy = mStreamSetOutputBuffers[i]->getHandleType(b);
-        assert (handleTy && !handleTy->isPointerTy());
+        assert (handleTy && !handleTy->isPointerTy() && &handleTy->getContext() == &b.getContext());
         const auto isLocal = Kernel::isLocalBuffer(output);
         if (LLVM_UNLIKELY(isLocal.any())) {
             mTarget->addInternalScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
@@ -446,18 +446,8 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
         }
     }
     IntegerType * const sizeTy = b.getSizeTy();
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-
-        // In multi-threaded mode, given a small file, the pipeline could finish before all of the
-        // threads are constructed. Since we cannot detect when this occurs without additional
-        // book keeping and the behaviour is safe, we do not guard against double termination.
-        // All other kernels are checked to ensure that there are no pipeline errors.
-
-        if (mTarget->getTypeId() != Kernel::TypeId::Pipeline || mTarget->hasAttribute(AttrId::InternallySynchronized)) {
-            mTarget->addInternalScalar(sizeTy, TERMINATION_SIGNAL);
-        } else {
-            mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
-        }
+    if (mTarget->hasAttribute(AttrId::InternallySynchronized) || mTarget->canSetTerminateSignal()) {
+        mTarget->addInternalScalar(sizeTy, TERMINATION_SIGNAL);
     } else {
         mTarget->addNonPersistentScalar(sizeTy, TERMINATION_SIGNAL);
     }
@@ -534,6 +524,7 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
 
         if (LLVM_UNLIKELY(ea)) {
             auto & dl = b.getModule()->getDataLayout();
+
             const auto align = CBuilder::getAlignOf(dl, mTarget->getSharedStateType());
             if (LLVM_LIKELY(align > 1U)) {
             Value * handleInt = b.CreatePtrToInt(getHandle(), b.getSizeTy());
@@ -636,18 +627,24 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilde
             setHandle(nextArg());
         }
         StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
-        Value * const providedState = b.CreatePointerCast(nextArg(), threadLocalTy->getPointerTo());
+        PointerType * const threadLocalPtrTy = threadLocalTy->getPointerTo();
+        Value * const providedState = b.CreatePointerCast(nextArg(), threadLocalPtrTy);
         BasicBlock * const allocThreadLocal = BasicBlock::Create(b.getContext(), "allocThreadLocalState", mCurrentMethod);
         BasicBlock * const initThreadLocal = BasicBlock::Create(b.getContext(), "initThreadLocalState", mCurrentMethod);
         b.CreateCondBr(b.CreateIsNull(providedState), allocThreadLocal, initThreadLocal);
 
         b.SetInsertPoint(allocThreadLocal);
-        Value * const allocedState = b.CreatePageAlignedMalloc(mTarget->getThreadLocalStateType());
-        assert (providedState->getType() == allocedState->getType());
+        auto & DL = b.getModule()->getDataLayout();
+        Constant * const threadLocalTySize = b.getTypeSize(threadLocalTy);
+        const auto align = DL.getABITypeAlign(threadLocalTy).value();
+        assert (boost::gcd<size_t>(align, b.getPageSize()) == align);
+        Value * allocedState = b.CreatePageAlignedMalloc(threadLocalTySize);
+        b.CreateMemZero(allocedState, threadLocalTySize, align);
+        allocedState = b.CreatePointerCast(allocedState, threadLocalPtrTy);
         b.CreateBr(initThreadLocal);
 
         b.SetInsertPoint(initThreadLocal);
-        PHINode * const threadLocal = b.CreatePHI(providedState->getType(), 2);
+        PHINode * const threadLocal = b.CreatePHI(threadLocalPtrTy, 2);
         threadLocal->addIncoming(providedState, mEntryPoint);
         threadLocal->addIncoming(allocedState, allocThreadLocal);
 
@@ -829,11 +826,12 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         mIsFinal = b.getTrue();
         mNumOfStrides = mRawNumOfStrides;
     } else {
+        mIsFinal = b.CreateIsNull(mRawNumOfStrides);
         if (LLVM_UNLIKELY(mTarget->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-            mIsFinal = nullptr;
+            // mIsFinal = nullptr;
             mNumOfStrides = mRawNumOfStrides;
         } else {
-            mIsFinal = b.CreateIsNull(mRawNumOfStrides);
+            // mIsFinal = b.CreateIsNull(mRawNumOfStrides);
             mNumOfStrides = b.CreateSelect(mIsFinal, b.getSize(1), mRawNumOfStrides);
         }
         if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
@@ -870,6 +868,16 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
         buffer->setHandle(localHandle); assert (localHandle);
         buffer->setBaseAddress(b, virtualBaseAddress);
+
+        if (LLVM_UNLIKELY(checkStreamSet) && LLVM_LIKELY(!input.hasAttribute(AttrId::AllowsUnalignedAccess))) {
+            auto & dl = b.getModule()->getDataLayout();
+            Type * intPtrTy = dl.getIntPtrType(b.getContext());
+            Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
+            Constant * alignInt = ConstantInt::get(intPtrTy, b.getAlignOf(dl, buffer->getType()));
+            Value * modVBA = b.CreateURem(vbaInt, alignInt);
+            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of alignment 0x%" PRIx64,
+                               b.GetString(mInputStreamSets[i].getName()), vbaInt, alignInt);
+        }
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
             Value * const closed = nextArg();
@@ -916,18 +924,19 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         assert (accessible);
         assert (accessible->getType() == sizeTy);
         mAccessibleInputItems[i] = accessible;
-        Value * avail = b.CreateAdd(processed, accessible);
+        /// ----------------------------------------------------
+        /// available
+        /// ----------------------------------------------------
+        Value * const avail = b.CreateAdd(processed, accessible);
         mAvailableInputItems[i] = avail;
-        if (input.hasLookahead()) {
-            avail = b.CreateAdd(avail, b.getSize(input.getLookahead()));
-        }
-        buffer->setCapacity(b, avail);
         /// ----------------------------------------------------
         /// capacity
         /// ----------------------------------------------------
+        Value * capacity = avail;
         if (LLVM_UNLIKELY(checkStreamSet)) {
-            mInputItemCapacity[i] = nextArg();
+            capacity = nextArg(); assert (capacity->getType()->isIntegerTy());
         }
+        buffer->setCapacity(b, capacity);
     }
 
     // set all of the output buffers
@@ -946,7 +955,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         const auto isLocal =  Kernel::isLocalBuffer(output);
         if (LLVM_UNLIKELY(isLocal.isShared())) {
             Value * const handle = nextArg();
-            assert (isa<ManagedDynamicBuffer>(buffer));
+            assert (buffer->isDynamic());
             buffer->setHandle(b.CreatePointerCast(handle, buffer->getHandlePointerType(b)));
         } else if (LLVM_UNLIKELY(isMainPipeline || isLocal.any())) {
             // If an output is a managed buffer, the address is stored within the state instead
@@ -963,6 +972,15 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             buffer->setBaseAddress(b, virtualBaseAddress);
         }
 
+        if (LLVM_UNLIKELY(checkStreamSet) && LLVM_LIKELY(!output.hasAttribute(AttrId::AllowsUnalignedAccess))) {
+            auto & dl = b.getModule()->getDataLayout();
+            Type * intPtrTy = dl.getIntPtrType(b.getContext());
+            Value * vbaInt = b.CreatePtrToInt(buffer->getBaseAddress(b), intPtrTy);
+            Constant * alignInt = ConstantInt::get(intPtrTy, b.getAlignOf(dl, buffer->getType()));
+            Value * modVBA = b.CreateURem(vbaInt, alignInt);
+            b.CreateAssertZero(modVBA, "%s virtual base address 0x%" PRIx64 " is not a multiple of alignment 0x%" PRIx64,
+                               b.GetString(mOutputStreamSets[i].getName()), vbaInt, alignInt);
+        }
 
         /// ----------------------------------------------------
         /// produced item count
@@ -997,11 +1015,15 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         /// writable / consumed item count
         /// ----------------------------------------------------
         Value * writable = nullptr;
-        assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
+        assert (buffer->isDynamic() || !isLocal.isManaged());
         if (isLocal.any()) {
             Value * const consumed = nextArg();
             assert (consumed->getType() == sizeTy);
             mConsumedOutputItems[i] = consumed;
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                mUpdatableOutputCapacityPtr[i] = nextArg();
+                assert (mUpdatableOutputCapacityPtr[i]->getType()->isPointerTy());
+            }
             buffer->freePendingDeletions(b, consumed);
             writable = buffer->getLinearlyWritableItems(b, produced, consumed);
             assert (writable && writable->getType() == sizeTy);
@@ -1013,20 +1035,18 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
                 writable = b.CreateCeilUMulRational(mFixedRateFactor, rate.getRate() / fixedRateLCM);
                 assert (writable && writable->getType() == sizeTy);
             }
-            Value * capacity = nullptr;
-            if (writable) {
-                capacity = b.CreateAdd(produced, writable);
-                buffer->setCapacity(b, capacity);
-            } else {
-                capacity = ConstantExpr::getNeg(b.getSize(1));
-                buffer->setCapacity(b, capacity);
-            }
             /// ----------------------------------------------------
             /// capacity
             /// ----------------------------------------------------
+            Value * capacity = nullptr;
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                mOutputItemCapacity[i] = nextArg();
+                capacity = nextArg(); assert (capacity->getType()->isIntegerTy());
+            } else if (writable) {
+                capacity = b.CreateAdd(produced, writable);
+            } else {
+                capacity = ConstantInt::getAllOnesValue(sizeTy);
             }
+            buffer->setCapacity(b, capacity);
         }
         mWritableOutputItems[i] = writable;
     }
@@ -1041,7 +1061,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
 
     // initialize the termination signal if this kernel can set it
     mTerminationSignalPtr = nullptr;
-    if (canTerminate) {
+    if (internallySynchronized || canTerminate) {
         mTerminationSignalPtr = getScalarFieldPtr(b, TERMINATION_SIGNAL).first;
         if (LLVM_UNLIKELY(enableAsserts)) {
             Value * const unterminated =
@@ -1123,11 +1143,8 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         if (isMainPipeline || requiresItemCount(input)) {
             props.push_back(mAccessibleInputItems[i]);
         }
-        /// ----------------------------------------------------
-        /// capacity
-        /// ----------------------------------------------------
         if (LLVM_UNLIKELY(checkStreamSet)) {
-            props.push_back(mInputItemCapacity[i]);
+            props.push_back(buffer->getCapacity(b));
         }
     }
 
@@ -1169,15 +1186,15 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         /// ----------------------------------------------------
         if (LLVM_UNLIKELY(isLocal.any())) {
             props.push_back(mConsumedOutputItems[i]);
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                props.push_back(mUpdatableOutputCapacityPtr[i]);
+            }
         } else {
             if (isMainPipeline || requiresItemCount(output)) {
                 props.push_back(mWritableOutputItems[i]);
             }
-            /// ----------------------------------------------------
-            /// capacity
-            /// ----------------------------------------------------
             if (LLVM_UNLIKELY(checkStreamSet)) {
-                props.push_back(mOutputItemCapacity[i]);
+                props.push_back(buffer->getCapacity(b));
             }
         }
     }
@@ -1244,6 +1261,11 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
             assert (isFromCurrentFunction(b, mUpdatableOutputBaseVirtualAddressPtr[i], true));
 
             b.CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
+        }
+        if (LLVM_UNLIKELY(mUpdatableOutputCapacityPtr[i])) {
+            assert (isFromCurrentFunction(b, mUpdatableOutputCapacityPtr[i], true));
+            Value * const capacity = buffer->getCapacity(b);
+            b.CreateStore(capacity, mUpdatableOutputCapacityPtr[i]);
         }
     }
 
@@ -1339,6 +1361,332 @@ std::vector<Value *> KernelCompiler::getFinalOutputScalars(KernelBuilder & b) {
     }
     return outputs;
 }
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addToGroupCountMap
+ ** ------------------------------------------------------------------------------------------------------------- */
+static void addToGroupCountMap(flat_map<size_t, size_t> & groups, const size_t groupNum) {
+    auto f = groups.find(groupNum);
+    if (f == groups.end()) {
+        groups.emplace(groupNum, 1U);
+    } else {
+        f->second++;
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief computePartialSumOfGroupCounts
+ ** ------------------------------------------------------------------------------------------------------------- */
+static size_t computePartialSumOfGroupCounts(flat_map<size_t, size_t> & groups, const size_t initialCount) {
+    if (groups.empty()) return 0UL;
+    auto itr = groups.begin();
+    const auto end = groups.end();
+    #ifndef NDEBUG
+    auto prior = itr->first;
+    #endif
+    auto partSum = itr->second + initialCount;
+    itr->second = initialCount;
+    while (++itr != end) {
+        #ifndef NDEBUG
+        assert (prior < itr->first);
+        prior = itr->first;
+        #endif
+        const auto groupCount = itr->second;
+        itr->second = partSum;
+        partSum += groupCount;
+    }
+    return partSum;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief initializeScalarMap
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOptions options) {
+
+    StructType * const sharedTy = mTarget->getSharedStateType();
+
+    StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
+
+    auto & DL = b.getModule()->getDataLayout();
+
+    #ifndef NDEBUG
+    auto verifyStateType = [](Value * const handle, StructType * const stateType) {
+        if (handle == nullptr && stateType == nullptr) {
+            return true;
+        }
+        if (handle == nullptr || stateType == nullptr) {
+            return false;
+        }
+        if (handle->getType() != stateType->getPointerTo()) {
+            return false;
+        }
+        assert (!stateType->isOpaque());
+        assert (stateType->isSized());
+        assert (stateType->isPacked());
+        return true;
+    };
+    assert ("incorrect shared handle/type!" && verifyStateType(mSharedHandle, sharedTy));
+    if (options == InitializeOptions::IncludeThreadLocalScalars) {
+        assert ("incorrect thread local handle/type!" && verifyStateType(mThreadLocalHandle, threadLocalTy));
+    }
+    #endif
+
+    assert (isFromCurrentFunction(b, mSharedHandle, true));
+    assert (isFromCurrentFunction(b, mThreadLocalHandle, true));
+
+    mScalarFieldMap.clear();
+    mScalarAliasMap.clear();
+
+    auto addToScalarFieldMap = [&](StringRef bindingName, Value * const scalar, Type * const expectedType, Type * const actualType) {
+        const auto i = mScalarFieldMap.insert(std::make_pair(bindingName, std::make_pair(scalar, expectedType)));
+        if (LLVM_UNLIKELY(!i.second)) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Kernel " << getName() << " contains two scalar or alias fields named " << bindingName;
+            report_fatal_error(Twine(out.str()));
+        }
+        if (LLVM_UNLIKELY(actualType != expectedType && expectedType)) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Scalar " << getName() << '.' << bindingName << " was expected to be a ";
+            expectedType->print(out);
+            out << " but was stored as a ";
+            actualType->print(out);
+            report_fatal_error(Twine(out.str()));
+        }
+    };
+
+    flat_map<size_t, size_t> sharedGroups;
+    flat_map<size_t, size_t> threadLocalGroups;
+
+    bool hasThreadLocalAccum = false;
+
+    for (const auto & scalar : mInternalScalars) {
+        assert (scalar.getValueType());
+        switch (scalar.getScalarType()) {
+            case ScalarType::Internal:
+                addToGroupCountMap(sharedGroups, scalar.getGroup());
+                break;
+            case ScalarType::ThreadLocal:
+                if (options == InitializeOptions::DoNotIncludeThreadLocalScalars) continue;
+                addToGroupCountMap(threadLocalGroups, scalar.getGroup());
+                if (options != InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars) continue;
+                if (scalar.getAccumulationRule() != Kernel::ThreadLocalScalarAccumulationRule::DoNothing) {
+                    assert (mCommonThreadLocalHandle && "no main thread local given?");
+                    hasThreadLocalAccum = true;
+                }
+                break;
+            default: break;
+        }
+    }
+
+    const auto totalSharedGroupCount = computePartialSumOfGroupCounts(sharedGroups, mInputScalars.size());
+    computePartialSumOfGroupCounts(threadLocalGroups, 0U);
+
+    BasicBlock * combineToMainThreadLocal = nullptr;
+
+    if (LLVM_UNLIKELY(hasThreadLocalAccum)) {
+        combineToMainThreadLocal = b.CreateBasicBlock("combineToMainThreadLocal");
+    }
+
+    FixedArray<Value *, 2> indices;
+    indices[0] = b.getInt32(0);
+    auto enumerate = [&](const Bindings & bindings, const size_t initialIndex) {
+        auto index = initialIndex;
+        for (const auto & binding : bindings) {
+            assert (sharedTy);
+            const auto k = index * 2 + 1;
+            assert (k < sharedTy->getStructNumElements());
+            Type * const actualType = sharedTy->getStructElementType(k);
+            assert (actualType == binding.getType());
+            indices[1] = b.getInt32(k);
+            Value * const scalar = b.CreateInBoundsGEP(sharedTy, mSharedHandle, indices);
+            addToScalarFieldMap(binding.getName(), scalar, binding.getType(), actualType);
+            ++index;
+        }
+    };
+
+    BasicBlock * combineExit = combineToMainThreadLocal;
+
+    enumerate(mInputScalars, 0U);
+
+    for (const auto & binding : mInternalScalars) {
+        Value * scalar = nullptr;
+        Type * const scalarType = binding.getValueType(); assert (scalarType);
+        assert (&scalarType->getContext() == &b.getContext());
+
+        switch (binding.getScalarType()) {
+            case ScalarType::Internal:
+                assert (mSharedHandle);
+                BEGIN_SCOPED_REGION
+                auto f = sharedGroups.find(binding.getGroup());
+                assert (f != sharedGroups.end());
+                const auto index = f->second++;
+                const auto k = index * 2 + 1;
+                assert (k < sharedTy->getStructNumElements());
+                assert (sharedTy->getStructElementType(k) == scalarType);
+                indices[1] = b.getInt32(k);
+                scalar = b.CreateInBoundsGEP(sharedTy, mSharedHandle, indices);
+                END_SCOPED_REGION
+                break;
+            case ScalarType::ThreadLocal:
+                if (options == InitializeOptions::DoNotIncludeThreadLocalScalars) continue;
+                assert (mThreadLocalHandle);
+                BEGIN_SCOPED_REGION
+
+                auto f = threadLocalGroups.find(binding.getGroup());
+                assert (f != threadLocalGroups.end());
+                const auto index = f->second++;
+                const auto k = index * 2 + 1;
+                assert (k < threadLocalTy->getStructNumElements());
+                assert (threadLocalTy->getStructElementType(k) == scalarType);
+                indices[1] = b.getInt32(k);
+                scalar = b.CreateInBoundsGEP(threadLocalTy, mThreadLocalHandle, indices);
+
+                if (LLVM_UNLIKELY(options == InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars)) {
+
+                    Value * const mainScalar = b.CreateGEP(threadLocalTy, mCommonThreadLocalHandle, indices);
+
+                    using AccumRule = Kernel::ThreadLocalScalarAccumulationRule;
+
+                    if (binding.getAccumulationRule() != AccumRule::DoNothing) {
+
+                        const auto ip = b.saveIP();
+                        b.SetInsertPoint(combineExit);
+
+                        if (isa<ArrayType>(scalarType)) {
+                            ArrayType * const arrayTy = cast<ArrayType>(scalarType);
+
+                            unsigned depth = 2;
+                            for (ArrayType * aTy = arrayTy;;) {
+                                Type * const eTy = aTy->getArrayElementType();
+                                if (eTy->isArrayTy()) {
+                                    aTy = cast<ArrayType>(eTy);
+                                    ++depth;
+                                } else {
+                                    assert (eTy->isIntOrIntVectorTy());
+                                    break;
+                                }
+                            }
+
+                            const auto size = depth;
+
+                            ConstantInt * const i32_ZERO = b.getInt32(0);
+                            ConstantInt * const i32_ONE = b.getInt32(1);
+
+                            SmallVector<Value *, 4> indices(size);
+                            indices[0] = i32_ZERO;
+
+
+                            std::function<BasicBlock *(unsigned, Type *)> recursiveAccum = [&](const unsigned idx, Type * const elemTy) {
+                                assert (idx <= size);
+                                assert (indices.size() == size);
+
+                                BasicBlock * const entry = b.GetInsertBlock();
+
+                                if (idx == size) {
+                                    Value * const scalarPtr = b.CreateGEP(scalarType, scalar, indices);
+                                    const auto align = CBuilder::getAlignOf(DL, elemTy);
+                                    Value * const scalarVal = b.CreateAlignedLoad(elemTy, scalarPtr, align);
+                                    assert (scalarVal->getType()->isIntOrIntVectorTy());
+                                    Value * const mainScalarPtr = b.CreateGEP(scalarType, mainScalar, indices);
+                                    Value * mainScalarVal = b.CreateAlignedLoad(elemTy, mainScalarPtr, align);
+                                    assert (scalarVal->getType() == mainScalarVal->getType());
+                                    switch (binding.getAccumulationRule()) {
+                                        case AccumRule::Sum:
+                                            mainScalarVal = b.CreateAdd(scalarVal, mainScalarVal, "sum");
+                                            break;
+                                        default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
+                                    }
+                                    b.CreateStore(mainScalarVal, mainScalarPtr);
+                                    return entry;
+                                } else {
+
+                                    BasicBlock * const loop = b.CreateBasicBlock();
+                                    b.CreateBr(loop);
+
+                                    b.SetInsertPoint(loop);
+                                    PHINode * const idxPhi = b.CreatePHI(b.getInt32Ty(), 2);
+                                    idxPhi->addIncoming(i32_ZERO, entry);
+                                    assert (idx < indices.size());
+                                    indices[idx] = idxPhi;
+
+                                    BasicBlock * const loopExit =
+                                        recursiveAccum(idx + 1U, cast<ArrayType>(elemTy)->getArrayElementType());
+
+                                    BasicBlock * const exit = b.CreateBasicBlock();
+                                    Value * const nextIdx = b.CreateAdd(idxPhi, i32_ONE);
+                                    idxPhi->addIncoming(nextIdx, loopExit);
+
+                                    const auto m = cast<ArrayType>(elemTy)->getNumElements();
+                                    if (LLVM_UNLIKELY(m == 0)) {
+                                        report_fatal_error(Twine(getName()) + ": cannot automatically accumulate a 0-element scalar");
+                                    }
+
+                                    b.CreateCondBr(b.CreateICmpNE(nextIdx, b.getInt32(m)), loop, exit);
+
+                                    b.SetInsertPoint(exit);
+                                    return exit;
+                                }
+                            };
+
+                            combineExit = recursiveAccum(1, arrayTy);
+                        } else {
+                            Value * const scalarVal = b.CreateLoad(scalarType, scalar);
+                            Value * mainScalarVal = b.CreateLoad(scalarType, mainScalar);
+                            switch (binding.getAccumulationRule()) {
+                                case Kernel::ThreadLocalScalarAccumulationRule::Sum:
+                                    mainScalarVal = b.CreateAdd(scalarVal, mainScalarVal);
+                                    break;
+                                default: llvm_unreachable("unexpected thread-local scalar accumulation rule");
+                            }
+                            b.CreateStore(mainScalarVal, mainScalar);
+                        }
+                        b.restoreIP(ip);
+                    }
+
+
+
+                }
+                END_SCOPED_REGION
+                break;
+            case ScalarType::NonPersistent:
+                BEGIN_SCOPED_REGION
+                scalar = b.CreateAlloca(scalarType);
+                const auto align = DL.getABITypeAlign(scalarType);
+                cast<AllocaInst>(scalar)->setAlignment(align);
+                b.CreateAlignedStore(Constant::getNullValue(scalarType), cast<AllocaInst>(scalar), align.value());
+                END_SCOPED_REGION
+                break;
+            default: llvm_unreachable("I/O scalars cannot be internal");
+        }
+
+        assert (scalar);
+
+        addToScalarFieldMap(binding.getName(), scalar, binding.getValueType(), scalarType);
+    }
+
+    enumerate(mOutputScalars, totalSharedGroupCount);
+
+    // finally add any aliases
+    for (const auto & alias : mScalarAliasMap) {
+        const auto f = mScalarFieldMap.find(alias.second);
+        if (f != mScalarFieldMap.end()) {
+            addToScalarFieldMap(alias.first, f->second.first, f->second.second, f->second.second);
+        }
+    }
+
+    if (LLVM_UNLIKELY(hasThreadLocalAccum)) {
+        BasicBlock * const exit = b.CreateBasicBlock("afterThreadLocalAccumulation");
+        Value * const cond = b.CreateICmpEQ(mThreadLocalHandle, mCommonThreadLocalHandle);
+        b.CreateCondBr(cond, exit, combineToMainThreadLocal);
+        b.SetInsertPoint(combineExit);
+        b.CreateBr(exit);
+        b.SetInsertPoint(exit);
+    }
+}
+
+#if 0
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeScalarMap
@@ -1449,7 +1797,6 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
             indices[2] = b.getInt32(k++);
             Value * const scalar = b.CreateGEP(sharedTy, mSharedHandle, indices);
             addToScalarFieldMap(binding.getName(), scalar, binding.getType(), actualType);
-
         }
     };
 
@@ -1641,6 +1988,10 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     }
 }
 
+#endif
+
+
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addAlias
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -1680,10 +2031,10 @@ void KernelCompiler::initializeOwnedBufferHandles(KernelBuilder & b, const Initi
             auto handle = getScalarFieldPtr(b, output.getName() + BUFFER_HANDLE_SUFFIX);
             const auto & buffer = mStreamSetOutputBuffers[i]; assert (buffer.get());
             buffer->setHandle(handle.first);
-            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
-            assert (isa<ManagedDynamicBuffer>(buffer) || !isLocal.isManaged());
+//            assert (isLocal.isManaged() == Kernel::isManagedBuffer(output));
+//            assert (buffer->isDynamic() || !isLocal.isManaged());
             if (LLVM_UNLIKELY(isLocal.isManaged() && expectedNumOfStrides)) {
-                assert (isa<ManagedDynamicBuffer>(buffer));
+                assert (buffer->isDynamic());
                 Rational R{mTarget->getStride(), b.getBitBlockWidth()};
                 const auto & ub = output.getRate().getUpperBound();
                 if (ub.numerator() > 0) {
@@ -1828,63 +2179,153 @@ KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, c
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief getThreadLocalScalarFieldPtr
+ * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
-KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(KernelBuilder & b, Value * handle, const StringRef name) const {
+KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, Value * const handle, const ScalarType type, const StringRef name) const {
 
-    const auto count = mInternalScalars.size();
+    // TODO: if we have a scalar map we could extract the indices from the gep even if its not in the same function?
 
-    flat_map<size_t, size_t> threadLocalGroups;
+    assert (type == ScalarType::Internal || type == ScalarType::ThreadLocal);
 
-    size_t i = 0;
-    size_t groupIndex = 0;
-    size_t scalarIndex = 0;
-    for (; i < count; ++i) {
-        const InternalScalar & scalar = mInternalScalars[i];
-        if (scalar.getScalarType() == ScalarType::ThreadLocal) {
-            const auto g = scalar.getGroup();
-            auto f = threadLocalGroups.find(g);
-            if (LLVM_UNLIKELY(f == threadLocalGroups.end())) {
-                f = threadLocalGroups.emplace(g, 0).first;
+    if (LLVM_UNLIKELY(mScalarFieldMap.empty())) {
+
+        flat_map<size_t, size_t> groups;
+
+        for (const auto & scalar : mInternalScalars) {
+            assert (scalar.getValueType());
+            if (type == scalar.getScalarType()) {
+                addToGroupCountMap(groups, scalar.getGroup());
             }
-            if (scalar.getName() == name) {
-                groupIndex = g;
-                scalarIndex = f->second;
-                break;
+        }
+
+        computePartialSumOfGroupCounts(groups, mInputScalars.size());
+
+        for (const auto & binding : mInternalScalars) {
+
+            if (type == binding.getScalarType()) {
+
+                auto f = groups.find(binding.getGroup());
+                assert (f != groups.end());
+                const auto index = f->second++;
+
+                if (name.compare(binding.getName()) == 0) {
+                    StructType * stateTy = nullptr;
+                    if (type == ScalarType::Internal) {
+                        stateTy = mTarget->getSharedStateType(); assert(stateTy);
+                    } else {
+                        stateTy = mTarget->getThreadLocalStateType(); assert(stateTy);
+                    }
+
+                    const auto k = index * 2 + 1;
+
+                    FixedArray<Value *, 2> indices;
+                    indices[0] = b.getInt32(0);
+                    indices[1] = b.getInt32(k);
+                    assert (k < stateTy->getStructNumElements());
+
+                    assert (isFromCurrentFunction(b, handle, false));
+                    Value * ptr = b.CreateGEP(stateTy, handle, indices); assert (ptr);
+                    assert (stateTy->getStructElementType(k) == binding.getValueType());
+                    return ScalarRef{ptr, binding.getValueType()};
+                }
             }
-            f->second++;
         }
-    }
+        return ScalarRef{nullptr, nullptr};
 
+    } else {
 
-
-    for (; i < count; ++i) {
-        const InternalScalar & scalar = mInternalScalars[i];
-        if (scalar.getScalarType() == ScalarType::ThreadLocal) {
-            threadLocalGroups.emplace(scalar.getGroup(), 0);
+        auto f = mScalarFieldMap.find(name);
+        if (LLVM_UNLIKELY(f == mScalarFieldMap.end())) {
+            return ScalarRef{nullptr, nullptr};
         }
+        const auto & ref = f->second;
+
+        GetElementPtrInst * const gep = cast<GetElementPtrInst>(ref.first);
+        assert (gep->getNumIndices() == 2);
+        assert (gep->hasAllConstantIndices());
+
+        FixedArray<Value *, 2> indices;
+        indices[0] = gep->getOperand(1);
+        indices[1] = gep->getOperand(2);
+        Value * ptr = b.CreateGEP(gep->getSourceElementType(), handle, indices); assert (ptr);
+
+        return ScalarRef{ptr, cast<Type>(ref.second)};
+
     }
-
-    StructType * const threadLocalTy = mTarget->getThreadLocalStateType(); assert (threadLocalTy);
-
-    const auto f = threadLocalGroups.find(groupIndex);
-    const auto groupPos = std::distance(threadLocalGroups.begin(), f) * 2U;
-
-    assert (groupPos < threadLocalTy->getStructNumElements());
-    assert (scalarIndex < threadLocalTy->getStructElementType(groupPos)->getStructNumElements());
-
-    FixedArray<Value *, 3> indices;
-    indices[0] = b.getInt32(0);
-    indices[1] = b.getInt32(groupPos);
-    indices[2] = b.getInt32(scalarIndex);
-
-    Value * ptr = b.CreateGEP(threadLocalTy, handle, indices); assert (ptr);
-    Type * ty = threadLocalTy->getStructElementType(groupPos)->getStructElementType(scalarIndex);
-    return ScalarRef{ptr, ty};
 
 }
+
+#if 0
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getScalarFieldPtr
+ ** ------------------------------------------------------------------------------------------------------------- */
+KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, Value * const handle, const ScalarType type, const StringRef name) const {
+
+    // TODO: if we have a scalar map we could extract the indices from the gep even if its not in the same function?
+
+    flat_set<unsigned> groups;
+
+    for (const auto & scalar : mInternalScalars) {
+        assert (scalar.getValueType());
+        if (type == scalar.getScalarType()) {
+            groups.insert(scalar.getGroup());
+        }
+    }
+
+    std::vector<size_t> count(groups.size(), 0);
+
+    for (const auto & binding : mInternalScalars) {
+
+        if (type == binding.getScalarType()) {
+
+            auto f = groups.find(binding.getGroup());
+            assert (f != groups.end());
+            size_t g = std::distance(groups.begin(), f);
+
+            auto & c = count[g];
+
+            if (name.compare(binding.getName()) == 0) {
+                StructType * stateTy = nullptr;
+                if (type == ScalarType::Internal) {
+                    g += 1; // 0th group is for input scalars
+                    stateTy = mTarget->getSharedStateType(); assert(stateTy);
+                } else {
+                    stateTy = mTarget->getThreadLocalStateType(); assert(stateTy);
+                }
+                g *= 2; // adjust for padding
+
+
+                for (unsigned i = 0; i <= g; ++i) {
+                    FixedArray<Value *, 2> indices;
+                    indices[0] = b.getInt32(0);
+                    indices[1] = b.getInt32(i);
+                    Value * ptr0 = b.CreateGEP(stateTy, handle, indices); assert (ptr0);
+                }
+
+                FixedArray<Value *, 3> indices;
+                indices[0] = b.getInt32(0);
+                indices[1] = b.getInt32(g);
+                assert (g < stateTy->getStructNumElements());
+                indices[2] = b.getInt32(c);
+                assert (c < stateTy->getStructElementType(g)->getStructNumElements());
+
+
+
+                assert (isFromCurrentFunction(b, handle, false));
+                Value * ptr = b.CreateGEP(stateTy, handle, indices); assert (ptr);
+                Type * ty = stateTy->getStructElementType(g)->getStructElementType(c);
+
+                return ScalarRef{ptr, ty};
+            }
+            ++c;
+        }
+    }
+    return ScalarRef{nullptr, nullptr};
+}
+
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalarValuePtr
@@ -1952,14 +2393,13 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     reset(mProcessedInputItemPtr, numOfInputs);
     reset(mAccessibleInputItems, numOfInputs);
     reset(mAvailableInputItems, numOfInputs);
-    reset(mInputItemCapacity, numOfInputs);
     const auto numOfOutputs = getNumOfStreamOutputs();
     reset(mProducedOutputItemPtr, numOfOutputs);
     reset(mInitiallyProducedOutputItems, numOfOutputs);
     reset(mWritableOutputItems, numOfOutputs);
     reset(mConsumedOutputItems, numOfOutputs);
-    reset(mOutputItemCapacity, numOfOutputs);
     reset(mUpdatableOutputBaseVirtualAddressPtr, numOfOutputs);
+    reset(mUpdatableOutputCapacityPtr, numOfOutputs);
     for (const auto & buffer : mStreamSetInputBuffers) {
         buffer->setHandle(nullptr);
     }

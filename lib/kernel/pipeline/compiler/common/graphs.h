@@ -61,6 +61,7 @@ enum RelationshipNodeFlag {
     IndirectFamily = 1
     , ImplicitlyAdded = 2
     , IsSideEffecting = 4
+    , IsPipelineLayerBoundary = 8
 };
 
 struct RelationshipNode {
@@ -271,15 +272,18 @@ enum BufferType : unsigned {
     , Shared = 4
     , Returned = 8
     , Truncated = 16
-    , CrossThreaded = 32
-    , InOutRedirect = 64
-    , ManagedOutput = 128
-    , PreserveEntireStreamSet = 256
+    , PopCountPartialSumStream = 32
+    , CrossesPhaseBoundary = 64
+    , InOutRedirect = 128
+    , ManagedOutput = 256
     // ------------------
     , HasIllustratedStreamset = 512
-    , StartsNestedSynchronizationRegion = 1024
     , RequiresEmptyOverflow = 2048
     , HasNonFixedRateConsumer = 4096
+    , RequiresConsumedItemCount = 8192
+    , PreserveEntireStreamSet = 16384
+    // ------------------
+    , CanTrackBufferExpansionData = 32768
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -299,25 +303,29 @@ enum KernelFlags {
 
 struct BufferNode {
 
-    StreamSetBuffer * OutputBuffer = nullptr;
+
 
     unsigned Type = 0;
-    bool IsLinear = false;
+
+    StreamSetBuffer * Buffer = nullptr;
 
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
     unsigned LookBehind = 0;
-    unsigned MaxAdd = 0;
+//    unsigned RequiredOverflowSpace = 0;
 
-    unsigned NumOfOverflowStrides = 0;
+//    unsigned NumOfOverflowStrides = 0;
 
     bool RequiresUnderflow = false;
+
+    bool IsLinear = false;
 
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
     unsigned LockId = 0;
     unsigned ManagedStructId = 0;
+    unsigned ProducedPhaseId = 0;
 
     Rational RelativeIORate{0};
 
@@ -357,12 +365,16 @@ struct BufferNode {
         return (Type & BufferType::PreserveEntireStreamSet) != 0;
     }
 
-    bool isTruncated() const {
-        return (Type & BufferType::Truncated) != 0;
+    bool requiresConsumedItemCount() const {
+        return (Type & BufferType::RequiresConsumedItemCount) != 0;
     }
 
-    bool isCrossThreaded() const {
-        return (Type & BufferType::CrossThreaded) != 0;
+    bool crossesPhaseBoundary() const {
+        return (Type & BufferType::CrossesPhaseBoundary) != 0;
+    }
+
+    bool isTruncated() const {
+        return (Type & BufferType::Truncated) != 0;
     }
 
     bool isInOutRedirect() const {
@@ -373,8 +385,8 @@ struct BufferNode {
         return (Type & BufferType::ManagedOutput) != 0;
     }
 
-    bool startsNestedSynchronizationRegion() const {
-        return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;
+    bool isPopCountPartialSumStream() const {
+        return (Type & BufferType::PopCountPartialSumStream) != 0;
     }
 
     bool requiresEmptyOverflow() const {
@@ -401,6 +413,10 @@ struct BufferNode {
         return (Locality == BufferLocality::ZeroElementsOrWidth);
     }
 
+    bool canTrackBufferExpansionData() const {
+        return (Type & BufferType::CanTrackBufferExpansionData) != 0;
+    }
+
     bool isDeallocatable() const {
         return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isInOutRedirect() || isReturned());
     }
@@ -415,9 +431,13 @@ enum BufferPortType : unsigned {
     IsShared = 32,
     IsManaged = 64,
     CanModifySegmentLength = 128,
-    IsCrossThreaded = 256,
     Illustrated = 512,
-    InputMayBeTruncated = 1024
+    InputMayBeTruncated = 1024,
+    InputMayBeImplicitlyZeroExtended = 2048,
+    InputMustAlwaysBeFullyConsumed = 4096,
+// ---------------------------------------
+    TrackBlockedIO = 8192,
+    TrackBlockedIOSummary = 16384,
 };
 
 struct BufferPort {
@@ -427,28 +447,19 @@ struct BufferPort {
     Rational Minimum;
     Rational Maximum;
     unsigned Flags = 0;
-
-
     unsigned SymbolicRateId = 0U;
+    double LayerBoundaryRestriction = 0.0;
 
     // binding attributes
-    unsigned Add = 0;
-    unsigned Truncate = 0;
-    unsigned Delay = 0;
-    unsigned LookAhead = 0;
-    unsigned LookBehind = 0;
-    unsigned EmptyOverflow = 0;
-
-    //bool mCanModifySegmentLength = false;
-
-    int TransitiveAdd = 0;
+    int Add = 0;
+    int RequiredOverflowSpace = 0;
+    int Delay = 0;
+    int LookAhead = 0;
+    int LookBehind = 0;
+    int EmptyOverflow = 0;
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;
-    }
-
-    bool isCrossThreaded() const {
-        return (Flags & BufferPortType::IsCrossThreaded) != 0;
     }
 
     bool isFixed() const {
@@ -485,6 +496,10 @@ struct BufferPort {
 
     bool inputMayBeTruncated() const {
         return (Flags & BufferPortType::InputMayBeTruncated) != 0;
+    }
+
+    bool inputMustAlwaysBeFullConsumed() const {
+        return (Flags & BufferPortType::InputMustAlwaysBeFullyConsumed) != 0;
     }
 
     bool operator < (const BufferPort & rn) const {
@@ -585,7 +600,7 @@ struct PartitionData {
     Rational                ExpectedStridesPerSegment{1};
     Rational                StridesPerSegmentCoV{0};
     unsigned                LinkedGroupId = 0;
-
+    unsigned                PhaseId = 0;
 };
 
 struct PartitionStreamSet {

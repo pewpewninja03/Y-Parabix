@@ -124,7 +124,7 @@ const Binding & PipelineCommonGraphFunctions::getOutputBinding(const size_t kern
  ** ------------------------------------------------------------------------------------------------------------- */
 StreamSetBuffer * PipelineCommonGraphFunctions::getOutputBuffer(const size_t kernel, const StreamSetPort outputPort) const {
     assert (outputPort.Type == PortType::Output);
-    return mBufferGraphRef[getOutputBufferVertex(kernel, outputPort)].OutputBuffer;
+    return mBufferGraphRef[getOutputBufferVertex(kernel, outputPort)].Buffer;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -206,51 +206,51 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
 #ifdef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     return false;
 #else
-    const Kernel * const kernelObj = getKernel(kernel);
-    bool isExplicitlyMarkedAsStateFree = false;
-    bool hasOverridableAttribute = false;
-    bool hasForbiddenAttribute = false;
 
-    for (const Attribute & attr : kernelObj->getAttributes()) {
-        switch (attr.getKind()) {
-            case AttrId::MayFatallyTerminate:
-            case AttrId::CanTerminateEarly:
-            case AttrId::MustExplicitlyTerminate:
-            case AttrId::InternallySynchronized:
-                hasForbiddenAttribute = true;
-                break;
-            case AttrId::SideEffecting:
-                hasOverridableAttribute = true;
-                break;
-            case AttrId::Statefree:
-                isExplicitlyMarkedAsStateFree = true;
-                break;
-            default: break;
-        }
+    const Kernel * const kernelObj = getKernel(kernel);
+
+    if (kernelObj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) {
+        return false;
     }
 
     if ((mBufferGraphRef[kernel].Type & HasIllustratedStreamset) != 0) {
         return false;
     }
 
-    if (hasForbiddenAttribute || kernelObj->getNumOfNestedKernelFamilyCalls()) {
+    bool notStatefree = kernelObj->getNumOfNestedKernelFamilyCalls() > 0;
+
+    for (const Attribute & attr : kernelObj->getAttributes()) {
+        switch (attr.getKind()) {
+            case AttrId::MayFatallyTerminate:
+            case AttrId::CanTerminateEarly:
+            case AttrId::MustExplicitlyTerminate:
+            case AttrId::SideEffecting:
+            #ifndef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
+            case AttrId::InternallySynchronized:
+            #endif
+                notStatefree = true;
+                break;
+            #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
+            case AttrId::InternallySynchronized:
+            #endif
+            case AttrId::Statefree:
+                return true;
+            default: break;
+        }
+    }
+
+    if (notStatefree) {
         return false;
     }
 
     for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraphRef))) {
         const BufferPort & p = mBufferGraphRef[e];
-        #ifdef PREVENT_CROSS_THREAD_KERNELS_FROM_BEING_STATEFREE
-        const auto streamSet = source(e, mBufferGraphRef);
-        if (mBufferGraphRef[streamSet].isCrossThreaded()) {
-            return false;
-        }
-        #endif
         const Binding & b = p.Binding;
         const ProcessingRate & r = b.getRate();
         switch (r.getKind()) {
             case ProcessingRate::KindId::Fixed:
-            case ProcessingRate::KindId::PartialSum:
-            case ProcessingRate::KindId::Greedy:
+//            case ProcessingRate::KindId::PartialSum:
+//            case ProcessingRate::KindId::Greedy:
                 break;
             default:
                 return false;
@@ -269,12 +269,6 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
         switch (r.getKind()) {
             case ProcessingRate::KindId::Fixed:
                 break;
-            case ProcessingRate::KindId::PartialSum:
-                // We permit a partial sum output rate if and only if the kernel
-                // was explicitly marked as statefree. Otherwise we cannot ensure
-                // that the portion of a buffer that demarcates two invocations
-                // will be correctly merged.
-                if (isExplicitlyMarkedAsStateFree) break;
             default:
                 return false;
         }
@@ -282,18 +276,23 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
             return false;
         }
     }
-    if (LLVM_UNLIKELY(isExplicitlyMarkedAsStateFree)) {
-        return true;
-    }
-    if (LLVM_UNLIKELY(hasOverridableAttribute)) {
-        return false;
-    }
+    assert (kernelObj->isGenerated());
     StructType * const st = kernelObj->getSharedStateType();
     if (st == nullptr) {
         return true;
     }
-    assert (st->getStructNumElements() >= kernelObj->getNumOfScalarInputs());
-    return st->getStructNumElements() == kernelObj->getNumOfScalarInputs();
+    return false;
+    if (LLVM_UNLIKELY(isKernelFamilyCall(kernel))) {
+        // Even if this kernel object has no mutable scalars, we cannot determine whether a different kernel
+        // belonging to the same family would have none too.
+        return false;
+    } else { // check if we have only a (non-mutable) input scalar
+        const auto n = st->getStructNumElements();
+        assert ((n % 2) == 0 && n >= 4);
+        assert ((kernelObj->getNumOfScalarInputs() > 0) ^ st->getStructElementType(0)->isEmptyTy());
+        assert ((kernelObj->getNumOfScalarOutputs() > 0) ^ st->getStructElementType(n - 2)->isEmptyTy());
+        return (n == 4) && st->getStructElementType(2)->isEmptyTy();
+    }
 #endif
 }
 

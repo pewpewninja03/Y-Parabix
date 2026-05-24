@@ -182,12 +182,6 @@ size_t DynamicMultithreadingPeriod;
 static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithreading-period", cl::location(DynamicMultithreadingPeriod), cl::init(100),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
 
-
-bool EnableJumpGuidedSynchronizationVariables;
-static cl::opt<bool, true> EnableJumpGuidedSynchronizationVariablesOption("partition-guided-synchronization", cl::location(EnableJumpGuidedSynchronizationVariables), cl::init(false),
-                                                   cl::desc("Enable partition jump guided synchronization variables."), cl::cat(CodeGenOptions));
-
-
 static cl::opt<int, true> FreeCallBisectOption("free-bisect-value", cl::location(FreeCallBisectLimit), cl::init(-1),
                                                     cl::desc("The number of free calls to allow in bisecting"), cl::cat(CodeGenOptions));
 

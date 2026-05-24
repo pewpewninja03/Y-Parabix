@@ -827,7 +827,7 @@ updated_trie:
 
                         // each chunk is aligned in blockWidth x itemWidth bits
 
-                        const auto from = E->From * scale;
+                        const auto from = (E->From * scale);
                         const auto to = (E->To * scale);
 
                         if (to <= position) {

@@ -5,7 +5,7 @@
 
 // #define PRINT_GRAPH_BITSETS
 
-#define DISABLE_KERNEL_PARTITION_MOVEMENT
+// #define DISABLE_KERNEL_PARTITION_MOVEMENT
 
 namespace kernel {
 
@@ -74,12 +74,15 @@ struct PartitionBindingNode {
     std::vector<std::pair<unsigned, unsigned>> Transferable;
     std::vector<unsigned> PotentialRoots;
     std::vector<unsigned> AllKernels;
-    unsigned PartitionId;
+    unsigned PartitionId = 0;
+    unsigned PhaseId = 0;
 
     PartitionBindingNode & operator=(const PartitionBindingNode & other) {
         AllKernels.assign(other.AllKernels.begin(), other.AllKernels.end());
         PotentialRoots.assign(other.PotentialRoots.begin(), other.PotentialRoots.end());
         Transferable.assign(other.Transferable.begin(), other.Transferable.end());
+        PartitionId = other.PartitionId;
+        PhaseId = other.PhaseId;
         return *this;
     }
 };
@@ -96,8 +99,9 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     std::vector<unsigned> sequence;
     sequence.reserve(n);
 
-    std::vector<unsigned> allKernels;
-    allKernels.reserve(n / 2);
+    size_t numOfKernels = 1;
+
+    std::vector<unsigned> allKernels(mKernels.size() + 2);
 
     std::vector<unsigned> sequencePosition(n); // , -1U
 
@@ -113,11 +117,9 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     // For simplicity, force the pipeline input to be the first and the pipeline output
     // to be the last one.
 
-    // For some reason, the Mac C++ compiler cannot link the constexpr PipelineInput value?
-    // Hardcoding 0 here as a temporary workaround.
     sequencePosition[0] = 0;
     sequence.push_back(0);
-    allKernels.push_back(0);
+    allKernels[PipelineInput] = 0;
     for (unsigned u : ordering) {
         const RelationshipNode & node = Relationships[u];
         switch (node.Type) {
@@ -132,7 +134,8 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
                     assert (R.Kernel != mPipelineKernel);
                     const auto k = sequence.size();
                     sequencePosition[u] = k;
-                    allKernels.push_back(k);
+                    assert (numOfKernels < allKernels.size());
+                    allKernels[numOfKernels++] = k;
                     sequence.push_back(u);
                 }
                 END_SCOPED_REGION
@@ -154,7 +157,8 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
 
     const auto k = sequence.size();
     sequencePosition[PipelineOutput] = k;
-    allKernels.push_back(k);
+    assert (numOfKernels < allKernels.size());
+    allKernels[numOfKernels++] = k;
     sequence.push_back(PipelineOutput);
     END_SCOPED_REGION
     const auto m = sequence.size();
@@ -194,14 +198,17 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
     // NOTE: any decisions made during this pass *must* be provably correct for any
     // situation because the choices will *not* be verified.
 
+    const auto & boundaries = mPipelineKernel->mPhaseBoundaries;
+
+    const auto numOfPhases = boundaries.size() + 1;
+
     for (unsigned i = 0; i < m; ++i) {
         BitSet & V = G[i];
-        V.resize(n);
+        V.resize(n + numOfPhases);
         assert (V.none());
     }
 
-    const auto numOfKernels = allKernels.size();
-    unsigned nextRateId = 0;
+    unsigned nextRateId = numOfPhases;
 
     std::map<std::tuple<BitSet, size_t, size_t>, size_t> L;
     flat_set<size_t> LookAheadIds;
@@ -223,7 +230,27 @@ PartitionGraph PipelineAnalysis::generatePartitionGraph() {
             bool hasInputRateChange = false;
             bool hasLookAheads = false;
             auto demarcateOutputs = (node.Kernel == mPipelineKernel);
+
             const auto initialRateId = nextRateId;
+
+            const auto pf = KernelPhaseId.find(u);
+            if (LLVM_LIKELY(pf != KernelPhaseId.end())) {
+                const auto phaseId = pf->second;
+                assert (phaseId < numOfPhases);
+                // Although inputs to this phase can be from a prior phase, inputs cannot be from
+                // a subsequent one without violating the notion of phases. Report any such conflict
+                // as a fatal error.
+                const auto phaseConflictId = V.find_next(phaseId + 1); // returns -1U if no more bits are set
+                static_assert (BitSet::npos == std::numeric_limits<size_t>::max());
+                if (LLVM_UNLIKELY(phaseConflictId < numOfPhases)) {
+                    // TODO: make this error a bit more informative later
+                    SmallVector<char, 128> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << "Error: phase " << phaseId << " has inputs from phase " << phaseConflictId << "\n";
+                    report_fatal_error(msg.str());
+                }
+                V.set(phaseId);
+            }
 
             assert (node.Kernel);
 
@@ -351,7 +378,6 @@ found_rate_change:
                 O |= V;
 
                 if (rate.isFixed() && !demarcateOutputs) {
-
 
                     // Check the attributes to see whether any impose a partition change
                     for (const Attribute & attr : b.getAttributes()) {
@@ -500,6 +526,34 @@ add_output_rate:    assert (nextRateId < n);
         const auto producer = allKernels[i];
         assert (Relationships[sequence[producer]].Type == RelationshipNode::IsKernel);
         const auto prodPartId = getComponentIndex(producer);
+
+        auto & X = P[prodPartId];
+        if (LLVM_UNLIKELY(X.PhaseId == 0)) {
+            X.PartitionId = partitionId[producer];
+            auto pf = KernelPhaseId.find(sequence[producer]);
+            if (LLVM_LIKELY(pf != KernelPhaseId.end())) {
+                X.PhaseId = pf->second + 1U;
+            }
+        } else {
+            assert (X.PartitionId == partitionId[producer]);
+            #ifndef NDEBUG
+            auto pf = KernelPhaseId.find(sequence[producer]);
+            if (LLVM_LIKELY(pf != KernelPhaseId.end())) {
+                assert (X.PhaseId = (pf->second + 1U));
+            }
+            #endif
+        }
+    }
+
+    for (unsigned i = 0; i < numOfKernels; ++i) {
+
+        const auto producer = allKernels[i];
+        assert (Relationships[sequence[producer]].Type == RelationshipNode::IsKernel);
+        const auto prodPartId = getComponentIndex(producer);
+
+        auto & X = P[prodPartId];
+        const auto phaseId = X.PhaseId;
+
         unsigned localConsumers = 0;
         for (const auto e : make_iterator_range(out_edges(producer, G))) {
             const auto streamSet = target(e, G);
@@ -516,20 +570,21 @@ add_output_rate:    assert (nextRateId < n);
                 }
                 BEGIN_SCOPED_REGION
                 const auto consPartId = getComponentIndex(consumer);
-                // we may only migrate kernels with no local users from a partition to the next
-                // but as we migrate them, more opportunities may arise.
-                if (prodPartId == consPartId) {
-                    ++localConsumers;
-                    assert (partitionId[producer] == partitionId[consumer]);
+                const auto consPhaseId = P[consPartId].PhaseId;
+                if (LLVM_LIKELY(consPhaseId == phaseId || consPhaseId == 0 || phaseId == 0)) {
+                    // we may only migrate kernels with no local users from a partition to the next
+                    // but as we migrate them, more opportunities may arise.
+                    if (prodPartId == consPartId) {
+                        ++localConsumers;
+                        assert (partitionId[producer] == partitionId[consumer]);
+                    }
+                    add_edge(prodPartId, consPartId, BindingInfo{producer, consumer}, P);
                 }
-                add_edge(prodPartId, consPartId, BindingInfo{producer, consumer}, P);
                 END_SCOPED_REGION
 already_added:  continue;
             }
         }
 
-        auto & X = P[prodPartId];
-        X.PartitionId = partitionId[producer];
         X.AllKernels.emplace_back(producer);
 
         BEGIN_SCOPED_REGION
@@ -547,6 +602,7 @@ already_added:  continue;
         END_SCOPED_REGION
     }
 
+
     #ifdef PRINT_GRAPH_BITSETS
     BEGIN_SCOPED_REGION
     auto & out = errs();
@@ -554,16 +610,10 @@ already_added:  continue;
     out << "digraph \"P\" {\n";
     for (auto v : make_iterator_range(vertices(P))) {
         const PartitionBindingNode & D = P[v];
-        out << "v" << v << " [label=\"";
-        bool addNewLine = false;
+        out << "v" << v << " [label=\"\\n";
         for (const auto k : D.AllKernels) {
             const RelationshipNode & node = Relationships[sequence[k]];
             assert (node.Type == RelationshipNode::IsKernel);
-
-            if (addNewLine) {
-                out << "\\n";
-            }
-            addNewLine = true;
 
             out << k << ". " << node.Kernel->getName();
 
@@ -594,7 +644,12 @@ already_added:  continue;
                 out << ']';
             }
 
+            out << "\\n";
+
         }
+
+        out << "Phase: " << D.PhaseId;
+
         out << "\",shape=rect];\n";
     }
     for (auto e : make_iterator_range(edges(P))) {
@@ -612,7 +667,6 @@ already_added:  continue;
     assert (P[0].AllKernels.size() == 1);
     assert (sequence[P[0].AllKernels[0]] == PipelineInput);
     assert (P[0].Transferable.size() == 0);
-
 
     assert (P[componentCount - 1].AllKernels.size() == 1);
     assert (sequence[P[componentCount - 1].AllKernels[0]] == PipelineOutput);
@@ -690,52 +744,112 @@ already_added:  continue;
     #ifndef NDEBUG
     std::fill(ordering.begin(), ordering.end(), -1U);
     #endif
-    ordering[0] = 0;
     partitionPostDominators[0].resize(componentCount, false);
     partitionPostDominators[0].set(0);
+    ordering[0] = 0;
     ordering[componentCount - 1] = componentCount - 1;
     partitionPostDominators[componentCount - 1].resize(componentCount, false);
     partitionPostDominators[componentCount - 1].set(componentCount - 1);
+
     if (LLVM_LIKELY(componentCount > 2)) {
-        for (unsigned v = componentCount - 1; --v != 0; ) {
-            Q.push(v);
-        }
-        for (;;) {
-start_of_loop:
-            const auto v = Q.front();
-            Q.pop();
-            for (const auto e : make_iterator_range(out_edges(v, P))) {
-                const auto u = target(e, P);
-                if (LLVM_UNLIKELY(u != v && partitionPostDominators[u].empty())) {
-                    assert (!Q.empty());
-                    Q.push(v);
-                    goto start_of_loop;
+
+        std::vector<size_t> remaining(componentCount);
+
+        const auto cm = componentCount - 1;
+        const auto final = in_degree(cm, P) == 0 ? cm : componentCount;
+
+        for (unsigned v = 0; v < final; ++v) {
+            size_t d = 0;
+            for (const auto e : make_iterator_range(in_edges(v, P))) {
+                const auto u = source(e, P);
+                if (u != v) {
+                    ++d;
                 }
             }
-            auto & D = partitionPostDominators[v];
-            assert (D.empty());
-            // ordering is written in reverse order that we process the queue in so
-            // that the result is a topological ordering of the initial partitions.
-            assert (ordering[Q.size() + 1] == -1U);
-            ordering[Q.size() + 1] = v;
-            D.resize(componentCount, false);
-            D.set(v);
+            if (d == 0) {
+                Q.push(v);
+            }
+            remaining[v] = d;
+        }
+
+        assert (Q.size() > 0);
+        size_t orderingIndex = 0;
+        for (;;) {
+
+            const auto v = Q.front();
+            assert (remaining[v] == 0);
+            Q.pop();
+            ordering[orderingIndex++] = v;
+
             for (const auto e : make_iterator_range(out_edges(v, P))) {
                 const auto u = target(e, P);
-                if (u != v) {
-                    const auto & X = partitionPostDominators[u];
-                    assert (X.size() == componentCount);
-                    assert (X.test(v) == 0);
-                    D |= X;
+                if (u == v) continue;
+                assert (remaining[u] > 0);
+                if (--remaining[u] == 0) {
+                    Q.push(u);
                 }
             }
             if (Q.empty()) {
                 break;
             }
         }
+        assert (ordering[0] == 0);
+        assert (ordering[componentCount - 1] == componentCount - 1);
+        assert (Q.size() == 0);
+        for (unsigned v = componentCount; --v != 0U; ) {
+            size_t d = 0;
+            for (const auto e : make_iterator_range(out_edges(v, P))) {
+                const auto u = target(e, P);
+                if (u != v) {
+                    ++d;
+                }
+            }
+            if (d == 0) {
+                Q.push(v);
+            }
+            remaining[v] = d;
+        }
+        assert (Q.size() > 0);
+        remaining[0] = -1U;
+        for (;;) {
+            const auto v = Q.front();
+            assert (remaining[v] == 0);
+            Q.pop();
+
+            auto & D = partitionPostDominators[v];
+            assert (D.empty() || (D.count() == 1 && D.test(v) && (v == 0 || v == cm)));
+            D.resize(componentCount, false);
+            D.set(v);
+
+            for (const auto e : make_iterator_range(out_edges(v, P))) {
+                const auto u = target(e, P);
+                assert (remaining[u] == 0);
+                if (u != v) {
+                    const auto & X = partitionPostDominators[u];
+                    assert (X.size() == componentCount);
+                    assert (X.test(v) == 0);
+                    assert (X.any());
+                    D |= X;
+                }
+            }
+
+
+            for (const auto e : make_iterator_range(in_edges(v, P))) {
+                const auto u = source(e, P);
+                if (u == v) continue;
+                assert (remaining[u] > 0);
+                if (--remaining[u] == 0) {
+                    Q.push(u);
+                }
+            }
+
+            if (Q.empty()) {
+                break;
+            }
+        }
     }
 
-    assert (ordering[componentCount - 1] == componentCount - 1);
+
 
     // to maximize our ability to move a kernel to the deepest partition, we move according
     // to the ordering position.
@@ -929,6 +1043,10 @@ start_of_transfer_loop:
                         #endif
 
                         auto & TransferPart = partGraph[transferPartId];
+                        if (LLVM_UNLIKELY(TransferPart.PhaseId == 0)) {
+                            TransferPart.PhaseId = CurrentPart.PhaseId;
+                        }
+
                         TransferPart.Transferable.emplace_back(potentiallyTransferedKernel, localConsumers);
 
                         auto & T = TransferPart.AllKernels;
@@ -1008,6 +1126,7 @@ start_of_transfer_loop:
                 const auto & Pi = P[i];
                 auto & Gi = filteredClone[i];
                 Gi.PartitionId = Pi.PartitionId;
+                Gi.PhaseId = Pi.PhaseId;
                 Gi.AllKernels.assign(Pi.AllKernels.begin(), Pi.AllKernels.end());
                 Gi.PotentialRoots.push_back(vec[i]);
                 Gi.Transferable.assign(Pi.Transferable.begin(), Pi.Transferable.end());
@@ -1034,6 +1153,56 @@ start_of_transfer_loop:
     }
 
 #endif
+
+     assert (componentCount > 0);
+
+    if (numOfPhases > 0) {
+
+        std::vector<size_t> phaseStartOffset(numOfPhases + 1U, 0);
+        phaseStartOffset[0] = PipelineInput + 1U;
+
+        for (unsigned i = 1U; i < componentCount - 1U; ++i) {
+            const auto j = ordering[componentCount - i - 1U];
+            auto & CurrentPart = P[j]; // reverse order
+            if (LLVM_UNLIKELY(CurrentPart.PhaseId == 0)) {
+                // Kernels inserted by the compiler are initially set as phase 0. If such
+                // a kernel could not be placed into a partition with a user-defined one,
+                // it may still be in a phase 0 partition. Assign it the phase # of its
+                // closest consuming phase.
+
+                unsigned newPhaseId = numOfPhases;
+                for (auto e : make_iterator_range(out_edges(j, P))) {
+                    const auto & TransferPart = P[target(e, P)];
+                    if (TransferPart.PhaseId  == 0) {
+                        errs() << "PH0: " << target(e, P) << "\n";
+                    }
+                    assert (TransferPart.PhaseId > 0);
+                    newPhaseId = std::min(newPhaseId, TransferPart.PhaseId);
+                }
+                assert (newPhaseId > 0 && newPhaseId <= numOfPhases);
+                CurrentPart.PhaseId = newPhaseId;
+            }
+            phaseStartOffset[CurrentPart.PhaseId]++;
+        }
+
+        // get the partial sum of the counts to compute the actual offsets
+        for (unsigned i = 1; i <= numOfPhases; ++i) {
+            phaseStartOffset[i] += phaseStartOffset[i - 1U];
+        }
+
+        std::vector<Vertex> revisedOrdering(componentCount, 0);
+        revisedOrdering[0] = ordering[0];
+        for (unsigned i = 1; i < componentCount - 1U; ++i) {
+            const auto j = ordering[i];
+            const auto & C = P[j];
+            assert (C.PhaseId > 0);
+            auto & offset = phaseStartOffset[C.PhaseId - 1U];
+            assert (revisedOrdering[offset] == 0);
+            revisedOrdering[offset++] = j;
+        }
+        revisedOrdering[componentCount - 1] = ordering[componentCount - 1];
+        ordering = revisedOrdering;
+    }
 
     forcedPartitionRoot.clear();
 
@@ -1064,23 +1233,22 @@ start_of_transfer_loop:
         #ifndef NDEBUG
         totalSize += K.size();
         #endif
-     //   assert (CurrentPart.PotentialRoots.size() == 1);
         const auto root = CurrentPart.PotentialRoots[0];
         forcedPartitionRoot.push_back(root);
     }
-
-    assert (allKernels.size() == totalSize);
+    const auto finalComponentCount = forcedPartitionRoot.size();
+    assert (finalComponentCount > 1);
+    assert (numOfKernels == totalSize);
     assert (ordering[componentCount - 1] == componentCount - 1);
     assert (P[componentCount - 1].AllKernels.size() == 1);
 
-    const auto finalComponentCount = forcedPartitionRoot.size();
-    assert (finalComponentCount > 1);
 
     std::sort(forcedPartitionRoot.begin(), forcedPartitionRoot.end());
 
     PartitionGraph partGraph(finalComponentCount);
 
     size_t currentCompId = 0;
+    size_t priorPhaseId = 0;
 
     for (unsigned compId = 0; compId < componentCount; ++compId) {
         const auto index = ordering[compId];
@@ -1094,6 +1262,8 @@ start_of_transfer_loop:
         PartitionData & pd = partGraph[currentCompId];
         auto & R = pd.Kernels;
         pd.LinkedGroupId = CurrentPart.PartitionId;
+        pd.PhaseId = CurrentPart.PhaseId;
+        assert (priorPhaseId <= pd.PhaseId || compId == componentCount - 1);
         R.assign(K.begin(), K.end());
         for (unsigned j = 0; j < partitionSize; ++j) {
             const auto v = K[j];
@@ -1124,7 +1294,6 @@ found_interpartition_edge:
         }
         ++currentCompId;
     }
-
     assert (currentCompId == finalComponentCount);
 
     #ifndef NDEBUG
@@ -1462,53 +1631,43 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     std::vector<BitSet> rateDomSet(PartitionCount);
 
-    unsigned nextRateId = 0;
-
-    auto expandCapacity = [&](BitSet & bs) {
-        const auto size = (nextRateId + 127U) & (~63U);
-        if (bs.size() != size) {
-            bs.resize(size, false);
-        }
-    };
+    for (size_t i = 0; i < PartitionCount; ++i) {
+        rateDomSet[i].resize(PartitionCount * 2, false);
+    }
 
     auto addRateId = [&](const unsigned id, const unsigned rateId) {
         auto & bs = rateDomSet[id];
-        expandCapacity(bs);
+        assert (rateId < PartitionCount * 2);
         bs.set(rateId);
     };
 
     PartitionGraph J(PartitionCount);
 
-    for (auto streamSet = FirstStreamSet; streamSet < LastStreamSet; ++streamSet) {
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases > 1);
 
-        if (LLVM_UNLIKELY(in_degree(streamSet, mBufferGraph) == 0)) {
-            assert (mStreamGraph[streamSet].Type == RelationshipNode::IsStreamSet);
-            assert (isa<RepeatingStreamSet>(mStreamGraph[streamSet].Relationship));
-        } else {
-            const auto output = in_edge(streamSet, mBufferGraph);
+    unsigned nextRateId = 0;
+
+    for (auto kernel = PipelineInput; kernel < PipelineOutput; ++kernel) {
+        const auto pid = KernelPartitionId[kernel];
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto & outputPort = mBufferGraph[output];
             const Binding & binding = outputPort.Binding;
-
             const auto hasVarOutput = isNonSynchronousRate(binding);
 
-            const auto producer = source(output, mBufferGraph);
-            const auto pid = KernelPartitionId[producer];
-
-            auto rateId = nextRateId;
-            nextRateId += hasVarOutput ? 1 : 0;
+            const auto streamSet = target(output, mBufferGraph);
             for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const auto consumer = target(input, mBufferGraph);
                 const auto cid = KernelPartitionId[consumer];
                 if (cid != pid) {
                     add_edge(pid, cid, J);
                     if (hasVarOutput) {
-                        addRateId(cid, rateId);
+                        addRateId(cid, nextRateId);
                     }
                 }
             }
+
+            nextRateId += hasVarOutput ? 1U : 0U;
         }
-
-
     }
 
     // Now compute the transitive reduction of the partition relationships
@@ -1527,89 +1686,56 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         }
     }
 
-    for (unsigned i = 0; i < PartitionCount; ++i) {
-        expandCapacity(rateDomSet[i]);
-    }
+    for (size_t i = 1U; i < numOfPhases; ++i) {
+        const auto firstPartition = PartitionPhaseBoundaries[i - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[i];
 
-    BitSet intersection;
-    expandCapacity(intersection);
+        BitSet intersection(PartitionCount * 2);
 
-    for (auto partitionId = 1U; partitionId < PartitionCount; ++partitionId) { // topological ordering
-        auto & ds = rateDomSet[partitionId];
+        for (auto partitionId = firstPartition; partitionId < oneAfterLastPartition; ++partitionId) { // topological ordering
+            auto & ds = rateDomSet[partitionId];
 
-        if (out_degree(partitionId, J) == 0) {
-            ds.reset();
-        } else {
-            if (in_degree(partitionId, J) > 0) {
-                intersection.set();
-                for (const auto e : make_iterator_range(in_edges(partitionId, J))) {
-                    const unsigned producerId = source(e, J);
-                    assert (producerId <= partitionId);
-                    intersection &= rateDomSet[producerId];
-                }
-                ds |= intersection;
-            }
-        }
-
-        if (ds.none()) {
-            const auto rateId = nextRateId++;
-            for (unsigned i = 0; i < PartitionCount; ++i) {
-                expandCapacity(rateDomSet[i]);
-            }
-            expandCapacity(intersection);
-            ds.set(rateId);
-        }
-    }
-
-
-    for (size_t i = 1U; i < PartitionCount - 1; ++i) {
-        const BitSet & prior =  rateDomSet[i - 1];
-        const BitSet & current =  rateDomSet[i];
-        auto j = i + 1U;
-        if (prior != current && in_degree(i, J) > 0) {
-            assert (current.any());
-            for (; j < (PartitionCount - 1); ++j) {
-                const BitSet & next =  rateDomSet[j];
-                if (!current.is_subset_of(next)) {
-                    break;
+            if (out_degree(partitionId, J) == 0) {
+                ds.reset();
+            } else {
+                if (in_degree(partitionId, J) > 0) {
+                    intersection.set();
+                    for (const auto e : make_iterator_range(in_edges(partitionId, J))) {
+                        const unsigned producerId = source(e, J);
+                        assert (producerId <= partitionId);
+                        if (producerId >= firstPartition) {
+                            intersection &= rateDomSet[producerId];
+                        }
+                    }
+                    ds |= intersection;
                 }
             }
+
+            if (ds.none()) {
+                ds.set(nextRateId++);
+            }
         }
-        assert (j > i);
 
-        PartitionJumpTargetId[i] = j;
-    }
-
-    if (LLVM_UNLIKELY(!IsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables)) {
-        const auto lastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1U] - 1U;
-        for (auto partId = FirstComputePartitionId; partId <= LastComputePartitionId; ++partId) {
-            if (LLVM_UNLIKELY(PartitionJumpTargetId[partId] == (PartitionCount - 1))) {
-                const auto kernelId = FirstKernelInPartition[partId];
-                if (kernelId < lastComputeKernel) {
-                    mBufferGraph[kernelId].Type |= StartsNestedSynchronizationRegion;
+        for (auto partitionId = firstPartition; partitionId < oneAfterLastPartition; ++partitionId) {
+            const BitSet & prior =  rateDomSet[partitionId - 1];
+            const BitSet & current =  rateDomSet[partitionId];
+            auto j = partitionId + 1U;
+            if (prior != current && in_degree(partitionId, J) > 0) {
+                assert (current.any());
+                for (; j < oneAfterLastPartition; ++j) {
+                    const BitSet & next =  rateDomSet[j];
+                    if (!current.is_subset_of(next)) {
+                        break;
+                    }
                 }
             }
+            assert (j > partitionId);
+
+            PartitionJumpTargetId[partitionId] = j;
         }
+
     }
 
-
-
-    PartitionJumpTargetId[0] = 0;
-    if (LLVM_LIKELY(FirstComputePartitionId > 0)) {
-        for (size_t i = 2; i < FirstComputePartitionId; ++i) {
-            PartitionJumpTargetId[i - 1] = i;
-        }
-        PartitionJumpTargetId[(FirstComputePartitionId - 1)] = (LastComputePartitionId + 1);
-        for (size_t i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
-            if (PartitionJumpTargetId[i] > LastComputePartitionId) {
-                PartitionJumpTargetId[i] = (PartitionCount - 1);
-            }
-        }
-    }
-    assert (PartitionCount > 1);
-    for (auto i = (LastComputePartitionId + 1); i < (PartitionCount - 1); ++i) {
-        PartitionJumpTargetId[i] = (i + 1);
-    }
     PartitionJumpTargetId[(PartitionCount - 1)] = (PartitionCount - 1);
 
 #endif

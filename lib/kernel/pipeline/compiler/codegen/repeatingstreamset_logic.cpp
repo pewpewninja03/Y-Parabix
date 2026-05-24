@@ -38,7 +38,7 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(KernelBuilder & b)
                 const RelationshipNode & rn = mStreamGraph[streamSet];
                 assert (rn.Type == RelationshipNode::IsStreamSet);
                 if (rn.Relationship == s) {
-                    ms = getGuaranteedRepeatingStreamSetLength(b, streamSet);
+                    ms = b.getSize(getGuaranteedRepeatingStreamSetLength(b, streamSet, true));
                     break;
                 }
             }
@@ -56,17 +56,22 @@ void PipelineCompiler::generateMetaDataForRepeatingStreamSets(KernelBuilder & b)
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getMaximumNumOfStridesForRepeatingStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
-Constant * PipelineCompiler::getGuaranteedRepeatingStreamSetLength(KernelBuilder & b, const unsigned streamSet) const {
+size_t PipelineCompiler::getGuaranteedRepeatingStreamSetLength(KernelBuilder & b, const unsigned streamSet, const bool addOverflow) const {
     Rational ub{0U};
+    const auto bw = b.getBitBlockWidth();
     for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
         const auto consumer = target(e, mBufferGraph);
         assert (consumer >= FirstKernel && consumer <= PipelineOutput);
-        const auto m = MaximumNumOfStrides[consumer] ;
+        const auto m = MaximumNumOfStrides[consumer];
         const BufferPort & bp = mBufferGraph[e];
-        ub = std::max(ub, bp.Maximum * m);
+        auto v = bp.Maximum * m;
+        if (addOverflow) {
+            v += std::max(std::max(bp.Add, bp.LookAhead), bp.EmptyOverflow);
+        }
+        ub = std::max(ub, v);
     }
     assert (ub.denominator() == 1);
-    return b.getSize(ub.numerator());
+    return round_up_to<size_t>(ub.numerator(), bw);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -114,7 +119,7 @@ void PipelineCompiler::bindRepeatingStreamSetInitializationArguments(KernelBuild
                 assert (cast<RepeatingStreamSet>(rn.Relationship)->isDynamic());
                 #endif
                 // external buffers already have a buffer handle
-                RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.OutputBuffer);
+                RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
                 buffer->setHandle(handle);
                 Value * const ba = b.CreatePointerCast(addr, buffer->getPointerType());
                 buffer->setBaseAddress(b, ba);
@@ -159,7 +164,7 @@ void PipelineCompiler::addRepeatingStreamSetInitializationArguments(const unsign
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b, const unsigned streamSet) {
     const BufferNode & bn = mBufferGraph[streamSet];
-    RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.OutputBuffer);
+    RepeatingBuffer * const buffer = cast<RepeatingBuffer>(bn.Buffer);
 
     const auto handleName = REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet);
     Value * const handle = b.getScalarFieldPtr(handleName).first;
@@ -203,15 +208,7 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b
         assert (isFromCurrentFunction(b, buffer->getBaseAddress(b)));
     } else {
         Rational ub{1U};
-        for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-            const auto consumer = target(e, mBufferGraph);
-            assert (consumer >= FirstKernel && consumer <= PipelineOutput);
-            const auto m = MaximumNumOfStrides[consumer] + 1;
-            const BufferPort & bp = mBufferGraph[e];
-            ub = std::max(ub, bp.Maximum * m);
-        }
-        assert (ub.denominator() == 1);
-        const auto maxStrideLength = ub.numerator();
+        const auto maxStrideLength = getGuaranteedRepeatingStreamSetLength(b, streamSet, true);
         auto info = cast<PipelineKernel>(mTarget)->createRepeatingStreamSet(b, ss, maxStrideLength);
         Value * const ba = b.CreatePointerCast(info.first, buffer->getPointerType());
         buffer->setBaseAddress(b, ba);
@@ -220,6 +217,9 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b
 
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief addRepeatingStreamSetBufferProperties
+ ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addRepeatingStreamSetBufferProperties(KernelBuilder & b) {
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
@@ -228,7 +228,7 @@ void PipelineCompiler::addRepeatingStreamSetBufferProperties(KernelBuilder & b) 
             assert (S.Type == RelationshipNode::IsStreamSet);
             assert (isa<RepeatingStreamSet>(S.Relationship));
 
-            Type * const handleTy = bn.OutputBuffer->getHandleType(b);
+            Type * const handleTy = bn.Buffer->getHandleType(b);
             mTarget->addInternalScalar(handleTy,
                 REPEATING_STREAMSET_HANDLE_PREFIX + std::to_string(streamSet),
                                        getCacheLineGroupId(PipelineOutput));
@@ -241,6 +241,9 @@ void PipelineCompiler::addRepeatingStreamSetBufferProperties(KernelBuilder & b) 
     }
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief deallocateRepeatingBuffers
+ ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::deallocateRepeatingBuffers(KernelBuilder & b) {
 //    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 //        const BufferNode & bn = mBufferGraph[streamSet];

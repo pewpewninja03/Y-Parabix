@@ -68,39 +68,50 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
-    if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
-        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineInput));
-    }
 
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        const auto partitionId = KernelPartitionId[i];
-        const bool isRoot = (partitionId != currentPartitionId);
-        currentPartitionId = partitionId;
-        addInternalKernelProperties(b, i, isRoot);
-        #ifdef ENABLE_PAPI
-        addPAPIEventCounterKernelProperties(b, i, isRoot);
-        #endif
-        addProducedItemCountDeltaProperties(b, i);
-        addUnconsumedItemCountProperties(b, i);
-        if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
-            assert (isRoot);
-            assert (UseJumpGuidedSynchronization);
-            assert (FirstComputePartitionId <= partitionId && partitionId <= LastComputePartitionId);
-            mTarget->addInternalScalar(sizeTy,
-                NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
+
+    const auto trackIOSummary = StatisticsOptionIsSet(codegen::EnableBlockingIOCounter);
+    const auto trackIOHistory = StatisticsOptionIsSet(codegen::TraceBlockedIO);
+
+    for (size_t phase = 1; phase < numOfPhases; ++phase) {
+
+        const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[phase];
+        const auto firstKernelInCurrentPhase = std::max(FirstKernelInPartition[firstPartition], FirstKernel);
+        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
+
+        mTarget->addInternalScalar(sizeTy, PHASE_NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
+
+        if (numOfPhases != 2) {
+            mTarget->addThreadLocalScalar(sizeTy, PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), getCacheLineGroupId(firstKernelInCurrentPhase));
+        }
+
+        for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
+            const auto partitionId = KernelPartitionId[i];
+            const bool isRoot = (partitionId != currentPartitionId);
+            currentPartitionId = partitionId;
+            addInternalKernelProperties(b, i, isRoot);
+            #ifdef ENABLE_PAPI
+            addPAPIEventCounterKernelProperties(b, i, isRoot);
+            #endif
+            addProducedItemCountDeltaProperties(b, i);
+            addUnconsumedItemCountProperties(b, i);
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
+                addCycleCounterProperties(b, i, ((i + 1) == oneAfterLastKernelInCurrentPhase) | isRoot, isRoot, i);
+            }
+            if (LLVM_UNLIKELY(trackIOSummary)) {
+                addTrackBlockingIOSummaryProperties(b, i, i);
+            }
+            if (LLVM_UNLIKELY(trackIOHistory)) {
+                addTrackBlockingIOHistoryProperties(b, i, i);
+            }
         }
     }
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        auto currentPartitionId = -1U;
-        constexpr auto L = 0U;
-        for (auto i = FirstKernel; i <= LastKernel; ++i) {
-            const auto partitionId = KernelPartitionId[i];
-            const bool isRoot = (partitionId != currentPartitionId);
-            currentPartitionId = partitionId;
-            addCycleCounterProperties(b, i, isRoot, L + i);
-        }
-        addCycleCounterProperties(b, PipelineOutput, true, L + PipelineOutput);
+        addCycleCounterProperties(b, PipelineOutput, true, false, PipelineOutput);
         mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }
@@ -115,14 +126,6 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     }
     addZeroInputStructProperties(b);
     addLocalDynamicBufferStructs(b);
-
-    const auto first = FirstKernelInPartition[FirstComputePartitionId];
-    const auto last = FirstKernelInPartition[LastComputePartitionId + 1];
-
-    if (first > FirstKernel || last <= LastKernel) {
-        mTarget->addInternalScalar(sizeTy, COMPUTE_THREAD_TERMINATION_STATE);
-    }
-
 
 }
 
@@ -143,18 +146,13 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     mKernel = getKernel(kernelId);
     assert (mKernel->isGenerated());
 
-    bool isStateless = false;
-
-    const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
-    const auto onAfterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
+    bool allowDataParallelExecution = false;
 
     #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
-        if (LLVM_LIKELY(firstComputeKernelId <= kernelId && kernelId < onAfterLastComputeKernelId)) {
-            if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
-                isStateless = true;
-                mIsStatelessKernel.set(kernelId);
-            }
+        if (LLVM_LIKELY((mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0)) {
+            allowDataParallelExecution = true;
+            mIsStatelessKernel.set(kernelId);
         }
     }
     #endif
@@ -164,12 +162,6 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         mIsInternallySynchronized.set(kernelId);
     }
 
-    #if defined(ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL)
-    const auto allowDataParallelExecution = isStateless || isInternallySynchronized;
-    #else
-    const auto allowDataParallelExecution = isStateless;
-    #endif
-
     IntegerType * const sizeTy = b.getSizeTy();
 
     const auto groupId = getCacheLineGroupId(kernelId);
@@ -178,15 +170,15 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     const auto name = makeKernelName(kernelId);
 
-    if (kernelId < onAfterLastComputeKernelId) {
-        const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
-        if (isRoot && (kernelId >= firstComputeKernelId)) {
-            addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
-        }
+    const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+    if (isRoot) {
+        addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
     }
 
     addConsumerKernelProperties(b, kernelId);
+
+    const auto isStateFree = allowDataParallelExecution & !isInternallySynchronized;
 
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
@@ -196,7 +188,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (LLVM_UNLIKELY(isStateless)) {
+        if (LLVM_UNLIKELY(isStateFree)) {
             mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
         if (LLVM_UNLIKELY(br.isDeferred())) {
@@ -211,7 +203,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
-        if (LLVM_UNLIKELY(isStateless)) {
+        if (LLVM_UNLIKELY(isStateFree)) {
             mTarget->addInternalScalar(sizeTy, prefix + STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX, groupId);
         }
         if (LLVM_UNLIKELY(br.isDeferred())) {
@@ -252,37 +244,11 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     }
 
     if (LLVM_UNLIKELY(allowDataParallelExecution)) {
-        assert (kernelId < onAfterLastComputeKernelId);
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         addHistogramProperties(b, kernelId, groupId);
-    }
-
-    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-        for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-            const BufferPort & bp = mBufferGraph[output];
-            const auto streamSet = target(output, mBufferGraph);
-            const BufferNode & bn = mBufferGraph[streamSet];
-            if (bp.isManaged() || isa<ManagedDynamicBuffer>(bn.OutputBuffer)) {
-                const BufferPort & rd = mBufferGraph[output];
-                const auto prefix = makeBufferName(kernelId, rd.Port);
-                LLVMContext & C = b.getContext();
-                const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
-
-                // segment num  0
-                // new capacity 1
-                // produced item count 2
-                // consumer processed item count [3,n)
-                Type * const traceStructTy = ArrayType::get(sizeTy, numOfConsumers + 3);
-                FixedArray<Type *, 2> traceStruct;
-                traceStruct[0] = traceStructTy->getPointerTo(); // pointer to trace log
-                traceStruct[1] = sizeTy; // length of trace log
-                mTarget->addInternalScalar(StructType::get(C, traceStruct),
-                                                   prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX, groupId);
-            }
-        }
     }
 
     if (LLVM_UNLIKELY(isRoot && StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
@@ -425,39 +391,34 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const segmentSize) {
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
         assert (FirstKernel == LastKernel);
-        assert (LastStreamSet <= FirstStreamSet);
         return;
     }
 
     getABIAlignments(b);
 
-    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
-        assert (LastKernel == PipelineInput);
-        #ifndef NDEBUG
-        for (auto streamSet = (PipelineOutput + 1); streamSet <= LastStreamSet; ++streamSet) {
-            const auto & bn = mBufferGraph[streamSet];
-            assert (bn.isUnowned() && bn.isExternal());
-        }
-        #endif
-        return;
-    }
-
     initializeInitialSlidingWindowSegmentLengths(b, segmentSize);
 
-    bool hasAnyReturnedBuffer = false;
-    for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
-        const auto streamSet = source(output, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isReturned())) {
-            if (getReturnedBufferScaleFactor(streamSet) > 0) {
-                hasAnyReturnedBuffer = true;
-                break;
+    assert (PartitionPhaseBoundaries.size() >= 2);
+
+    bool getInputSize = false;
+
+    if (PartitionPhaseBoundaries.size() > 2) {
+        getInputSize = true;
+    } else {
+        for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
+            const auto streamSet = source(output, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (LLVM_UNLIKELY(bn.isReturned())) {
+                if (getReturnedBufferScaleFactor(streamSet) > 0) {
+                    getInputSize = true;
+                    break;
+                }
             }
         }
     }
 
     Value * expectedSourceOutputSize = nullptr;
-    if (LLVM_UNLIKELY(hasAnyReturnedBuffer)) {
+    if (LLVM_UNLIKELY(getInputSize)) {
         Value * bufferScaling = nullptr;
         for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
             if (LLVM_UNLIKELY(in_degree(kernel, mBufferGraph) == 0)) {
@@ -493,14 +454,32 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
     }
     getABIAlignments(b);
     assert (mTarget->hasThreadLocal());
-    for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
-        const Kernel * const kernel = getKernel(i);
-        if (kernel->hasThreadLocal()) {
-            setActiveKernel(b, i, true);
-            assert (mKernel == kernel);
-            callKernelInitializeThreadLocalFunction(b);
+
+    const auto numOfPhases = PartitionPhaseBoundaries.size(); assert (numOfPhases >= 2);
+
+    for (size_t phase = 1; phase < numOfPhases; ++phase) {
+
+        const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
+        const auto oneAfterLastPartition = PartitionPhaseBoundaries[phase];
+        const auto firstKernelInCurrentPhase = std::max(FirstKernelInPartition[firstPartition], FirstKernel);
+        const auto oneAfterLastKernelInCurrentPhase = FirstKernelInPartition[oneAfterLastPartition];
+        assert (oneAfterLastKernelInCurrentPhase <= PipelineOutput);
+
+        if (numOfPhases != 2) {
+            // TODO: is there a way to predict better initial phase segment limits?
+            b.setScalarField(PHASE_ITERATION_SEGMENT_LIMIT_STEP + std::to_string(phase), b.getSize(DEFAULT_INITIAL_PHASE_SEGMENT_LIMIT));
+        }
+
+        for (auto i = firstKernelInCurrentPhase; i < oneAfterLastKernelInCurrentPhase; ++i) {
+            const Kernel * const kernel = getKernel(i);
+            if (kernel->hasThreadLocal()) {
+                setActiveKernel(b, i, true);
+                assert (mKernel == kernel);
+                callKernelInitializeThreadLocalFunction(b);
+            }
         }
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -637,7 +616,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(HasZeroExtendedStream)) {
         b.CreateFree(b.getScalarField(ZERO_EXTENDED_BUFFER));
     }
-//    freePendingFreeableDynamicBuffers(b);
     freeZeroedInputBuffers(b);
 }
 

@@ -121,7 +121,7 @@ void CopyKernel::generateDoSegmentMethod(KernelBuilder & b) {
             Value * const mask = b.CreateNot(b.bitblock_mask_from(maskPos));
             Value * val = b.CreateAnd(b.CreateAlignedLoad(b.getBitBlockType(), inputPtr, bw / 8), mask);
             b.CreateStore(val, outputPtr);
-            current = b.CreateSaturatingSub(current, BLOCK_WIDTH);
+            current = b.CreateUnsignedSaturatingSub(current, BLOCK_WIDTH);
         }
     }
     b.setProducedItemCount("output", upTo);

@@ -909,7 +909,7 @@ inline Value * CarryManager::longAdvanceCarryInCarryOut(kernel::KernelBuilder & 
                     advanced = b.CreateOr(b.CreateShl(prior, 1), carry);
                     carry = b.CreateLShr(prior, summaryBlocks - 1);
                 } else {
-                    std::tie(carry, advanced) = b.bitblock_advance(prior, carry, 1);
+                    std::tie(carry, advanced) = b.bitblock_advance(b.bitCast(prior), carry, 1);
                 }
                 Value * stream = b.CreateBitCast(advanced, bitBlockTy);
                 if (LLVM_LIKELY(i == summarySize)) {

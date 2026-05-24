@@ -57,7 +57,7 @@ void PipelineCompiler::illustrateStreamSet(KernelBuilder & b, const size_t strea
 
             const auto & bn = mBufferGraph[streamSet];
 
-            StreamSetBuffer * const buffer = bn.OutputBuffer;
+            StreamSetBuffer * const buffer = bn.Buffer;
 
             const auto & rt = mBufferGraph[in_edge(streamSet, mBufferGraph)];
 

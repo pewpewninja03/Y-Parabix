@@ -67,7 +67,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(KernelBuilder & b, V
     const auto streamSetIdx = getInputBufferVertex(condInput);
 
     const BufferNode & bn = mBufferGraph[streamSetIdx];
-    StreamSetBuffer * const buffer = bn.OutputBuffer;
+    StreamSetBuffer * const buffer = bn.Buffer;
 
     if (LLVM_UNLIKELY(!isConstantOne(buffer->getStreamSetCount(b)))) {
         report_fatal_error("Optimization branch condition must be a fixed-rate single-stream StreamSet");

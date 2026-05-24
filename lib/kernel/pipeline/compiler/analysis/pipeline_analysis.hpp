@@ -41,7 +41,7 @@ public:
         P.simpleSchedulePartitionedProgram(initialGraph, rng);
 
         // Construct the Stream and Scalar graphs
-        P.transcribeRelationshipGraph(initialGraph, initialGraph);
+        P.transcribeRelationshipGraph(initialGraph);
 
         P.generateInitialBufferGraph(b);
 
@@ -52,8 +52,6 @@ public:
         P.identifyOutputNodeIds();
 
         P.identifyInterPartitionSymbolicRates();
-
-        P.addFlowControlAnnotations();
 
         P.identifyTerminationChecks();
 
@@ -73,7 +71,6 @@ public:
         if (P.RequiresIllustratorObject) {
             P.identifyIllustratedStreamSets();
         }
-        P.calculatePartialSumStepFactors(b);
 
         P.estimateInitialBufferSizes(b);
 
@@ -81,11 +78,11 @@ public:
 
         P.buildZeroInputGraph();
 
+        P.calculatePartialSumStepFactors(b);
+
         P.identifyPortsThatModifySegmentLength();
 
         P.mapInternallyGeneratedStreamSets();
-
-        P.identifySynchronizationVariableLevels();
 
         // Finish the buffer graph
 
@@ -131,7 +128,7 @@ private:
 
     void identifyPipelineInputs();
 
-    void transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph);
+    void transcribeRelationshipGraph(const PartitionGraph & partitionGraph);
 
     void gatherInfo() {
         MaxNumOfInputPorts = in_degree(PipelineOutput, mBufferGraph);
@@ -197,8 +194,6 @@ private:
 
     void buildZeroInputGraph();
 
-    void addFlowControlAnnotations();
-
     void setStreamSetLockIds();
 
     void identifyManagedBufferStructIds(pipeline_random_engine & rng);
@@ -256,10 +251,6 @@ private:
 
     void mapInternallyGeneratedStreamSets();
 
-    // Synchronization Level Analysis
-
-    void identifySynchronizationVariableLevels();
-
 public:
 
     // Debug functions
@@ -273,6 +264,8 @@ public:
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
+    std::vector<size_t>             PartitionPhaseBoundaries;
+    flat_map<size_t, size_t>        KernelPhaseId;
 
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;
@@ -292,10 +285,7 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        FirstComputePartitionId = 0;
-    unsigned                        LastComputePartitionId = 0;
     unsigned                        ManagedBufferStructCount = 0;
-    bool                            AllowIOProcessThread = false;
 
     bool                            HasZeroExtendedStream = false;
     bool                            RequiresIllustratorObject = false;
@@ -311,7 +301,7 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
-
+    std::vector<unsigned>           TerminalPhaseSet;
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;
@@ -320,7 +310,7 @@ public:
     ThreadLocalConflictGraphType    ThreadLocalConflictGraph;
 
     std::vector<unsigned>           PartitionJumpTargetId;
-    RedundantStreamSetMap           RedundantStreamSets;
+    RedundantStreamSetMap           RemappedStreamSets;
 
     ConsumerGraph                   mConsumerGraph;
 

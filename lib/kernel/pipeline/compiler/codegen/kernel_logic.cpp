@@ -105,7 +105,7 @@ void PipelineCompiler::computeFullyProducedItemCounts(KernelBuilder & b, Value *
             const Binding & output = br.Binding;
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::Delayed))) {
                 const auto & D = output.findAttribute(AttrId::Delayed);
-                produced = b.CreateSaturatingSub(produced, b.getSize(D.amount()));
+                produced = b.CreateUnsignedSaturatingSub(produced, b.getSize(D.amount()));
             }
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::BlockSize))) {
                 Constant * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
@@ -138,7 +138,7 @@ Value * PipelineCompiler::subtractLookahead(KernelBuilder & b, const BufferPort 
     }
     Constant * const lookAhead = b.getSize(inputPort.LookAhead);
     Value * const closed = isClosed(b, inputPort.Port);
-    Value * const reducedItemCount = b.CreateSaturatingSub(itemCount, lookAhead);
+    Value * const reducedItemCount = b.CreateUnsignedSaturatingSub(itemCount, lookAhead);
     return b.CreateSelect(closed, itemCount, reducedItemCount);
 }
 
@@ -152,7 +152,7 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(KernelBuilder & b, const unsig
     Value * handle = nullptr;
     if (LLVM_UNLIKELY(commonThreadLocal)) {
         assert (mCommonThreadLocalHandle);
-        handle = getThreadLocalScalarFieldPtr(b, mCommonThreadLocalHandle, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+        handle = getScalarFieldPtr(b, mCommonThreadLocalHandle, ScalarType::ThreadLocal, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
         assert (handle);
     } else {
         handle = getScalarFieldPtr(b, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
@@ -194,17 +194,6 @@ bool PipelineCompiler::hasAnyGreedyInput(const unsigned kernelId) const {
         }
     }
     return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isDataParallel
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::isDataParallel(const size_t kernel) const {
-    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
-    return mIsStatelessKernel.test(kernel) || mIsInternallySynchronized.test(kernel);
-    #else
-    return mIsStatelessKernel.test(kernel);
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -314,7 +303,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     // TODO: make it so these are only needed in debug mode for assertion checks?
 
     mExecuteStridesIndividually = false;
-    mCurrentKernelIsStateFree = false;
+    mAllowDataParallelExecution = false;
     mAllowDataParallelExecution = false;
     mHasPrincipalInput = false;
 

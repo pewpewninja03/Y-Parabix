@@ -337,12 +337,18 @@ void PipelineAnalysis::calculatePartialSumStepFactors(KernelBuilder & b) {
                     const auto k = G[e] * StrideRepetitionVector[consumer];
                     maxStepFactor = std::max(maxStepFactor, k);
                 }
-                maxStepFactor = round_up_to(maxStepFactor, stepsPerBlock);
+
+
+
+                const BufferPort & bp = mBufferGraph[output];
+                maxStepFactor = round_up_to(maxStepFactor + bp.RequiredOverflowSpace, stepsPerBlock);
                 const auto spanLength = maxStepFactor / stepsPerBlock;
                 add_edge(kernel, streamSet, spanLength, G);
                 assert (spanLength > 0);
+
                 BufferNode & bn = mBufferGraph[streamSet];
                 bn.PartialSumSpanLength = std::max(bn.PartialSumSpanLength, spanLength + 1);
+                bn.Type |= BufferType::PopCountPartialSumStream;
             }
         }
 
@@ -654,52 +660,6 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
             }
         }
     }
-
-//    std::vector<int> component(PartitionCount);
-//    connected_components(P, component.data());
-
-//    for (unsigned partId = 0; partId < PartitionCount; ++partId) {
-//        const auto & X = T[partId];
-//        if (X.any()) {
-
-
-//        }
-//    }
-
-
-
-//    for (unsigned partId = 0; partId < PartitionCount; ++partId) {
-//        const auto & X = T[partId];
-//        if (X.any()) {
-//            const auto firstKernel = FirstKernelInPartition[partId];
-//            auto & bn = mBufferGraph[firstKernel];
-//            if (in_degree(firstKernel, mBufferGraph) == 0) {
-//                bn.Type = KernelFlags::ControlsSegmentSizeSlidingWindowing;
-//            } else {
-//                bn.Type = 0;
-//            }
-//            const auto firstKernelInNextPartition = FirstKernelInPartition[partId + 1];
-//            for (auto kernel = firstKernel; kernel < firstKernelInNextPartition; ++kernel) {
-//                for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-//                    const auto streamSet = source(input, mBufferGraph);
-//                    const auto producer = parent(streamSet, mBufferGraph);
-//                    const auto prodPartId = KernelPartitionId[producer];
-//                    if ((prodPartId != partId) && (X != T[prodPartId])) {
-//                        auto & bn = mBufferGraph[firstKernel];
-//                        if (kernel == firstKernel) {
-//                            bn.Type = KernelFlags::ControlsSegmentSizeSlidingWindowing;
-//                        } else {
-//                            bn.Type = KernelFlags::PermitSegmentSizeSlidingWindowing;
-//                            break;
-//                        }
-//                    }
-//                }
-//            }
-//            for (const auto output : make_iterator_range(out_edges(partId, T))) {
-//                T[target(output, T)] |= X;
-//            }
-//        }
-//    }
 
     for (auto kernel = PipelineInput; kernel <= PipelineOutput; ++kernel) {
         const auto partId = KernelPartitionId[kernel];

@@ -380,26 +380,43 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 }
             }
 
-            const auto sharedGroupCount = sharedGroups.size();
-            const auto threadLocalGroupCount = threadLocalGroups.size();
-
             using TypesVec = std::vector<Type *>;
 
             using VecOfTypes = std::vector<TypesVec>;
 
-            VecOfTypes shared(sharedGroupCount + 2);
-            VecOfTypes threadLocal(threadLocalGroupCount);
+            VecOfTypes shared(sharedGroups.size() + 2);
+            VecOfTypes threadLocal(threadLocalGroups.size());
 
-            Type * const emptyTy = StructType::get(b.getContext());
-
-            auto addScalar = [](VecOfTypes & S, const unsigned group, Type * const type) {
-                assert (group < S.size());
+            #ifndef NDEBUG
+            std::function<void(Type *)> checkType = [&](Type * type) {
                 assert (type);
+                assert (&type->getContext() == &b.getContext());
+                if (isa<ArrayType>(type)) {
+                    checkType(type->getArrayElementType());
+                } else if (isa<VectorType>(type)) {
+                    checkType(type->getScalarType());
+                } else if (isa<StructType>(type)) {
+                    for (size_t i = 0; i < type->getStructNumElements(); ++i) {
+                        checkType(type->getStructElementType(i));
+                    }
+                }
+            };
+            #endif
+
+            auto addScalar = [&](VecOfTypes & S, const unsigned group, Type * const type) {
+                assert (group < S.size());
+                #ifndef NDEBUG
+                checkType(type);
+                #endif
                 S[group].push_back(type);
             };
 
+            size_t sharedGroupCount = 0;
+            size_t threadLocalGroupCount = 0;
+
             for (const auto & scalar : mInputScalars) {
                 addScalar(shared, 0, scalar.getType());
+                 ++sharedGroupCount;
             }
 
             for (const auto & scalar : mInternalScalars) {
@@ -414,80 +431,87 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 switch (scalar.getScalarType()) {
                     case ScalarType::Internal:
                         addScalar(shared, getGroupIndex(sharedGroups) + 1, scalar.getValueType());
+                         ++sharedGroupCount;
                         break;
                     case ScalarType::ThreadLocal:
                         addScalar(threadLocal, getGroupIndex(threadLocalGroups), scalar.getValueType());
+                        ++threadLocalGroupCount;
                         break;
                     default: break;
                 }
             }
 
-            assert (shared[sharedGroupCount + 1].empty());
+            assert (shared[sharedGroups.size() + 1].empty());
             for (const auto & scalar : mOutputScalars) {
-                addScalar(shared, sharedGroupCount + 1, scalar.getType());
+                addScalar(shared, sharedGroups.size() + 1, scalar.getType());
+                ++sharedGroupCount;
             }
 
             IntegerType * const int8Ty = b.getInt8Ty();
 
-            const size_t cacheAlignment = b.getCacheAlignment();
+            const uintptr_t cacheAlignment = b.getCacheAlignment();
 
             auto & dl = m->getDataLayout();
 
-            auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec,
+            auto & C = m->getContext();
+
+            auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec, const size_t count,
                                       StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
+
+                if (count == 0) return nullptr;
 
                 const auto n = structTypeVec.size();
 
-                if (n == 0) return nullptr;
+                std::vector<Type *> fields(count * 2);
 
-                std::vector<Type *> structTypes(n * 2);
+                uintptr_t byteOffset = 0;
+                size_t k = 0;
 
                 for (unsigned i = 0; i < n; ++i) {
-                    StructType * const sty = StructType::create(b.getContext(), structTypeVec[i]);
-                    assert (sty->isSized());
-                    structTypes[i * 2] = sty;
-               }
-
-               uintptr_t byteOffset = 0;
-
-               for (unsigned i = 0; i < n; ++i) {
-
-                   byteOffset += CBuilder::getTypeSize(dl, structTypes[i * 2]);
-
-                    Type * paddingTy = emptyTy;
-
-                    if (addGroupCacheLinePadding) {
-                        const auto offset = (byteOffset % cacheAlignment);
-                        if (offset) {
-                            const auto padding = cacheAlignment - offset;
-                            paddingTy = ArrayType::get(int8Ty, padding);
-                            byteOffset += padding;
+                    const auto & L = structTypeVec[i];
+                    const auto m = L.size();
+                    for (size_t j = 0; j != m; ++j) {
+                        Type * const type = L[j]; assert(type);
+                        uintptr_t align = CBuilder::getAlignOf(dl, type);
+                        assert (align > 0);
+                        if (j == 0 && addGroupCacheLinePadding) {
+                            align = boost::lcm(align, cacheAlignment);
                         }
+
+                        const auto offset = (byteOffset % align);
+                        assert (i != 0 || j != 0 || offset == 0);
+                        const auto padding = (offset == 0ULL) ? 0ULL : (align - offset);
+                        byteOffset += padding + CBuilder::getTypeSize(dl, type);
+                        Type * const paddingTy = ArrayType::get(int8Ty, padding);
+                        assert (k < fields.size());
+                        fields[k++] = paddingTy;
+                        assert (k < fields.size());
+                        fields[k++] = type;
                     }
-
-                    structTypes[(i * 2) + 1] = paddingTy;
-
                 }
 
-                if (byteOffset == 0) return nullptr;
+
+                assert (k == fields.size());
+
+                if (LLVM_UNLIKELY(byteOffset == 0)) return nullptr;
 
                 if (st == nullptr) {
-                    st = StructType::create(b.getContext(), structTypes, name);
+                    st = StructType::create(C, fields, name, true);
                 } else {
                     assert (st->isOpaque());
-                    st->setBody(structTypes);
+                    st->setBody(fields);
+                    assert (!st->isOpaque() && st->isPacked());
                 }
-                assert (!st->isOpaque());
 
                 #ifndef NDEBUG
+                assert (st->getStructNumElements() == k);
                 const StructLayout * const sl = dl.getStructLayout(st);
                 const auto structTypeSize = CBuilder::getTypeSize(dl, st);
                 assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() == structTypeSize);
-                assert (structTypeSize >= byteOffset);
-                if (addGroupCacheLinePadding) {
-                    for (unsigned i = 0; i < n; ++i) {
-                        assert ("cache line group alignment failed." && ((sl->getElementOffset(i * 2) % cacheAlignment) == 0));
-                    }
+                assert ("expected stuct size does not match byte offset?" && structTypeSize == byteOffset);
+                for (size_t i = 0; i < k; ++i) {
+                    const auto align = dl.getABITypeAlign(st->getElementType(i)).value();
+                    assert ((sl->getElementOffset(i) %  align) == 0);
                 }
                 #endif
 
@@ -497,11 +521,11 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             // NOTE: StructType::create always creates a new type even if an identical one exists.
             const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
             if (mSharedStateType == nullptr || mSharedStateType->isOpaque()) {
-                mSharedStateType = makeStructType(mSharedStateType, shared, strShared, allowStructPadding);
+                mSharedStateType = makeStructType(mSharedStateType, shared, sharedGroupCount, strShared, allowStructPadding);
                 assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
             }
             if (mThreadLocalStateType == nullptr || mThreadLocalStateType->isOpaque()) {
-                mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, strThreadLocal, false);
+                mThreadLocalStateType = makeStructType(mThreadLocalStateType, threadLocal, threadLocalGroupCount, strThreadLocal, false);
                 assert (nullIfEmpty(mThreadLocalStateType) == mThreadLocalStateType);
             }
             if (LLVM_UNLIKELY(InfoOptionIsSet(codegen::PrintKernelSizes))) {
@@ -766,19 +790,6 @@ Function * Kernel::addInitializeThreadLocalDeclaration(KernelBuilder & b) const 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasInternalStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::allocatesInternalStreamSets() const {
-    // TODO: store flag for this?
-    for (const Binding & output : mOutputStreamSets) {
-        if (LLVM_UNLIKELY(Kernel::isManagedBuffer(output))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAllocateInternalStreamSets
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * Kernel::getAllocateSharedInternalStreamSetsFunction(KernelBuilder & b, const bool alwayReturnDeclaration) const {
@@ -1034,6 +1045,9 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         // that we are not using an old buffer allocation.
         if (isLocal.any()) {
             fields.push_back(sizeTy); // consumed
+            if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                fields.push_back(sizePtrTy); // updatable capacity
+            }
         } else {
             if (isMainPipeline || requiresItemCount(output)) {
                 fields.push_back(sizeTy); // writable item count
@@ -1066,7 +1080,9 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
     Function * doSegment = m->getFunction(funcName);
     if (LLVM_LIKELY(doSegment == nullptr)) {
 
-        Type * const retTy = canSetTerminateSignal() ? b.getSizeTy() : b.getVoidTy();
+        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+
+        Type * const retTy = (internallySynchronized || canSetTerminateSignal()) ? b.getSizeTy() : b.getVoidTy();
         FunctionType * const doSegmentType = FunctionType::get(retTy, getDoSegmentFields(b), false);
         doSegment = Function::Create(doSegmentType, GlobalValue::ExternalLinkage, funcName, m);
         doSegment->setCallingConv(CallingConv::C);
@@ -1094,11 +1110,13 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("threadLocal");
         }
-        const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
+
         const auto isPipeline = (getTypeId() == TypeId::Pipeline);
         const auto isMainPipeline = isPipeline && !internallySynchronized;
 
-        if (LLVM_LIKELY(!isMainPipeline)) {
+        if (LLVM_UNLIKELY(isMainPipeline)) {
+            setNextArgName("segmentSize");
+        } else {
             if (LLVM_UNLIKELY(internallySynchronized)) {
                 setNextArgName("segNo");
             }
@@ -1111,8 +1129,6 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
                 setNextArgName("eventSetId");
             }
             #endif
-        } else {
-            setNextArgName("segmentSize");
         }
 
         const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
@@ -1142,8 +1158,12 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             if (LLVM_LIKELY(hasTerminationSignal || isAddressable(output) || isCountable(output))) {
                 setNextArgName(output.getName() + "_produced");
             }
-            if (LLVM_UNLIKELY(isLocalBuffer(output).any())) {
+            const auto isLocal = Kernel::isLocalBuffer(output);
+            if (LLVM_UNLIKELY(isLocal.any())) {
                 setNextArgName(output.getName() + "_consumed");
+                if (LLVM_UNLIKELY(checkStreamSet && !isLocal.isShared())) {
+                    setNextArgName(output.getName() + "_updatableCapacity");
+                }
             } else {
                 if (isMainPipeline || requiresItemCount(output)) {
                     setNextArgName(output.getName() + "_writable");
@@ -1319,7 +1339,13 @@ Function * Kernel::addOrDeclareMainFunction(KernelBuilder & /* b */, const MainM
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::createInstance(KernelBuilder & b) const {
     if (LLVM_LIKELY(isStateful())) {
-        return b.CreatePageAlignedMalloc(getSharedStateType());
+        StructType * stateTy = getSharedStateType();
+        auto & DL = b.getModule()->getDataLayout();
+        Constant *  const stateTySize = b.getSize(b.getTypeSize(DL, stateTy));
+        Value * const stateObj = b.CreatePageAlignedMalloc(stateTySize);
+        const auto align = DL.getABITypeAlign(stateTy).value();
+        b.CreateMemZero(stateObj, stateTySize, align);
+        return b.CreatePointerCast(stateObj, stateTy->getPointerTo());
     }
     llvm_unreachable("createInstance should not be called on stateless kernels");
     return nullptr;
@@ -1576,15 +1602,15 @@ void SegmentOrientedKernel::generateKernelMethod(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasInternalScalars
+ * @brief hasAnySharedOrOutputScalars
  ** ------------------------------------------------------------------------------------------------------------- */
-bool Kernel::hasInternalScalars(const ScalarType type) const {
+bool Kernel::noMutableSharedScalars() const {
     for (const InternalScalar & s : mInternalScalars) {
-        if (s.getScalarType() == type) {
-            return true;
+        if (LLVM_LIKELY(s.getScalarType() == ScalarType::Internal)) {
+            return false;
         }
     }
-    return false;
+    return mOutputScalars.empty();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1631,7 +1657,7 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         buffer << "_EA";
     } else {
-        if (LLVM_UNLIKELY(id == Kernel::TypeId::Pipeline)) {
+        if (LLVM_UNLIKELY(id == TypeId::Pipeline || id == TypeId::PopCountKernel)) {
             // TODO: look into cleaner method for this
             if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnablePipelineAsserts))) {
                 buffer << "_EP";

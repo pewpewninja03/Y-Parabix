@@ -270,6 +270,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     auto & dl = b.getModule()->getDataLayout();
 
+    const auto bw = b.getBitBlockWidth();
+
     size_t numOfThreadLocalStreamSets = 0U;
     size_t packedPartitionCount = 0;
 
@@ -303,13 +305,13 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                     } else {
                         mapStreamSetToThreadLocal[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
                         streamSetPartitionId[numOfThreadLocalStreamSets] = packedPartitionCount;
-                        Type * const type = bn.OutputBuffer->getType();
+                        Type * const type = bn.Buffer->getType();
                         const size_t typeSize = b.getTypeSize(dl, type);
                         const BufferPort & bp = mBufferGraph[output];
                         const auto W = bp.Maximum * typeSize * StrideRepetitionVector[kernel];
                         assert (W.denominator() == 1);
                         unitWeight[numOfThreadLocalStreamSets] = W.numerator();
-                        overflowWeight[numOfThreadLocalStreamSets] = bn.NumOfOverflowStrides;
+                        overflowWeight[numOfThreadLocalStreamSets] = ceiling(Rational{bp.RequiredOverflowSpace, bw});
                         ++numOfThreadLocalStreamSets;
                     }
 
@@ -487,7 +489,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         assert (intervals.size() == numOfThreadLocalStreamSets);
 
         const auto pageSize = getPageSize();
-        const auto bw = b.getBitBlockWidth();
+
 
 
         Rational::int_type denomLCM = 1U;

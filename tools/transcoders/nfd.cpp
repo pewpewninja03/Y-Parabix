@@ -142,14 +142,14 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
         StreamSet * const NonModified = P.CreateStreamSet(1, 8);
         FilterByMask(P, NonModifiedMask, Source, NonModified);
         SHOW_BYTES(NonModified);
-        
+
         StreamSet * const NonModifiedPlacementMask = P.CreateStreamSet(1, 1);
         Invert(P, FinalWorkPlacementMask, NonModifiedPlacementMask);
         SHOW_STREAM(NonModifiedPlacementMask);
-        
+
         StreamSet * const NonModifiedPlaced = P.CreateStreamSet(1, 8);
         SpreadByMask(P, NonModifiedPlacementMask, NonModified, NonModifiedPlaced);
-        
+
         StreamSet * const TransformedBytes = P.CreateStreamSet(1, 8);
         P.CreateKernelCall<P2SKernel>(TransformedBasis, TransformedBytes);
 
@@ -249,10 +249,10 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver) {
         StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
         StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
         NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
-        
+
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         NFD_builder.NFD_U8_Pipeline(WorkingBasis, TransformedBasis);
-        
+
         OutputAssemblyStage(P, WorkSelectionMask, FinalWorkPlacementMask, ByteMerging ? ByteStream : BasisBits, TransformedBasis);
     }
     return P.compile();
