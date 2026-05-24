@@ -184,6 +184,59 @@ void QuoteEscape2Backslash::generatePabloMethod() {
     }
 }
 
+class FinalCommaToRBracket : public PabloKernel {
+public:
+    FinalCommaToRBracket(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * EOFmark,
+                         StreamSet * translatedBasis)
+        : PabloKernel(ts, std::string("FinalCommaToRBracket") + (codegen::DebugOptionIsSet(codegen::DisableInOutAttributes) ? "-InOut" : ""),
+                      {Binding{"basis", basis}, Binding{"EOFmark", EOFmark, FixedRate(), LookAhead(2)}},
+                      {}) {
+    mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
+    if (mUseInOut) {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis, FixedRate(), InOut("basis")});
+    } else {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis});
+    }
+}
+protected:
+    void generatePabloMethod() override;
+    void translationLogic(PabloBuilder & pb, PabloAST * FinalCommaPos, std::vector<PabloAST *> & basis);
+private:
+    bool mUseInOut;
+};
+
+void FinalCommaToRBracket::translationLogic(PabloBuilder & pb, PabloAST * FinalCommaPos, std::vector<PabloAST *> & basis) {
+    std::vector<PabloAST *> translated_basis(basis.size());
+    Var * outputVar = getOutputStreamVar("translatedBasis");
+    // Replace the comma (0x2C) character with ] = 0x5D
+    pb.createAssign(pb.createExtract(outputVar, pb.getInteger(0)), pb.createOr(FinalCommaPos, basis[0]));
+    for (unsigned i = 1; i < 4; i++) {
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), basis[i]);
+    }
+    for (unsigned i = 4; i < 7; i++) {
+        translated_basis[i] = pb.createXor(basis[i], FinalCommaPos, "xlated" + std::to_string(i));
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), translated_basis[i]);
+    }
+    for (unsigned i = 7; i < basis.size(); i++) {
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), basis[i]);
+    }
+}
+
+void FinalCommaToRBracket::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * EOFmark = getInputStreamSet("EOFmark")[0];
+    PabloAST * FinalCommaPos = pb.createLookahead(EOFmark, 2);
+
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    if (mUseInOut) {
+        auto nested = pb.createScope();
+        pb.createIf(FinalCommaPos, nested);
+        translationLogic(nested, FinalCommaPos, basis);
+    } else {
+        translationLogic(pb, FinalCommaPos, basis);
+    }
+}
+
 class CalcQuoteBixNum : public PabloKernel {
 public:
     CalcQuoteBixNum(LLVMTypeSystemInterface & ts, StreamSet * stringStarts, StreamSet * stringFollows,
@@ -315,12 +368,12 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     //FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
     //SHOW_STREAM(recordsByField);
 
-    //StreamSet * translatedBasis = P.CreateStreamSet(8);
-    //P.CreateKernelCall<QuoteEscape2Backslash>(quoteEscape, BasisBits, translatedBasis);
-    //SHOW_BIXNUM(translatedBasis);
+    StreamSet * translatedBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<QuoteEscape2Backslash>(quoteEscape, BasisBits, translatedBasis);
+    SHOW_BIXNUM(translatedBasis);
 
     StreamSet * filteredBasis = P.CreateStreamSet(8);
-    FilterByMask(P, toKeep, BasisBits, filteredBasis);
+    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
     // Reset Basis bits and reparse.
@@ -397,13 +450,19 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     }
     StreamSet * TemplateBasis = P.CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
-    StreamSet * FinalBasis = P.CreateStreamSet(8);
+    StreamSet * MergedBasis = P.CreateStreamSet(8);
     if (UseMergeByMaskKernel) {
-        MergeByMask(P, BasisSpreadMask, BasisBits, TemplateBasis, FinalBasis);
+        MergeByMask(P, BasisSpreadMask, BasisBits, TemplateBasis, MergedBasis);
     } else {
-        MergeByMask01(P, BasisSpreadMask, BasisBits, TemplateBasis, FinalBasis);
+        MergeByMask01(P, BasisSpreadMask, BasisBits, TemplateBasis, MergedBasis);
     }
-    SHOW_BIXNUM(FinalBasis);
+    SHOW_BIXNUM(MergedBasis);
+
+    EOFmark = P.CreateStreamSet(1);
+    P.CreateKernelCall<EOFbit>(MergedBasis, EOFmark);
+    StreamSet * FinalBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<FinalCommaToRBracket>(MergedBasis, EOFmark, FinalBasis);
+
     StreamSet * Instantiated = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
     P.CreateKernelCall<StdOutKernel>(Instantiated);
@@ -418,7 +477,6 @@ int main(int argc, char *argv[]) {
 
     const auto templateStrs = JSONfieldPrefixes(headers);
     std::string templatePrologue = "[\n";
-    std::string templateEpilogue = "]\n";
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
@@ -441,7 +499,6 @@ int main(int argc, char *argv[]) {
         fflush(stdout);
         fn(fd);
         close(fd);
-        printf("%s", templateEpilogue.c_str());
         #ifdef REPORT_PAPI_TESTS
         jitExecution.stop();
         jitExecution.write(std::cerr);
