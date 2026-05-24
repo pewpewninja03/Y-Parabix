@@ -296,14 +296,7 @@ enum BufferLocality {
     , ZeroElementsOrWidth
 };
 
-enum KernelFlags {
-    PermitSegmentSizeSlidingWindowing = 1
-    , ControlsSegmentSizeSlidingWindowing = 2
-};
-
 struct BufferNode {
-
-
 
     unsigned Type = 0;
 
@@ -312,9 +305,6 @@ struct BufferNode {
     BufferLocality Locality = BufferLocality::ThreadLocal;
 
     unsigned LookBehind = 0;
-//    unsigned RequiredOverflowSpace = 0;
-
-//    unsigned NumOfOverflowStrides = 0;
 
     bool RequiresUnderflow = false;
 
@@ -328,14 +318,6 @@ struct BufferNode {
     unsigned ProducedPhaseId = 0;
 
     Rational RelativeIORate{0};
-
-    bool permitSlidingWindow() const {
-        return (Type & KernelFlags::PermitSegmentSizeSlidingWindowing) != 0;
-    }
-
-    bool controlsSlidingWindow() const {
-        return (Type & KernelFlags::ControlsSegmentSizeSlidingWindowing) != 0;
-    }
 
     bool isOwned() const {
         return (Type & BufferType::Unowned) == 0;

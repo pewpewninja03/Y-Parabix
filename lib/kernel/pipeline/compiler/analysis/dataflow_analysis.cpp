@@ -449,13 +449,12 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
     assert (PipelineOutput == FirstKernelInPartition[PartitionCount - 1]);
 
-    for (unsigned i = PipelineInput; i < PipelineOutput; ++i) {
+    for (unsigned i = PipelineInput; i <= PipelineOutput; ++i) {
         const auto partId = KernelPartitionId[i];
         assert (partId < PartitionCount);
         auto rootVar = PartitionVarList[partId];
         VarList[i] = multiply(rootVar, StrideRepetitionVector[i]);
     }
-    VarList[PipelineOutput] = z3_ONE;
 
     for (auto kernel = FirstKernel; kernel <= PipelineOutput; ++kernel) {
 
@@ -475,7 +474,12 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
                     const auto expectedInput = (port.Minimum + port.Maximum) * Rational{1, 2};
                     assert (expectedInput.numerator() > 0);
                     Z3_ast expInRate = multiply(VarList[kernel], expectedInput);
-                    soft_assert(Z3_mk_eq(ctx, expInRate, VarList[streamSet]));
+                    auto r = Z3_mk_eq(ctx, expInRate, VarList[streamSet]);
+                    if (iRate.isFixed()) {
+                        hard_assert(r);
+                    } else {
+                        soft_assert(r);
+                    }
                 }
                 add_edge(prodPartId, consPartId, T);
                 if (port.Minimum != port.Maximum) {
@@ -517,21 +521,33 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
         }
     }
 
+//    SmallVector<Z3_ast, 2> fakeIOVars;
+//    for (unsigned kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
+//        if (in_degree(kernel, mBufferGraph) == 0) {
+//            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+//                const auto streamSet = target(output, mBufferGraph);
+//                fakeIOVars.push_back(VarList[streamSet]);
+//            }
+//        }
+//    }
+
+//    if (fakeIOVars.empty()) {
+//        for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
+//            const auto streamSet = target(input, mBufferGraph);
+//            fakeIOVars.push_back(VarList[streamSet]);
+//        }
+//    }
+
+
     SmallVector<Z3_ast, 2> fakeIOVars;
     for (unsigned kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         if (in_degree(kernel, mBufferGraph) == 0) {
-            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-                fakeIOVars.push_back(VarList[streamSet]);
-            }
+            fakeIOVars.push_back(VarList[kernel]);
         }
     }
 
     if (fakeIOVars.empty()) {
-        for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-            const auto streamSet = target(input, mBufferGraph);
-            fakeIOVars.push_back(VarList[streamSet]);
-        }
+        fakeIOVars.push_back(VarList[PipelineInput]);
     }
 
     const auto m = fakeIOVars.size(); assert (m > 0);

@@ -320,7 +320,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mKernelInitiallyTerminatedExit = nullptr;
     mInitiallyTerminated = nullptr;
 
-    mMaximumNumOfStrides = nullptr;
     mNumOfLinearStridesPhi = nullptr;
     mNumOfLinearStrides = nullptr;
     mFixedRateFactorPhi = nullptr;

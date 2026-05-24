@@ -85,17 +85,32 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 
     if (isSourceKernel) {
         const auto factor = calculateBufferScalingFactor(mKernelId);
-        mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
-
-        numOfLinearStrides = mMaximumNumOfStrides;
-    } else if (!mIsPartitionRoot) {
+        numOfLinearStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
+    } else if (mIsPartitionRoot) {
+        if (!mIsNestedPipeline) {
+            for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+                const auto streamSet = source(input, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_LIKELY(bn.isInternal())) {
+                    goto notExternal;
+                }
+                const auto producer = parent(streamSet, mBufferGraph);
+                if (producer != PipelineInput) {
+                    goto notExternal;
+                }
+            }
+            const auto factor = calculateBufferScalingFactor(mKernelId);
+            numOfLinearStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
+        }
+    } else {
         const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
         assert (factor.numerator() > 0);
-        mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
-
-        numOfLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        Value * const maximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
+        numOfLinearStrides = b.CreateSub(maximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
     }
+
+notExternal:
 
     Value * numOfLinearStridesForConstants = nullptr;
 
@@ -138,14 +153,7 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     }
 
     if (mIsPartitionRoot) {
-//        if (isSourceKernel) {
-//            mPotentialSegmentLength = mMaximumNumOfStrides;
-//        } else {
-            mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
-            mMaximumNumOfStrides = mPotentialSegmentLength;
-//            Value * remainingLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-//            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, remainingLinearStrides);
-//        }
+        mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
     } else {
         mPotentialSegmentLength = nullptr;
     }

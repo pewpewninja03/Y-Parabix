@@ -20,12 +20,16 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
     #endif
 
     using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
+    using Edge = ThreadLocalPlacementGraph::edge_descriptor;
 
     const auto n = (LastStreamSet - FirstStreamSet) + 1;
 
     const auto bw = b.getBitBlockWidth();
 
     std::vector<Value *> precalculatedOffset(n, nullptr);
+    ConstantInt * const sz_ZERO = b.getSize(0);
+
+    const Rational T{mTarget->getStride(), b.getBitBlockWidth()};
 
     std::function<Value *(Vertex)> calculatePlacement = [&](const Vertex v) -> Value * {
         assert (v >= PartitionCount);
@@ -36,49 +40,40 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         }
         const auto streamSet = FirstStreamSet + v - PartitionCount;
         assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
-
-
-        assert (in_degree(v, ThreadLocalPlacement) > 0);
-        ThreadLocalPlacementGraph::in_edge_iterator begin, end;
-        std::tie(begin, end) = in_edges(v, ThreadLocalPlacement);
-
-        const auto first = source(*begin, ThreadLocalPlacement);
-        Value * max = nullptr;
-        if (first < PartitionCount) {
-            assert (in_degree(v, ThreadLocalPlacement) == 1);
-        } else {
-            max = calculatePlacement(first);
-            for (auto ei = begin; ++ei != end; ) {
-                max = b.CreateUMax(max, calculatePlacement(source(*ei, ThreadLocalPlacement)));
-            }
-            assert (max);
-        }
-
-        const auto producer = parent(streamSet, mBufferGraph);
-        Rational scale{THREAD_LOCAL_ALLOC_SCALE * mTarget->getStride() * MaximumNumOfStrides[producer], getKernel(producer)->getStride() * StrideStepLength[producer]};
-
         const auto & bn = mBufferGraph[streamSet];
         assert (bn.isThreadLocal());
-        Value * maxStrides = b.CreateCeilUMulRational(segmentSize, bn.RelativeIORate * scale);
+        Value * maxStrides = segmentSize;
         const BufferPort & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
         if (LLVM_UNLIKELY(bp.RequiredOverflowSpace)) {
             const auto k = ceiling(Rational{bp.RequiredOverflowSpace, bw});
             maxStrides = b.CreateAdd(maxStrides, b.getSize(k));
         }
-        Value * off = b.CreateCeilUMulRational(maxStrides, ThreadLocalPlacement[*begin]);
-        if (max) {
-            off = b.CreateAdd(off, max);
+
+        assert (in_degree(v, ThreadLocalPlacement) > 0);
+        ThreadLocalPlacementGraph::in_edge_iterator begin, end;
+        std::tie(begin, end) = in_edges(v, ThreadLocalPlacement);
+        Value * off = b.CreateCeilUMulRational(maxStrides, bn.RelativeIORate * ThreadLocalPlacement[*begin]);
+        const auto first = source(*begin, ThreadLocalPlacement);
+        if (first < PartitionCount) {
+            assert (in_degree(v, ThreadLocalPlacement) == 1);
+        } else {
+            Value * prior = calculatePlacement(first);
+            for (auto ei = begin; ++ei != end; ) {
+                prior = b.CreateUMax(prior, calculatePlacement(source(*ei, ThreadLocalPlacement)));
+            }
+            assert (prior);
+            off = b.CreateAdd(off, prior);
         }
         precalculatedOffset[v - PartitionCount] = off;
 
-        if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
-            auto src = streamSet;
-            do {
-                src = parent(src, InOutStreamSetReplacement);
-                assert (FirstStreamSet <= src && src <= LastStreamSet);
-                precalculatedOffset[src - FirstStreamSet] = off;
-            } while (LLVM_UNLIKELY(in_degree(src, InOutStreamSetReplacement) != 0));
-        }
+//        if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+//            auto src = streamSet;
+//            do {
+//                src = parent(src, InOutStreamSetReplacement);
+//                assert (FirstStreamSet <= src && src <= LastStreamSet);
+//                precalculatedOffset[src - FirstStreamSet] = off;
+//            } while (LLVM_UNLIKELY(in_degree(src, InOutStreamSetReplacement) != 0));
+//        }
 
         return off;
     };
@@ -93,6 +88,7 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         auto ms = calculatePlacement(source(*ei, ThreadLocalPlacement));
         memorySize = b.CreateUMax(memorySize, ms);
     }
+
     assert (memorySize);
     const auto pageSize = getPageSize();
     assert (is_pow2(pageSize));
@@ -105,6 +101,7 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
     b.setScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES, memorySize);
 
 }
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeThreadLocalMemoryPhiNodes
@@ -308,12 +305,18 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     b.CreateUnlikelyCondBr(needsExpansion, expandThreadLocalMemory, afterExpansion);
 
     b.SetInsertPoint(expandThreadLocalMemory);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        startCycleCounter(b, CycleCounter::BUFFER_EXPANSION);
+    }
     b.CreateFree(mThreadLocalStreamSetBaseAddress);
     // At minimum, we want to double the required space to minimize future reallocs
     Value * const newSize = b.CreateRoundUpRational(b.CreateRoundUp(memoryForSegment, currentMem), pageSize);
     b.CreateAlignedStore(newSize, threadLocalMemorySizePtr, SizeTyABIAlignment);
     Value * const newThreadLocalBaseAddress = b.CreateAlignedMalloc(newSize, pageSize);
     b.CreateAlignedStore(newThreadLocalBaseAddress, threadLocalPtr, PtrTyABIAlignment);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
+    }
     b.CreateBr(afterExpansion);
 
     b.SetInsertPoint(afterExpansion);

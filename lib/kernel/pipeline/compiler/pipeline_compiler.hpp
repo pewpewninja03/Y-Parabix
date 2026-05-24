@@ -770,11 +770,6 @@ protected:
     Value *                                     mInitiallyTerminated = nullptr;
     PHINode *                                   mThreadLocalStreamSetBaseAddressAtEntryPhi = nullptr;
     PHINode *                                   mThreadLocalStreamSetBaseAddressAtExitPhi = nullptr;
-    Value *                                     mMaximumNumOfStrides = nullptr;
-//    PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
-//    PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
-//    PHINode *                                   mMaximumNumOfStridesAtExitPhi = nullptr;
-//    Value *                                     mThreadLocalScalingFactor = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
     Value *                                     mUpdatedNumOfStrides = nullptr;

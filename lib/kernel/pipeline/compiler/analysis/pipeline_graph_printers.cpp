@@ -422,13 +422,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         const auto borders = nonLinear ? '2' : '1';
         out << "v" << kernel << " [label=\"[" <<
                 kernel << "] " << name << "\\n";
-        const BufferNode & kn = mBufferGraph[kernel];
-        if (kn.controlsSlidingWindow()) {
-            out << "<sliding>\\n";
-        } else if (kn.permitSlidingWindow()) {
-            out << "(sliding)\\n";
-        }
-
         if (MinimumNumOfStrides.size() > 0) {
             out << " Expected: [";
             if (MaximumNumOfStrides.size() > 0) {

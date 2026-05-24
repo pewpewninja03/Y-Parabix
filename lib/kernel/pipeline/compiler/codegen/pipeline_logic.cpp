@@ -489,7 +489,7 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Kerne
     assert (PartitionCount > 0);
     initializeThreadLocalMemory(b, segmentSize);
     const Rational T{mTarget->getStride(), b.getBitBlockWidth()};
-    allocateOwnedBuffers(b, b.CreateCeilUMulRational(segmentSize, T), nullptr, false);
+    allocateOwnedBuffers(b,  b.CreateCeilUMulRational(segmentSize, T), nullptr, false);
     resetInternalBufferHandles();
 }
 
