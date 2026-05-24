@@ -477,7 +477,6 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                         if (j == 0 && addGroupCacheLinePadding) {
                             align = boost::lcm(align, cacheAlignment);
                         }
-
                         const auto offset = (byteOffset % align);
                         assert (i != 0 || j != 0 || offset == 0);
                         const auto padding = (offset == 0ULL) ? 0ULL : (align - offset);
@@ -510,7 +509,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() == structTypeSize);
                 assert ("expected stuct size does not match byte offset?" && structTypeSize == byteOffset);
                 for (size_t i = 0; i < k; ++i) {
-                    const auto align = dl.getABITypeAlign(st->getElementType(i)).value();
+                    const auto align = CBuilder::getAlignOf(dl, st->getElementType(i));
                     assert ((sl->getElementOffset(i) %  align) == 0);
                 }
                 #endif
@@ -626,6 +625,7 @@ Function * Kernel::addInitializeDeclaration(KernelBuilder & b) const {
     if (LLVM_LIKELY(initFunc == nullptr)) {
         InitArgTypes params;
         const auto ea = codegen::DebugOptionIsSet(codegen::EnableAsserts);
+
         if (LLVM_UNLIKELY(ea)) {
             params.push_back(b.getSizeTy());
             params.push_back(b.getSizeTy());
@@ -642,7 +642,7 @@ Function * Kernel::addInitializeDeclaration(KernelBuilder & b) const {
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
         initFunc->setCallingConv(CallingConv::C);
         initFunc->setDoesNotRecurse();
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        if (LLVM_UNLIKELY(ea)) {
             #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(15, 0, 0)
             initFunc->setHasUWTable();
             #else

@@ -109,7 +109,7 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief scaleThreadLocalMemoryToMaximumNumOfStrides
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b) {
+void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b, const bool hasSlidingWindow) {
 
     if (out_degree(mCurrentPartitionId, ThreadLocalPlacement) == 0) {
         mThreadLocalStreamSetBaseAddress = nullptr;
@@ -124,8 +124,6 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
 
     Value * threadLocalPtr = nullptr;
     Type * threadLocalTy = nullptr;
-
-    const auto hasSlidingWindow = mBufferGraph[mKernelId].permitSlidingWindow();
 
     BasicBlock * rebuildOffsets = nullptr;
 
