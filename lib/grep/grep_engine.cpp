@@ -98,6 +98,8 @@ MaxLimitTerminationMode("maxlimit-termination-mode",
                              clEnumValN(UntilNMode::ZeroAfterN, "zero", "fully process the file")));
 
 
+static cl::opt<bool> UseLayers("UseLayers", cl::desc("Use pipeline layers"), cl::init(false));
+
 const auto ENCODING_BITS = 8;
 
 void GrepCallBackObject::handle_signal(unsigned s) {
@@ -703,6 +705,9 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * By
     bool hasContext = (mAfterContext != 0) || (mBeforeContext != 0);
     StreamSet * MatchesByLine = nullptr;
     if (mColoring | hasContext) {
+        if (UseLayers) {
+            P.InsertPhaseBoundary();
+        }
         MatchesByLine = P.CreateStreamSet(1, 1);
         FilterByMask(P, lbs, MatchedLineEnds, MatchesByLine);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {

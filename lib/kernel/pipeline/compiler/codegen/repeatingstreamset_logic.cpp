@@ -207,7 +207,6 @@ void PipelineCompiler::generateGlobalDataForRepeatingStreamSet(KernelBuilder & b
     if (ss->isDynamic()) {
         assert (isFromCurrentFunction(b, buffer->getBaseAddress(b)));
     } else {
-        Rational ub{1U};
         const auto maxStrideLength = getGuaranteedRepeatingStreamSetLength(b, streamSet, true);
         auto info = cast<PipelineKernel>(mTarget)->createRepeatingStreamSet(b, ss, maxStrideLength);
         Value * const ba = b.CreatePointerCast(info.first, buffer->getPointerType());

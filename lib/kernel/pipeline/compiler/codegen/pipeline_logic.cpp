@@ -172,10 +172,6 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
     mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
-    if (isRoot) {
-        addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
-    }
-
     addConsumerKernelProperties(b, kernelId);
 
     const auto isStateFree = allowDataParallelExecution & !isInternallySynchronized;
@@ -395,8 +391,6 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
     }
 
     getABIAlignments(b);
-
-    initializeInitialSlidingWindowSegmentLengths(b, segmentSize);
 
     assert (PartitionPhaseBoundaries.size() >= 2);
 

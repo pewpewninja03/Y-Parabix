@@ -84,8 +84,16 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
     Value * numOfLinearStrides = nullptr;
 
     if (isSourceKernel) {
+        const auto factor = calculateBufferScalingFactor(mKernelId);
+        mMaximumNumOfStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
+
         numOfLinearStrides = mMaximumNumOfStrides;
     } else if (!mIsPartitionRoot) {
+        const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
+        const auto factor = ratio / mPartitionStrideRateScalingFactor;
+        assert (factor.numerator() > 0);
+        mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
+
         numOfLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
     }
 
@@ -109,16 +117,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         numOfLinearStrides = b.CreateZExt(b.CreateNot(exhausted), b.getSizeTy());
     }
 
-    mHasMoreInput = nullptr;
-    if (LLVM_UNLIKELY(numOfLinearStridesForConstants)) {
-        if (LLVM_LIKELY(numOfLinearStrides)) {
-            mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
-            numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
-        } else {
-            numOfLinearStrides = numOfLinearStridesForConstants;
-        }
-    }
-
     for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[output];
         if (LLVM_UNLIKELY(port.canModifySegmentLength())) {
@@ -129,14 +127,25 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 
     Value * const potentialNumOfLinearStrides = numOfLinearStrides;
 
-    if (mIsPartitionRoot) {
-        if (isSourceKernel) {
-            mPotentialSegmentLength = mMaximumNumOfStrides;
+    mHasMoreInput = nullptr;
+    if (LLVM_UNLIKELY(numOfLinearStridesForConstants)) {
+        if (LLVM_LIKELY(numOfLinearStrides)) {
+            mHasMoreInput = b.CreateICmpULT(numOfLinearStridesForConstants, numOfLinearStrides);
+            numOfLinearStrides = b.CreateSelect(mHasMoreInput, numOfLinearStridesForConstants, numOfLinearStrides);
         } else {
-            mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
-            Value * remainingLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
-            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, remainingLinearStrides);
+            numOfLinearStrides = numOfLinearStridesForConstants;
         }
+    }
+
+    if (mIsPartitionRoot) {
+//        if (isSourceKernel) {
+//            mPotentialSegmentLength = mMaximumNumOfStrides;
+//        } else {
+            mPotentialSegmentLength = b.CreateAdd(mCurrentNumOfStridesAtLoopEntryPhi, numOfLinearStrides);
+            mMaximumNumOfStrides = mPotentialSegmentLength;
+//            Value * remainingLinearStrides = b.CreateSub(mMaximumNumOfStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+//            numOfLinearStrides = b.CreateUMin(numOfLinearStrides, remainingLinearStrides);
+//        }
     } else {
         mPotentialSegmentLength = nullptr;
     }
@@ -155,6 +164,10 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
             const auto streamSet = target(e, mBufferGraph);
             ensureSufficientOutputSpace(b, port, streamSet);
         }
+    }
+
+    if (mIsPartitionRoot) {
+        allocateThreadLocalMemoryForMaximumNumOfStrides(b, potentialNumOfLinearStrides);
     }
 
 }
@@ -352,8 +365,9 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                     penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
                 }
             }
-            if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides)) {
-                inPenultimateSubSegment = b.CreateAnd(b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides), inPenultimateSubSegment);
+            if (mIsPartitionRoot && (penultimateNumOfStrides != potentialNumOfLinearStrides) && potentialNumOfLinearStrides) {
+                Value * finalPenultimateSegment = b.CreateICmpEQ(penultimateNumOfStrides, potentialNumOfLinearStrides);
+                inPenultimateSubSegment = b.CreateAnd(finalPenultimateSegment, inPenultimateSubSegment);
             }
         } else {
             inPenultimateSubSegment = isFinalSegment;
@@ -445,6 +459,7 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b, Val
                      fixedRateFactor, unterminated, nonFinalNumOfLinearStrides, sz_ZERO, inPenultimateSubSegment, false);
 
     b.CreateBr(mKernelCheckOutputSpace);
+
     b.SetInsertPoint(mKernelCheckOutputSpace);
 
     assert (mPenultimateSubSegmentPhi);
@@ -1414,7 +1429,6 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     Value * initialItemCount = nullptr;
     Value * sourceItemCount = nullptr;
-    Value * minimumItemCount = MAX_INT;
 
     const auto port = partialSumPort.Port;
 
@@ -1422,13 +1436,11 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
         initialItemCount = mCurrentProcessedItemCountPhi[port];
         Value * const accessible = getAccessibleInputItems(b, partialSumPort);
         sourceItemCount = b.CreateAdd(initialItemCount, accessible);
-        minimumItemCount = getInputStrideLength(b, partialSumPort, "maxPartialSum");
         sourceItemCount = subtractLookahead(b, partialSumPort, sourceItemCount);
     } else { // if (port.Type == PortType::Output) {
         initialItemCount = mCurrentProducedItemCountPhi[port];
         Value * const writable = getWritableOutputItems(b, partialSumPort);
         sourceItemCount = b.CreateAdd(initialItemCount, writable);
-        minimumItemCount = getOutputStrideLength(b, partialSumPort, "maxPartialSum");
     }
 
     const auto ref = getReference(port);
@@ -1462,13 +1474,13 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     // check on the rightmost entry?
 
     b.SetInsertPoint(popCountLoop);
-    PHINode * const numOfStrides = b.CreatePHI(sizeTy, 2);
-    numOfStrides->addIncoming(numOfLinearStrides, popCountEntry);
-    PHINode * const nextRequiredItems = b.CreatePHI(sizeTy, 2);
-    nextRequiredItems->addIncoming(MAX_INT, popCountEntry);
+    PHINode * const popCountStrideCountPhi = b.CreatePHI(sizeTy, 2);
+    popCountStrideCountPhi->addIncoming(numOfLinearStrides, popCountEntry);
+    PHINode * const nextRequiredItemsPhi = b.CreatePHI(sizeTy, 2);
+    nextRequiredItemsPhi->addIncoming(MAX_INT, popCountEntry);
 
 
-    Value * const strideIndex = b.CreateSub(numOfStrides, sz_ONE);
+    Value * const strideIndex = b.CreateSub(popCountStrideCountPhi, sz_ONE);
 
     Value * offset = strideIndex;
 
@@ -1477,7 +1489,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     // stream.
     const auto step = getPopCountStepSize(ref);
     if (LLVM_UNLIKELY(step > 1)) {
-        offset = b.CreateSub(b.CreateMul(numOfStrides, b.getSize(step)), sz_ONE);
+        offset = b.CreateSub(b.CreateMul(popCountStrideCountPhi, b.getSize(step)), sz_ONE);
     }
 
     Value * const pos = b.CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
@@ -1507,29 +1519,28 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
     if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & input = getInputBinding(ref);
         Value * const inputName = b.GetString(input.getName());
-        b.CreateAssert(b.CreateICmpULE(requiredItems, nextRequiredItems),
+        b.CreateAssert(b.CreateICmpULE(requiredItems, nextRequiredItemsPhi),
                         "%s.%s: partial sum is not non-decreasing at %" PRIu64
                         " (prior %" PRIu64 " > current %" PRIu64 ") @ getMaximumNumOfPartialSumStrides",
                         mCurrentKernelName, inputName,
-                        pos, requiredItems, nextRequiredItems);
+                        pos, requiredItems, nextRequiredItemsPhi);
     }
 
-    nextRequiredItems->addIncoming(requiredItems, popCountLoop);
-    numOfStrides->addIncoming(strideIndex, popCountLoop);
+    nextRequiredItemsPhi->addIncoming(requiredItems, popCountLoop);
+    popCountStrideCountPhi->addIncoming(strideIndex, popCountLoop);
     b.CreateCondBr(repeat, popCountLoop, popCountLoopExit);
 
     b.SetInsertPoint(popCountLoopExit);
-    PHINode * const numOfStridesPhi = b.CreatePHI(sizeTy, 2);
-    numOfStridesPhi->addIncoming(sz_ZERO, popCountEntry);
-    numOfStridesPhi->addIncoming(numOfStrides, popCountLoop);
-    PHINode * const requiredItemsPhi = b.CreatePHI(sizeTy, 2);
-    requiredItemsPhi->addIncoming(sz_ZERO, popCountEntry);
-    requiredItemsPhi->addIncoming(requiredItems, popCountLoop);
-    PHINode * const nextRequiredItemsPhi = b.CreatePHI(sizeTy, 2);
-    nextRequiredItemsPhi->addIncoming(minimumItemCount, popCountEntry);
-    nextRequiredItemsPhi->addIncoming(nextRequiredItems, popCountLoop);
+    PHINode * const finalNumOfStridesPhi = b.CreatePHI(sizeTy, 2);
+    finalNumOfStridesPhi->addIncoming(sz_ZERO, popCountEntry);
+    finalNumOfStridesPhi->addIncoming(popCountStrideCountPhi, popCountLoop);
+    PHINode * const finalNotEnoughPhi = b.CreatePHI(b.getInt1Ty(), 2);
+    finalNotEnoughPhi->addIncoming(b.getFalse(), popCountEntry);
+    finalNotEnoughPhi->addIncoming(notEnough, popCountLoop);
 
-    Value * finalNumOfStrides = numOfStridesPhi;
+    // TODO: only needed if we cannot statically prove we'll have enough input for the popcount marker stream
+    Value * const finalNumOfStrides = b.CreateSub(finalNumOfStridesPhi, b.CreateZExt(finalNotEnoughPhi, sizeTy));
+
     if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & binding = getInputBinding(ref);
         b.CreateAssert(b.CreateICmpNE(finalNumOfStrides, MAX_INT),

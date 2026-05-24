@@ -52,8 +52,6 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
 struct RelationshipGraphBuilder {
 
-    using LayerBoundaries = PipelineKernel::PhaseBoundaries;
-
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief addProducerRelationships
      ** ------------------------------------------------------------------------------------------------------------- */

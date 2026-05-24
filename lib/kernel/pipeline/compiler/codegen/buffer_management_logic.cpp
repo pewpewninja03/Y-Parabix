@@ -20,8 +20,6 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
 
-        bool requiresLGVBA = rd.isManaged();
-
         // external buffers already have a buffer handle
         if (LLVM_LIKELY(bn.isInternal() || bn.isConstant())) {
             Type * const handleType = buffer->getHandleType(b);
@@ -40,15 +38,9 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
                 hasAnyInternalStreamSets = true;
                 mTarget->addInternalScalar(handleType, prefix, groupId);
             } else {
-                // mTarget->addNonPersistentScalar(handleType, prefix);
                 mTarget->addInternalScalar(handleType, prefix, groupId);
-//                requiresLGVBA = true;
             }
         }
-
-//        if (requiresLGVBA) {
-//            mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
-//        }
 
         if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
             if (rd.isManaged() || bn.Buffer->isDynamic()) {
@@ -522,7 +514,6 @@ void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
     mKernelIsClosed.reset(FirstKernel, LastKernel);
 
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & port = mBufferGraph[input];
         const auto streamSet = source(input, mBufferGraph);
         if (mLocallyAvailableItems[streamSet] == nullptr) {
             mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
@@ -897,6 +888,36 @@ void PipelineCompiler::getInputVirtualBaseAddresses(KernelBuilder & b, Vec<Value
         baseAddresses[inputPort.Port.Number] = addr;
     }
 
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief calculateBufferScalingFactor
+ ** ------------------------------------------------------------------------------------------------------------- */
+Rational PipelineCompiler::calculateBufferScalingFactor(const unsigned kernelId) const {
+    assert (kernelId == FirstKernelInPartition[KernelPartitionId[kernelId]]);
+    Rational scale{0};
+    if (in_degree(kernelId, mBufferGraph) == 0) {
+        assert (out_degree(kernelId, mBufferGraph) > 0);
+        for (auto input : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = target(input, mBufferGraph);
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const auto & bn = mBufferGraph[streamSet];
+            scale = std::max(scale, bn.RelativeIORate);
+        }
+        scale *= Rational{mTarget->getStride(), getKernel(kernelId)->getStride()};
+        assert (scale.numerator() > 0);
+    } else {
+        assert (in_degree(kernelId, mBufferGraph) > 0);
+        for (auto input : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = source(input, mBufferGraph);
+            assert (FirstStreamSet <= streamSet && streamSet <= LastStreamSet);
+            const auto & bn = mBufferGraph[streamSet];
+            scale = std::max(scale, bn.RelativeIORate);
+        }
+        assert (scale.numerator() > 0);
+    }
+
+    return scale;
 }
 
 

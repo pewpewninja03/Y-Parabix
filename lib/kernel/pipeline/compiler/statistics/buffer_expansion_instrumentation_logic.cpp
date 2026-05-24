@@ -36,8 +36,6 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
 generate_function:
 
-    Value * const initialSharedState = getHandle();
-
     auto ip = b.saveIP();
 
     auto & DL = m->getDataLayout();
@@ -103,7 +101,6 @@ generate_function:
     newCapacity->setName("capacity");
     assert (arg == f->arg_end());
 
-    const auto ts = b.getTypeSize(DL, mTarget->getSharedStateType());
     const auto type = isDataParallel(kernelId) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
     Value * syncLockPtr = getScalarFieldPtr(b, handle, ScalarType::Internal, makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]).first;
     Value * const currentSegNo = b.CreateAlignedLoad(sizeTy, syncLockPtr, sizeTyAlign);
@@ -413,9 +410,6 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
 
         IntegerType * sizeTy = b.getSizeTy();
 
-        auto & DL = b.getModule()->getDataLayout();
-        const auto ts = b.getTypeSize(DL, mTarget->getSharedStateType());
-
         for (auto i = FirstKernel; i <= LastKernel; ++i) {
 
             for (const auto output : make_iterator_range(out_edges(i, mBufferGraph))) {
@@ -436,7 +430,6 @@ void PipelineCompiler::printOptionalBufferExpansionHistory(KernelBuilder & b) {
 
                     const auto prefix = makeBufferName(i, br.Port);
 
-                    auto ref = getScalarFieldPtr(b, getHandle(), ScalarType::Internal, prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                     Value * traceData; Type * traceTy;
                     std::tie(traceData, traceTy) = b.getScalarFieldPtr(prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX);
                     FixedArray<Value *, 2> indices;

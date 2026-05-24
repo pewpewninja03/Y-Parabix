@@ -998,7 +998,6 @@ void PipelineCompiler::start(KernelBuilder & b) {
 
     mExpectedNumOfStridesMultiplier = ns; // b.CreateCeilUMulRational(ns, mTarget->getStride());
 
-    initializeFlowControl(b);
     loadInternalStreamSetHandles(b, true);
     loadInternalStreamSetHandles(b, false);
 

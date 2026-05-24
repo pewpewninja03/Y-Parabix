@@ -37,7 +37,6 @@ SRC
     compiler/codegen/buffer_management_logic.cpp
     compiler/codegen/buffer_manipulation_logic.cpp
     compiler/codegen/consumer_logic.cpp
-    compiler/codegen/flow_control_logic.cpp
     compiler/codegen/kernel_execution_logic.cpp
     compiler/codegen/kernel_family_logic.cpp
     compiler/codegen/kernel_io_calculation_logic.cpp

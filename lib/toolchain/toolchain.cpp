@@ -221,7 +221,7 @@ MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
                      cl::value_desc("positive integer"));
 
 static cl::opt<unsigned, true>
-ThreadNumOption("thread-num", cl::location(SegmentThreads), cl::init(2),
+ThreadNumOption("thread-num", cl::location(SegmentThreads), cl::init(3),
                 cl::desc("Number of threads used for segment pipeline parallel"),
                 cl::value_desc("positive integer"));
 

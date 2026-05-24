@@ -256,15 +256,6 @@ public:
     void writeInitiallyTerminatedPartitionExit(KernelBuilder & b);
     void checkForPartitionExit(KernelBuilder & b);
 
-// flow control functions
-
-    void addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId);
-    Rational calculateBufferScalingFactor(const unsigned kernelId) const;
-    void initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor);
-    void initializeFlowControl(KernelBuilder & b);
-    void detemineMaximumNumberOfStrides(KernelBuilder & b);
-    void updateNextSlidingWindowSize(KernelBuilder & b, Value * const maxNumOfStrides, Value * const actualNumOfStrides);
-
 // inter-kernel codegen functions
 
     void readAvailableItemCounts(KernelBuilder & b);
@@ -406,6 +397,8 @@ public:
 
     void addZeroInputStructProperties(KernelBuilder & b) const;
 
+    Rational calculateBufferScalingFactor(const unsigned kernelId) const;
+
 // repeating streamset functions
 
     using InternallyGeneratedStreamSetMap = flat_map<Value *, std::pair<Value *, Value>>;
@@ -499,7 +492,8 @@ public:
 // thread local buffer management
 
     void initializeThreadLocalMemory(KernelBuilder & b, Value * const segmentSize);
-    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b, const bool hasSlidingWindow);
+    void initializeThreadLocalMemoryPhiNodes(KernelBuilder & b);
+    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b, Value * const maximumNumOfStrides);
     void remapThreadLocalBufferMemory(KernelBuilder & b);
 
 // optimization branch functions
@@ -705,7 +699,6 @@ protected:
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
     Value *                                     mPipelineProgress = nullptr;
-    Value *                                     mThreadLocalMemorySizePtr = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
     BasicBlock *                                mKernelCheckOutputSpace = nullptr;
@@ -733,6 +726,9 @@ protected:
     FixedVector<Value *>                        mScalarValue;
     FixedVector<Value *>                        mThreadLocalStartOffset;
     FixedVector<Value *>                        mThreadLocalEndOffset;
+    FixedVector<PHINode *>                      mThreadLocalStartOffsetAtEntryPhi;
+    FixedVector<PHINode *>                      mThreadLocalStartOffsetAtExitPhi;
+
     BitVector                                   mIsStatelessKernel;
     BitVector                                   mIsInternallySynchronized;
 
@@ -772,11 +768,12 @@ protected:
     // kernel state
     Value *                                     mInitialTerminationSignal = nullptr;
     Value *                                     mInitiallyTerminated = nullptr;
-    Value *                                     mIOThreadAcceptedAllTerminationSignals = nullptr;
+    PHINode *                                   mThreadLocalStreamSetBaseAddressAtEntryPhi = nullptr;
+    PHINode *                                   mThreadLocalStreamSetBaseAddressAtExitPhi = nullptr;
     Value *                                     mMaximumNumOfStrides = nullptr;
-    PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
-    PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
-    PHINode *                                   mMaximumNumOfStridesAtExitPhi = nullptr;
+//    PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
+//    PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
+//    PHINode *                                   mMaximumNumOfStridesAtExitPhi = nullptr;
 //    Value *                                     mThreadLocalScalingFactor = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
@@ -1017,6 +1014,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mScalarValue(FirstKernel, LastScalar, mAllocator)
 , mThreadLocalStartOffset(FirstStreamSet, LastStreamSet, mAllocator)
 , mThreadLocalEndOffset(FirstStreamSet, LastStreamSet, mAllocator)
+, mThreadLocalStartOffsetAtEntryPhi(FirstStreamSet, LastStreamSet, mAllocator)
+, mThreadLocalStartOffsetAtExitPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)
 , mPartitionEntryPoint(PartitionCount, mAllocator)
