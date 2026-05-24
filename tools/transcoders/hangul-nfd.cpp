@@ -25,13 +25,14 @@
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/unicode/charclasses.h>
+#include <kernel/unicode/utf8_support.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/algo/normalization.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/algo/normalization.h>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -248,7 +249,8 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     //  after each LV and LVT character.   This spreadmask will have an
     //  extra 0 bit inserted after each LV character and two extra 0 bits
     //  inserted after each LVT character.
-    StreamSet * SpreadMask = InsertionSpreadMask(P, LV_LVT, kernel::InsertPosition::After);
+    StreamSet * SpreadMask = P.CreateStreamSet(1, 1);
+    InsertionSpreadMask(P, LV_LVT, SpreadMask, kernel::InsertPosition::After);
     SHOW_STREAM(SpreadMask);
 
     //  The SpreadByMask operation uses the calculated spreadmask to produce
@@ -295,7 +297,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&NFD_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     CPUDriver driver("NFD_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
     XfrmFunctionType fn;
