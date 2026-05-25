@@ -38,8 +38,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
     using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, RelationshipGraph::edge_descriptor>;
     using Vertex = graph_traits<Graph>::vertex_descriptor;
 
-    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
-
     const auto traceDynamicBufferFlag = mTraceDynamicBuffers ? BufferType::CanTrackBufferExpansionData : 0U;
 
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
@@ -111,13 +109,10 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
             BufferPort bp(port, binding, lb, ub);
 
-            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory || noThreadLocal;
-
             if (rate.isFixed()) {
                 bp.Flags |= BufferPortType::IsFixed;
             } else if (LLVM_UNLIKELY(rate.isUnknown())) {
                 bp.Flags |= BufferPortType::IsManaged;
-                cannotBePlacedIntoThreadLocalMemory = true;
             } else if (LLVM_UNLIKELY(rate.isRelative())) {
 
                 const auto refPort = getReference(kernel, port);
@@ -160,15 +155,12 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         break;
                     case AttrId::Delayed:
                         bp.Delay = std::max<unsigned>(bp.Delay, attr.amount());
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookAhead:
                         bp.LookAhead = std::max<unsigned>(bp.LookAhead, attr.amount());
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookBehind:
                         bp.LookBehind = std::max<unsigned>(bp.LookBehind, attr.amount());
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::Truncate:
                         maxTruncate = std::max<unsigned>(maxTruncate, attr.amount());
@@ -185,21 +177,17 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         break;
                     case AttrId::Deferred:
                         bp.Flags |= BufferPortType::IsDeferred;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::SharedManagedBuffer:
                         bp.Flags |= BufferPortType::IsShared;
                         bn.Type |= traceDynamicBufferFlag;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ManagedBuffer:
                         bp.Flags |= BufferPortType::IsManaged;
                         bn.Type |= traceDynamicBufferFlag;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ReturnedBuffer:
                         bn.Type |= BufferType::Returned | BufferType::PreserveEntireStreamSet;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::EmptyReadOverflow:
                         // TODO: thread local buffers could technically read into the next buffer here as long
@@ -215,7 +203,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         }
                         bp.EmptyOverflow = std::max<int>(bp.EmptyOverflow, width);
                         bn.Type |= BufferType::RequiresEmptyOverflow;
-//                        bn.NumOfOverflowStrides = std::max(bn.NumOfOverflowStrides, 1U);
                         END_SCOPED_REGION
                         break;
                     case AttrId::InOut:
@@ -292,10 +279,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             } else {
                 if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(ss))) {
                     bn.Type |= BufferType::Truncated;
-                    cannotBePlacedIntoThreadLocalMemory = true;
-                }
-                if (cannotBePlacedIntoThreadLocalMemory) {
-                    mNonThreadLocalStreamSets.insert(streamSet);
                 }
             }
             return bp;
@@ -305,7 +288,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             for (auto i = I.lower(); i <= I.upper(); ++i) {
                 BufferNode & bn = mBufferGraph[i];
                 bn.Type |= BufferType::PreserveEntireStreamSet;
-                mNonThreadLocalStreamSets.insert(i);
             }
         }
 
@@ -465,11 +447,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             }
         }
 
-        for (unsigned j = 0; j < numOfInputs; ++j) {
-
-
-        }
-
         for (unsigned j = 1; j < numOfPorts; ++j) {
             add_edge_if_no_induced_cycle(j - 1, j);
         }
@@ -513,25 +490,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             out << kernelObj->getName() << " must have at least one input port with a non-zero lowerbound"
                    " to have an explicit termination condition.";
             report_fatal_error(out.str());
-        }
-    }
-
-    if (LLVM_UNLIKELY(!codegen::ThreadLocalPermittedOptions.empty())) {
-
-        const auto permitted = parseCommaDelimitedList(codegen::ThreadLocalPermittedOptions);
-
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            const auto f = permitted.find(streamSet);
-            if (f == permitted.end()) {
-                for (auto id = streamSet;;) {
-                    if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
-                        break;
-                    }
-                    id = parent(id, InOutStreamSetReplacement);
-                    mNonThreadLocalStreamSets.insert(id);
-                }
-                mNonThreadLocalStreamSets.insert(streamSet);
-            }
         }
     }
 

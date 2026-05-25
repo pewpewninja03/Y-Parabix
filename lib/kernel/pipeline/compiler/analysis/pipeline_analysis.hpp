@@ -65,6 +65,7 @@ public:
 
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
+
         P.identifyZeroExtendedStreamSets();
 
         P.identifyLinearBuffers();
@@ -315,8 +316,6 @@ public:
     ConsumerGraph                   mConsumerGraph;
 
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;
-
-    flat_set<unsigned>              mNonThreadLocalStreamSets;
 
     TerminationChecks               mTerminationCheck;
 
