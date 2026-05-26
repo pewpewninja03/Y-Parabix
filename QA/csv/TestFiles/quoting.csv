@@ -5,4 +5,6 @@ LineNo,QuotedField,Description
 4,12,unquoted field having the integer 12
 5,"a,b","field with a comma"
 6,,unquoted empty field
-7,final_empty,
+7," ""-"" "" ",three embedded quotes
+8,"""""""""""",consecutive embedded quotes 
+9,final_empty,

@@ -5,4 +5,6 @@
 {"LineNo":4,"QuotedField":12,"Description":"unquoted field having the integer 12"},
 {"LineNo":5,"QuotedField":"a,b","Description":"field with a comma"},
 {"LineNo":6,"QuotedField":"","Description":"unquoted empty field"},
-{"LineNo":7,"QuotedField":"final_empty","Description":""}]
+{"LineNo":7,"QuotedField":" \"-\" \" ","Description":"three embedded quotes"},
+{"LineNo":8,"QuotedField":"\"\"\"\"\"","Description":"consecutive embedded quotes "},
+{"LineNo":9,"QuotedField":"final_empty","Description":""}]
