@@ -57,7 +57,6 @@ void PipelineAnalysis::annotateBufferGraphWithAddAttributes() {
             }
 
             for (const auto e : make_iterator_range(in_edges(i, mBufferGraph))) {
-                const auto streamSet = source(e, mBufferGraph);
                 BufferPort & br = mBufferGraph[e];
                 if (br.isFixed()) {
                     assert (minAddK < std::numeric_limits<int>::max());

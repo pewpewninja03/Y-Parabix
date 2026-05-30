@@ -129,7 +129,7 @@ void PipelineCompiler::signalAbnormalTermination(KernelBuilder & b) {
     mTerminatedSignalPhi->addIncoming(aborted, exitBlock);
     mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
     if (mIsPartitionRoot) {
-        mPotentialSegmentLengthAtTerminationPhi->addIncoming(mPotentialSegmentLength, exitBlock);
+//        mPotentialSegmentLengthAtTerminationPhi->addIncoming(mPotentialSegmentLength, exitBlock);
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
     }
 }
@@ -232,9 +232,7 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
         mTerminatedSignalPhi->addIncoming(getTerminationSignal(b, TerminationSignal::Aborted), entryPoint);
         mCurrentNumOfStridesAtTerminationPhi->addIncoming(mCurrentNumOfStridesAtLoopEntryPhi, entryPoint);
         if (mIsPartitionRoot) {
-            Constant * const ZERO = b.getSize(0);
-            mPotentialSegmentLengthAtTerminationPhi->addIncoming(ZERO, entryPoint);
-            mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(ZERO, entryPoint);
+            mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(b.getSize(0), entryPoint);
         }
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {

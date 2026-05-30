@@ -218,13 +218,12 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        const auto isInternal = (bn.Locality == BufferLocality::ThreadLocal || bn.Locality == BufferLocality::PartitionLocal);
+        const auto isInternal = (bn.Locality == BufferLocality::ThreadLocal);
         if (isInternal ^ internal) return;
 
         out << "v" << streamSet << " [shape=record,";
         switch (bn.Locality) {
             case BufferLocality::GloballyShared:
-            case BufferLocality::PartitionLocal:
                 out << "style=bold,";
             default:
                 break;
@@ -275,7 +274,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << 'R';
         }
         if (bn.isTruncated()) {
-            out << 'K';
+            out << 't';
         }
         if (bn.isShared()) {
             out << '*';

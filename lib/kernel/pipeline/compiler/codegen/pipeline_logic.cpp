@@ -211,6 +211,10 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     addFamilyKernelProperties(b, kernelId, groupId);
 
+    if (isRoot) {
+        addThreadLocalPartitionProperties(b, KernelPartitionId[kernelId], groupId);
+    }
+
     if (LLVM_UNLIKELY(isInternallySynchronized || (mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) || kernelHasAnyPipelineIllustratedStreamSet(kernelId))) {
         // TODO: only needed if its possible to loop back or if we are not guaranteed that this kernel will always fire
         mTarget->addInternalScalar(sizeTy, name + INTERNALLY_SYNCHRONIZED_SUB_SEGMENT_SUFFIX, groupId);

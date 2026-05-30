@@ -763,7 +763,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                 #else
                 if (isPartitionRoot) {
                     inputRate.Flags |= partitionRootIOFlag;
-                } else if (N.isConstant() || N.isExternal() || !N.IsLinear) {
+                } else if (N.isConstant() || N.isExternal() || !N.IsLinear || N.isTruncated()) {
                     inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 }
                 #endif

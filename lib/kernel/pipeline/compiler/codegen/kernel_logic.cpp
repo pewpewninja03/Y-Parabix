@@ -430,4 +430,32 @@ LLVM_READNONE std::string PipelineCompiler::makeBufferName(const size_t kernelIn
     return tmp;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief nonNestedPipelineHasAnyInternalInput
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::nonNestedPipelineHasAnyInternalInput() const {
+    if (mIsNestedPipeline) {
+        return false;
+    }
+    for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = source(input, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_LIKELY(bn.isInternal())) {
+            return true;
+        }
+        const auto producer = parent(streamSet, mBufferGraph);
+        if (producer != PipelineInput) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief currentKernelOnlyHasNonCountableInputs
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::currentKernelOnlyHasNonCountableInputs() const {
+return false;
+}
+
 }

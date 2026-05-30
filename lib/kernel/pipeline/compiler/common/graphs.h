@@ -290,7 +290,6 @@ ENABLE_ENUM_FLAGS(BufferType)
 
 enum BufferLocality {
     ThreadLocal
-    , PartitionLocal
     , GloballyShared
     , ConstantShared
     , ZeroElementsOrWidth
