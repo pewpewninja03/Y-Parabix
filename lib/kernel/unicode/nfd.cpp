@@ -324,8 +324,7 @@ void LVT_Indexes::generatePabloMethod() {
     LV_index = bnc.Truncate(LV_index, L_Index_bits + V_Index_bits);
     BixNum L_index;
     BixNum V_index;
-    // A further bixnum division computes the separate L and V index
-    values.
+    // A further bixnum division computes the separate L and V index values.
     bnc.Div(LV_index, Hangul::VCount, L_index, V_index);
     
     for (unsigned i = 0; i < L_Index_bits; i++) {
