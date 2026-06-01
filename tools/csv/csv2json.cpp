@@ -65,23 +65,8 @@ using namespace llvm;
 using namespace pablo;
 
 static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(csv::CSV_Options), cl::Hidden);
-static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(csv::CSV_Options), cl::Hidden);
 
 typedef void (*CSVFunctionType)(uint32_t fd);
-
-inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
-    unsigned elems = merged->getNumElements();
-    if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
-        llvm::report_fatal_error("MergeByMask called with incompatible element counts");
-    }
-    StreamSet * expandedA = P.CreateStreamSet(elems);
-    SpreadByMask(P, mask, a, expandedA);
-    StreamSet * inverted = P.CreateStreamSet(1);
-    Invert(P, mask, inverted);
-    StreamSet * expandedB = P.CreateStreamSet(elems);
-    SpreadByMask(P, inverted, b, expandedB);
-    OrCombine(P, expandedA, expandedB, merged);
-}
 
 std::vector<std::string> JSONfieldPrefixes(std::vector<std::string> fieldNames) {
     std::vector<std::string> tmp;
@@ -123,10 +108,10 @@ void CSVdataFieldMask::generatePabloMethod() {
 
 class QuoteEscape2Backslash : public PabloKernel {
 public:
-    QuoteEscape2Backslash(LLVMTypeSystemInterface & ts, StreamSet * quoteEscape, StreamSet * basis,
+    QuoteEscape2Backslash(LLVMTypeSystemInterface & ts, StreamSet * quotedData, StreamSet * basis,
                          StreamSet * translatedBasis)
         : PabloKernel(ts, std::string("QuoteEscape2Backslash") + (codegen::DebugOptionIsSet(codegen::DisableInOutAttributes) ? "-InOut" : ""),
-                      {Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
+                      {Binding{"quotedData", quotedData}, Binding{"basis", basis}},
                       {}) {
     mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
     if (mUseInOut) {
@@ -143,7 +128,7 @@ private:
 
 void QuoteEscape2Backslash::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    PabloAST * quoteEscape = getInputStreamSet("quoteEscape")[0];
+    PabloAST * quoteEscape = getInputStreamSet("quotedData")[1];
     auto nested = pb.createScope();
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     Var * outputVar = getOutputStreamVar("translatedBasis");
@@ -334,19 +319,16 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     StreamSet * BasisBits = P.CreateStreamSet(8);
     Selected_S2P(P, ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
-    //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P.CreateStreamSet(4);
-    csv::CSV_Lexer(P, BasisBits, csvCCs);
 
-    StreamSet * recordSeparators = P.CreateStreamSet(1);
-    StreamSet * fieldStarts = P.CreateStreamSet(1);
-    StreamSet * fieldFollows = P.CreateStreamSet(1);
-    StreamSet * quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
-    StreamSet * EOFmark = P.CreateStreamSet(1);
+    csv::CSV_Parser parser(P, csv::QuoteChar, csv::FieldDelimiter);
+
+    parser.setSource(BasisBits);
+
+    StreamSet * fieldStarts = parser.getFieldStarts();
+    StreamSet * fieldFollows = parser.getFieldFollows();
 
     StreamSet * toKeep = P.CreateStreamSet(1);
-    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, toKeep, csv::HeaderSpec == "");
+    P.CreateKernelCall<CSVdataFieldMask>(parser.getCsvCCs(), parser.getLineEnds(), toKeep, csv::HeaderSpec == "");
     SHOW_STREAM(toKeep);
     //
     // Create a short stream which is 1-to-1 with the (field/record) separators,
@@ -361,33 +343,22 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     FilterByMask(P, toKeep, BasisBits, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
-    // Reset Basis bits and reparse.
-    BasisBits = filteredBasis;
-    csvCCs = P.CreateStreamSet(4);
-    csv::CSV_Lexer(P, BasisBits, csvCCs);
+    parser.setSource(filteredBasis);
+    fieldStarts = parser.getFieldStarts();
+    fieldFollows = parser.getFieldFollows();
 
-    recordSeparators = P.CreateStreamSet(1);
-    fieldStarts = P.CreateStreamSet(1);
-    fieldFollows = P.CreateStreamSet(1);
-    quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
-
-    StreamSet * QuotedBasis = P.CreateStreamSet(BasisBits->getNumElements());
-    JSON_Value_Quoting(P, BasisBits, fieldStarts, fieldFollows, QuotedBasis);
+    StreamSet * QuotedBasis = P.CreateStreamSet(filteredBasis->getNumElements());
+    JSON_Value_Quoting(P, filteredBasis, fieldStarts, fieldFollows, QuotedBasis);
+    SHOW_BIXNUM(QuotedBasis);
 
     // Reset Basis bits and reparse.
     BasisBits = QuotedBasis;
-    csvCCs = P.CreateStreamSet(4);
-    csv::CSV_Lexer(P, BasisBits, csvCCs);
-
-    recordSeparators = P.CreateStreamSet(1);
-    fieldStarts = P.CreateStreamSet(1);
-    fieldFollows = P.CreateStreamSet(1);
-    quoteEscape = P.CreateStreamSet(1);
-    csv::ParseCSV(P, csvCCs, recordSeparators, fieldStarts, fieldFollows, quoteEscape);
+    parser.setSource(BasisBits);
+    fieldStarts = parser.getFieldStarts();
+    fieldFollows = parser.getFieldFollows();
 
     StreamSet * translatedBasis = P.CreateStreamSet(8);
-    P.CreateKernelCall<QuoteEscape2Backslash>(quoteEscape, BasisBits, translatedBasis);
+    P.CreateKernelCall<QuoteEscape2Backslash>(parser.getQuotedData(), BasisBits, translatedBasis);
     SHOW_BIXNUM(translatedBasis);
     BasisBits = translatedBasis;
 
@@ -441,14 +412,10 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     StreamSet * TemplateBasis = P.CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
     StreamSet * MergedBasis = P.CreateStreamSet(8);
-    if (UseMergeByMaskKernel) {
-        MergeByMask(P, BasisSpreadMask, BasisBits, TemplateBasis, MergedBasis);
-    } else {
-        MergeByMask01(P, BasisSpreadMask, BasisBits, TemplateBasis, MergedBasis);
-    }
+    MergeByMask(P, BasisSpreadMask, BasisBits, TemplateBasis, MergedBasis);
     SHOW_BIXNUM(MergedBasis);
 
-    EOFmark = P.CreateStreamSet(1);
+    StreamSet * EOFmark = P.CreateStreamSet(1);
     P.CreateKernelCall<EOFbit>(MergedBasis, EOFmark);
     StreamSet * FinalBasis = P.CreateStreamSet(8);
     P.CreateKernelCall<FinalCommaToRBracket>(MergedBasis, EOFmark, FinalBasis);

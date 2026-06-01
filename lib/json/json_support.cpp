@@ -35,7 +35,7 @@
 // The escape sequences for backslash and several common control characters
 // generate two character escape sequences (insertion of one position required).
 //
-// \ -> \\, 0x08 (BS) -> \b, 0x09 (TAB) -> \t, 0x0A(LF) -> \n, 0x0A(FF) -> \f, 0x0D(CR) -> \r
+// \ -> \\, " -> \", 0x08 (BS) -> \b, 0x09 (TAB) -> \t, 0x0A(LF) -> \n, 0x0A(FF) -> \f, 0x0D(CR) -> \r
 //
 // Other controls generate 6-character escape sequences of the form \u00xy
 // where xy are the two hexadecimal digits of the control sequence value.
@@ -45,6 +45,9 @@ using namespace pablo;
 
 namespace json {
 
+
+//
+//
 class JSON_Escape_Sequence_Expansion : public PabloKernel {
 public:
     JSON_Escape_Sequence_Expansion(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * dataMask, StreamSet * insertBixNum)
@@ -59,13 +62,15 @@ protected:
 void JSON_Escape_Sequence_Expansion::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    PabloAST * dataMask = getInputStreamSet("dataMask")[0];
     cc::Parabix_CC_Compiler_Builder ccc(basis);
-    BixNumCompiler bnc(pb);    
+    BixNumCompiler bnc(pb);
+    re::CC * quote_backslash = re::makeCC(re::makeCC('"'), re::makeCC('\\'));
     re::CC * unit_controls = re::makeCC(re::makeCC(0x8, 0xA), re::makeCC(0xC, 0XD));
-    re::CC * expand_by_1 = re::makeCC(re::makeCC('\\'), unit_controls);
+    re::CC * expand_by_1 = re::makeCC(quote_backslash, unit_controls);
     re::CC * expand_by_5 = subtractCC(re::makeCC(0x00, 0x1F), unit_controls);
-    PabloAST * Expand1 = ccc.compileCC(expand_by_1, pb);
-    PabloAST * Expand5 = ccc.compileCC(expand_by_5, pb);
+    PabloAST * Expand1 = pb.createAnd(ccc.compileCC(expand_by_1, pb), dataMask);
+    PabloAST * Expand5 = pb.createAnd(ccc.compileCC(expand_by_5, pb), dataMask);
     BixNum Expansion = bnc.AddModular(bnc.Create(Expand5, 5), bnc.Create(Expand1, 1));
     writeOutputStreamSet("insertBixNum", Expansion);
 }
@@ -102,8 +107,9 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
             basisVar[i] = pb.createVar("outVar" + std::to_string(i), ZEROES);
         }
     }
+    re::CC * quote_backslash = re::makeCC(re::makeCC('"'), re::makeCC('\\'));
     re::CC * unit_controls = re::makeCC(re::makeCC(0x8, 0xA), re::makeCC(0xC, 0XD));
-    re::CC * expand_by_1 = re::makeCC(re::makeCC('\\'), unit_controls);
+    re::CC * expand_by_1 = re::makeCC(quote_backslash, unit_controls);
     re::CC * expand_by_5 = subtractCC(re::makeCC(0x00, 0x1F), unit_controls);
     PabloAST * Expand1 = ccc.compileCC(expand_by_1, pb);
     PabloAST * Expand5 = ccc.compileCC(expand_by_5, pb);

@@ -25,12 +25,6 @@ namespace csv {
 // DQ - quote stream possibly overriden by csv::QuoteChar.
 // Comma - comma stream, possibly overriden by csv::FieldDelimiter.
 enum {markLF = 0, markCR = 1, markDQ = 2, markComma = 3};
-void CSV_Lexer(PipelineBuilder & P, StreamSet * source, StreamSet * csvCCs);
-
-// Parse a CSV file determining the record separators, field separators as
-// well as any escaped quote marks.
-void ParseCSV(PipelineBuilder & P, StreamSet * csvCCs, 
-              StreamSet * recordSeparators, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * quoteEscape);
 
 void ColumnSelectionMask(PipelineBuilder & P,
                          StreamSet * Record_separators, StreamSet * fieldStarts, StreamSet * fieldFollows,
