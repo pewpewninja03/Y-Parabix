@@ -3,8 +3,6 @@
  *  SPDX-License-Identifier: OSL-3.0
  */
 
-#pragma once
-
 #include <csv/csv_support.h>
 #include <re/adt/adt.h>
 #include <re/adt/re_re.h>

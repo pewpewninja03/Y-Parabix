@@ -38,4 +38,27 @@ void ColumnSelectionMask(PipelineBuilder & P,
 
 void GetEmptyFields(PipelineBuilder & P, StreamSet * csvCCs, StreamSet * fieldSeparators,
                     StreamSet * EmptyFieldMarks);
+
+class CSV_Parser {
+public:
+    CSV_Parser(PipelineBuilder & P, codepoint_t quoteCp, codepoint_t separatorCp);
+
+    void setSource(StreamSet * basis);
+    StreamSet * getCsvCCs();
+    StreamSet * getQuotedData();
+    StreamSet * getLineEnds();
+    StreamSet * getFieldStarts();
+    StreamSet * getFieldFollows();
+
+private:
+    PipelineBuilder mPB;
+    codepoint_t mQuoteCp;
+    codepoint_t mSeparatorCp;
+    StreamSet * mCsvCCs;
+    StreamSet * mQuotedData;
+    StreamSet * mFieldStarts;
+    StreamSet * mFieldFollows;
+    StreamSet * mLineEnds;
+};
+
 }
