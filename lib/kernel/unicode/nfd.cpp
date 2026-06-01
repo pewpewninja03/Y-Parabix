@@ -285,6 +285,10 @@ void LVT_Indexes::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     BixNumCompiler bnc0(pb);
+    // We identify the Hangul precomposed LV and LVT characters as
+    // any of the SCount = 11172 characters in the range from
+    // SBase = 0xAC00 to SBase + SCount - 1.   This use 21-bit
+    // Bixnum comparison operations UGE and ULT.
     PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul::SBase), bnc0.ULT(basis, Hangul::SBase + Hangul::SCount));
     BixNum ZeroBasis(basis.size(), pb.createZeroes());
 
@@ -305,14 +309,22 @@ void LVT_Indexes::generatePabloMethod() {
     pb.createIf(Hangul_precomposed, nested);
     BixNumCompiler bnc(nested);
 
+    // To extract the LVT indexes, we first calculate a normalized
+    // S_Index value by bixnum subtraction of SBase.
     BixNum S_Index = bnc.Select(Hangul_precomposed, bnc.SubModular(basis, Hangul::SBase), ZeroBasis);
+    // As there are only S_Index_bits = 14 significant bits in
+    // the result, we can optimize our calculations by truncating.
     S_Index = bnc.Truncate(S_Index, S_Index_bits);
     BixNum LV_index;
     BixNum T_index;
+    // Bixnum division computes both an integer dividend and remainder.
+    // When dividing by TCount = 28, we get an intermediate LV_index
+    // and the final T index.
     bnc.Div(S_Index, Hangul::TCount, LV_index, T_index);
     LV_index = bnc.Truncate(LV_index, L_Index_bits + V_Index_bits);
     BixNum L_index;
     BixNum V_index;
+    // A further bixnum division computes the separate L and V index values.
     bnc.Div(LV_index, Hangul::VCount, L_index, V_index);
     
     for (unsigned i = 0; i < L_Index_bits; i++) {
@@ -369,12 +381,20 @@ void LVT2NFD::generatePabloMethod() {
     BixNumCompiler bnc(nested);
     BixNum LPart = bnc.ZeroExtend(L_index, 21);
     // The LPart will be encoded at the original precomposed position.
+    // The bixnum calculation simply adds the L index value to the
+    // base codepoint value for Hangul L characters (LBase = 0x1100).
+    // Because we have zero-extended to 21 bits, this gives the full
+    // Unicode codepoint value.
     LPart = bnc.AddModular(LPart, Hangul::LBase);
     // The V Part, when it exists, is one position after the opening L Part.
+    // This position must have been created by insertion step.
     PabloAST * V_position = nested.createAdvance(Hangul_precomposed, 1);
     for (unsigned i = 0; i < V_Index_bits; i++) {
         V_index[i] = nested.createAdvance(V_index[i], 1);
     }
+    // Similar to the bixnum calculation of L characters, V and T
+    // characters are computed using bixnum addition of the
+    // VBase = 0x1161 and TBase = 0x11A7 values, respectively.
     BixNum VPart = bnc.ZeroExtend(V_index, 21);
     VPart = bnc.AddModular(VPart, Hangul::VBase);
     // The T Part, if it exists is two positions after the opening
