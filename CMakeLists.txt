@@ -413,6 +413,7 @@ add_subdirectory(lib/ucd/data)
 add_subdirectory(lib/ucd/utf)
 add_subdirectory(lib/audio)
 add_subdirectory(lib/csv)
+add_subdirectory(lib/json)
 
 # Kernel Libraries
 add_subdirectory(lib/kernel/basis)

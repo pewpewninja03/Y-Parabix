@@ -198,9 +198,12 @@ skip_phase_check:
         const auto lc = lastConsumer[id - FirstStreamSet];
         ConsumerGraph::edge_descriptor e;
         bool exists;
-        std::tie(e, exists) = edge(id, lc, mConsumerGraph); assert (exists);
-        ConsumerEdge & cn = mConsumerGraph[e];
-        cn.Flags |= ConsumerEdge::WriteConsumedCount;
+        std::tie(e, exists) = edge(id, lc, mConsumerGraph);
+        //  If there are consumers, update.
+        if (exists) {
+            ConsumerEdge & cn = mConsumerGraph[e];
+            cn.Flags |= ConsumerEdge::WriteConsumedCount;
+        }
 
     }
 

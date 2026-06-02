@@ -1,17 +1,20 @@
 #  Part of the Parabix Project, under the Open Software License 3.0.
 #  SPDX-License-Identifier: OSL-3.0
 
-# module: csv
+# module: json
 
 parabix_add_module(
 NAME
-    csv
+    jsonlib
 SRC
-    csv_cmdline.cpp
-    csv_parser.cpp
-    csv_support.cpp
+    json_support.cpp
 DEPS
     re.adt
-    re.transforms
+    pablo
+    grep
+    kernel.bitwise
+    kernel.io
+    kernel.pipeline
+    kernel.re
     kernel.unicode
 )

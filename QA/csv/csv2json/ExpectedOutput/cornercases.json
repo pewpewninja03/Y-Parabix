@@ -1,0 +1,11 @@
+[
+{"Line":1,"Data":"","Desc":""},
+{"Line":2,"Data":"","Desc":"quoted null"},
+{"Line":3,"Data":null,"Desc":"null"},
+{"Line":4,"Data":-43e+7,"Desc":"float1"},
+{"Line":5,"Data":89.333,"Desc":"fixed point"},
+{"Line":6,"Data":"+44.88","Desc":"not JSON number"},
+{"Line":7,"Data":true,"Desc":"true literal"},
+{"Line":8,"Data":"false","Desc":"quoted false"},
+{"Line":9,"Data":"","Desc":null},
+{"Line":10,"Data":"","Desc":""}]

@@ -27,6 +27,7 @@ using namespace pablo;
 using namespace kernel;
 
 static cl::opt<bool> ElemSpread("ElemSpread", cl::desc("Use ElemSpreadKernel in place of byte spread by mask"), cl::init(true), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> SeparatedMergeByMask("separated-merge-by-mask", cl::desc("implement merge-by-mask by combining two spread-by-mask steps"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> UnalignedLoads("UnalignedLoads", cl::desc("Use unaligned loads in ElemSpread"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> RecursiveSpreadMaskCalculation("RecursiveSpreadMaskCalculation", cl::desc("Use recursive multi-kernel approach to insertion spread mask calculation (legacy)"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 
@@ -106,7 +107,15 @@ void MergeByMask(PipelineBuilder & P,
     if ((a->getFieldWidth() != fw) || (b->getFieldWidth() != fw)) {
         llvm::report_fatal_error("MergeByMask called with incompatible field widths");
     }
-    if (ElemSpread && (elems == 1) && (fw >= 8)) {
+    if (SeparatedMergeByMask) {
+        StreamSet * expandedA = P.CreateStreamSet(elems);
+        SpreadByMask(P, mask, a, expandedA);
+        StreamSet * inverted = P.CreateStreamSet(1);
+        Invert(P, mask, inverted);
+        StreamSet * expandedB = P.CreateStreamSet(elems);
+        SpreadByMask(P, inverted, b, expandedB);
+        OrCombine(P, expandedA, expandedB, merged);
+    } else if (ElemSpread && (elems == 1) && (fw >= 8)) {
         P.CreateKernelCall<ElemMergeKernel>(mask, a, b, merged);
     } else {
         unsigned streamOffset = 0;
@@ -581,7 +590,7 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
 }
 
 /*************************StreamMergeKernel*********************************/
-constexpr unsigned StreamMergeStrideSize = 4;
+constexpr unsigned StreamMergeStrideSize = 1;
 
 StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,

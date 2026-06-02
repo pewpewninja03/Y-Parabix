@@ -25,16 +25,34 @@ namespace csv {
 // DQ - quote stream possibly overriden by csv::QuoteChar.
 // Comma - comma stream, possibly overriden by csv::FieldDelimiter.
 enum {markLF = 0, markCR = 1, markDQ = 2, markComma = 3};
-void CSV_Lexer(PipelineBuilder & P, StreamSet * source, StreamSet * csvCCs);
 
-// Parse a CSV file determining the record separators, field separators as
-// well as any escaped quote marks.
-void ParseCSV(PipelineBuilder & P, StreamSet * csvCCs, 
-              StreamSet * recordSeparators, StreamSet * fieldSeparators, StreamSet * quoteEscape);
-
-void ColumnSelectionMask(PipelineBuilder & P, StreamSet * Record_separators, StreamSet * Field_separators,
+void ColumnSelectionMask(PipelineBuilder & P,
+                         StreamSet * Record_separators, StreamSet * fieldStarts, StreamSet * fieldFollows,
                          StreamSet * toKeep, const std::vector<unsigned> & columnNos, bool forCut = false);
 
 void GetEmptyFields(PipelineBuilder & P, StreamSet * csvCCs, StreamSet * fieldSeparators,
                     StreamSet * EmptyFieldMarks);
+
+class CSV_Parser {
+public:
+    CSV_Parser(PipelineBuilder & P, codepoint_t quoteCp, codepoint_t separatorCp);
+
+    void setSource(StreamSet * basis);
+    StreamSet * getCsvCCs();
+    StreamSet * getQuotedData();
+    StreamSet * getLineEnds();
+    StreamSet * getFieldStarts();
+    StreamSet * getFieldFollows();
+
+private:
+    PipelineBuilder mPB;
+    codepoint_t mQuoteCp;
+    codepoint_t mSeparatorCp;
+    StreamSet * mCsvCCs;
+    StreamSet * mQuotedData;
+    StreamSet * mFieldStarts;
+    StreamSet * mFieldFollows;
+    StreamSet * mLineEnds;
+};
+
 }
