@@ -276,7 +276,7 @@ public:
     void checkForSufficientOutputSpace(KernelBuilder & b, const BufferPort & outputPort, const unsigned streamSet);
     void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet);
 
-    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const maxNumOfNonConstantCountableStrides, Value * const numOfNonCountableStrides);
+    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const maxNumOfStrides, Value * const potentialNumOfStrides);
 
     enum class InputExhaustionReturnType {
         Conjunction, Disjunction

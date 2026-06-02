@@ -96,6 +96,9 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
         }
         const auto factor = calculateBufferScalingFactor(mKernelId);
         numOfNonConstantCountableStrides = b.CreateCeilUMulRational(mExpectedNumOfStridesMultiplier, factor);
+        if (LLVM_UNLIKELY(in_degree(mKernelId, mBufferGraph) > 0)) {
+             numOfNonConstantCountableStrides = b.CreateSub(numOfNonConstantCountableStrides, mCurrentNumOfStridesAtLoopEntryPhi);
+        }
     } else {
         assert (in_degree(mKernelId, mBufferGraph) > 0);
         const Rational ratio{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
@@ -107,7 +110,6 @@ void PipelineCompiler::determineNumOfLinearStrides(KernelBuilder & b) {
 
 no_static_max:
 
-    Value * numOfLinearStridesForConstants = nullptr;
     Value * numOfNonCountableStrides = nullptr;
 
     if (LLVM_LIKELY(hasAtLeastOneNonGreedyInput())) {
@@ -117,13 +119,11 @@ no_static_max:
                 Value * const strides = getNumOfAccessibleStrides(b, port, numOfNonConstantCountableStrides);
                 const BufferNode & bn = mBufferGraph[source(input, mBufferGraph)];
                 if (LLVM_UNLIKELY(bn.isConstant())) {
-                    numOfLinearStridesForConstants = b.CreateUMin(numOfLinearStridesForConstants, strides);
+                    numOfNonCountableStrides = b.CreateUMin(numOfNonCountableStrides, strides);
+                } else  if (isCountable(port.Binding)) {
+                    numOfNonConstantCountableStrides = b.CreateUMin(numOfNonConstantCountableStrides, strides);
                 } else {
-                    if (isCountable(port.Binding)) {
-                        numOfNonConstantCountableStrides = b.CreateUMin(numOfNonConstantCountableStrides, strides);
-                    } else {
-                        numOfNonCountableStrides = b.CreateUMin(numOfNonCountableStrides, strides);
-                    }
+                    numOfNonCountableStrides = b.CreateUMin(numOfNonCountableStrides, strides);
                 }
             }
         }
@@ -149,13 +149,11 @@ no_static_max:
     }
 
     Value * maxNumOfStrides = numOfNonConstantCountableStrides;
-
     mHasMoreInput = nullptr;
-    if (LLVM_UNLIKELY(numOfLinearStridesForConstants || numOfNonCountableStrides)) {
-        maxNumOfStrides = b.CreateUMin(maxNumOfStrides, numOfLinearStridesForConstants);
+    if (LLVM_UNLIKELY(numOfNonCountableStrides)) {
         maxNumOfStrides = b.CreateUMin(maxNumOfStrides, numOfNonCountableStrides);
         if (LLVM_LIKELY(numOfNonConstantCountableStrides)) {
-            mHasMoreInput = b.CreateICmpULT(maxNumOfStrides, numOfNonConstantCountableStrides);
+            mHasMoreInput = b.CreateICmpNE(maxNumOfStrides, numOfNonConstantCountableStrides);
             maxNumOfStrides = b.CreateSelect(mHasMoreInput, maxNumOfStrides, numOfNonConstantCountableStrides);
         }
     }
@@ -191,8 +189,8 @@ no_static_max:
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b,
                                                           Value * const numOfLinearStrides,
-                                                          Value * const maxNumOfNonConstantCountableStrides,
-                                                          Value * const numOfNonCountableStrides) {
+                                                          Value * const maxNumOfStrides,
+                                                          Value * const potentialNumOfStrides) {
 
     const auto numOfInputs = in_degree(mKernelId, mBufferGraph);
     const auto numOfOutputs = out_degree(mKernelId, mBufferGraph);
@@ -382,8 +380,8 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b,
                     penultimateNumOfStrides = b.CreateSelect(mHasExhaustedClosedInput, numOfLinearStrides, nonFinalNumOfLinearStrides);
                 }
             }
-            if (mIsPartitionRoot && (penultimateNumOfStrides != maxNumOfNonConstantCountableStrides) && maxNumOfNonConstantCountableStrides) {
-                Value * finalPenultimateSegment = b.CreateICmpEQ(penultimateNumOfStrides, maxNumOfNonConstantCountableStrides);
+            if (mIsPartitionRoot && (penultimateNumOfStrides != maxNumOfStrides) && maxNumOfStrides) {
+                Value * finalPenultimateSegment = b.CreateICmpEQ(penultimateNumOfStrides, maxNumOfStrides);
                 inPenultimateSubSegment = b.CreateAnd(finalPenultimateSegment, inPenultimateSubSegment);
             }
         } else {
@@ -482,12 +480,13 @@ Value * PipelineCompiler::calculateTransferableItemCounts(KernelBuilder & b,
     assert (mPenultimateSubSegmentPhi);
     if (mHasMoreInput) {
         mHasMoreInput = b.CreateOr(mHasMoreInput, mPenultimateSubSegmentPhi);
-    } else if (numOfNonCountableStrides && !mKernelIsInternallySynchronized) {
-        assert (maxNumOfNonConstantCountableStrides == nullptr);
+    } else if (potentialNumOfStrides && !mKernelIsInternallySynchronized) {
+        assert (maxNumOfStrides == nullptr);
         mHasMoreInput = b.CreateICmpEQ(mIsFinalInvocationPhi, sz_ZERO);
     } else {
         mHasMoreInput = mPenultimateSubSegmentPhi;
     }
+
 
     return mNumOfLinearStridesPhi;
 }

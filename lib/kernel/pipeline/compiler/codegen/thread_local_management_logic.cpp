@@ -2,6 +2,8 @@
 #include <queue>
 #include <stack>
 
+// #define VERIFY_THREAD_LOCAL_OUTPUT_COPY
+
 namespace kernel {
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -21,12 +23,6 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
     if (num_edges(ThreadLocalPlacement) == 0) {
         return;
     }
-
-    #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-    constexpr size_t THREAD_LOCAL_ALLOC_SCALE = THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-    #else
-    constexpr size_t THREAD_LOCAL_ALLOC_SCALE = 1;
-    #endif
 
     using Vertex = ThreadLocalPlacementGraph::vertex_descriptor;
     using Edge = ThreadLocalPlacementGraph::edge_descriptor;
@@ -101,7 +97,7 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
     for (size_t partId = 1; partId < PartitionCount; ++partId) {
         if (out_degree(partId, ThreadLocalPlacement) > 0) {
             const auto f = FirstKernelInPartition[partId];
-            const auto max = (MinimumNumOfStrides[f] + MaximumNumOfStrides[f]) / 2U;
+            const auto max = MaximumNumOfStrides[f];
             b.setScalarField(PARTITION_THREAD_LOCAL_STREAMSET_MAX_STRIDE_COUNT + std::to_string(partId), b.getSize(max));
         }
     }
@@ -239,15 +235,9 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
         return;
     }
 
-    #ifdef THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER
-    constexpr size_t THREAD_LOCAL_ALLOC_SCALE = THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER;
-    #else
-    constexpr size_t THREAD_LOCAL_ALLOC_SCALE = 1;
-    #endif
-
-
     BasicBlock * const allocateThreadLocal = b.CreateBasicBlock("allocateThreadLocal", mKernelLoopCall);
     BasicBlock * const expandThreadLocalMemory = b.CreateBasicBlock("expandThreadLocalMemory", mKernelLoopCall);
+    BasicBlock * const copyOrAcceptThreadLocalMemoryLayout = b.CreateBasicBlock("copyOrAcceptThreadLocalMemoryLayout", mKernelLoopCall);
     BasicBlock * const copyThreadLocalMemory = b.CreateBasicBlock("copyThreadLocalMemory", mKernelLoopCall);
     BasicBlock * const copyThreadLocalMemoryExit = b.CreateBasicBlock("copyThreadLocalMemoryExit", mKernelLoopCall);
     BasicBlock * const afterExpansion = b.CreateBasicBlock("afterExpansion", mKernelLoopCall);
@@ -286,7 +276,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
 
     Value * const recalcOrReallocNeeded = b.CreateAnd(hasEnough, mExecutedAtLeastOnceAtLoopEntryPhi);
 
-    b.CreateLikelyCondBr(recalcOrReallocNeeded, allocateThreadLocalExit, allocateThreadLocal);
+    b.CreateCondBr(recalcOrReallocNeeded, allocateThreadLocalExit, allocateThreadLocal);
 
     b.SetInsertPoint(allocateThreadLocal);
 
@@ -315,11 +305,15 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
 
     const auto bw = b.getBitBlockWidth();
 
-    const auto strideLength = mKernel->getStride();
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        startCycleCounter(b, CycleCounter::BUFFER_EXPANSION);
+    }
 
     maximumNumOfStrides = b.CreateSelect(hasEnough, initialMaxStride, maximumNumOfStrides);
 
     b.CreateAlignedStore(maximumNumOfStrides, maxStrideCountPtr, SizeTyABIAlignment);
+
+    std::vector<size_t> selected;
 
     Value * memoryForSegment = nullptr;
     for (auto u = mCurrentPartitionId;;) {
@@ -333,16 +327,27 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
             if (T == 0) {
                 const auto streamSet = v + FirstStreamSet - PartitionCount;
                 const BufferNode & bn = mBufferGraph[streamSet];
+
                 assert (bn.isThreadLocal());
                 assert (!bn.isInOutRedirect());
                 assert (mThreadLocalStartOffset[streamSet] == nullptr);
                 assert (mThreadLocalEndOffset[streamSet] == nullptr);
 
+
+
                 Value * start = nullptr;
                 Value * end = nullptr;
                 Value * maxStrides = maximumNumOfStrides;
 
-                const BufferPort & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
+                const auto output = in_edge(streamSet, mBufferGraph);
+
+                const auto producer = source(output, mBufferGraph);
+                assert (FirstKernelInPartition[mCurrentPartitionId] <= producer && producer < FirstKernelInPartition[mCurrentPartitionId + 1]);
+                if (producer == mKernelId) {
+                    selected.push_back(streamSet);
+                }
+
+                const BufferPort & bp = mBufferGraph[output];
                 auto overflow = (bp.Maximum * StrideStepLength[mKernelId] + Rational{bp.RequiredOverflowSpace}) / bw;
                 const auto k = ceiling(overflow);
 
@@ -350,8 +355,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                     maxStrides = b.CreateAdd(maxStrides, b.getSize(k - 1));
                 }
 
-                const auto & P = ThreadLocalPlacement[e];
-                Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, P * THREAD_LOCAL_ALLOC_SCALE), LOG_2_PAGE_SIZE);
+                Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, ThreadLocalPlacement[e]), LOG_2_PAGE_SIZE);
                 if (u < PartitionCount) {
                     start = sz_ZERO;
                     end = off;
@@ -381,9 +385,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 }
 
                 #if defined(PRINT_DEBUG_MESSAGES) && !defined(PRINT_DEBUG_MESSAGES_NO_ADDRESS_DISPLAY)
-                debugPrint(b, "mappedAddrRange" + std::to_string(streamSet) +
-                           " (" + std::to_string(P.numerator()) + "/" + std::to_string(P.denominator()) +
-                           ") = [%" PRIx64 ", %" PRIx64 ")", start, end);
+                debugPrint(b, "mappedAddrRange%" PRIu64 " = [%" PRIx64 ", %" PRIx64 ")", b.getSize(streamSet), start, end);
                 #endif
 
                 if (ThreadLocalPlacement[v]) {
@@ -429,63 +431,75 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     }
 
     mThreadLocalStreamSetBaseAddress = b.CreateAlignedLoad(int8PtrTy, threadLocalPtr, PtrTyABIAlignment);
-
     Value * const threadLocalMemorySizePtr = b.getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES).first;
-
     Value * const currentMem = b.CreateAlignedLoad(sizeTy, threadLocalMemorySizePtr, SizeTyABIAlignment);
 
     // TODO: is it possible we could reuse memory but need new offsets on a second pass that causes us to overlap
     // a copy of one buffer to a different one?
-
-    b.CreateUnlikelyCondBr(b.CreateICmpUGT(memoryForSegment, currentMem), expandThreadLocalMemory, afterExpansion);
+    Value * const expandBuffer = b.CreateICmpUGT(memoryForSegment, currentMem);
+    b.CreateUnlikelyCondBr(expandBuffer, expandThreadLocalMemory, copyOrAcceptThreadLocalMemoryLayout);
 
     b.SetInsertPoint(expandThreadLocalMemory);
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        startCycleCounter(b, CycleCounter::BUFFER_EXPANSION);
-    }
-
     // At minimum, we want to double the required space to minimize future reallocs
     Value * const newSize = b.CreateRoundUp(memoryForSegment, currentMem);
     b.CreateAlignedStore(newSize, threadLocalMemorySizePtr, SizeTyABIAlignment);
     Value * const newThreadLocalBaseAddress = b.CreateAlignedMalloc(newSize, pageSize);
     b.CreateAlignedStore(newThreadLocalBaseAddress, threadLocalPtr, PtrTyABIAlignment);
-    b.CreateUnlikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, copyThreadLocalMemory, copyThreadLocalMemoryExit);
+    b.CreateBr(copyOrAcceptThreadLocalMemoryLayout);
+
     // If we already processed one iteration, we have likely written something to the old thread local buffer.
     // Copy it to the correct location of the new one.
+    b.SetInsertPoint(copyOrAcceptThreadLocalMemoryLayout);
+    PHINode * const newThreadLocalBaseAddressPhi = b.CreatePHI(int8PtrTy, 2);
+    newThreadLocalBaseAddressPhi->addIncoming(newThreadLocalBaseAddress, expandThreadLocalMemory);
+    newThreadLocalBaseAddressPhi->addIncoming(mThreadLocalStreamSetBaseAddress, allocateThreadLocal);
+
+    PHINode * sizePhi = b.CreatePHI(sizeTy, 2);
+    sizePhi->addIncoming(newSize, expandThreadLocalMemory);
+    sizePhi->addIncoming(currentMem, allocateThreadLocal);
+    b.CreateCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, copyThreadLocalMemory, afterExpansion);
+
     b.SetInsertPoint(copyThreadLocalMemory);
-    for (auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = target(output, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal()) {
-            const BufferPort & bp = mBufferGraph[output];
-            Value * const priorEnd = mThreadLocalEndOffsetAtEntryPhi[bp.Port.Number];
-            Value * const priorStart = mThreadLocalStartOffsetAtEntryPhi[streamSet];
-            Value * const priorLength = b.CreateSub(priorEnd, priorStart);
-            Value * const priorPtr = b.CreateGEP(int8Ty, mThreadLocalStreamSetBaseAddress, priorStart);
-            Value * const currentPtr = b.CreateGEP(int8Ty, newThreadLocalBaseAddress, mThreadLocalStartOffset[streamSet]);
-            b.CreateMemCpy(currentPtr, priorPtr, priorLength, pageSize);
-        }
+    #ifdef VERIFY_THREAD_LOCAL_OUTPUT_COPY
+    Value * const copyBuffer = b.CreateAlignedMalloc(currentMem, pageSize);
+    b.CreateMemCpy(copyBuffer, mThreadLocalStreamSetBaseAddress, currentMem, pageSize);
+    #endif
+    for (auto i = selected.rbegin(); i != selected.rend(); ++i) {
+        const auto streamSet = *i;
+        assert (mBufferGraph[streamSet].isThreadLocal());
+        const auto output = in_edge(streamSet, mBufferGraph);
+        const BufferPort & bp = mBufferGraph[output];
+        Value * const priorEnd = mThreadLocalEndOffsetAtEntryPhi[bp.Port.Number];
+        Value * const priorStart = mThreadLocalStartOffsetAtEntryPhi[streamSet];
+        Value * const priorLength = b.CreateSub(priorEnd, priorStart);
+        Value * const priorPtr = b.CreateGEP(int8Ty, mThreadLocalStreamSetBaseAddress, priorStart);
+        Value * const currentPtr = b.CreateGEP(int8Ty, newThreadLocalBaseAddressPhi, mThreadLocalStartOffset[streamSet]);
+        b.CreateMemCpy(currentPtr, priorPtr, priorLength, pageSize);
+        #ifdef VERIFY_THREAD_LOCAL_OUTPUT_COPY
+        Value * const copyPtr = b.CreateGEP(int8Ty, copyBuffer, priorStart);
+        Value * const match = b.CreateIsNull(b.CreateMemCmp(copyPtr, currentPtr, priorLength));
+        b.CreateAssert (match, "thread local movement failed for streamset %" PRIu64, b.getSize(streamSet));
+        #endif
     }
-    b.CreateBr(copyThreadLocalMemoryExit);
+    #ifdef VERIFY_THREAD_LOCAL_OUTPUT_COPY
+    b.CreateFree(copyBuffer);
+    #endif
+    b.CreateCondBr(expandBuffer, copyThreadLocalMemoryExit, afterExpansion);
 
     b.SetInsertPoint(copyThreadLocalMemoryExit);
     b.CreateFree(mThreadLocalStreamSetBaseAddress);
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
-    }
     b.CreateBr(afterExpansion);
 
     b.SetInsertPoint(afterExpansion);
-    PHINode * const basePtrPhi = b.CreatePHI(int8PtrTy, 2);
-    basePtrPhi->addIncoming(mThreadLocalStreamSetBaseAddress, allocateThreadLocal);
-    basePtrPhi->addIncoming(newThreadLocalBaseAddress, copyThreadLocalMemoryExit);
-    mThreadLocalStreamSetBaseAddress = basePtrPhi;
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
+    }
     b.CreateBr(allocateThreadLocalExit);
 
     b.SetInsertPoint(allocateThreadLocalExit);
     PHINode * const threadLocalBaseAttrPhi = b.CreatePHI(int8PtrTy, 2);
     threadLocalBaseAttrPhi->addIncoming(mThreadLocalStreamSetBaseAddressAtEntryPhi, entryBlock);
-    threadLocalBaseAttrPhi->addIncoming(mThreadLocalStreamSetBaseAddress, afterExpansion);
+    threadLocalBaseAttrPhi->addIncoming(newThreadLocalBaseAddressPhi, afterExpansion);
     mThreadLocalStreamSetBaseAddress = threadLocalBaseAttrPhi;
 
     for (auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {

@@ -262,7 +262,11 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     Value * terminationRequestRejected = nullptr;
     if (LLVM_UNLIKELY(mKernelMustTerminateExplicitly)) {
         terminationRequestRejected = b.CreateAnd(b.CreateIsNull(mTerminatedExplicitly),  b.CreateIsNotNull(mIsFinalInvocation));
-        mHasMoreInput = b.CreateOr(mHasMoreInput, terminationRequestRejected);
+        if (delayReleaseOfPreInvocationLock) {
+            mHasMoreInput = b.CreateAnd(delayReleaseOfPreInvocationLock, terminationRequestRejected);
+        } else {
+            mHasMoreInput = b.CreateOr(mHasMoreInput, terminationRequestRejected);
+        }
     }
 
     updateProcessedAndProducedItemCounts(b, terminationRequestRejected);
