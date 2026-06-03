@@ -45,9 +45,6 @@ using namespace pablo;
 
 namespace json {
 
-
-//
-//
 class JSON_Escape_Sequence_Expansion : public PabloKernel {
 public:
     JSON_Escape_Sequence_Expansion(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * dataMask, StreamSet * insertBixNum)
@@ -75,16 +72,22 @@ void JSON_Escape_Sequence_Expansion::generatePabloMethod() {
     writeOutputStreamSet("insertBixNum", Expansion);
 }
 
+StreamSet * EscapeSequenceExpansionBixNum(PipelineBuilder & P, StreamSet * Basis, StreamSet * stringMask) {
+    StreamSet * insertBixNum = P.CreateStreamSet(3);  // Max insert is 5, requiring a 3-bit bixnum.
+    P.CreateKernelCall<JSON_Escape_Sequence_Expansion>(Basis, stringMask, insertBixNum);
+    return insertBixNum;
+}
+
 //
 // Translating escape sequences, assuming that the necessary
 // space for expanded escape sequences have been created by inserting
-// zeroes after the escaped character.
+// zeroes before the escaped character.
 
 class JSON_Escape_Sequence_Translation : public PabloKernel {
 public:
     JSON_Escape_Sequence_Translation(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * spreadMask, StreamSet * translatedBasis)
         : PabloKernel(ts, "JSON_Escape_Sequence_Translation" + Basis->shapeString(),
-                      {Binding{"basis", Basis},
+                      {Binding{"basis", Basis, FixedRate(), LookAhead(1)},
                        Binding{"spreadMask", spreadMask}},
                       {Binding{"translatedBasis", translatedBasis, FixedRate(), InOut("basis")}}) {
             mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
@@ -98,8 +101,7 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     cc::Parabix_CC_Compiler_Builder ccc(basis);
-    BixNumCompiler bnc(pb);
-    PabloAST * spreadMask = getInputStreamSet("spreadMask")[0];
+    PabloAST * insertMask = pb.createNot(getInputStreamSet("spreadMask")[0]);
     auto ZEROES = pb.createZeroes();
     std::vector<Var *> basisVar(7);
     if (!mUseInOut) {
@@ -107,63 +109,58 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
             basisVar[i] = pb.createVar("outVar" + std::to_string(i), ZEROES);
         }
     }
-    re::CC * quote_backslash = re::makeCC(re::makeCC('"'), re::makeCC('\\'));
-    re::CC * unit_controls = re::makeCC(re::makeCC(0x8, 0xA), re::makeCC(0xC, 0XD));
-    re::CC * expand_by_1 = re::makeCC(quote_backslash, unit_controls);
-    re::CC * expand_by_5 = subtractCC(re::makeCC(0x00, 0x1F), unit_controls);
-    PabloAST * Expand1 = ccc.compileCC(expand_by_1, pb);
-    PabloAST * Expand5 = ccc.compileCC(expand_by_5, pb);
-    // Ensure that we don't treat inserted nulls as characters to escape.
-    Expand5 = pb.createAnd(Expand5, spreadMask);
-    PabloAST * AnyEscape = pb.createOr(Expand1, Expand5);
     auto nested = pb.createScope();
-    pb.createIf(AnyEscape, nested);
-    // All bit modifications for escape translation involve 7 bit ASCII values only.
-    // Create Vars to receive the produced values.
-    if (mUseInOut) {
-        for (unsigned i = 0; i < 7; i++) {
-            basisVar[i] = nested.createVar("outVar" + std::to_string(i), ZEROES);
-        }
-    }
-    std::vector<PabloAST *> outputBasis(7);
+    pb.createIf(insertMask, nested);
+    BixNumCompiler bnc(nested);
+    PabloAST * insert1 = nested.createAnd(insertMask, nested.createNot(nested.createAdvance(insertMask, 1)));
+    //
     // For all escape sequences, backslash (0x5C) is the first character of the escape sequence.
     // Bits 2, 3, 4 and 6 are set for any escape, bits 0, 1, and 5 are cleared.
-    PabloAST * preserve = nested.createNot(AnyEscape);
-    outputBasis[6] = nested.createOr(basis[6], AnyEscape);
+    PabloAST * preserve = nested.createNot(insert1);
+    std::vector<PabloAST *> outputBasis(7);
+    outputBasis[6] = nested.createOr(basis[6], insert1);
     outputBasis[5] = nested.createAnd(basis[5], preserve);
-    outputBasis[4] = nested.createOr(basis[4], AnyEscape);
-    outputBasis[3] = nested.createOr(basis[3], AnyEscape);
-    outputBasis[2] = nested.createOr(basis[2], AnyEscape);
+    outputBasis[4] = nested.createOr(basis[4], insert1);
+    outputBasis[3] = nested.createOr(basis[3], insert1);
+    outputBasis[2] = nested.createOr(basis[2], insert1);
     outputBasis[1] = nested.createAnd(basis[1], preserve);
     outputBasis[0] = nested.createAnd(basis[0], preserve);
-    // To escape a backslash, we create a second backslash (0x5C).
-    // We only need to or in bits 2, 3, 4 and 6.
-    PabloAST * bslash = ccc.compileCC(re::makeCC('\\'), nested);
-    PabloAST * bslash_next = nested.createAdvance(bslash, 1);
-    outputBasis[6] = nested.createOr(outputBasis[6], bslash_next);
-    outputBasis[4] = nested.createOr(outputBasis[4], bslash_next);
-    outputBasis[3] = nested.createOr(outputBasis[3], bslash_next);
-    outputBasis[2] = nested.createOr(outputBasis[2], bslash_next);
     //
-    // Translation of unit controls
-    // 0x08 -> 0x62 (b), 0x09 -> 0x74 (t), 0x0A-> 0x6E , 0x0C -> 0x66, 0x0D -> 0x72
-    // Note that the high hex digit is either 6 or 7. It is 7 if
-    // the low bit of the character to be escaped is 1 (0x09, 0x0D)
-    PabloAST * controls_next = nested.createAdvance(nested.createXor(Expand1, bslash), 1);
-    outputBasis[6] = nested.createOr(outputBasis[6], controls_next);
-    outputBasis[5] = nested.createOr(outputBasis[5], controls_next);
-    outputBasis[4] = nested.createOr(outputBasis[4], nested.createAnd(controls_next, nested.createAdvance(basis[0], 1)));
+    //  Further processing depends on the first escaped position,
+    //  that is, is the next basis character to be escaped, or
+    //  are there more inserted characters marking a \u00xy sequence.
     //
-    // bit 3 is set only for LF (0xA) -> \n
-    PabloAST * LF_next = nested.createAdvance(ccc.compileCC(re::makeCC(0x0A), nested), 1);
-    outputBasis[3] = nested.createOr(outputBasis[3], nested.createAnd(controls_next, LF_next));
-    // bit 2 is set for 0x09 -> 0x74 (t), 0x0A-> 0x6E , 0x0C -> 0x66
-    PabloAST * TAB_next = nested.createAdvance(ccc.compileCC(re::makeCC(0x09), nested), 1);
-    PabloAST * FF_next = nested.createAdvance(ccc.compileCC(re::makeCC(0x0C), nested), 1);
-    PabloAST * LF_TAB_FF_next = nested.createOr3(LF_next, TAB_next, FF_next);
-    outputBasis[2] = nested.createOr(outputBasis[2], nested.createAnd(controls_next, LF_TAB_FF_next));
-    // bit 1 is set for all except tab.
-    outputBasis[1] = nested.createOr(outputBasis[1], nested.createAnd(controls_next, nested.createNot(TAB_next)));
+    PabloAST * escaped_position_1 = nested.createAdvance(insert1, 1);
+    PabloAST * u00xy_start = nested.createAnd(escaped_position_1, insertMask);
+    PabloAST * unit_escape = nested.createXor(escaped_position_1, u00xy_start);
+    //
+    // Unit escapes may be escaped quotes or backslashes, but these
+    // are already encoded in the basis data, so we only need consider
+    // translation of unit controls.
+    // 0x08 -> 0x62 (b), 0x09 -> 0x74 (t), 0x0A-> 0x6E (n), 0x0C -> 0x66 (f), 0x0D -> 0x72 (r)
+    // We only need consider the low 4 bits of the basis.
+    PabloAST * unit_controls = pb.createAnd(unit_escape, bnc.ULT(basis, 0x10));
+    // The high 4 bits of the controls are all zero, and must translate to 6 or 7.
+    // It is 7 if the low bit of the character to be escaped is 1 (0x09, 0x0D)
+    outputBasis[6] = nested.createOr(outputBasis[6], unit_controls);
+    outputBasis[5] = nested.createOr(outputBasis[5], unit_controls);
+    outputBasis[4] = nested.createOr(outputBasis[4], nested.createAnd(unit_controls, basis[0]));
+    //
+    // For the low 4 positions, we determine which bits have to be flipped.
+    BixNum low4 = bnc.Truncate(basis, 4);
+    // bit 3 is flipped for all but LF (0xA) -> 0x6E (\n)
+    PabloAST * at_LF = nested.createAnd(unit_controls, bnc.EQ(low4, 0x0A));
+    outputBasis[3] = nested.createXor(outputBasis[3], nested.createXor(unit_controls, at_LF));
+    // bit 2 is flipped for 0x09 -> 0x74, 0x0A-> 0x6E, 0x0D -> 0x72
+    PabloAST * at_TAB = nested.createAnd(unit_controls, bnc.EQ(low4, 0x09));
+    PabloAST * at_CR = nested.createAnd(unit_controls, bnc.EQ(low4, 0x0D));
+    outputBasis[2] = nested.createXor(outputBasis[2], nested.createOr3(at_TAB, at_LF, at_CR));
+    // bit 1 is flipped for 0x08 -> 0x62, 0x0C -> 0x66, 0x0D -> 0x72
+    PabloAST * at_BS = nested.createAnd(unit_controls, bnc.EQ(low4, 0x08));
+    PabloAST * at_FF = nested.createAnd(unit_controls, bnc.EQ(low4, 0x0C));
+    outputBasis[1] = nested.createXor(outputBasis[1], nested.createOr3(at_BS, at_FF, at_CR));
+    // bit 0 is zeroed for all unit controls
+    outputBasis[0] = nested.createAnd(outputBasis[0], nested.createNot(unit_controls));
     //
     // For hexadecimal escapes (expected to be rare), we will create a further nested block.
     // But first Assign the computed output basis streams, so we have the final values,
@@ -172,23 +169,24 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
         nested.createAssign(basisVar[i], outputBasis[i]);
     }
     auto hex_scope = nested.createScope();
-    nested.createIf(Expand5, hex_scope);
-    re::CC * hexA_F = re::makeCC(re::makeCC(0x0A, 0x0F), re::makeCC(0xC, 0XD));
+    nested.createIf(u00xy_start, hex_scope);
+    BixNumCompiler bnc2(hex_scope);
     // The first character after the open escape (\) is the
     // letter u (0x75).
-    PabloAST * u_pos = hex_scope.createAdvance(Expand5, 1);
-    outputBasis[6] = hex_scope.createOr(outputBasis[6], u_pos);
-    outputBasis[5] = hex_scope.createOr(outputBasis[5], u_pos);
-    outputBasis[4] = hex_scope.createOr(outputBasis[4], u_pos);
-    outputBasis[2] = hex_scope.createOr(outputBasis[2], u_pos);
-    outputBasis[0] = hex_scope.createOr(outputBasis[0], u_pos);
+    outputBasis[6] = hex_scope.createOr(outputBasis[6], u00xy_start);
+    outputBasis[5] = hex_scope.createOr(outputBasis[5], u00xy_start);
+    outputBasis[4] = hex_scope.createOr(outputBasis[4], u00xy_start);
+    outputBasis[2] = hex_scope.createOr(outputBasis[2], u00xy_start);
+    outputBasis[0] = hex_scope.createOr(outputBasis[0], u00xy_start);
     //
-    PabloAST * hex_pos1 = hex_scope.createAdvance(u_pos, 1);
+    PabloAST * hex_pos1 = hex_scope.createAdvance(u00xy_start, 1);
     PabloAST * hex_pos2 = hex_scope.createAdvance(hex_pos1, 1);
     PabloAST * hex_pos3 = hex_scope.createAdvance(hex_pos2, 1);
     PabloAST * hex_pos4 = hex_scope.createAdvance(hex_pos3, 1);
-    PabloAST * finalHexAF = hex_scope.createAdvance(ccc.compileCC(hexA_F, hex_scope), 5);
-    finalHexAF = hex_scope.createAnd(finalHexAF, hex_pos4);
+    // We need to encode a hexadecimal digit A to F at the final
+    // position if the low 4 digits of the control character is
+    // 10 or greater.
+    PabloAST * finalHexAF = hex_scope.createAnd(bnc2.UGE(low4, 10), hex_pos4);
     //
     // The hexadecimal sequence to be produced is in the pattern 00[01][0-9A-F].
     // The numerals [0-9] are all in the ASCII range 0x30-0x39.
@@ -202,21 +200,15 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     // The high 4 bits are 0100.
     outputBasis[6] = hex_scope.createOr(outputBasis[6], hex_scope.createAnd(hex_pos4, finalHexAF));
     //
-    //  Now set the low 4 bits. 
+    //  Now set the low 4 bits.
     //  For the first two hex digits, the low 4 bits remain as 0.
     //  For the third digit, the low bit is 0 or 1, depending
     //  on bit 4 of the character to be escaped.
-    PabloAST * bit4moved = hex_scope.createAdvance(basis[4], 4);
+    PabloAST * bit4moved = hex_scope.createLookahead(basis[4], 1);
     outputBasis[0] = hex_scope.createOr(outputBasis[0], hex_scope.createAnd(bit4moved, hex_pos3));
     //
-    // The final hex digit is based on the 4 low bits of the
-    // escaped character, moved forward 5 positions.
-    std::vector<PabloAST *> low4(4);
-    for (unsigned i = 0; i < 4; i++) {
-        low4[i] = hex_scope.createAdvance(basis[i], 5);
-    }
+    // The final hex digit is based on the 4 low bits of the escaped control.
     // For hex A-F values, the low 4 bits are in the range 10-15, so we subract 9.
-    BixNumCompiler bnc2(hex_scope);
     BixNum AF_low4 = bnc2.SubModular(low4, 9);
     for (unsigned i = 0; i < 4; i++) {
         PabloAST * bit = hex_scope.createSel(finalHexAF, AF_low4[i], low4[i]);
@@ -242,24 +234,10 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
-void EscapeStringSpecials(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * stringMask, StreamSet * EscapedBasis) {
-    StreamSet * JSON_Escape_Insert_Bixnum = P.CreateStreamSet(3);
-    P.CreateKernelCall<JSON_Escape_Sequence_Expansion>(BasisBits, stringMask, JSON_Escape_Insert_Bixnum);
-    SHOW_BIXNUM(JSON_Escape_Insert_Bixnum);
-
-    StreamSet * const EscapeSpreadMask = P.CreateStreamSet(1);
-    InsertionSpreadMask(P, JSON_Escape_Insert_Bixnum, EscapeSpreadMask, kernel::InsertPosition::After);
-    SHOW_STREAM(EscapeSpreadMask);
-
-    StreamSet * ExpandedBasis = P.CreateStreamSet(BasisBits->getNumElements());
-    SpreadByMask(P, EscapeSpreadMask, BasisBits, ExpandedBasis);
-    SHOW_BIXNUM(ExpandedBasis);
-
-    P.CreateKernelCall<JSON_Escape_Sequence_Translation>(ExpandedBasis, EscapeSpreadMask, EscapedBasis);
+void EscapeStringTranslation(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * EscapeSpreadMask, StreamSet * EscapedBasis) {
+    P.CreateKernelCall<JSON_Escape_Sequence_Translation>(BasisBits, EscapeSpreadMask, EscapedBasis);
     SHOW_BIXNUM(EscapedBasis);
 }
-
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 
 const std::vector<std::string> JSON_Kind_REs = {"null", "true", "false", "-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?(?:[Ee][-+][0-9]+)?", "\".*\""};
 
