@@ -111,6 +111,11 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     }
     auto nested = pb.createScope();
     pb.createIf(insertMask, nested);
+    if (mUseInOut) {
+        for (unsigned i = 0; i < 7; i++) {
+            basisVar[i] = nested.createVar("outVar" + std::to_string(i), ZEROES);
+        }
+    }
     BixNumCompiler bnc(nested);
     PabloAST * insert1 = nested.createAnd(insertMask, nested.createNot(nested.createAdvance(insertMask, 1)));
     //
@@ -139,7 +144,7 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     // translation of unit controls.
     // 0x08 -> 0x62 (b), 0x09 -> 0x74 (t), 0x0A-> 0x6E (n), 0x0C -> 0x66 (f), 0x0D -> 0x72 (r)
     // We only need consider the low 4 bits of the basis.
-    PabloAST * unit_controls = pb.createAnd(unit_escape, bnc.ULT(basis, 0x10));
+    PabloAST * unit_controls = nested.createAnd(unit_escape, bnc.ULT(basis, 0x10));
     // The high 4 bits of the controls are all zero, and must translate to 6 or 7.
     // It is 7 if the low bit of the character to be escaped is 1 (0x09, 0x0D)
     outputBasis[6] = nested.createOr(outputBasis[6], unit_controls);
@@ -221,12 +226,15 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     //
     // Finally write out the values.
     Var * outVar = getOutputStreamVar("translatedBasis");
-    for (unsigned i = 0; i < 7; i++) {
-        if (mUseInOut) {
+    if (mUseInOut) {
+        for (unsigned i = 0; i < 7; i++) {
             nested.createAssign(nested.createExtract(outVar, nested.getInteger(i)), basisVar[i]);
-        } else {
+        }
+    } else {
+        for (unsigned i = 0; i < 7; i++) {
             pb.createAssign(pb.createExtract(outVar, pb.getInteger(i)), basisVar[i]);
         }
+        pb.createAssign(pb.createExtract(outVar, pb.getInteger(7)), basis[7]);
     }
 }
 
