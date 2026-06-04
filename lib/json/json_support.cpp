@@ -35,7 +35,7 @@
 // The escape sequences for backslash and several common control characters
 // generate two character escape sequences (insertion of one position required).
 //
-// \ -> \\, " -> \", 0x08 (BS) -> \b, 0x09 (TAB) -> \t, 0x0A(LF) -> \n, 0x0A(FF) -> \f, 0x0D(CR) -> \r
+// \ -> \\, " -> \", 0x08 (BS) -> \b, 0x09 (TAB) -> \t, 0x0A(LF) -> \n, 0x0C(FF) -> \f, 0x0D(CR) -> \r
 //
 // Other controls generate 6-character escape sequences of the form \u00xy
 // where xy are the two hexadecimal digits of the control sequence value.
@@ -203,7 +203,7 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     //
     // For hexadecimal A-F values, the ASCII range is 0x41 to 0x46.
     // The high 4 bits are 0100.
-    outputBasis[6] = hex_scope.createOr(outputBasis[6], hex_scope.createAnd(hex_pos4, finalHexAF));
+    outputBasis[6] = hex_scope.createOr(outputBasis[6], finalHexAF);
     //
     //  Now set the low 4 bits.
     //  For the first two hex digits, the low 4 bits remain as 0.
@@ -216,8 +216,7 @@ void JSON_Escape_Sequence_Translation::generatePabloMethod() {
     // For hex A-F values, the low 4 bits are in the range 10-15, so we subract 9.
     BixNum AF_low4 = bnc2.SubModular(low4, 9);
     for (unsigned i = 0; i < 4; i++) {
-        PabloAST * bit = hex_scope.createSel(finalHexAF, AF_low4[i], low4[i]);
-        outputBasis[i] = hex_scope.createOr(outputBasis[i], hex_scope.createAnd(bit, hex_pos4));
+        outputBasis[i] = hex_scope.createSel(finalHexAF, AF_low4[i], outputBasis[i]);
     }
     // Now assign the computed values so that they are available in the outer scope.
     for (unsigned i = 0; i < 7; i++) {
