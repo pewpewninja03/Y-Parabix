@@ -97,7 +97,6 @@ skip_phase_check:
         }
         assert (FirstStreamSet <= id && id <= streamSet);
         BufferNode & sn = mBufferGraph[id];
-
         assert (sn.isNonThreadLocal());
 
         const auto pe = in_edge(streamSet, mBufferGraph);
@@ -116,41 +115,38 @@ skip_phase_check:
         auto & lc = lastConsumer[id - FirstStreamSet];
         for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(input, mBufferGraph);
-            if (KernelPartitionId[consumer] == partId) {
-                continue;
-            }
             assert (consumer > 0);
             lc = std::max(lc, consumer);
             const BufferPort & I = mBufferGraph[input];
             const unsigned index = out_degree(id, mConsumerGraph);
             allConsumersFixedRate &= I.isFixed();
-            add_edge(id, consumer, ConsumerEdge{I.Port, index + 1, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+            const auto flags = (KernelPartitionId[consumer] == partId) ? ConsumerEdge::None : ConsumerEdge::UpdateConsumedCount;
+            add_edge(id, consumer, ConsumerEdge{I.Port, 0, flags}, mConsumerGraph);
         }
 
         sn.Type |= allConsumersFixedRate ? 0U : BufferType::HasNonFixedRateConsumer;
         assert (lastConsumer[streamSet - FirstStreamSet] == 0 || mConsumerGraph[streamSet] == streamSet);
     }
 
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const auto lc = lastConsumer[streamSet - FirstStreamSet];
-        assert (lc == 0 || out_degree(streamSet, mConsumerGraph) != 0);
-        if (LLVM_UNLIKELY(lc == 0)) {
-            continue;
-        }
-        assert (mConsumerGraph[streamSet] == streamSet);
-        for (auto ss = streamSet; ss <= LastStreamSet; ++ss) {
-            if (mConsumerGraph[ss] == streamSet) {
-                for (const auto ce : make_iterator_range(out_edges(ss, mBufferGraph))) {
-                    const auto consumer = target(ce, mBufferGraph);
-                    if (consumer == lc) {
-                        const unsigned index = out_degree(streamSet, mConsumerGraph);
-                        const BufferPort & input = mBufferGraph[ce];
-                        add_edge(streamSet, consumer, ConsumerEdge{input.Port, index + 1, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
-                    }
-                }
-            }
-        }
-    }
+//    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+//        const auto lc = lastConsumer[streamSet - FirstStreamSet];
+//        if (LLVM_UNLIKELY(lc == 0)) {
+//            continue;
+//        }
+//        assert (mConsumerGraph[streamSet] == streamSet);
+//        for (auto ss = streamSet; ss <= LastStreamSet; ++ss) {
+//            if (mConsumerGraph[ss] == streamSet) {
+//                for (const auto ce : make_iterator_range(out_edges(ss, mBufferGraph))) {
+//                    const auto consumer = target(ce, mBufferGraph);
+//                    if (consumer == lc) {
+//                        const unsigned index = out_degree(streamSet, mConsumerGraph);
+//                        const BufferPort & input = mBufferGraph[ce];
+//                        add_edge(streamSet, consumer, ConsumerEdge{input.Port, index + 1, ConsumerEdge::UpdateConsumedCount}, mConsumerGraph);
+//                    }
+//                }
+//            }
+//        }
+//    }
 
     constexpr auto propogatedFlagSet =
         BufferType::PreserveEntireStreamSet |
@@ -160,12 +156,12 @@ skip_phase_check:
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         const auto id = mConsumerGraph[streamSet];
-
-        if (id == 0) {
+        if (out_degree(id, mConsumerGraph) == 0) {
             continue;
         }
-
+        assert (id > 0);
         assert (in_degree(id, mConsumerGraph) == 1);
+
 
         const BufferNode & sn = mBufferGraph[id];
         BufferNode & bn = mBufferGraph[streamSet];
@@ -205,9 +201,27 @@ skip_phase_check:
         std::tie(e, exists) = edge(id, lc, mConsumerGraph); assert (exists);
         //  If there are consumers, update.
         ConsumerEdge & cn = mConsumerGraph[e];
-        cn.Flags |= ConsumerEdge::WriteConsumedCount;
+        cn.Flags |= ConsumerEdge::UpdateConsumedCount | ConsumerEdge::WriteConsumedCount;
+
+        remove_out_edge_if(id, [&](ConsumerGraph::edge_descriptor f) -> bool {
+            #ifndef NDEBUG
+            const auto consumer = target(f, mConsumerGraph);
+            assert (FirstKernel <= consumer && consumer <= PipelineOutput);
+            #endif
+            return mConsumerGraph[f].Flags == ConsumerEdge::None;
+        }, mConsumerGraph);
+
+        size_t index = 0;
+        for (auto f : make_iterator_range(out_edges(id, mConsumerGraph))) {
+            auto & C = mConsumerGraph[f];
+            assert (C.Flags != ConsumerEdge::None);
+            C.Index = ++index;
+        }
+        assert (index == out_degree(id, mConsumerGraph));
 
     }
+
+
 
     // If this is a pipeline input, we want to update the count at the end of the loop.
     for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {

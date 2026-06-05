@@ -388,7 +388,6 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             argTy->print(out);
             out << " but got ";
             arg->getType()->print(out);
-            assert (false);
             report_fatal_error(out.str());
         }
         #endif
@@ -615,7 +614,8 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     }
 
     if (LLVM_UNLIKELY(mTraceDynamicBuffers && hasManagedOutput)) {
-        addNextArg(mBufferExpansionFunction); assert (mBufferExpansionFunction);
+        assert (mBufferExpansionFunction);
+        addNextArg(mBufferExpansionFunction);
         addNextArg(b.CreatePointerCast(getHandle(), voidPtrTy));
     }
 

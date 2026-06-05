@@ -316,8 +316,8 @@ ElemMergeKernel::ElemMergeKernel(LLVMTypeSystemInterface & ts,
                         return tmp;
                     }(),
 {Binding("mask", mask, FixedRate(1), Principal()),
- Binding("source1", source1, PopcountOf("mask")),
- Binding("source2", source2, PopcountOfNot("mask"))},
+ Binding("source1", source1, PopcountOf("mask"), EmptyReadOverflow()),
+ Binding("source2", source2, PopcountOfNot("mask"), EmptyReadOverflow())},
 {Binding{"merged", merged}},
 {}, {}, {}), mElemWidth(source1->getFieldWidth()) {
     //setStride(ts.getBitBlockWidth()/mElemWidth);
@@ -607,7 +607,9 @@ StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                         nm.flush();
                         return tmp;
                     }(),
-{Binding("marker", mask, FixedRate(1), Principal()),Binding("source1", source1, PopcountOf("marker")), Binding("source2", source2, PopcountOfNot("marker"))},
+{Binding("marker", mask, FixedRate(1), Principal()),
+ Binding("source1", source1, PopcountOf("marker"), EmptyReadOverflow()),
+ Binding("source2", source2, PopcountOfNot("marker"), EmptyReadOverflow())},
 {Binding{"mergedStreamSet", merged}},
 // input scalar
 {Binding{"base", base}},

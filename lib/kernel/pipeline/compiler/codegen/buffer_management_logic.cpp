@@ -42,25 +42,20 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
             }
         }
 
-        if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
-            if (rd.isManaged() || bn.Buffer->isDynamic()) {
-                if (LLVM_UNLIKELY(mConsumerGraph[streamSet] != streamSet)) {
-                    continue;
-                }
-                const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
+        if (LLVM_UNLIKELY(mTraceDynamicBuffers && bn.canTrackBufferExpansionData())) {
+            const auto numOfConsumers = std::max(out_degree(streamSet, mConsumerGraph), 1UL);
 
-                // segment num  0
-                // new capacity 1
-                // produced item count 2
-                // consumer processed item count [3,n)
-                IntegerType * const sizeTy = b.getSizeTy();
-                Type * const traceStructTy = ArrayType::get(sizeTy, numOfConsumers + 3);
-                FixedArray<Type *, 2> traceStruct;
-                traceStruct[0] = traceStructTy->getPointerTo(); // pointer to trace log
-                traceStruct[1] = sizeTy; // length of trace log
-                mTarget->addInternalScalar(StructType::get(b.getContext(), traceStruct),
-                                                   prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX, groupId);
-            }
+            // segment num  0
+            // new capacity 1
+            // produced item count 2
+            // consumer processed item count [3,n)
+            IntegerType * const sizeTy = b.getSizeTy();
+            Type * const traceStructTy = ArrayType::get(sizeTy, numOfConsumers + 3);
+            FixedArray<Type *, 2> traceStruct;
+            traceStruct[0] = traceStructTy->getPointerTo(); // pointer to trace log
+            traceStruct[1] = sizeTy; // length of trace log
+            mTarget->addInternalScalar(StructType::get(b.getContext(), traceStruct),
+                                               prefix + STATISTICS_BUFFER_EXPANSION_SUFFIX, groupId);
         }
 
 
@@ -334,7 +329,6 @@ void PipelineCompiler::freePendingDeletions(KernelBuilder & b, const size_t stre
     StreamSetBuffer * const buffer = bn.Buffer;
     if (LLVM_LIKELY(buffer->isDynamic())) {
         assert (getTruncatedStreamSetSourceId(streamSet) == streamSet);
-        assert (out_degree(streamSet, mConsumerGraph) > 0);
         buffer->freePendingDeletions(b, consumed);
     }
 }
@@ -624,7 +618,8 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
         if (bn.Type & BufferType::RequiresConsumedItemCount) {
             consumed = readConsumedItemCount(b, streamSet); assert (consumed);
         }
-        mKernelConsumedItemCount[outputPort] = consumed;
+
+        Value * produced = nullptr;
 
         if (LLVM_UNLIKELY(br.isRelative())) {
 
@@ -634,20 +629,24 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
                 Value * itemCount = mInitiallyProcessedItemCount[ref];
                 itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
                 mInitiallyProducedItemCount[streamSet] = itemCount;
+                produced = itemCount;
                 if (br.isDeferred()) {
                     Value * itemCount = mInitiallyProcessedDeferredItemCount[ref];
                     itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
                     mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+                    produced = itemCount;
                 }
             } else {
                 const auto refStreamSet = getOutputBufferVertex(ref);
                 Value * itemCount = mInitiallyProducedItemCount[refStreamSet];
                 itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
                 mInitiallyProducedItemCount[streamSet] = itemCount;
+                produced = itemCount;
                 if (br.isDeferred()) {
                     Value * itemCount = mInitiallyProducedDeferredItemCount[refStreamSet];
                     itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
                     mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+                    produced = itemCount;
                 }
             }
 
@@ -662,6 +661,7 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
 
             mProducedItemCountPtr[outputPort] = itemCountPtr;
             mInitiallyProducedItemCount[streamSet] = itemCount;
+            produced = itemCount;
 
             if (br.isDeferred()) {
                 assert (!mAllowDataParallelExecution || mKernelIsInternallySynchronized);
@@ -670,9 +670,9 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
                 Value * itemCount = b.CreateAlignedLoad(defRef.second, itemCountPtr, SizeTyABIAlignment);
                 mProducedDeferredItemCountPtr[outputPort] = itemCountPtr;
                 mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+                produced = itemCount;
             }
         }
-
 
         if (LLVM_UNLIKELY(CheckAssertions() && consumed)) {
             Value * const produced = mInitiallyProducedItemCount[streamSet]; assert (produced);
@@ -688,6 +688,11 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
             b.CreateAssert(valid, msg,
                 consumed, mCurrentKernelName, bindingName, produced);
         }
+
+        if (LLVM_UNLIKELY(consumed == nullptr)) {
+            consumed = produced;
+        }
+        mKernelConsumedItemCount[outputPort] = consumed;
 
         freePendingDeletions(b, streamSet, consumed);
 

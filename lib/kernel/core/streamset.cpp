@@ -604,6 +604,7 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
     name << "_initial_alloc" << mAddressSpace;
     if (LLVM_UNLIKELY(traceDynamicBuffer)) {
         name << 'T';
+        assert (pipelineHandle && portNum);
     }
 
     Module * const m = b.getModule();
@@ -687,11 +688,11 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         ConstantInt * const i32_ONE = b.getInt32(1);
         Constant * const nullVoidPtr = ConstantPointerNull::get(addrPtrTy);
 
-        FixedArray<Value *, 2> indices;
-        indices[0] = i32_ZERO;
-        indices[1] = b.getInt32(LinearBaseAddress);
+        FixedArray<Value *, 2> indices2;
+        indices2[0] = i32_ZERO;
+        indices2[1] = b.getInt32(LinearBaseAddress);
 
-        Value * const baseAddressField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        Value * const baseAddressField = b.CreateInBoundsGEP(handleTy, handle, indices2);
         Value * currentAddr = b.CreateAlignedLoad(addrPtrTy, baseAddressField, voidPtrTyAlign);
 
         // If the user has filled in a base address in the init function, assume they're handling all
@@ -722,14 +723,11 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
             baseAddress = b.CreateCall(makeBuffer, makeArgs);
         }
 
-        indices[1] = b.getInt32(LinearMallocedAddress);
-        Value * mallocAddrField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        indices2[1] = b.getInt32(LinearMallocedAddress);
+        Value * mallocAddrField = b.CreateInBoundsGEP(handleTy, handle, indices2);
         b.CreateAlignedStore(baseAddress, mallocAddrField, voidPtrTyAlign);
-
-
-
-        indices[1] = b.getInt32(LinearInternalCapacity);
-        Value * capacityField = b.CreateInBoundsGEP(handleTy, handle, indices);
+        indices2[1] = b.getInt32(LinearInternalCapacity);
+        Value * capacityField = b.CreateInBoundsGEP(handleTy, handle, indices2);
         b.CreateAlignedStore(capacity, capacityField, intPtrTyAlign);
 
         b.CreateAlignedStore(baseAddress, baseAddressField, voidPtrTyAlign);
@@ -799,7 +797,6 @@ void ManagedDynamicBuffer::allocateBuffer(KernelBuilder & b, Value * const capac
         args[4] = pipelineHandle;
         args[5] = portNum;
     }
-
     b.CreateCall(f, args);
 }
 
@@ -1524,9 +1521,9 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
 
     assert ("unspecified module" && b.getModule());
 
-    name << "__ManagedDynamicBuffer";
+    name << "__MDB";
     if (mLinear) {
-        name << "Linear";
+        name << "L";
     }
     name << "_reserve_capacity" << mAddressSpace;
     if (LLVM_UNLIKELY(traceDynamicBuffer)) {
@@ -1837,6 +1834,7 @@ Value * ManagedDynamicBuffer::reserveCapacity(KernelBuilder & b, Value * produce
         indices2[1] = b.getInt32(PendingDeletionStruct);
         Value * const pendingField = b.CreateGEP(handleTy, handle, indices2);
         Value * const safeToDeleteAt = b.CreateAdd(produced, BLOCK_WIDTH);
+
         addToPendingDeletions(b, pendingField, initialAddr, initialCapacity, b.CreateShl(bytesPerChunk, 1), safeToDeleteAt, mAddressSpace);
 
         b.CreateBr(exit);

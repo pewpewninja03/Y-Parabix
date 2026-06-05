@@ -194,13 +194,13 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         // as the final buffer has one block padding.
                     case AttrId::EmptyWriteOverflow:
                         BEGIN_SCOPED_REGION
-                        auto width = kernelObj->getStride();
                         assert (ub.denominator() == 1);
-                        if (binding.getNumElements() == 1) {
-                            const auto fw = binding.getFieldWidth();
-                            assert ((width % fw) == 0);
-                            width /= fw;
-                        }
+                        auto width = ub.numerator();
+//                        if (binding.getNumElements() == 1) {
+//                            const auto fw = binding.getFieldWidth();
+//                            assert ((width % fw) == 0);
+//                            width /= fw;
+//                        }
                         bp.EmptyOverflow = std::max<int>(bp.EmptyOverflow, width);
                         bn.Type |= BufferType::RequiresEmptyOverflow;
                         END_SCOPED_REGION
@@ -944,6 +944,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 #endif
                 } else { // is internal buffer
                     assert (bn.IsLinear || !bn.isReturned());
+                    assert (src == streamSet);
                     bn.Type |= traceDynamicBufferFlag;
                     outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
                 }

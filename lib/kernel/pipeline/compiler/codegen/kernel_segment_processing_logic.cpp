@@ -281,6 +281,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
     }
     recordProducedItemCountDeltas(b);
+
     // chain the progress state so that the next one carries on from this one
     assert (isFromCurrentFunction(b, mAnyProgressedAtExitPhi, false));
     mPipelineProgress = mAnyProgressedAtExitPhi;
