@@ -159,7 +159,7 @@ void OutputAssemblyStage(PipelineBuilder & P, StreamSet * WorkSelectionMask, Str
             StreamSet * const TransformedPlaced = P.CreateStreamSet(1, 8);
             SpreadByMask(P, FinalWorkPlacementMask, TransformedBytes, TransformedPlaced);
 
-            P.CreateKernelCall<ByteCombine>(NonModifiedPlaced, TransformedPlaced, OutputBytes);
+            OrCombine(P, NonModifiedPlaced, TransformedPlaced, OutputBytes);
         }
     } else {
         StreamSet * const NonModifiedBasis = P.CreateStreamSet(8);
