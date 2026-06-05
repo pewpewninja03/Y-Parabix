@@ -510,7 +510,12 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     // an empty mask.
     Value * const zeroElemVec = b.fwCast(mElemWidth, b.allZeroes());
     for (unsigned i = 0; i < mElemWidth; i++) {
-        b.storeOutputStreamPack("spread", ZERO, b.getSize(i), blockNoPhi, zeroElemVec);
+        //b.storeOutputStreamPack("spread", ZERO, b.getSize(i), blockNoPhi, zeroElemVec);
+        Value * packPtr = b.getOutputStreamPackPtr("spread", ZERO, b.getSize(i), blockNoPhi);
+        Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, b.getSize(i));
+        //b.CallPrintInt("packPtr", packPtr);
+        //b.CallPrintInt("outputPtr", outputPtr);
+        b.CreateStore(zeroElemVec, outputPtr);
     }
 
     b.CreateCondBr(b.CreateIsNull(metaMask), packsDone, scanPackLoop);
