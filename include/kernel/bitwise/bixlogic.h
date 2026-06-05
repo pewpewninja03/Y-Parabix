@@ -11,7 +11,7 @@ namespace kernel {
 
 //
 //  Perform bitwise logical inversion of a mask stream.   Both mask and
-//  inverted are streamsets of a single stream.
+//  inverted are streamsets of a single i1 stream.
 
 void Invert(PipelineBuilder & P, StreamSet * mask, StreamSet * inverted);
 
@@ -19,9 +19,9 @@ void Invert(PipelineBuilder & P, StreamSet * mask, StreamSet * inverted);
 //  Combining kernels use a bitwise logic operation (Or, Xor, or And) to
 //  combine streams from a source stream set with respective streams from
 //  a combining stream set.   The number of streams in the combining stream
-//  set may be fewer than those of the source stream set, in which the
+//  set may be fewer than those of the source stream set, in which case the
 //  higher indexed streams in the output are reproduced unmodified from
-//  the source.
+//  the source.  The fieldwidth of streams may be i1, i8, i16, i32 or i64.
 //
 //  Combining kernels can be employed in two styles: Functional and InOut.
 //  In the Functional style, the output streamset is produced as a distinct

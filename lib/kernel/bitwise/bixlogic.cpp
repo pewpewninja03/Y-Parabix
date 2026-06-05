@@ -3,10 +3,12 @@
  *  SPDX-License-Identifier: OSL-3.0
  */
 #include <kernel/bitwise/bixlogic.h>
+#include <kernel/core/kernel_builder.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
 #include <pablo/pablo_kernel.h>
 
+using namespace llvm;
 using namespace pablo;
 
 namespace kernel {
@@ -53,64 +55,96 @@ std::string uniqueOperationName(BitwiseOp op, CombiningKind k,
     return out.str();
 }
 
-class BitwiseCombine : public PabloKernel {
+class StreamsCombine : public BlockOrientedKernel {
 public:
-    BitwiseCombine(LLVMTypeSystemInterface & ts,
+    StreamsCombine(LLVMTypeSystemInterface & ts,
                    BitwiseOp op,
                    StreamSet * source, StreamSet * toCombine,
-                   StreamSet * combined, CombiningKind k)
-    : PabloKernel(ts, uniqueOperationName(op, k, source, toCombine),
-                  {Binding{"source", source}, Binding{"toCombine", toCombine}},
-                  {}), mOp(op)
-    {
+                   StreamSet * combined, CombiningKind k);
+
+protected:
+    void generateDoBlockMethod(KernelBuilder & b) override;
+    Value * combine(KernelBuilder & b, Value * x, Value * y);
+private:
+    BitwiseOp mOp;
+    CombiningKind mKind;
+};
+
+Value * StreamsCombine::combine(KernelBuilder & b, Value * x, Value * y) {
+    if (mOp == BitwiseOp::Or) {
+        return b.CreateOr(x, y);
+    } else if (mOp == BitwiseOp::Xor) {
+        return b.CreateXor(x, y);
+    } else {
+        return b.CreateAnd(x, y);
+    }
+}
+
+StreamsCombine::StreamsCombine(LLVMTypeSystemInterface & ts,
+                               BitwiseOp op,
+                               StreamSet * source, StreamSet * toCombine,
+                               StreamSet * combined, CombiningKind k)
+: BlockOrientedKernel(ts, uniqueOperationName(op, k, source, toCombine), 
+    {Binding{"source", source}, Binding{"toCombine", toCombine}}, {}, {}, {}, {}), mOp(op), mKind(k) {
         if (k == CombiningKind::InOut) {
             mOutputStreamSets.push_back(Binding{"combined", combined, FixedRate(), InOut("source")});
         } else {
             mOutputStreamSets.push_back(Binding{"combined", combined});
         }
-    }
-protected:
-    void generatePabloMethod() override;
-private:
-    BitwiseOp mOp;
-};
+        assert(source->getFieldWidth() == toCombine->getFieldWidth());
+        assert(source->getFieldWidth() == combined->getFieldWidth());
+        assert(source->getNumElements() == combined->getNumElements());
+        assert(source->getNumElements() >= toCombine->getNumElements());
+}
 
-void BitwiseCombine::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> source = getInputStreamSet("source");
-    std::vector<PabloAST *> toCombine = getInputStreamSet("toCombine");
-    std::vector<PabloAST *> combined(source.size());
-    for (unsigned i = 0; i < toCombine.size(); i++) {
-        if (mOp == BitwiseOp::Or) {
-            combined[i] = pb.createOr(source[i], toCombine[i]);
-        } else if (mOp == BitwiseOp::Xor) {
-            combined[i] = pb.createXor(source[i], toCombine[i]);
+void StreamsCombine::generateDoBlockMethod(KernelBuilder & b) {
+    const auto fw = getInputStreamSet(0)->getFieldWidth();
+    const auto n = getInputStreamSet(0)->getNumElements();
+    const auto m = getInputStreamSet(1)->getNumElements();
+    for (unsigned i = 0; i < m; ++i) {
+        if (fw == 1) {
+            Value * src = b.loadInputStreamBlock("source", b.getInt32(i));
+            Value * toCombine = b.loadInputStreamBlock("toCombine", b.getInt32(i));
+            b.storeOutputStreamBlock("combined", b.getInt32(i), combine(b, src, toCombine));
         } else {
-            combined[i] = pb.createAnd(source[i], toCombine[i]);
+            for (unsigned k = 0; k < fw; k++) {
+                Value * pack1 = b.loadInputStreamPack("source", b.getInt32(i), b.getInt32(k));
+                Value * pack2 = b.loadInputStreamPack("toCombine", b.getInt32(i), b.getInt32(k));
+                b.storeOutputStreamPack("combined", b.getInt32(i), b.getInt32(k), combine(b, pack1, pack2));
+            }
         }
     }
-    for (unsigned i = toCombine.size(); i < source.size(); i++) {
-        combined[i] = source[i];
+    if (mKind != CombiningKind::InOut) {
+        for (unsigned i = m; i < n; ++i) {
+            if (fw == 1) {
+                Value * src = b.loadInputStreamBlock("source", b.getInt32(i));
+                b.storeOutputStreamBlock("combined", b.getInt32(i), src);
+            } else {
+                for (unsigned k = 0; k < fw; k++) {
+                    Value * pack = b.loadInputStreamPack("source", b.getInt32(i), b.getInt32(k));
+                    b.storeOutputStreamPack("combined", b.getInt32(i), b.getInt32(k), pack);
+                }
+            }
+        }
     }
-    writeOutputStreamSet("combined", combined);
 }
 
 void OrCombine(PipelineBuilder & P,
                StreamSet * source, StreamSet * toCombine,
                StreamSet * combined, CombiningKind k) {
-    P.CreateKernelCall<BitwiseCombine>(BitwiseOp::Or, source, toCombine, combined, k);
+    P.CreateKernelCall<StreamsCombine>(BitwiseOp::Or, source, toCombine, combined, k);
 }
 
 void XorCombine(PipelineBuilder & P,
                 StreamSet * source, StreamSet * toCombine,
                 StreamSet * combined, CombiningKind k) {
-    P.CreateKernelCall<BitwiseCombine>(BitwiseOp::Xor, source, toCombine, combined, k);
+    P.CreateKernelCall<StreamsCombine>(BitwiseOp::Xor, source, toCombine, combined, k);
 }
 
 void AndCombine(PipelineBuilder & P,
                 StreamSet * source, StreamSet * toCombine,
                 StreamSet * combined, CombiningKind k) {
-    P.CreateKernelCall<BitwiseCombine>(BitwiseOp::And, source, toCombine, combined, k);
+    P.CreateKernelCall<StreamsCombine>(BitwiseOp::And, source, toCombine, combined, k);
 }
 
 std::string ZBM_unique_name(CombiningKind k, StreamSet * source) {

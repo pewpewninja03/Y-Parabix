@@ -108,12 +108,13 @@ void MergeByMask(PipelineBuilder & P,
         llvm::report_fatal_error("MergeByMask called with incompatible field widths");
     }
     if (SeparatedMergeByMask) {
-        StreamSet * expandedA = P.CreateStreamSet(elems);
+        StreamSet * expandedA = P.CreateStreamSet(elems, fw);
         SpreadByMask(P, mask, a, expandedA);
         StreamSet * inverted = P.CreateStreamSet(1);
         Invert(P, mask, inverted);
-        StreamSet * expandedB = P.CreateStreamSet(elems);
+        StreamSet * expandedB = P.CreateStreamSet(elems, fw);
         SpreadByMask(P, inverted, b, expandedB);
+
         OrCombine(P, expandedA, expandedB, merged);
     } else if (ElemSpread && (elems == 1) && (fw >= 8)) {
         P.CreateKernelCall<ElemMergeKernel>(mask, a, b, merged);
@@ -510,11 +511,7 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     // an empty mask.
     Value * const zeroElemVec = b.fwCast(mElemWidth, b.allZeroes());
     for (unsigned i = 0; i < mElemWidth; i++) {
-        //b.storeOutputStreamPack("spread", ZERO, b.getSize(i), blockNoPhi, zeroElemVec);
-        Value * packPtr = b.getOutputStreamPackPtr("spread", ZERO, b.getSize(i), blockNoPhi);
         Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, b.getSize(i));
-        //b.CallPrintInt("packPtr", packPtr);
-        //b.CallPrintInt("outputPtr", outputPtr);
         b.CreateStore(zeroElemVec, outputPtr);
     }
 
