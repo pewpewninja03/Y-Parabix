@@ -78,6 +78,42 @@ std::vector<std::string> JSONfieldPrefixes(std::vector<std::string> fieldNames) 
     return tmp;
 }
 
+//
+//  JSON_Expansion_Candidates
+//
+//  Certain characters must be expanded into escape sequences if they
+//  are to be included in JSON data strings.   JSON_Expansion_Candidates
+//  returns a mask identifying all CSV characters that potentially need
+//  such expansion by excluding certain reserved CSV characters:
+//  (a) CR and LF outside of CSV quoted strings
+//  (b) quote marks (including paired quote marks within strings)
+//  Paired quote marks within CSV data do not expand, but just
+//  require the translation of the first quote mark to a backslash escape.
+//
+
+class JSON_ExpansionCandidates : public PabloKernel {
+public:
+    JSON_ExpansionCandidates(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * quotedData,
+        StreamSet * candidates)
+        : PabloKernel(ts, "JSON_ExpansionCandidates",
+                      {Binding{"csvCCs", csvCCs},
+                       Binding{"quotedData", quotedData}},
+                      {Binding{"candidates", candidates}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void JSON_ExpansionCandidates::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvCCs = getInputStreamSet("csvCCs");
+    std::vector<PabloAST *> quotedData = getInputStreamSet("quotedData");
+    PabloAST * outsideOfQuotes =  pb.createNot(quotedData[0]);
+    PabloAST * CSV_reserved = pb.createAnd(pb.createOr(csvCCs[csv::markCR], csvCCs[csv::markLF]), outsideOfQuotes);
+    CSV_reserved = pb.createOr(CSV_reserved, csvCCs[csv::markDQ]);
+    PabloAST * candidates = pb.createInFile(pb.createNot(CSV_reserved));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("candidates"), pb.getInteger(0)), candidates);
+}
+
 class CSVdataFieldMask : public PabloKernel {
 public:
     CSVdataFieldMask(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * recordSeparators,
@@ -258,8 +294,38 @@ void EnQuote::generatePabloMethod() {
     writeOutputStreamSet("quotedBasis", basis);
 }
 
+class EnQuoteValues : public PabloKernel {
+public:
+    EnQuoteValues(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * spreadMask, StreamSet * fieldStarts, StreamSet * fieldFollows,
+                         StreamSet * quotedBasis, StreamSet * remainingMask)
+        : PabloKernel(ts, std::string("EnQuote") + basis->shapeString(),
+                      {Binding{"basis", basis}, Binding{"spreadMask", spreadMask},
+                       Binding{"fieldStarts", fieldStarts},
+                       Binding{"fieldFollows", fieldFollows, FixedRate(), LookAhead(1)}},
+                      {Binding{"quotedBasis", quotedBasis}, Binding{"remainingMask", remainingMask}}) {}
+protected:
+    void generatePabloMethod() override;
+};
 
-void JSON_Value_Quoting(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * QuotedBasis) {
+void EnQuoteValues::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    PabloAST * spreadMask = getInputStreamSet("spreadMask")[0];
+    PabloAST * fieldStarts = getInputStreamSet("fieldStarts")[0];
+    PabloAST * fieldFollows = getInputStreamSet("fieldFollows")[0];
+    PabloAST * insertedZeroes = pb.createNot(spreadMask);
+    PabloAST * quotePos = pb.createAnd(pb.createOr(fieldStarts, pb.createLookahead(fieldFollows, 1)), insertedZeroes);
+    //
+    // Convert the nulls at quotePos to 0x22 (double quote)
+    // This requires only setting bits 1 and 5
+    basis[1] = pb.createOr(basis[1], quotePos);
+    basis[5] = pb.createOr(basis[5], quotePos);
+    PabloAST * remainingMask = pb.createOr(spreadMask, quotePos);
+    writeOutputStreamSet("quotedBasis", basis);
+    writeOutputStreamSet("remainingMask", std::vector<PabloAST *>{remainingMask});
+}
+
+StreamSet * QuoteInsertionBixNum(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows) {
     StreamSet * literalMatches = P.CreateStreamSet(1);
     json::JSON_ValueKind no_quotes_needed_set =
         static_cast<json::JSON_ValueKind>(json::NullLiteral|
@@ -289,6 +355,11 @@ void JSON_Value_Quoting(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * 
     StreamSet * const quoteInsertBixNum = P.CreateStreamSet(2);
     P.CreateKernelCall<CalcQuoteBixNum>(stringStarts, stringFollows, quoteInsertBixNum);
     SHOW_BIXNUM(quoteInsertBixNum);
+    return quoteInsertBixNum;
+}
+
+void JSON_Value_Quoting(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * QuotedBasis) {
+    StreamSet * const quoteInsertBixNum = QuoteInsertionBixNum(P, BasisBits, fieldStarts, fieldFollows);
 
     StreamSet * const BasisSpreadMask = P.CreateStreamSet(1);
     InsertionSpreadMask(P, quoteInsertBixNum, BasisSpreadMask, kernel::InsertPosition::Before);
@@ -330,37 +401,50 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     StreamSet * toKeep = P.CreateStreamSet(1);
     P.CreateKernelCall<CSVdataFieldMask>(parser.getCsvCCs(), parser.getLineEnds(), toKeep, csv::HeaderSpec == "");
     SHOW_STREAM(toKeep);
-    //
-    // Create a short stream which is 1-to-1 with the (field/record) separators,
-    // having 0 bits for field separators and 1 bits for record separators.
-    // Normally this will be a stream having exactly one bit set for every
-    // N positions, where N is the number of entries per row.
-    //StreamSet * recordsByField = P.CreateStreamSet(1);
-    //FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
-    //SHOW_STREAM(recordsByField);
 
     StreamSet * filteredBasis = P.CreateStreamSet(8);
     FilterByMask(P, toKeep, BasisBits, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
-    parser.setSource(filteredBasis);
-    fieldStarts = parser.getFieldStarts();
-    fieldFollows = parser.getFieldFollows();
-
-    StreamSet * QuotedBasis = P.CreateStreamSet(filteredBasis->getNumElements());
-    JSON_Value_Quoting(P, filteredBasis, fieldStarts, fieldFollows, QuotedBasis);
-    SHOW_BIXNUM(QuotedBasis);
-
-    // Reset Basis bits and reparse.
-    BasisBits = QuotedBasis;
+    BasisBits = filteredBasis;
     parser.setSource(BasisBits);
     fieldStarts = parser.getFieldStarts();
     fieldFollows = parser.getFieldFollows();
 
+    StreamSet * const quoteInsertBixNum = QuoteInsertionBixNum(P, BasisBits, fieldStarts, fieldFollows);
+    StreamSet * expansionCandidates = P.CreateStreamSet(1);
+    P.CreateKernelCall<JSON_ExpansionCandidates>(parser.getCsvCCs(), parser.getQuotedData(), expansionCandidates);
+    StreamSet * escapeInsertBixNum = json::EscapeSequenceExpansionBixNum(P, BasisBits, expansionCandidates);
+
+    StreamSet * combinedInsertBixNum = P.CreateStreamSet(3); // Three significant bits suffice.
+    P.CreateKernelCall<bixnum::Add>(quoteInsertBixNum, escapeInsertBixNum, combinedInsertBixNum);
+
+    StreamSet * const spreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, combinedInsertBixNum, spreadMask, kernel::InsertPosition::Before);
+    SHOW_STREAM(spreadMask);
+
+    StreamSet * ExpandedBasis = P.CreateStreamSet(BasisBits->getNumElements());
+    SpreadByMask(P, spreadMask, BasisBits, ExpandedBasis);
+
+    // Parse the expanded stream
+    parser.setSource(ExpandedBasis);
+
+    fieldStarts = parser.getFieldStarts();
+    fieldFollows = parser.getFieldFollows();
+
+    StreamSet * QuotedBasis = P.CreateStreamSet(filteredBasis->getNumElements());
+    StreamSet * remainingSpreadMask = P.CreateStreamSet(1);
+    P.CreateKernelCall<EnQuoteValues>(ExpandedBasis, spreadMask, fieldStarts, fieldFollows, QuotedBasis, remainingSpreadMask);
+
     StreamSet * translatedBasis = P.CreateStreamSet(8);
-    P.CreateKernelCall<QuoteEscape2Backslash>(parser.getQuotedData(), BasisBits, translatedBasis);
+    P.CreateKernelCall<QuoteEscape2Backslash>(parser.getQuotedData(), QuotedBasis, translatedBasis);
     SHOW_BIXNUM(translatedBasis);
     BasisBits = translatedBasis;
+
+    StreamSet * EscapedBasis = P.CreateStreamSet(BasisBits->getNumElements());
+    json::EscapeStringTranslation(P, BasisBits, remainingSpreadMask, EscapedBasis);
+    SHOW_BIXNUM(EscapedBasis);
+    BasisBits = EscapedBasis;
 
     std::vector<uint64_t> insertionAmts;
     unsigned maxInsertAmt = 0;

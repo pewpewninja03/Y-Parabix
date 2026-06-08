@@ -16,21 +16,31 @@ namespace json {
 //
 // Certain characters within JSON strings must be escaped, including
 // double quotes, backslashes and ASCII controls 0x00-0X1F.
-// The escape sequences for backslash and several common control characters
+// The escape sequences for backslash and several common control characters can
 // generate two character escape sequences (insertion of one position required).
 //
-// \ -> \\, 0x08 (BS) -> \b, 0x09 (TAB) -> \t, 0x0A(LF) -> \n, 0x0A(FF) -> \f, 0x0D(CR) -> \r
+// \ -> \\, " -> \", 0x08 (BS) -> \b, 0x09 (TAB) -> \t, 0x0A(LF) -> \n, 0x0A(FF) -> \f, 0x0D(CR) -> \r
 //
 // Other controls generate 6-character escape sequences of the form \u00xy
 // where xy are the two hexadecimal digits of the control sequence value.
 //
+// Escape Sequence Expansion
+//
 // Inputs:
 //    Basis - a set of basis bit streams
-//    stringmask - a mask marking data to be included in JSON strings
-//    EscapedBasis - a newly created StreamSet of the same number of
-//	      streams as basis.
+//    stringmask - a mask marking data potentially requiring JSON escaping
+// Output:
+//    a bixnum indicating the number of extra positions required for
+//    escaping characters at each escape position
+//
+StreamSet * EscapeSequenceExpansionBixNum(PipelineBuilder & P, StreamSet * Basis, StreamSet * stringMask);
 
-void EscapeStringSpecials(PipelineBuilder & P, StreamSet * Basis, StreamSet * stringMask, StreamSet * EscapedBasis);
+//
+// Translating escape sequences, assuming that the necessary
+// space for expanded escape sequences have been created by inserting
+// zeroes before the escaped character.
+
+void EscapeStringTranslation(PipelineBuilder & P, StreamSet * Basis, StreamSet * EscapeSpreadMask, StreamSet * EscapedBasis);
 
 //
 // JSON atomic values are the special values null, true, false as well as
