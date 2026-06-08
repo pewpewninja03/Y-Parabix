@@ -95,6 +95,8 @@ public:
 
         P.setStreamSetLockIds();
 
+        P.calculateUnwrittenDataZeroLength(b);
+
         P.identifyManagedBufferStructIds(rng);
 
         P.gatherInfo();
@@ -194,6 +196,8 @@ private:
     void identifyIllustratedStreamSets();
 
     void buildZeroInputGraph();
+
+    void calculateUnwrittenDataZeroLength(KernelBuilder & b);
 
     void setStreamSetLockIds();
 

@@ -274,7 +274,7 @@ public:
     void determineNumOfLinearStrides(KernelBuilder & b);
     void checkForSufficientInputData(KernelBuilder & b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(KernelBuilder & b, const BufferPort & outputPort, const unsigned streamSet);
-    void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet);
+    void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet, Value * const produced, Value * const required, Value * const writable, const bool postLockSyncNeeded);
 
     Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const maxNumOfStrides, Value * const potentialNumOfStrides);
 
@@ -300,7 +300,6 @@ public:
 
     void writeKernelCall(KernelBuilder & b);
     void buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args);
-    Value * updateCountableProcessedItemCounts(KernelBuilder & b);
     void updateProcessedAndProducedItemCounts(KernelBuilder & b, Value * rejectedTermSignal);
     void writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination);
     void readAndUpdateInternalProcessedAndProducedItemCounts(KernelBuilder & b);

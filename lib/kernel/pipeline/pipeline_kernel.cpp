@@ -918,11 +918,14 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (codegen::UseProcessThreadForIO) {
         out << "+IOT";
     }
-    if (!codegen::PreserveAllStreamSetDataOptions.empty()) {
+    if (!codegen::ThreadLocalPermittedOptions.empty()) {
         out << "+TLP:" << codegen::ThreadLocalPermittedOptions;
     }
     if (!codegen::PreserveAllStreamSetDataOptions.empty()) {
         out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
+    }
+    if (!codegen::DoubleStreamSetSizeOptions.empty()) {
+        out << "+DSS:" << codegen::DoubleStreamSetSizeOptions;
     }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableCycleCounter))) {

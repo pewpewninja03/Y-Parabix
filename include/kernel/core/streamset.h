@@ -91,9 +91,9 @@ public:
     virtual void releaseBuffer(kernel::KernelBuilder & b) const = 0;
 
     // The number of items that cam be linearly accessed from a given logical stream position.
-    virtual llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems) const = 0;
+    virtual llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems, llvm::Value * requiredOverflow) const = 0;
 
-    virtual llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const = 0;
+    virtual llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * requiredOverflow) const = 0;
 
     virtual llvm::StructType * getHandleType(kernel::KernelBuilder & b) const = 0;
 
@@ -173,9 +173,9 @@ public:
 
     llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems) const override;
+    llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * totalItems, llvm::Value * requiredOverflow) const override;
 
-    llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
+    llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * requiredOverflow) const override;
 
     static llvm::StructType * getExternalHandleType(kernel::KernelBuilder & b);
 
@@ -216,9 +216,9 @@ public:
 
     llvm::Value * getVirtualBasePtr(kernel::KernelBuilder & b, llvm::Value * baseAddress, llvm::Value * const transferredItems) const override;
 
-    llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * const totalItems) const override;
+    llvm::Value * getLinearlyAccessibleItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * const totalItems, llvm::Value * requiredOverflow) const override;
 
-    llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems) const override;
+    llvm::Value * getLinearlyWritableItems(kernel::KernelBuilder & b, llvm::Value * fromPosition, llvm::Value * consumedItems, llvm::Value * requiredOverflow) const override;
 
 protected:
 

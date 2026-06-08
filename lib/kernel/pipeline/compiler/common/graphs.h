@@ -282,8 +282,9 @@ enum BufferType : unsigned {
     , HasNonFixedRateConsumer = 4096
     , RequiresConsumedItemCount = 8192
     , PreserveEntireStreamSet = 16384
+    , MustClearUnwrittenData = 32768
     // ------------------
-    , CanTrackBufferExpansionData = 32768
+    , CanTrackBufferExpansionData = 65536
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -305,18 +306,18 @@ struct BufferNode {
 
     unsigned LookBehind = 0;
 
-    bool RequiresUnderflow = false;
-
-    bool IsLinear = false;
-
     unsigned PartialSumSpanLength = 0;
-
     unsigned OutputItemCountId = 0;
     unsigned LockId = 0;
     unsigned ManagedStructId = 0;
     unsigned ProducedPhaseId = 0;
+    unsigned UnwrittenAlignment = 0;
 
     Rational RelativeIORate{0};
+
+    bool RequiresUnderflow = false;
+
+    bool IsLinear = false;
 
     bool isOwned() const {
         return (Type & BufferType::Unowned) == 0;
@@ -396,6 +397,14 @@ struct BufferNode {
 
     bool canTrackBufferExpansionData() const {
         return (Type & BufferType::CanTrackBufferExpansionData) != 0;
+    }
+
+    bool mustClearUnwrittenData() const {
+        // If this stream is either controlled by this kernel or is an external
+        // stream, any clearing of data is the responsibility of the owner.
+        // Simply ignore any external buffers for the purpose of zeroing out
+        // unnecessary data.
+        return (Type & BufferType::MustClearUnwrittenData) != 0;
     }
 
     bool isDeallocatable() const {

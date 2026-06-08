@@ -534,9 +534,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                 consPort.LookAhead = 0;
             }
         }
-
-
-
     }
 
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
@@ -1132,6 +1129,52 @@ void PipelineAnalysis::buildZeroInputGraph() {
     }
 
     mZeroInputGraph = G;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief calculateUnwrittenDataZeroLength
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::calculateUnwrittenDataZeroLength(KernelBuilder & b) {
+
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isUnowned() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth() || bn.isPopCountPartialSumStream()) {
+            continue;
+        }
+
+        const auto output = in_edge(streamSet, mBufferGraph);
+
+        const auto producer = source(output, mBufferGraph);
+
+        // Zero out any blocks we could potentially touch
+        auto & port = mBufferGraph[output];
+        Rational maxVal = port.Maximum * StrideRepetitionVector[producer];
+
+        const auto currentPartition = KernelPartitionId[producer];
+
+        if (bn.isNonThreadLocal()) {
+            for (auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(input, mBufferGraph);
+                if (KernelPartitionId[consumer] != currentPartition) {
+                    const auto & port = mBufferGraph[input];
+                    const auto m = port.Maximum * StrideRepetitionVector[consumer];
+                    if (maxVal < m) {
+                        maxVal = m;
+                    }
+                }
+            }
+        }
+
+        bn.Type |= BufferType::MustClearUnwrittenData;
+        bn.UnwrittenAlignment = ceiling(maxVal / b.getBitBlockWidth());
+
+    }
+
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

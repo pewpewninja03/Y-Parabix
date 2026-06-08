@@ -444,11 +444,11 @@ Value * ExternalBuffer::modByCapacity(KernelBuilder & /* b */, Value * const off
     return offset;
 }
 
-Value * ExternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * const fromPosition, Value * const totalItems) const {
+Value * ExternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * const fromPosition, Value * const totalItems, Value * const /* requiredOverflow */) const {
     return b.CreateSub(totalItems, fromPosition);
 }
 
-Value * ExternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const fromPosition, Value * const /* consumed */) const {
+Value * ExternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const fromPosition, Value * const /* consumed */, Value * const /* requiredOverflow */) const {
     assert (fromPosition);
     Value * const capacity = getCapacity(b);
     assert (fromPosition->getType() == capacity->getType());
@@ -515,24 +515,26 @@ Value * InternalBuffer::getVirtualBasePtr(KernelBuilder & b, Value * const baseA
     return b.CreatePointerCast(addr, getPointerType());
 }
 
-Value * InternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * const processedItems, Value * const totalItems) const {
+Value * InternalBuffer::getLinearlyAccessibleItems(KernelBuilder & b, Value * const processedItems, Value * const totalItems, Value * const requiredOverflow) const {
     return b.CreateSub(totalItems, processedItems);
 }
 
-Value * InternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const producedItems, Value * const consumedItems) const {
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
-        Value * const valid = b.CreateICmpULE(consumedItems, producedItems);
-        b.CreateAssert(valid, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
-                        consumedItems, producedItems);
-    }
+Value * InternalBuffer::getLinearlyWritableItems(KernelBuilder & b, Value * const producedItems, Value * const consumedItems, Value * const requiredOverflow) const {
     Value * const capacity = getInternalCapacity(b);
     Value * const unconsumedItems = b.CreateSub(producedItems, consumedItems);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts))) {
-        Value * const valid = b.CreateICmpULE(unconsumedItems, capacity);
-        b.CreateAssert(valid, "unconsumed item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
+        Value * const valid1 = b.CreateICmpULE(consumedItems, producedItems);
+        b.CreateAssert(valid1, "consumed item count (%" PRIu64 ") exceeds produced (%" PRIu64 ").",
+                        consumedItems, producedItems);
+        Value * const valid2 = b.CreateICmpULE(unconsumedItems, capacity);
+        b.CreateAssert(valid2, "unconsumed item count (%" PRIu64 ") exceeds capacity (%" PRIu64 ").",
                         unconsumedItems, capacity);
     }
-    return b.CreateSub(capacity, unconsumedItems);
+    Value * writeable = b.CreateSub(capacity, unconsumedItems);
+    if (requiredOverflow) {
+        writeable = b.CreateUnsignedSaturatingSub(writeable, requiredOverflow);
+    }
+    return writeable;
 }
 
 // Managed Dynamic Buffer

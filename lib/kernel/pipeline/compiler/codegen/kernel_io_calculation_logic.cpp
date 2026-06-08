@@ -166,11 +166,15 @@ no_static_max:
 
     mNumOfLinearStrides = calculateTransferableItemCounts(b, maxNumOfStrides, numOfNonConstantCountableStrides, numOfNonCountableStrides);
 
+    bool isFirstLock = true;
+
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & port = mBufferGraph[e];
-        if (!port.canModifySegmentLength()) {
+        if (LLVM_LIKELY(!port.canModifySegmentLength())) {
             const auto streamSet = target(e, mBufferGraph);
-            ensureSufficientOutputSpace(b, port, streamSet);
+            Value * const produced = mCurrentProducedItemCountPhi[port.Port];
+            Value * const required = mLinearOutputItemsPhi[port.Port];
+            ensureSufficientOutputSpace(b, port, streamSet, produced, required, getWritableOutputItems(b, port), true);
         }
     }
 
@@ -766,11 +770,12 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     return accessible;
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ensureSufficientOutputSpace
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet) {
+void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet,
+                                                   Value * const produced, Value * const required, Value * const writable,
+                                                   const bool postLockSyncNeeded) {
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
@@ -783,21 +788,20 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     const auto prefix = makeBufferName(mKernelId, outputPort);
     const StreamSetBuffer * const buffer = bn.Buffer;
 
-    Value * const required = mLinearOutputItemsPhi[outputPort];
+    BasicBlock * const noExpansionExit = b.GetInsertBlock();
+    BasicBlock * const nextBlock = noExpansionExit->getNextNode();
 
-    BasicBlock * const expandBuffer = b.CreateBasicBlock(prefix + "_expandBuffer", mKernelLoopCall);
-    BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", mKernelLoopCall);
-    Value * const beforeExpansion = getWritableOutputItems(b, port);
+    BasicBlock * const expandBuffer = b.CreateBasicBlock(prefix + "_expandBuffer", nextBlock);
+    BasicBlock * const expanded = b.CreateBasicBlock(prefix + "_resumeAfterPossiblyModifyingBuffer", nextBlock);
 
-    Value * hasEnoughSpace = b.CreateICmpULE(required, beforeExpansion);
+    Value * const hasEnoughSpace = b.CreateICmpULE(required, writable);
 
     #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), beforeExpansion);
+    debugPrint(b, prefix + "_writable (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), writable);
     debugPrint(b, prefix + "_required (%" PRIu64 ") = %" PRIu64, b.getSize(streamSet), required);
     debugPrint(b, prefix + "_hasEnoughSpace = %" PRIu64, hasEnoughSpace);
     #endif
 
-    BasicBlock * const noExpansionExit = b.GetInsertBlock();
     b.CreateLikelyCondBr(hasEnoughSpace, expanded, expandBuffer);
 
     b.SetInsertPoint(expandBuffer);
@@ -815,19 +819,21 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     // its "unwritten" data. Thus we need to wait for the other thread to finish processing before
     // we can proceed.
 
-    // TODO: can we determine which locks will always dominate another?
+    // TODO: if we tracked what post-sync lock was last acquired, we could skip this but it would only be useful if
+    // we expect to need to expand multiple buffers in the same (sub)segment.
 
-    if (LLVM_LIKELY(bn.LockId == 0)) {
-        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-            acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+    if (postLockSyncNeeded) {
+        if (LLVM_LIKELY(bn.LockId == 0)) {
+            if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+                acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            }
+        } else {
+            assert (bn.LockId > mKernelId);
+            const auto lockType = isDataParallel(bn.LockId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+            acquireSynchronizationLockWithTimingInstrumentation(b, bn.LockId, lockType, mSegNo);
         }
-    } else {
-        assert (bn.LockId > mKernelId);
-        const auto lockType = isDataParallel(bn.LockId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLockWithTimingInstrumentation(b, bn.LockId, lockType, mSegNo);
     }
 
-    Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
     Value * const consumed = mKernelConsumedItemCount[outputPort]; assert (consumed);
 
     BasicBlock * const afterCopyBackOrExpand = b.CreateBasicBlock(prefix + "_afterCopyBackOrExpand", mKernelLoopCall);
@@ -879,7 +885,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     if (LLVM_UNLIKELY(CheckAssertions())) {
         const Binding & output = getOutputBinding(outputPort);
-        b.CreateAssert(b.CreateICmpUGT(afterExpansion, beforeExpansion),
+        b.CreateAssert(b.CreateICmpUGT(afterExpansion, writable),
                        "%s.%s was not expanded correctly?", mCurrentKernelName, b.GetString(output.getName()));
     }
 
@@ -888,10 +894,9 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     b.SetInsertPoint(expanded);
     PHINode * const phi = b.CreatePHI(b.getSizeTy(), 2);
-    phi->addIncoming(beforeExpansion, noExpansionExit);
+    phi->addIncoming(writable, noExpansionExit);
     phi->addIncoming(afterExpansion, expandBufferExit);
     mInternalWritableOutputItems[outputPort] = phi;
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -938,7 +943,6 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     const auto output = getOutput(mKernelId, outputPort);
     const auto streamSet = target(output, mBufferGraph);
     const BufferNode & bn = mBufferGraph[streamSet];
-    assert (bn.isNonThreadLocal());
     const StreamSetBuffer * const buffer = bn.Buffer;
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
@@ -982,6 +986,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
 
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, prefix + "_consumed%" PRIu64 " = %" PRIu64, b.getSize(src), consumed);
+        debugPrint(b, prefix + "_intCapacityd%" PRIu64 " = %" PRIu64, b.getSize(src), buffer->getInternalCapacity(b));
         #endif
 
 
@@ -995,15 +1000,15 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
                             consumed, produced);
         }
 
-        Value * p = produced;
-        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
-            p = b.CreateAdd(produced, b.getSize(port.EmptyOverflow));
-        }
         Value * c = consumed;
         if (bn.hasNonFixedRateConsumer() || !port.isFixed()) {
             c = b.CreateRoundDownRational(c, b.getBitBlockWidth());
         }
-        writable = buffer->getLinearlyWritableItems(b, p, c);
+        Constant * overflow = nullptr;
+        if (LLVM_UNLIKELY(port.EmptyOverflow > 0)) {
+            overflow = b.getSize(port.EmptyOverflow);
+        }
+        writable = buffer->getLinearlyWritableItems(b, produced, c, overflow);
     }
 
     // cache the values for later use

@@ -212,6 +212,14 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
         sharedHandle = b.CreatePointerCast(getHandle(), b.getVoidPtrTy());
     }
 
+    flat_set<size_t> doubleSize;
+    for (const auto & I : parseCommaDelimitedList(codegen::DoubleStreamSetSizeOptions)) {
+        for (auto i = I.lower(); i <= I.upper(); ++i) {
+            doubleSize.insert(i);
+        }
+    }
+
+
     for (size_t phase = 1; phase < numOfPhases; ++phase) {
 
         const auto firstPartition = PartitionPhaseBoundaries[phase - 1];
@@ -268,7 +276,9 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const all
                             } else {
                                 multiplier = b.CreateCeilUMulRational(maxStrides, R);
                             }
-
+                            if (doubleSize.count(streamSet)) {
+                                multiplier = b.CreateMul(multiplier, b.getSize(2));
+                            }
                             if (LLVM_UNLIKELY(bn.canTrackBufferExpansionData())) {
                                 const BufferPort & bp = mBufferGraph[output];
                                 buffer->allocateBuffer(b, multiplier, reportCallback, sharedHandle, b.getSize(bp.Port.Number));

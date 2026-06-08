@@ -118,7 +118,6 @@ skip_phase_check:
             assert (consumer > 0);
             lc = std::max(lc, consumer);
             const BufferPort & I = mBufferGraph[input];
-            const unsigned index = out_degree(id, mConsumerGraph);
             allConsumersFixedRate &= I.isFixed();
             const auto flags = (KernelPartitionId[consumer] == partId) ? ConsumerEdge::None : ConsumerEdge::UpdateConsumedCount;
             add_edge(id, consumer, ConsumerEdge{I.Port, 0, flags}, mConsumerGraph);
@@ -156,10 +155,9 @@ skip_phase_check:
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         const auto id = mConsumerGraph[streamSet];
-        if (out_degree(id, mConsumerGraph) == 0) {
+        if (out_degree(id, mConsumerGraph) == 0 || id == 0) {
             continue;
         }
-        assert (id > 0);
         assert (in_degree(id, mConsumerGraph) == 1);
 
 
@@ -203,20 +201,22 @@ skip_phase_check:
         ConsumerEdge & cn = mConsumerGraph[e];
         cn.Flags |= ConsumerEdge::UpdateConsumedCount | ConsumerEdge::WriteConsumedCount;
 
+        size_t index = 0;
+
         remove_out_edge_if(id, [&](ConsumerGraph::edge_descriptor f) -> bool {
             #ifndef NDEBUG
             const auto consumer = target(f, mConsumerGraph);
             assert (FirstKernel <= consumer && consumer <= PipelineOutput);
             #endif
-            return mConsumerGraph[f].Flags == ConsumerEdge::None;
+            auto & C = mConsumerGraph[f];
+            if (C.Flags == ConsumerEdge::None) {
+                return true;
+            } else {
+                C.Index = ++index;
+                return false;
+            }
         }, mConsumerGraph);
 
-        size_t index = 0;
-        for (auto f : make_iterator_range(out_edges(id, mConsumerGraph))) {
-            auto & C = mConsumerGraph[f];
-            assert (C.Flags != ConsumerEdge::None);
-            C.Index = ++index;
-        }
         assert (index == out_degree(id, mConsumerGraph));
 
     }

@@ -533,8 +533,6 @@ void PipelineCompiler::initializeKernelTerminatedPhis(KernelBuilder & b) {
     mTerminatedSignalPhi = b.CreatePHI(sizeTy, 2, prefix + "_terminatedSignal");
     mCurrentNumOfStridesAtTerminationPhi = b.CreatePHI(sizeTy, 2, prefix + "_currentNumOfStridesAtTermination");
     if (mIsPartitionRoot) {
-//        mPotentialSegmentLengthAtTerminationPhi =
-//            b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtTermination");
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi =
             b.CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesAtTerminationPhi");
     }
@@ -568,7 +566,6 @@ void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(KernelBuilder & b
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b.CreatePHI(sizeTy, 2, prefix + "_producedAtJumpPhi");
     }
-//    mMaximumNumOfStridesAtJumpPhi = b.CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtJumpPhi");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

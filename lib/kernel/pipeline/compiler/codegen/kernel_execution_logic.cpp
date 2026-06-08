@@ -622,17 +622,6 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     assert (args.size() == mKernelDoSegmentFunctionType->getNumParams());
 }
 
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateCountableProcessedItemCounts
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::updateCountableProcessedItemCounts(KernelBuilder & b) {
-
-    return nullptr;
-
-}
-
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateProcessedAndProducedItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */

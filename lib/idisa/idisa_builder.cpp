@@ -1019,9 +1019,12 @@ Value * IDISA_Builder::hsimd_signmask(unsigned fw, Value * a) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "hsimd_signmask");
     Value * a1 = fwCast(fw, a);
     Value * mask = CreateICmpSLT(a1, ConstantAggregateZero::get(a1->getType()));
-    mask = CreateBitCast(mask, getIntNTy(mBitBlockWidth/fw));
-    if (mBitBlockWidth/fw < 32) return CreateZExt(mask, getInt32Ty());
-    else return mask;
+    const auto maskWidth = mBitBlockWidth / fw;
+    mask = CreateBitCast(mask, getIntNTy(maskWidth));
+    if (maskWidth < 32)  {
+        mask = CreateZExt(mask, getInt32Ty());
+    }
+    return mask;
 }
 
 Value * IDISA_Builder::mvmd_extract(unsigned fw, Value * a, unsigned fieldIndex) {
