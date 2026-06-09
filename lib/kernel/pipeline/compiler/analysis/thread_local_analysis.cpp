@@ -806,62 +806,65 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
         return;
     }
 
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) {
-            mNonThreadLocalStreamSets.insert(streamSet);
-            unsigned srcStreamSet = 0;
-            for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
-                const auto & v = mStreamGraph[ref];
-                if (v.Reason == ReasonType::Reference) {
-                    srcStreamSet = source(ref, mBufferGraph);
-                    assert (srcStreamSet >= FirstStreamSet && srcStreamSet <= LastStreamSet);
-                    break;
-                }
-            }
-            assert (srcStreamSet);
-            const BufferNode & bn = mBufferGraph[srcStreamSet];
-            if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-
-            const auto producer = parent(srcStreamSet, mBufferGraph);
-            const auto partId = KernelPartitionId[producer];
-
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
-                if (partId != KernelPartitionId[consumer]) {
-                    mNonThreadLocalStreamSets.insert(srcStreamSet);
-                    break;
-                }
+    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            BufferNode & bn = mBufferGraph[streamSet];
+            if (bn.isThreadLocal() && bn.isInternal() && bn.isOwned()) {
+                bn.Locality = GloballyShared;
             }
         }
+        return;
+    }
 
-        if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+
+        if (bn.isExternal() || bn.isUnowned() || bn.isConstant()) {
             continue;
         }
 
         const auto producer = parent(streamSet, mBufferGraph);
         const auto partId = KernelPartitionId[producer];
-
         for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(input, mBufferGraph);
             if (partId != KernelPartitionId[consumer]) {
-                mNonThreadLocalStreamSets.insert(streamSet);
+                bn.Locality = BufferLocality::GloballyShared;
                 break;
+            }
+        }
+    }
+
+    if (LLVM_UNLIKELY(!codegen::ThreadLocalPermittedOptions.empty())) {
+
+        const auto permitted = parseCommaDelimitedList(codegen::ThreadLocalPermittedOptions);
+
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            const auto f = permitted.find(streamSet);
+            if (f == permitted.end()) {
+                for (auto id = streamSet;;) {
+                    BufferNode & bn = mBufferGraph[id];
+                    if (LLVM_LIKELY(!bn.isConstant())) {
+                        bn.Locality = BufferLocality::ThreadLocal;
+                    }
+                    if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
+                        break;
+                    }
+                    id = parent(id, InOutStreamSetReplacement);
+                }
             }
         }
     }
 
     if (num_edges(InOutStreamSetReplacement) > 0) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) >0 && in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
+            if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) > 0 && in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
                 auto toCheck = streamSet;
                 bool isNonThreadLocal = false;
                 for (;;) {
                     assert (FirstStreamSet <= toCheck && toCheck <= LastStreamSet);
-                    if (mNonThreadLocalStreamSets.count(toCheck)) {
-                        isNonThreadLocal = true;
+                    const BufferNode & bn = mBufferGraph[toCheck];
+                    if (bn.isNonThreadLocal()) {
+                        isNonThreadLocal = !bn.isConstant() && !bn.isExternal();
                         break;
                     }
                     if (out_degree(toCheck, InOutStreamSetReplacement) == 0) {
@@ -874,74 +877,47 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
                     auto toUpdate = streamSet;
                     for (;;) {
                         assert (FirstStreamSet <= toUpdate && toUpdate <= LastStreamSet);
-                        mNonThreadLocalStreamSets.insert(toUpdate);
+                        BufferNode & bn = mBufferGraph[toUpdate];
+                        assert (!bn.isConstant() && !bn.isExternal());
+                        bn.Locality = BufferLocality::GloballyShared;
                         if (out_degree(toUpdate, InOutStreamSetReplacement) == 0) {
                             break;
                         }
                         toUpdate = child(toUpdate, InOutStreamSetReplacement);
                     }
                 }
-
             }
         }
     }
 
-    for (;;) {
+recheck_truncations:
 
-        for (const auto streamSet : mNonThreadLocalStreamSets) {
+    bool anyChanges = false;
 
-            BufferNode & bn = mBufferGraph[streamSet];
-            if (LLVM_UNLIKELY(bn.hasZeroElementsOrWidth())) {
-                continue;
-            }
-            const auto producer = parent(streamSet, mBufferGraph);
-            const auto partId = KernelPartitionId[producer];
-            auto type = BufferLocality::PartitionLocal;
-            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(e, mBufferGraph);
-                if (KernelPartitionId[consumer] != partId) {
-                    type = BufferLocality::GloballyShared;
-                    break;
-                }
-            }
-            assert (bn.Locality != BufferLocality::ConstantShared);
-            bn.Locality = type;
-        }
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
 
-        mNonThreadLocalStreamSets.clear();
-
-        // If any inter-partition input to a kernel is not thread local, none of its
-        // inter-partition inputs can be safely made to be thread local.
-        for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
-            bool hasNonThreadLocalInput = false;
-            for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                const auto streamSet = source(e, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isNonThreadLocal()) {
-                    hasNonThreadLocalInput = true;
-                    break;
-                }
-            }
-            if (hasNonThreadLocalInput) {
-                const auto partId = KernelPartitionId[kernel];
-                for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                    const auto streamSet = source(e, mBufferGraph);
-                    BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
-                        const auto producer = parent(streamSet, mBufferGraph);
-                        if (partId != KernelPartitionId[producer]) {
-                            mNonThreadLocalStreamSets.insert(streamSet);
-                        }
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            for (auto ref : make_iterator_range(in_edges(streamSet, mStreamGraph))) {
+                const auto & v = mStreamGraph[ref];
+                if (v.Reason == ReasonType::Reference) {
+                    const auto srcStreamSet = source(ref, mBufferGraph);
+                    assert (srcStreamSet >= FirstStreamSet && srcStreamSet <= LastStreamSet);
+                    BufferNode & sn = mBufferGraph[srcStreamSet];
+                    if (sn.isNonThreadLocal()) {
+                        anyChanges |= (bn.Locality != sn.Locality);
+                        bn.Locality = sn.Locality;
+                    } else if (bn.isNonThreadLocal()) {
+                        anyChanges |= (bn.Locality != sn.Locality);
+                        sn.Locality = bn.Locality;
                     }
+                    break;
                 }
             }
         }
-
-        if (mNonThreadLocalStreamSets.empty()) {
-            break;
-        }
-
     }
+
+    if (anyChanges) goto recheck_truncations;
 
 }
 

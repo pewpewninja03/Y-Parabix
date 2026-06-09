@@ -281,6 +281,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
     }
     recordProducedItemCountDeltas(b);
+
     // chain the progress state so that the next one carries on from this one
     assert (isFromCurrentFunction(b, mAnyProgressedAtExitPhi, false));
     mPipelineProgress = mAnyProgressedAtExitPhi;
@@ -336,19 +337,7 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
     mExecutedAtLeastOnceAtLoopEntryPhi->addIncoming(i1_TRUE, exitBlockAfterLoopAgainTest);
     mCurrentNumOfStridesAtLoopEntryPhi->addIncoming(mUpdatedNumOfStrides, exitBlockAfterLoopAgainTest);
     if (mIsPartitionRoot) {
-        assert (mThreadLocalStreamSetBaseAddress);
-        assert (mThreadLocalStreamSetBaseAddressAtEntryPhi);
-        mThreadLocalStreamSetBaseAddressAtEntryPhi->addIncoming(mThreadLocalStreamSetBaseAddress, exitBlockAfterLoopAgainTest);
-        const auto oneAfterLastKernel = FirstKernelInPartition[mCurrentPartitionId + 1];
-        for (auto kernel = mKernelId; kernel < oneAfterLastKernel; ++kernel) {
-            for (auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isThreadLocal()) {
-                    mThreadLocalStartOffsetAtEntryPhi[streamSet]->addIncoming(mThreadLocalStartOffset[streamSet], exitBlockAfterLoopAgainTest);
-                }
-            }
-        }
+        updateThreadLocalMemoryLoopEntryPhiNodes(b);
     }
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         assert (mOptimizationBranchSelectedBranch);
@@ -391,24 +380,9 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         assert (mUpdatedNumOfStrides);
         Value * const updatedNumOfStrides = b.CreateMulRational(mUpdatedNumOfStrides, mPartitionStrideRateScalingFactor);
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(updatedNumOfStrides, exitBlock);
-        mPotentialSegmentLengthAtTerminationPhi->addIncoming(mPotentialSegmentLength, exitBlock);
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b.getFalse(), exitBlock);
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLength, exitBlock);
-
-
-        mThreadLocalStreamSetBaseAddressAtExitPhi->addIncoming(mThreadLocalStreamSetBaseAddress, exitBlock);
-        const auto oneAfterLastKernel = FirstKernelInPartition[mCurrentPartitionId + 1];
-        for (auto kernel = mKernelId; kernel < oneAfterLastKernel; ++kernel) {
-            for (auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isThreadLocal()) {
-                    mThreadLocalStartOffsetAtExitPhi[streamSet]->addIncoming(mThreadLocalStartOffset[streamSet], exitBlock);
-                }
-            }
-        }
-
+        updateThreadLocalMemoryLoopExitPhiNodes(b);
     }
     b.CreateUnlikelyCondBr(isFinal, mKernelTerminated, mKernelLoopExit);
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -559,8 +533,6 @@ void PipelineCompiler::initializeKernelTerminatedPhis(KernelBuilder & b) {
     mTerminatedSignalPhi = b.CreatePHI(sizeTy, 2, prefix + "_terminatedSignal");
     mCurrentNumOfStridesAtTerminationPhi = b.CreatePHI(sizeTy, 2, prefix + "_currentNumOfStridesAtTermination");
     if (mIsPartitionRoot) {
-        mPotentialSegmentLengthAtTerminationPhi =
-            b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtTermination");
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi =
             b.CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesAtTerminationPhi");
     }
@@ -594,7 +566,6 @@ void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(KernelBuilder & b
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b.CreatePHI(sizeTy, 2, prefix + "_producedAtJumpPhi");
     }
-//    mMaximumNumOfStridesAtJumpPhi = b.CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtJumpPhi");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -633,7 +604,7 @@ void PipelineCompiler::initializeKernelLoopExitPhis(KernelBuilder & b) {
     if (mIsPartitionRoot) {
         mTotalNumOfStridesAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
         mFinalPartitionSegmentAtLoopExitPhi = b.CreatePHI(boolTy, 2, prefix + "_finalPartitionSegmentAtLoopExitPhi");
-        mPotentialSegmentLengthAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtLoopExit");
+//        mPotentialSegmentLengthAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtLoopExit");
         mThreadLocalStreamSetBaseAddressAtExitPhi = b.CreatePHI(b.getInt8PtrTy(), 2, prefix + "_threadLocalBaseAddressAtLoopExit");
     }
 }
@@ -649,27 +620,14 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
 
     b.SetInsertPoint(mKernelInsufficientInput);
 
-    if (LLVM_UNLIKELY(CheckAssertions() && mAllowDataParallelExecution)) {
-        b.CreateAssert(b.CreateNot(mExecutedAtLeastOnceAtLoopEntryPhi),
-                        "%s: is a data-parallel kernel with an invalid loop again check",
-                        mCurrentKernelName);
-    }
-
     Value * currentNumOfStrides = nullptr;
     assert (mCurrentNumOfStridesAtLoopEntryPhi);
     currentNumOfStrides = b.CreateMulRational(mCurrentNumOfStridesAtLoopEntryPhi, mPartitionStrideRateScalingFactor);
-
-//    Value * threadLocalBaseAddr = nullptr;
-
-//    if (mIsPartitionRoot) {
-//        threadLocalBaseAddr = b.getScalarField(BASE_THREAD_LOCAL_STREAMSET_MEMORY);
-//    }
 
     bool hasBranchToLoopExit = false;
 
     if (mKernelJumpToNextUsefulPartition) {
         assert (mIsPartitionRoot);
-//        mMaximumNumOfStridesAtJumpPhi->addIncoming(mMaximumNumOfStrides, b.GetInsertBlock());
         // TODO: check whether we need to release/acquire the pre/post locks here too
         b.CreateLikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, mKernelLoopExit, mKernelJumpToNextUsefulPartition);
         hasBranchToLoopExit = true;
@@ -688,10 +646,6 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
     }
 
     BasicBlock * const exitBlock = b.GetInsertBlock();
-
-    if (hasBranchToLoopExit && mIsPartitionRoot) {
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(b.getSize(0), exitBlock);
-    }
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto & br = mBufferGraph[e];
         const auto port = br.Port;
@@ -847,7 +801,7 @@ void PipelineCompiler::updatePhisAfterTermination(KernelBuilder & b) {
         }
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(finalNumOfStrides, exitBlock);
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b.getTrue(), exitBlock);
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLengthAtTerminationPhi, exitBlock);
+//        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLengthAtTerminationPhi, exitBlock);
         mThreadLocalStreamSetBaseAddressAtExitPhi->addIncoming(mThreadLocalStreamSetBaseAddress, exitBlock);
         const auto oneAfterLastKernel = FirstKernelInPartition[mCurrentPartitionId + 1];
         for (auto kernel = mKernelId; kernel < oneAfterLastKernel; ++kernel) {

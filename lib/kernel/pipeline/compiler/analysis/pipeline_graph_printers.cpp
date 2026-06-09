@@ -218,13 +218,12 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
 
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        const auto isInternal = (bn.Locality == BufferLocality::ThreadLocal || bn.Locality == BufferLocality::PartitionLocal);
+        const auto isInternal = (bn.Locality == BufferLocality::ThreadLocal);
         if (isInternal ^ internal) return;
 
         out << "v" << streamSet << " [shape=record,";
         switch (bn.Locality) {
             case BufferLocality::GloballyShared:
-            case BufferLocality::PartitionLocal:
                 out << "style=bold,";
             default:
                 break;
@@ -275,7 +274,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << 'R';
         }
         if (bn.isTruncated()) {
-            out << 'K';
+            out << 't';
         }
         if (bn.isShared()) {
             out << '*';
@@ -422,13 +421,6 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         const auto borders = nonLinear ? '2' : '1';
         out << "v" << kernel << " [label=\"[" <<
                 kernel << "] " << name << "\\n";
-        const BufferNode & kn = mBufferGraph[kernel];
-        if (kn.controlsSlidingWindow()) {
-            out << "<sliding>\\n";
-        } else if (kn.permitSlidingWindow()) {
-            out << "(sliding)\\n";
-        }
-
         if (MinimumNumOfStrides.size() > 0) {
             out << " Expected: [";
             if (MaximumNumOfStrides.size() > 0) {

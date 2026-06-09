@@ -449,13 +449,12 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
     assert (PipelineOutput == FirstKernelInPartition[PartitionCount - 1]);
 
-    for (unsigned i = PipelineInput; i < PipelineOutput; ++i) {
+    for (unsigned i = PipelineInput; i <= PipelineOutput; ++i) {
         const auto partId = KernelPartitionId[i];
         assert (partId < PartitionCount);
         auto rootVar = PartitionVarList[partId];
         VarList[i] = multiply(rootVar, StrideRepetitionVector[i]);
     }
-    VarList[PipelineOutput] = z3_ONE;
 
     for (auto kernel = FirstKernel; kernel <= PipelineOutput; ++kernel) {
 
@@ -475,7 +474,12 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
                     const auto expectedInput = (port.Minimum + port.Maximum) * Rational{1, 2};
                     assert (expectedInput.numerator() > 0);
                     Z3_ast expInRate = multiply(VarList[kernel], expectedInput);
-                    soft_assert(Z3_mk_eq(ctx, expInRate, VarList[streamSet]));
+                    auto r = Z3_mk_eq(ctx, expInRate, VarList[streamSet]);
+                    if (iRate.isFixed()) {
+                        hard_assert(r);
+                    } else {
+                        soft_assert(r);
+                    }
                 }
                 add_edge(prodPartId, consPartId, T);
                 if (port.Minimum != port.Maximum) {
@@ -520,18 +524,12 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     SmallVector<Z3_ast, 2> fakeIOVars;
     for (unsigned kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         if (in_degree(kernel, mBufferGraph) == 0) {
-            for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-                const auto streamSet = target(output, mBufferGraph);
-                fakeIOVars.push_back(VarList[streamSet]);
-            }
+            fakeIOVars.push_back(VarList[kernel]);
         }
     }
 
     if (fakeIOVars.empty()) {
-        for (const auto input : make_iterator_range(out_edges(PipelineInput, mBufferGraph))) {
-            const auto streamSet = target(input, mBufferGraph);
-            fakeIOVars.push_back(VarList[streamSet]);
-        }
+        fakeIOVars.push_back(VarList[PipelineInput]);
     }
 
     const auto m = fakeIOVars.size(); assert (m > 0);
@@ -555,56 +553,6 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
 
     const auto model = Z3_optimize_get_model(ctx, solver);
     Z3_model_inc_ref(ctx, model);
-
-
-//    Z3_ast value;
-//    if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, VarList[PipelineInput], Z3_L_TRUE, &value) != Z3_L_TRUE)) {
-//        report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
-//    }
-
-//    Z3_int64 pipelineInputNum, pipelineInputDenom;
-//    if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, value, &pipelineInputNum, &pipelineInputDenom) != Z3_L_TRUE)) {
-//        report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
-//    }
-//    assert (pipelineInputDenom > 0);
-//    assert (pipelineInputNum > 0);
-
-//    size_t lcmOfDenom = 1UL;
-
-//    std::vector<Rational> partitionRepVector(PartitionCount);
-//    const Rational inRatio{pipelineInputDenom, pipelineInputNum};
-
-//    for (unsigned partId = 0; partId < PartitionCount; ++partId) {
-
-//        Z3_ast value;
-//        if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, PartitionVarList[partId], Z3_L_TRUE, &value) != Z3_L_TRUE)) {
-//            report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
-//        }
-
-//        Z3_int64 num, denom;
-//        if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, value, &num, &denom) != Z3_L_TRUE)) {
-//            report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
-//        }
-
-//        assert (num > 0);
-//        assert (denom > 0);
-//        // Sometimes Z3 may return extremely large pipeline input num/denoms and partiton num/denoms that cancel one
-//        // another out. To mitigate potential 64-bit overflows, split the equation into two rational nums.
-//        const auto rv = Rational{num, denom} * inRatio;
-//        const auto firstKernel = FirstKernelInPartition[partId];
-//        assert (KernelPartitionId[firstKernel] == partId);
-
-//        assert (StrideRepetitionVector[firstKernel] > 0);
-
-//        partitionRepVector[partId] = (rv / StrideRepetitionVector[firstKernel]);
-//        assert (partitionRepVector[partId].numerator() > 0);
-//        const auto m = partitionRepVector[partId].denominator();
-//        if (m > 1) {
-//            lcmOfDenom = boost::lcm(lcmOfDenom, m);
-//        }
-//    }
-
-//    assert (lcmOfDenom > 0);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         Z3_ast value;

@@ -38,8 +38,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
     using Graph = adjacency_list<hash_setS, vecS, bidirectionalS, RelationshipGraph::edge_descriptor>;
     using Vertex = graph_traits<Graph>::vertex_descriptor;
 
-    const auto disableThreadLocalMemory = DebugOptionIsSet(codegen::DisableThreadLocalStreamSets);
-
     const auto traceDynamicBufferFlag = mTraceDynamicBuffers ? BufferType::CanTrackBufferExpansionData : 0U;
 
     InOutStreamSetReplacement = InOutGraph(LastStreamSet + 1U);
@@ -111,13 +109,10 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
 
             BufferPort bp(port, binding, lb, ub);
 
-            auto cannotBePlacedIntoThreadLocalMemory = disableThreadLocalMemory || noThreadLocal;
-
             if (rate.isFixed()) {
                 bp.Flags |= BufferPortType::IsFixed;
             } else if (LLVM_UNLIKELY(rate.isUnknown())) {
                 bp.Flags |= BufferPortType::IsManaged;
-                cannotBePlacedIntoThreadLocalMemory = true;
             } else if (LLVM_UNLIKELY(rate.isRelative())) {
 
                 const auto refPort = getReference(kernel, port);
@@ -160,15 +155,12 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         break;
                     case AttrId::Delayed:
                         bp.Delay = std::max<unsigned>(bp.Delay, attr.amount());
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookAhead:
                         bp.LookAhead = std::max<unsigned>(bp.LookAhead, attr.amount());
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::LookBehind:
                         bp.LookBehind = std::max<unsigned>(bp.LookBehind, attr.amount());
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::Truncate:
                         maxTruncate = std::max<unsigned>(maxTruncate, attr.amount());
@@ -185,37 +177,32 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                         break;
                     case AttrId::Deferred:
                         bp.Flags |= BufferPortType::IsDeferred;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::SharedManagedBuffer:
                         bp.Flags |= BufferPortType::IsShared;
                         bn.Type |= traceDynamicBufferFlag;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ManagedBuffer:
                         bp.Flags |= BufferPortType::IsManaged;
                         bn.Type |= traceDynamicBufferFlag;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::ReturnedBuffer:
                         bn.Type |= BufferType::Returned | BufferType::PreserveEntireStreamSet;
-                        cannotBePlacedIntoThreadLocalMemory = true;
                         break;
                     case AttrId::EmptyReadOverflow:
                         // TODO: thread local buffers could technically read into the next buffer here as long
                         // as the final buffer has one block padding.
                     case AttrId::EmptyWriteOverflow:
                         BEGIN_SCOPED_REGION
-                        auto width = kernelObj->getStride();
                         assert (ub.denominator() == 1);
-                        if (binding.getNumElements() == 1) {
-                            const auto fw = binding.getFieldWidth();
-                            assert ((width % fw) == 0);
-                            width /= fw;
-                        }
+                        auto width = ub.numerator();
+//                        if (binding.getNumElements() == 1) {
+//                            const auto fw = binding.getFieldWidth();
+//                            assert ((width % fw) == 0);
+//                            width /= fw;
+//                        }
                         bp.EmptyOverflow = std::max<int>(bp.EmptyOverflow, width);
                         bn.Type |= BufferType::RequiresEmptyOverflow;
-//                        bn.NumOfOverflowStrides = std::max(bn.NumOfOverflowStrides, 1U);
                         END_SCOPED_REGION
                         break;
                     case AttrId::InOut:
@@ -292,10 +279,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             } else {
                 if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(ss))) {
                     bn.Type |= BufferType::Truncated;
-                    cannotBePlacedIntoThreadLocalMemory = true;
-                }
-                if (cannotBePlacedIntoThreadLocalMemory) {
-                    mNonThreadLocalStreamSets.insert(streamSet);
                 }
             }
             return bp;
@@ -305,7 +288,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             for (auto i = I.lower(); i <= I.upper(); ++i) {
                 BufferNode & bn = mBufferGraph[i];
                 bn.Type |= BufferType::PreserveEntireStreamSet;
-                mNonThreadLocalStreamSets.insert(i);
             }
         }
 
@@ -465,11 +447,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             }
         }
 
-        for (unsigned j = 0; j < numOfInputs; ++j) {
-
-
-        }
-
         for (unsigned j = 1; j < numOfPorts; ++j) {
             add_edge_if_no_induced_cycle(j - 1, j);
         }
@@ -516,25 +493,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
         }
     }
 
-    if (LLVM_UNLIKELY(!codegen::ThreadLocalPermittedOptions.empty())) {
-
-        const auto permitted = parseCommaDelimitedList(codegen::ThreadLocalPermittedOptions);
-
-        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            const auto f = permitted.find(streamSet);
-            if (f == permitted.end()) {
-                for (auto id = streamSet;;) {
-                    if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
-                        break;
-                    }
-                    id = parent(id, InOutStreamSetReplacement);
-                    mNonThreadLocalStreamSets.insert(id);
-                }
-                mNonThreadLocalStreamSets.insert(streamSet);
-            }
-        }
-    }
-
     // If a kernel within this pipeline consumes an input and the consuming port has a lookahead,
     // this is only safe if the pipeline input port has a lookahead or is a non-countable or
     // deferrable rate. However, if we know the outer pipeline is already applying the lookahead
@@ -576,9 +534,6 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
                 consPort.LookAhead = 0;
             }
         }
-
-
-
     }
 
     for (const auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
@@ -805,7 +760,7 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
                 #else
                 if (isPartitionRoot) {
                     inputRate.Flags |= partitionRootIOFlag;
-                } else if (N.isConstant() || N.isExternal() || !N.IsLinear) {
+                } else if (N.isConstant() || N.isExternal() || !N.IsLinear || N.isTruncated()) {
                     inputRate.Flags |= BufferPortType::CanModifySegmentLength;
                 }
                 #endif
@@ -986,6 +941,7 @@ void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
                 #endif
                 } else { // is internal buffer
                     assert (bn.IsLinear || !bn.isReturned());
+                    assert (src == streamSet);
                     bn.Type |= traceDynamicBufferFlag;
                     outputBuffer = new ManagedDynamicBuffer(streamSet, b, output.getType(), bn.IsLinear, 0U);
                 }
@@ -1173,6 +1129,52 @@ void PipelineAnalysis::buildZeroInputGraph() {
     }
 
     mZeroInputGraph = G;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief calculateUnwrittenDataZeroLength
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::calculateUnwrittenDataZeroLength(KernelBuilder & b) {
+
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
+
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isUnowned() || bn.isTruncated() || bn.isConstant() || bn.hasZeroElementsOrWidth() || bn.isPopCountPartialSumStream()) {
+            continue;
+        }
+
+        const auto output = in_edge(streamSet, mBufferGraph);
+
+        const auto producer = source(output, mBufferGraph);
+
+        // Zero out any blocks we could potentially touch
+        auto & port = mBufferGraph[output];
+        Rational maxVal = port.Maximum * StrideRepetitionVector[producer];
+
+        const auto currentPartition = KernelPartitionId[producer];
+
+        if (bn.isNonThreadLocal()) {
+            for (auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(input, mBufferGraph);
+                if (KernelPartitionId[consumer] != currentPartition) {
+                    const auto & port = mBufferGraph[input];
+                    const auto m = port.Maximum * StrideRepetitionVector[consumer];
+                    if (maxVal < m) {
+                        maxVal = m;
+                    }
+                }
+            }
+        }
+
+        bn.Type |= BufferType::MustClearUnwrittenData;
+        bn.UnwrittenAlignment = ceiling(maxVal / b.getBitBlockWidth());
+
+    }
+
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

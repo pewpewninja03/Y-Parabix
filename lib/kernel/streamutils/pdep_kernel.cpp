@@ -317,8 +317,8 @@ ElemMergeKernel::ElemMergeKernel(LLVMTypeSystemInterface & ts,
                         return tmp;
                     }(),
 {Binding("mask", mask, FixedRate(1), Principal()),
- Binding("source1", source1, PopcountOf("mask")),
- Binding("source2", source2, PopcountOfNot("mask"))},
+ Binding("source1", source1, PopcountOf("mask"), EmptyReadOverflow()),
+ Binding("source2", source2, PopcountOfNot("mask"), EmptyReadOverflow())},
 {Binding{"merged", merged}},
 {}, {}, {}), mElemWidth(source1->getFieldWidth()) {
     //setStride(ts.getBitBlockWidth()/mElemWidth);
@@ -330,7 +330,9 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
     IntegerType * const maskTy = b.getIntNTy(maskWidth);
     Type * const elemVecTy = b.fwVectorType(mElemWidth);
 
-    Constant * const ZERO = b.getSize(0);
+    auto & DL = b.getModule()->getDataLayout();
+
+    Constant * const sz_ZERO = b.getSize(0);
     Constant * const ELEMS_PER_PACK = ConstantInt::get(sizeTy, maskWidth);
     Constant * const UREM_MASK = ConstantInt::get(sizeTy, maskWidth - 1);
 
@@ -343,9 +345,9 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
         assert ((getStride() % b.getBitBlockWidth()) == 0);
         numOfIterations = b.CreateMul(numOfStrides, b.getSize(getStride() / maskWidth));
     }
-    Value * const processedMaskItems = b.getProcessedItemCount("mask");
-    Value * const rawMaskPtr = b.getRawInputPointer("mask", processedMaskItems);
-    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
+    Value * const maskBasePtr = b.CreatePointerCast(b.getInputStreamBlockPtr("mask", sz_ZERO), maskTy->getPointerTo());
+
+    const auto elemVecTyAlign = b.getAlignOf(DL, elemVecTy);
 
     std::vector<std::string> source = {"source1", "source2"};
     Value * initialSourceOffset[2];
@@ -353,24 +355,24 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
     Value * initialPendingData[2];
     for (unsigned i = 0; i < 2; i++) {
         Value * const processedSourceItems = b.getProcessedItemCount(source[i]);
-        initialSourceOffset[i] = b.CreateURem(processedSourceItems, ELEMS_PER_PACK);
+        initialSourceOffset[i] = b.CreateAnd(processedSourceItems, UREM_MASK);
         Value * const sourceItemBase = b.CreateSub(processedSourceItems, initialSourceOffset[i]);
         Value * const sourceBasePtr = b.getRawInputPointer(source[i], sourceItemBase);
         sourcePackPtr[i] = b.CreatePointerCast(sourceBasePtr, elemVecTy->getPointerTo());
-        initialPendingData[i] = b.CreateLoad(elemVecTy, sourcePackPtr[i]);
+        initialPendingData[i] = b.CreateAlignedLoad(elemVecTy, sourcePackPtr[i], elemVecTyAlign);
     }
 
-    Value * const producedItems = b.getProducedItemCount("merged");
-    Value * const rawOutputPtr = b.getRawOutputPointer("merged", producedItems);
+    Value * const rawOutputPtr = b.getOutputStreamBlockPtr("merged", sz_ZERO);
     Value * const outputPackPtr = b.CreatePointerCast(rawOutputPtr, elemVecTy->getPointerTo());
+    const auto maskTyAlign = b.getAlignOf(DL, maskTy);
 
     b.CreateBr(elemMergeLoop);
 
     b.SetInsertPoint(elemMergeLoop);
     PHINode * const maskNoPhi = b.CreatePHI(sizeTy, 2);
-    maskNoPhi->addIncoming(ZERO, entry);
+    maskNoPhi->addIncoming(sz_ZERO, entry);
     PHINode * const outputOffsetPhi = b.CreatePHI(sizeTy, 2);
-    outputOffsetPhi->addIncoming(ZERO, entry);
+    outputOffsetPhi->addIncoming(sz_ZERO, entry);
     PHINode * sourceOffsetPhi[2];
     PHINode * pendingDataPhi[2];
     for (unsigned i = 0; i < 2; i++) {
@@ -380,27 +382,43 @@ void ElemMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * c
         pendingDataPhi[i]->addIncoming(initialPendingData[i], entry);
     }
 
-    Value * mask[2];
-    mask[0] = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskNoPhi));
-    mask[1] = b.CreateNot(mask[0]);
+    Value * mask = nullptr;
+    Value * maskPopCount = nullptr;
 
     Value * spread[2];
     for (unsigned i = 0; i < 2; i++) {
-        Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask[i]), sizeTy);
-        Value * const pendingPackNo = b.CreateUDiv(sourceOffsetPhi[i], ELEMS_PER_PACK);
+
+//        Value * const pendingPackNo = b.CreateUDiv(sourceOffsetPhi[i], ELEMS_PER_PACK);
         // Elements in the pending pack may already have been processed.
         Value * const pendingElemsDone = b.CreateAnd(sourceOffsetPhi[i], UREM_MASK);
         // If the offset within the pack is nonzero, we have pending data elements to keep.
         Value * pendingElemsToKeep = b.CreateAnd(b.CreateSub(ELEMS_PER_PACK, pendingElemsDone), UREM_MASK);
+
+        if (i == 0) {
+            mask = b.CreateAlignedLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, maskNoPhi), maskTyAlign);
+            maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
+        } else {
+            maskPopCount = b.CreateSub(ELEMS_PER_PACK, maskPopCount);
+        }
+
         Value * const updatedSourceOffset = b.CreateAdd(sourceOffsetPhi[i], maskPopCount);
-        Value * const nextPackNo = b.CreateUDiv(updatedSourceOffset, ELEMS_PER_PACK);
+
+//        Value * const nextPackNo = b.CreateUDiv(updatedSourceOffset, ELEMS_PER_PACK);
         Value * const nextPackElems = b.CreateAnd(updatedSourceOffset, UREM_MASK);
         // We can only safely load a pack if our mask tells us that there are new elements to load.
-        Value * const packToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), pendingPackNo, nextPackNo);
+
+        Value * const offsetToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), sourceOffsetPhi[i], updatedSourceOffset);
+        Value * const packToLoad = b.CreateUDiv(offsetToLoad, ELEMS_PER_PACK);
+
+        // Value * const packToLoad = b.CreateSelect(b.CreateIsNull(nextPackElems), pendingPackNo, nextPackNo);
+
         Value * const packPtr = b.CreateGEP(elemVecTy, sourcePackPtr[i], packToLoad);
-        Value * const newPack = b.CreateLoad(elemVecTy, packPtr);
+        Value * const newPack = b.CreateAlignedLoad(elemVecTy, packPtr, elemVecTyAlign);
         Value * const shiftedData = b.mvmd_dsll(mElemWidth, newPack, pendingDataPhi[i], pendingElemsToKeep);
-        spread[i] = b.mvmd_expand(mElemWidth, shiftedData, mask[i]);
+        if (i == 1) {
+            mask = b.CreateNot(mask);
+        }
+        spread[i] = b.mvmd_expand(mElemWidth, shiftedData, mask);
         sourceOffsetPhi[i]->addIncoming(updatedSourceOffset, elemMergeLoop);
         pendingDataPhi[i]->addIncoming(newPack, elemMergeLoop);
     }
@@ -514,7 +532,6 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
         Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, b.getSize(i));
         b.CreateStore(zeroElemVec, outputPtr);
     }
-
     b.CreateCondBr(b.CreateIsNull(metaMask), packsDone, scanPackLoop);
 
     b.SetInsertPoint(scanPackLoop);
@@ -609,7 +626,9 @@ StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                         nm.flush();
                         return tmp;
                     }(),
-{Binding("marker", mask, FixedRate(1), Principal()),Binding("source1", source1, PopcountOf("marker")), Binding("source2", source2, PopcountOfNot("marker"))},
+{Binding("marker", mask, FixedRate(1), Principal()),
+ Binding("source1", source1, PopcountOf("marker"), EmptyReadOverflow()),
+ Binding("source2", source2, PopcountOfNot("marker"), EmptyReadOverflow())},
 {Binding{"mergedStreamSet", merged}},
 // input scalar
 {Binding{"base", base}},

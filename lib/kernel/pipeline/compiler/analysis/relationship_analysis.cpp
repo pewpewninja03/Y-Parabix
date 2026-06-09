@@ -1297,15 +1297,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partit
         assert (subsitution[scalars[i]] == -1U);
         subsitution[scalars[i]] = FirstScalar + i;
     }
-    // When constructing the initial partition graph, we identified which streamsets were
-    // thread-local before we considered termination properties.
-    mNonThreadLocalStreamSets.reserve(num_edges(partitionGraph));
-    for (auto e : make_iterator_range(edges(partitionGraph))) {
-        const auto & streamSet = partitionGraph[e];
-        if (streamSet.Id) {
-            mNonThreadLocalStreamSets.insert(subsitution[streamSet.Id]);
-        }
-    }
 
     SmallVector<std::pair<RelationshipType, unsigned>, 64> temp;
 

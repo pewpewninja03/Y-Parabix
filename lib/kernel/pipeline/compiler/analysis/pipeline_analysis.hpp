@@ -65,6 +65,7 @@ public:
 
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
+
         P.identifyZeroExtendedStreamSets();
 
         P.identifyLinearBuffers();
@@ -93,6 +94,8 @@ public:
         P.scanFamilyKernelBindings();
 
         P.setStreamSetLockIds();
+
+        P.calculateUnwrittenDataZeroLength(b);
 
         P.identifyManagedBufferStructIds(rng);
 
@@ -193,6 +196,8 @@ private:
     void identifyIllustratedStreamSets();
 
     void buildZeroInputGraph();
+
+    void calculateUnwrittenDataZeroLength(KernelBuilder & b);
 
     void setStreamSetLockIds();
 
@@ -315,8 +320,6 @@ public:
     ConsumerGraph                   mConsumerGraph;
 
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;
-
-    flat_set<unsigned>              mNonThreadLocalStreamSets;
 
     TerminationChecks               mTerminationCheck;
 

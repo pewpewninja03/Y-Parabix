@@ -62,6 +62,8 @@ const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY = "LSM";
 
 const static std::string BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES = "LSMb";
 
+const static std::string PARTITION_THREAD_LOCAL_STREAMSET_MAX_STRIDE_COUNT = "@PTlS";
+
 const static std::string ZERO_EXTENDED_BUFFER = "ZeB";
 const static std::string ZERO_EXTENDED_SPACE = "ZeS";
 
@@ -95,8 +97,6 @@ const static std::string COMPUTE_THREAD_TERMINATION_STATE = "@CTTS";
 const static std::string DEBUG_FD = ".DFd";
 
 const static std::array<std::string, 2> OPT_BR_INFIX = { ".0", ".1" };
-
-const static std::string SCALED_SLIDING_WINDOW_SIZE_PREFIX = "@SWS";
 
 const static std::string TERMINATION_PREFIX = "@TERM";
 const static std::string CONSUMER_TERMINATION_COUNT_PREFIX = "@PTC";
@@ -274,9 +274,9 @@ public:
     void determineNumOfLinearStrides(KernelBuilder & b);
     void checkForSufficientInputData(KernelBuilder & b, const BufferPort & inputPort, const unsigned streamSet);
     void checkForSufficientOutputSpace(KernelBuilder & b, const BufferPort & outputPort, const unsigned streamSet);
-    void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet);
+    void ensureSufficientOutputSpace(KernelBuilder & b, const BufferPort & port, const unsigned streamSet, Value * const produced, Value * const required, Value * const writable, const bool postLockSyncNeeded);
 
-    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const potentialNumOfLinearStrides);
+    Value * calculateTransferableItemCounts(KernelBuilder & b, Value * const numOfLinearStrides, Value * const maxNumOfStrides, Value * const potentialNumOfStrides);
 
     enum class InputExhaustionReturnType {
         Conjunction, Disjunction
@@ -300,7 +300,6 @@ public:
 
     void writeKernelCall(KernelBuilder & b);
     void buildKernelCallArgumentList(KernelBuilder & b, ArgVec & args);
-    Value * updateCountableProcessedItemCounts(KernelBuilder & b);
     void updateProcessedAndProducedItemCounts(KernelBuilder & b, Value * rejectedTermSignal);
     void writeInternalProcessedAndProducedItemCounts(KernelBuilder & b, const bool atTermination);
     void readAndUpdateInternalProcessedAndProducedItemCounts(KernelBuilder & b);
@@ -491,9 +490,12 @@ public:
 
 // thread local buffer management
 
+    void addThreadLocalPartitionProperties(KernelBuilder & b, const size_t partitionId, const size_t groupId);
     void initializeThreadLocalMemory(KernelBuilder & b, Value * const segmentSize);
     void initializeThreadLocalMemoryPhiNodes(KernelBuilder & b);
-    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b, Value * const maximumNumOfStrides);
+    void updateThreadLocalMemoryLoopEntryPhiNodes(KernelBuilder & b);
+    void updateThreadLocalMemoryLoopExitPhiNodes(KernelBuilder & b);
+    void allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBuilder & b, Value * const maximumNumOfStrides, Value * const nonCountableNumOfStrides);
     void remapThreadLocalBufferMemory(KernelBuilder & b);
 
 // optimization branch functions
@@ -601,6 +603,10 @@ public:
     }
 
     bool hasPrincipalInputRate() const;
+
+    bool nonNestedPipelineHasAnyInternalInput() const;
+
+    bool currentKernelOnlyHasNonCountableInputs() const;
 
     void getABIAlignments(KernelBuilder & b);
 
@@ -727,6 +733,7 @@ protected:
     FixedVector<Value *>                        mThreadLocalStartOffset;
     FixedVector<Value *>                        mThreadLocalEndOffset;
     FixedVector<PHINode *>                      mThreadLocalStartOffsetAtEntryPhi;
+    FixedVector<PHINode *>                      mThreadLocalEndOffsetAtEntryPhi;
     FixedVector<PHINode *>                      mThreadLocalStartOffsetAtExitPhi;
 
     BitVector                                   mIsStatelessKernel;
@@ -770,11 +777,6 @@ protected:
     Value *                                     mInitiallyTerminated = nullptr;
     PHINode *                                   mThreadLocalStreamSetBaseAddressAtEntryPhi = nullptr;
     PHINode *                                   mThreadLocalStreamSetBaseAddressAtExitPhi = nullptr;
-    Value *                                     mMaximumNumOfStrides = nullptr;
-//    PHINode *                                   mMaximumNumOfStridesAtLoopExitPhi = nullptr;
-//    PHINode *                                   mMaximumNumOfStridesAtJumpPhi = nullptr;
-//    PHINode *                                   mMaximumNumOfStridesAtExitPhi = nullptr;
-//    Value *                                     mThreadLocalScalingFactor = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtLoopEntryPhi = nullptr;
     PHINode *                                   mCurrentNumOfStridesAtTerminationPhi = nullptr;
     Value *                                     mUpdatedNumOfStrides = nullptr;
@@ -788,9 +790,6 @@ protected:
     PHINode *                                   mTerminatedAtExitPhi = nullptr;
     PHINode *                                   mTotalNumOfStridesAtExitPhi = nullptr;
     Value *                                     mNumOfLinearStrides = nullptr;
-    Value *                                     mPotentialSegmentLength = nullptr;
-    PHINode *                                   mPotentialSegmentLengthAtTerminationPhi = nullptr;
-    PHINode *                                   mPotentialSegmentLengthAtLoopExitPhi = nullptr;
     Value *                                     mCurrentNumOfLinearStrides = nullptr;
     Value *                                     mHasZeroExtendedInput = nullptr;
     Value *                                     mInternallySynchronizedSubsegmentNumber = nullptr;
@@ -1015,6 +1014,8 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mThreadLocalStartOffset(FirstStreamSet, LastStreamSet, mAllocator)
 , mThreadLocalEndOffset(FirstStreamSet, LastStreamSet, mAllocator)
 , mThreadLocalStartOffsetAtEntryPhi(FirstStreamSet, LastStreamSet, mAllocator)
+, mThreadLocalEndOffsetAtEntryPhi(P.MaxNumOfOutputPorts, mAllocator)
+
 , mThreadLocalStartOffsetAtExitPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mIsStatelessKernel(PipelineOutput - PipelineInput + 1)
 , mIsInternallySynchronized(PipelineOutput - PipelineInput + 1)

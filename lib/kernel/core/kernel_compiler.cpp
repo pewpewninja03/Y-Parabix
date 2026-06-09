@@ -1022,7 +1022,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
                 assert (mUpdatableOutputCapacityPtr[i]->getType()->isPointerTy());
             }
             buffer->freePendingDeletions(b, consumed);
-            writable = buffer->getLinearlyWritableItems(b, produced, consumed);
+            writable = buffer->getLinearlyWritableItems(b, produced, consumed, nullptr);
             assert (writable && writable->getType() == sizeTy);
         } else {
             if (isMainPipeline || requiresItemCount(output)) {

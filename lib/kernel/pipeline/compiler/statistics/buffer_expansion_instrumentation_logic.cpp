@@ -9,6 +9,17 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(KernelBuilder & b, const size_t kernelId) {
 
+    for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            const auto streamSet = target(output, mBufferGraph);
+            const BufferNode & bn = mBufferGraph[streamSet];
+            if (bn.canTrackBufferExpansionData()) {
+                goto generate_function;
+            }
+        }
+        return nullptr;
+
+generate_function:
+
     SmallVector<char, 200> buf;
     raw_svector_ostream name(buf);
 
@@ -22,19 +33,8 @@ Value * PipelineCompiler::generateBufferExpansionFunctionForCurrentKernel(Kernel
 
     Function * const f0 = m->getFunction(name.str());
     if (f0) {
-        return b.CreatePointerCast(f0, voidPtrTy);
+        return b.CreatePointerCast(f0, voidPtrTy, name.str());
     }
-
-    for (const auto output : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
-        const auto streamSet = target(output, mBufferGraph);
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.canTrackBufferExpansionData()) {
-            goto generate_function;
-        }
-    }
-    return nullptr;
-
-generate_function:
 
     auto ip = b.saveIP();
 
@@ -101,6 +101,11 @@ generate_function:
     newCapacity->setName("capacity");
     assert (arg == f->arg_end());
 
+    if (LLVM_UNLIKELY(CheckAssertions() || mCheckStreamSets)) {
+        Value * const valid = b.CreateICmpULT(outputPortNum, b.getSize(outputPorts));
+        b.CreateAssert(valid, "Unhandled port number %" PRIu64 " given to %s", outputPortNum, b.GetString(name.str()));
+    }
+
     const auto type = isDataParallel(kernelId) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
     Value * syncLockPtr = getScalarFieldPtr(b, handle, ScalarType::Internal, makeKernelName(kernelId) + LOGICAL_SEGMENT_SUFFIX[type]).first;
     Value * const currentSegNo = b.CreateAlignedLoad(sizeTy, syncLockPtr, sizeTyAlign);
@@ -121,11 +126,6 @@ generate_function:
         FixedArray<Value *, 2> jumpIndex;
         jumpIndex[0] = b.getSize(0);
         jumpIndex[1] = outputPortNum;
-
-        if (LLVM_UNLIKELY(mCheckAssertions)) {
-            Value * const valid = b.CreateICmpULT(outputPortNum, b.getSize(outputPorts));
-            b.CreateAssert(valid, "Unhandled port number %" PRIu64 " given to %s", outputPortNum, b.GetString(name.str()));
-        }
 
         Value * const targetPtr = b.CreateGEP(jumpAddrTableTy, jumpTargetArray, jumpIndex);
         Value * const target = b.CreateAlignedLoad(i8PtrTy, targetPtr, int8PtrTyAlign);
@@ -214,9 +214,6 @@ generate_function:
             const auto traceDataTyAlign = DL.getABITypeAlign(traceDataTy).value(); assert (traceDataTyAlign > 0);
             const auto traceDataTySize = b.getTypeSize(DL, traceDataTy); assert (traceDataTySize > 0);
 
-            // b.CreateRealloc()
-
-
             Constant * const sz_TraceDataTySize = b.getSize(traceDataTySize);
             Value * const newTraceSizeBytes = b.CreateMul(newTraceSize, sz_TraceDataTySize);
             Value * newEntryArray = b.CreateAlignedMalloc(newTraceSizeBytes, traceDataTyAlign);
@@ -232,7 +229,6 @@ generate_function:
             entryArrayPhi->addIncoming(entryArray, outputPortHandler[bp.Port.Number]);
             entryArrayPhi->addIncoming(newEntryArray, needsRealloc);
             b.CreateAlignedStore(traceCount, traceLogCountField, SizeTyABIAlignment);
-
 
             indices[0] = traceIndex;
 
@@ -284,7 +280,7 @@ generate_function:
 
     b.restoreIP(ip);
 
-    return b.CreatePointerCast(f, voidPtrTy);
+    return b.CreatePointerCast(f, voidPtrTy, name.str());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

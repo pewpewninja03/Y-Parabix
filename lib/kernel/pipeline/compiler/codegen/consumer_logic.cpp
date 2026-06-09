@@ -73,6 +73,7 @@ void PipelineCompiler::addConsumerKernelProperties(KernelBuilder & b, const unsi
 void PipelineCompiler::readExternalConsumerItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
+        assert (mConsumerGraph[streamSet] == streamSet);
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_LIKELY(bn.isOwned())) {
             const BufferPort & externalPort = mBufferGraph[e];
@@ -179,17 +180,16 @@ void PipelineCompiler::computeMinimumConsumedItemCounts(KernelBuilder & b) {
             const auto id = mConsumerGraph[streamSet];
             assert (FirstStreamSet <= id && id <= streamSet);
             assert (out_degree(id, mConsumerGraph) > 0);
-
             if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
                 const ConsumerEdge & c = mConsumerGraph[e];
-                assert (c.Index > 0);
+                assert (0 < c.Index && c.Index <= out_degree(id, mConsumerGraph));
                 setConsumedItemCount(b, streamSet, processed, c.Index);
             }
-
             Value * const transConsumedPtr = getScalarFieldPtr(b, TRANSITORY_CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id)).first;
             Value * const prior = b.CreateAlignedLoad(b.getSizeTy(), transConsumedPtr, SizeTyABIAlignment);
             Value * const minConsumed = b.CreateUMin(prior, processed);
             b.CreateAlignedStore(minConsumed, transConsumedPtr, SizeTyABIAlignment);
+
             #ifdef PRINT_DEBUG_MESSAGES
             const auto producer = parent(id, mBufferGraph);
             for (const auto output : make_iterator_range(out_edges(producer, mBufferGraph))) {
@@ -224,6 +224,7 @@ void PipelineCompiler::writeConsumedItemCounts(KernelBuilder & b) {
             const auto prefix = makeBufferName(producer, br.Port);
             debugPrint(b, " * writing " + prefix + "_consumed = %" PRIu64, consumed);
             #endif
+            assert (out_degree(mConsumerGraph[id], mConsumerGraph) > 0);
             setConsumedItemCount(b, streamSet, consumed, 0);
         }
     }
@@ -244,7 +245,9 @@ void PipelineCompiler::setConsumedItemCount(KernelBuilder & b, const size_t stre
     const auto id = getTruncatedStreamSetSourceId(streamSet);
     auto consumedRef = b.getScalarFieldPtr(CONSUMED_ITEM_COUNT_PREFIX + std::to_string(id));
     Value * ptr = consumedRef.first;
+    assert ((slot == 0 && producer == PipelineInput) || slot <= out_degree(id, mConsumerGraph));
     if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
+        assert (slot <= out_degree(id, mConsumerGraph));
         ptr = b.CreateInBoundsGEP(consumedRef.second, ptr, { b.getInt32(0), b.getInt32(slot) });
     }
 

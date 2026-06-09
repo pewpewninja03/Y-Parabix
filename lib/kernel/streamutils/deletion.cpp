@@ -83,6 +83,7 @@ ElemFilterKernel::ElemFilterKernel(LLVMTypeSystemInterface & ts,
  Binding("source", source)},
 {Binding{"filtered", filtered, PopcountOf("mask"), EmptyWriteOverflow()}},
 {}, {}, {}), mElemWidth(source->getFieldWidth()) {
+
 }
 void ElemFilterKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
     const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
@@ -118,7 +119,6 @@ void ElemFilterKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     blockOutputPosPhi->addIncoming(initialOutputPos, entry);
 
     Value * const nextBlock = b.CreateAdd(blockNoPhi, b.getSize(1));
-    Value * const moreBlocksToDo = b.CreateICmpNE(nextBlock, numOfBlocks);
 
     Value * const maskVector = b.loadInputStreamBlock("mask", ZERO, blockNoPhi);
     //b.CallPrintRegister("maskVector", maskVector);
@@ -141,16 +141,11 @@ void ElemFilterKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
 
     Value * const nextNonEmptyMaskNo = b.CreateZExtOrTrunc(b.CreateCountForwardZeroes(metaMaskPhi), sizeTy);
     Value * const mask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, nextNonEmptyMaskNo));
-    //b.CallPrintInt("mask", mask);
     Value * const maskPopCount = b.CreateZExtOrTrunc(b.CreatePopcount(mask), sizeTy);
-    //b.CallPrintInt("maskPopCount", maskPopCount);
 
     Value * const sourcePtr = b.CreateGEP(elemVecTy, sourcePackPtr, nextNonEmptyMaskNo);
     Value * const newPack = b.CreateLoad(elemVecTy, sourcePtr);
-
     Value * const compressed = b.mvmd_compress(mElemWidth, newPack, mask);
-    //b.CallPrintRegister("compressed", compressed);
-
     Value * const ptr = b.getRawOutputPointer("filtered", outputPosPhi);
     Value * const toStorePtr = b.CreatePointerCast(ptr, elemVecTy->getPointerTo());
     b.CreateAlignedStore(compressed, toStorePtr, 1);
@@ -170,6 +165,7 @@ void ElemFilterKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
     BasicBlock * const elemFilterFinal = b.GetInsertBlock();
     blockNoPhi->addIncoming(nextBlock, elemFilterFinal);
     blockOutputPosPhi->addIncoming(loopEndOutputPosPhi, elemFilterFinal);
+    Value * const moreBlocksToDo = b.CreateICmpNE(nextBlock, numOfBlocks);
     b.CreateCondBr(moreBlocksToDo, blockAtATimeLoop, elemFilterDone);
 
     b.SetInsertPoint(elemFilterDone);
