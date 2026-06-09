@@ -293,10 +293,13 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         print_rational(bn.RelativeIORate);
         if (bn.isThreadLocal()) {
             const auto p = PartitionCount + streamSet - FirstStreamSet;
-            if (in_degree(p, ThreadLocalPlacement) > 0) {
-                out << "|TL:";
-                const auto r = first_in_edge(p, ThreadLocalPlacement);
-                print_rational(ThreadLocalPlacement[r]);
+            if (num_vertices(ThreadLocalPlacement) > 0) {
+                assert (num_vertices(ThreadLocalPlacement) > p);
+                if (in_degree(p, ThreadLocalPlacement) > 0) {
+                    out << "|TL:";
+                    const auto r = first_in_edge(p, ThreadLocalPlacement);
+                    print_rational(ThreadLocalPlacement[r]);
+                }
             }
         }
         if (in_degree(streamSet, InOutStreamSetReplacement) != 0) {

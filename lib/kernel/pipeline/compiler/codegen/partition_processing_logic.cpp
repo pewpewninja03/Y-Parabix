@@ -79,7 +79,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
 
             auto lastReader = producer;
             for (const auto input : make_iterator_range(out_edges(mConsumerGraph[streamSet], mConsumerGraph))) {
-                const auto consumer = target(input, mConsumerGraph);
+                const auto consumer = target(input, mBufferGraph);
                 if (lastReader < consumer && consumer < oneAfterLastComputeKernel) {
                     lastReader = consumer;
                 }

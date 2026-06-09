@@ -133,7 +133,8 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) {
     assert (EnableCycleCounter || mUseDynamicMultithreading);
-    assert (cond && cond->getType() == b.getInt1Ty());
+    assert (cond);
+    assert (cond->getType() == b.getInt1Ty());
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)ifTrue]; assert (start);
     assert (mCycleCounters[(unsigned)ifFalse] == start);

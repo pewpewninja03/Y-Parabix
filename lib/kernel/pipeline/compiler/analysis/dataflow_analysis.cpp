@@ -375,7 +375,6 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
     const auto cfg = Z3_mk_config();
     Z3_set_param_value(cfg, "model", "true");
     Z3_set_param_value(cfg, "proof", "false");
-//    Z3_set_param_value(cfg, "timeout", "2000");
     const auto ctx = Z3_mk_context(cfg);
     Z3_del_config(cfg);
     const auto solver = Z3_mk_optimize(ctx);
@@ -475,11 +474,11 @@ void PipelineAnalysis::calculateRelativeToInputDataTransferIORates() {
                     assert (expectedInput.numerator() > 0);
                     Z3_ast expInRate = multiply(VarList[kernel], expectedInput);
                     auto r = Z3_mk_eq(ctx, expInRate, VarList[streamSet]);
-                    if (iRate.isFixed()) {
-                        hard_assert(r);
-                    } else {
+//                    if (iRate.isFixed()) {
+//                        hard_assert(r);
+//                    } else {
                         soft_assert(r);
-                    }
+//                    }
                 }
                 add_edge(prodPartId, consPartId, T);
                 if (port.Minimum != port.Maximum) {

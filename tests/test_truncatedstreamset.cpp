@@ -133,10 +133,25 @@ void CopyKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
 class PassThroughKernel final : public SegmentOrientedKernel {
 public:
+    PassThroughKernel(LLVMTypeSystemInterface & ts, StreamSet * input, TruncatedStreamSet * output, Scalar * upTo);
     PassThroughKernel(LLVMTypeSystemInterface & ts, TruncatedStreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
+
+PassThroughKernel::PassThroughKernel(LLVMTypeSystemInterface & ts, StreamSet * input, TruncatedStreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(ts, "truncThroughKernel",
+// input streams
+{Binding{"input", input}},
+// output stream
+{Binding{"output", output}},
+// input scalar
+{Binding{"upTo", upTo}},
+{},
+// internal scalar
+{}) {
+    addAttribute(CanTerminateEarly());
+}
 
 PassThroughKernel::PassThroughKernel(LLVMTypeSystemInterface & ts, TruncatedStreamSet * output, Scalar * upTo)
 : SegmentOrientedKernel(ts, "passThroughKernel",
@@ -294,6 +309,86 @@ void StreamEq::generateFinalizeMethod(KernelBuilder & b) {
     Value * const newVal = b.CreateSelect(b.CreateICmpEQ(ptrVal, b.getInt32(1)), b.getInt32(1), resultState);
     b.CreateStore(newVal, resultPtr);
 }
+
+
+bool runRepeatedTruncationTests(CPUDriver & driver,
+                               uint64_t numElements,
+                               uint64_t fieldWidth,
+                               uint64_t patternLength,
+                               uint64_t copyCountVal,
+                               uint64_t passCountVal,
+                               std::default_random_engine & rng) {
+
+    auto P = CreatePipeline(driver, Input<uint64_t>{"copyCount"}, Input<uint64_t>{"passCount"}, Input<uint32_t*>{"output"});
+
+    const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
+
+    std::uniform_int_distribution<uint64_t> dist(0ULL, maxVal);
+
+    std::vector<std::vector<uint64_t>> pattern(numElements);
+    for (unsigned i = 0; i < numElements; ++i) {
+        auto & vec = pattern[i];
+        vec.resize(patternLength);
+        for (unsigned j = 0; j < patternLength; ++j) {
+            vec[j] = dist(rng);
+        }
+    }
+
+    Scalar * const copyCountScalar = P.getInputScalar("copyCount");
+
+    RepeatingStreamSet * const RepeatingStream = P.CreateRepeatingStreamSet(fieldWidth, pattern);
+
+    StreamSet * const Output = P.CreateStreamSet(numElements, fieldWidth);
+
+    P.CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCountScalar);
+
+    TruncatedStreamSet * const Trunc1 = P.CreateTruncatedStreamSet(RepeatingStream);
+
+    TruncatedStreamSet * const Trunc2 = P.CreateTruncatedStreamSet(Output);
+
+    P.CreateKernelCall<PassThroughKernel>(Trunc1, copyCountScalar);
+
+    Scalar * const passCountScalar = P.getInputScalar("passCount");
+
+    P.CreateKernelCall<PassThroughKernel>(Trunc2, passCountScalar);
+
+    Scalar * output = P.getInputScalar("output");
+
+    P.CreateKernelCall<StreamEq>(Trunc1, Trunc2, output);
+
+    const auto f = P.compile();
+
+    uint32_t result = 0;
+
+    const bool verbose = optVerbose;
+
+    if (verbose) {
+        llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength <<
+                        " copyCount = " << copyCountVal <<
+                        " passCount = " << passCountVal <<
+                        " -- ";
+    }
+
+    f(copyCountVal, passCountVal, &result);
+
+    if (result != 0 || verbose) {
+        if (!verbose) {
+            llvm::errs() << "TEST: " << numElements << 'x' << fieldWidth << 'w' << patternLength <<
+                            " copyCount = " << copyCountVal <<
+                            " passCount = " << passCountVal <<
+                            " -- ";
+        }
+        if (result == 0) {
+            llvm::errs() << "success";
+        } else {
+            llvm::errs() << "failed";
+        }
+        llvm::errs() << '\n';
+    }
+
+    return (result != 0);
+}
+
 
 typedef void (*TestFunctionType)(uint64_t copyCount, uint64_t passCount, uint32_t * output);
 

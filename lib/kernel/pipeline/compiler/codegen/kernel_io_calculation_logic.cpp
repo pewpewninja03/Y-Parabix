@@ -852,7 +852,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     b.SetInsertPoint(afterCopyBackOrExpand);
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         if (mustExpand) {
-            updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
+            updateCycleCounter(b, mKernelId, b.CreateIsNotNull(mustExpand), CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
         } else {
             updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
         }

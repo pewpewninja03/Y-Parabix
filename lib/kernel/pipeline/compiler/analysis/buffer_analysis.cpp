@@ -270,16 +270,14 @@ void PipelineAnalysis::generateInitialBufferGraph(KernelBuilder & b) {
             assert (sn.Type == RelationshipNode::IsStreamSet);
             assert (sn.Relationship);
             const StreamSet * ss = static_cast<const StreamSet *>(sn.Relationship);
-            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(ss))) {
-                bn.Locality = BufferLocality::ConstantShared;
-                bn.IsLinear = true;
-            } else if (LLVM_UNLIKELY(ss->getNumElements() == 0 || ss->getFieldWidth() == 0)) {
+            if (LLVM_UNLIKELY(ss->getNumElements() == 0 || ss->getFieldWidth() == 0)) {
                 bn.Locality = BufferLocality::ZeroElementsOrWidth;
                 bn.IsLinear = true;
-            } else {
-                if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(ss))) {
-                    bn.Type |= BufferType::Truncated;
-                }
+            } else if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(ss))) {
+                bn.Locality = BufferLocality::ConstantShared;
+                bn.IsLinear = true;
+            } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(ss))) {
+                bn.Type |= BufferType::Truncated;
             }
             return bp;
         };
