@@ -960,6 +960,7 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
     if (LLVM_UNLIKELY(src == 0)) {
         writable = ConstantInt::getAllOnesValue(b.getSizeTy());
    } else  if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
+
         Value * const avail = mLocallyAvailableItems[src]; assert (avail);
 
         #ifdef PRINT_DEBUG_MESSAGES

@@ -201,22 +201,20 @@ skip_phase_check:
         ConsumerEdge & cn = mConsumerGraph[e];
         cn.Flags |= ConsumerEdge::UpdateConsumedCount | ConsumerEdge::WriteConsumedCount;
 
-        size_t index = 0;
-
         remove_out_edge_if(id, [&](ConsumerGraph::edge_descriptor f) -> bool {
             #ifndef NDEBUG
             const auto consumer = target(f, mConsumerGraph);
             assert (FirstKernel <= consumer && consumer <= PipelineOutput);
             #endif
-            auto & C = mConsumerGraph[f];
-            if (C.Flags == ConsumerEdge::None) {
-                return true;
-            } else {
-                C.Index = ++index;
-                return false;
-            }
+            return mConsumerGraph[f].Flags == ConsumerEdge::None;
         }, mConsumerGraph);
 
+        size_t index = 0;
+        for (auto f : make_iterator_range(out_edges(id, mConsumerGraph))) {
+            auto & C = mConsumerGraph[f];
+            assert (C.Flags != ConsumerEdge::None);
+            C.Index = ++index;
+        }
         assert (index == out_degree(id, mConsumerGraph));
 
     }

@@ -78,8 +78,8 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             const auto k = streamSet - FirstStreamSet;
 
             auto lastReader = producer;
-            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consumer = target(input, mBufferGraph);
+            for (const auto input : make_iterator_range(out_edges(mConsumerGraph[streamSet], mConsumerGraph))) {
+                const auto consumer = target(input, mConsumerGraph);
                 if (lastReader < consumer && consumer < oneAfterLastComputeKernel) {
                     lastReader = consumer;
                 }
@@ -736,15 +736,16 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
         const auto n = LastStreamSet - FirstStreamSet + 1U;
 
-        for (unsigned i = 0; i != n; ++i) {
-            PHINode * const phi = mPartitionProducedItemCountPhi[nextPartitionId][i];
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            PHINode * const phi = mPartitionProducedItemCountPhi[nextPartitionId][streamSet - FirstStreamSet];
             if (phi) {
                 assert (isFromCurrentFunction(b, phi, false));
-                const auto streamSet = FirstStreamSet + i;
                 assert (isFromCurrentFunction(b, mLocallyAvailableItems[streamSet], false));
                 phi->addIncoming(mLocallyAvailableItems[streamSet], exitBlock);
                 mLocallyAvailableItems[streamSet] = phi;
             }
+
+
         }
 
         const auto firstKernelOfNextPartition = FirstKernelInPartition[nextPartitionId];
