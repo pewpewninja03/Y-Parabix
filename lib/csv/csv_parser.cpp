@@ -51,14 +51,34 @@ void CSV_QuoteParser::generatePabloMethod() {
     writeOutputStreamSet("quotedData",  std::vector<PabloAST*>{quoted_data, quote_escape});
 }
 
+class CSV_RecordParser : public PabloKernel {
+public:
+    CSV_RecordParser(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * quotedData,
+                    StreamSet * recordSeparators)
+        : PabloKernel(ts, "CSVrecord_parser",
+                      {Binding{"csvCCs", csvCCs}, Binding{"quotedData", quotedData}},
+                      {Binding{"recordSeparators", recordSeparators}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void CSV_RecordParser::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvCCs");
+    std::vector<PabloAST *> quotedData = getInputStreamSet("quotedData");
+    PabloAST * unquoted = pb.createNot(quotedData[0]);
+    PabloAST * recordMarks = pb.createAnd(csvMarks[markLF], unquoted);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("recordSeparators"), pb.getInteger(0)), recordMarks);
+}
+
 class CSV_FieldParser : public PabloKernel {
 public:
-    CSV_FieldParser(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * quotedData, 
-                    StreamSet * recordSeparators, StreamSet * fieldStarts, StreamSet * fieldFollows)
+    CSV_FieldParser(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * quotedData,
+                    StreamSet * fieldStarts, StreamSet * fieldFollows)
         : PabloKernel(ts, "CSVparser",
-                      {Binding{"csvCCs", csvCCs}, Binding{"quotedData", quotedData}},
-                      {Binding{"recordSeparators", recordSeparators},
-                       Binding{"fieldStarts", fieldStarts},
+                      {Binding{"csvCCs", csvCCs},
+                       Binding{"quotedData", quotedData}},
+                      {Binding{"fieldStarts", fieldStarts},
                        Binding{"fieldFollows", fieldFollows}}) {}
 protected:
     void generatePabloMethod() override;
@@ -77,7 +97,6 @@ void CSV_FieldParser::generatePabloMethod() {
     fieldFollows = pb.createOr(fieldFollows, bareLF);
     PabloAST * fieldFinals = pb.createAnd(pb.createOr(csvMarks[markComma], csvMarks[markLF]), unquoted);
     PabloAST * fieldStarts = pb.createInFile(pb.createNot(pb.createAdvance(pb.createNot(fieldFinals), 1)));
-    pb.createAssign(pb.createExtract(getOutputStreamVar("recordSeparators"), pb.getInteger(0)), recordMarks);
     pb.createAssign(pb.createExtract(getOutputStreamVar("fieldStarts"), pb.getInteger(0)), fieldStarts);
     pb.createAssign(pb.createExtract(getOutputStreamVar("fieldFollows"), pb.getInteger(0)), fieldFollows);
 }
@@ -115,7 +134,7 @@ StreamSet * CSV_Parser::getLineEnds() {
         mFieldStarts = mPB.CreateStreamSet(1);
         mFieldFollows = mPB.CreateStreamSet(1);
         mLineEnds = mPB.CreateStreamSet(1);
-        mPB.CreateKernelCall<CSV_FieldParser>(mCsvCCs, getQuotedData(), mLineEnds, mFieldStarts, mFieldFollows);
+        mPB.CreateKernelCall<CSV_RecordParser>(mCsvCCs, getQuotedData(), mLineEnds);
     }
     return mLineEnds;
 }
@@ -124,8 +143,7 @@ StreamSet * CSV_Parser::getFieldStarts() {
     if (mFieldStarts == nullptr) {
         mFieldStarts = mPB.CreateStreamSet(1);
         mFieldFollows = mPB.CreateStreamSet(1);
-        mLineEnds = mPB.CreateStreamSet(1);
-        mPB.CreateKernelCall<CSV_FieldParser>(mCsvCCs, getQuotedData(), mLineEnds, mFieldStarts, mFieldFollows);
+        mPB.CreateKernelCall<CSV_FieldParser>(mCsvCCs, getQuotedData(), mFieldStarts, mFieldFollows);
     }
     return mFieldStarts;
 }
@@ -133,8 +151,7 @@ StreamSet * CSV_Parser::getFieldFollows() {
     if (mFieldFollows == nullptr) {
         mFieldStarts = mPB.CreateStreamSet(1);
         mFieldFollows = mPB.CreateStreamSet(1);
-        mLineEnds = mPB.CreateStreamSet(1);
-        mPB.CreateKernelCall<CSV_FieldParser>(mCsvCCs, getQuotedData(), mLineEnds, mFieldStarts, mFieldFollows);
+        mPB.CreateKernelCall<CSV_FieldParser>(mCsvCCs, getQuotedData(), mFieldStarts, mFieldFollows);
     }
     return mFieldFollows;
 }
