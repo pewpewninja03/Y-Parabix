@@ -395,9 +395,6 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     parser.setSource(BasisBits);
 
-    StreamSet * fieldStarts = parser.getFieldStarts();
-    StreamSet * fieldFollows = parser.getFieldFollows();
-
     StreamSet * toKeep = P.CreateStreamSet(1);
     P.CreateKernelCall<CSVdataFieldMask>(parser.getCsvCCs(), parser.getLineEnds(), toKeep, csv::HeaderSpec == "");
     SHOW_STREAM(toKeep);
@@ -408,8 +405,8 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     BasisBits = filteredBasis;
     parser.setSource(BasisBits);
-    fieldStarts = parser.getFieldStarts();
-    fieldFollows = parser.getFieldFollows();
+    StreamSet * fieldStarts = parser.getFieldStarts();
+    StreamSet * fieldFollows = parser.getFieldFollows();
 
     StreamSet * const quoteInsertBixNum = QuoteInsertionBixNum(P, BasisBits, fieldStarts, fieldFollows);
     StreamSet * expansionCandidates = P.CreateStreamSet(1);
