@@ -532,7 +532,6 @@ void ElemSpreadKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * 
         Value * const outputPtr = b.CreateGEP(elemVecTy, outputPackPtr, b.getSize(i));
         b.CreateStore(zeroElemVec, outputPtr);
     }
-
     b.CreateCondBr(b.CreateIsNull(metaMask), packsDone, scanPackLoop);
 
     b.SetInsertPoint(scanPackLoop);
