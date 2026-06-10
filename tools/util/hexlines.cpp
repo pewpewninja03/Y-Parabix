@@ -89,6 +89,7 @@
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/scan/scanmatchgen.h>
@@ -179,6 +180,29 @@ void Hexify::generatePabloMethod() {
     writeOutputStreamSet("hexBasis", finalBasis);
 }
 
+class AddSpaces : public PabloKernel {
+public:
+    AddSpaces(LLVMTypeSystemInterface & ts, StreamSet * spaceSpreadMask, StreamSet * spreadBasis, StreamSet * finalBasis)
+        : PabloKernel(ts, "AddSpaces",
+                      {Binding{"spaceSpreadMask", spaceSpreadMask}, Binding{"spreadBasis", spreadBasis}},
+                      {Binding{"finalBasis", finalBasis}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void AddSpaces::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    // Get the input stream sets.
+    PabloAST * spaceSpreadMask = getInputStreamSet("spaceSpreadMask")[0];
+    std::vector<PabloAST *> basis = getInputStreamSet("spreadBasis");
+    //
+    // We want to turn the inserted nulls in the basis stream into
+    // ASCII space characters (0x20).   This only requires that bit 5
+    // be set at positions where the spaceSpreadMask is 0,
+    basis[5] = pb.createOr(basis[5], pb.createInFile(pb.createNot(spaceSpreadMask)));
+    writeOutputStreamSet("finalBasis", basis);
+}
+
 typedef void (*HexLinesFunctionType)(uint32_t fd);
 
 HexLinesFunctionType generatePipeline(CPUDriver & driver) {
@@ -232,10 +256,40 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     P.CreateKernelCall<Hexify>(hexInsertMask, spreadBasis, hexBasis);
     SHOW_BIXNUM(hexBasis);
 
+    // Space insertion - after every inserted hex position, except before LF.
+    StreamSet * expandedNonLF = P.CreateStreamSet(1);
+    P.CreateKernelCall<CharacterClassKernelBuilder>(nonLF_CC, hexBasis, expandedNonLF);
+    SHOW_STREAM(expandedNonLF);
+
+    // Inserted hex positions are marked by 0s in the hexInsertMask.
+    StreamSet * insertedHexPositions = P.CreateStreamSet(1);
+    Invert(P, hexInsertMask, insertedHexPositions);
+    SHOW_STREAM(insertedHexPositions);
+
+    StreamSet * nonLFAhead = P.CreateStreamSet(1);
+    P.CreateKernelCall<ShiftBack>(expandedNonLF, nonLFAhead, 1);
+    SHOW_STREAM(nonLFAhead);
+
+    StreamSet * spaceInsertMarks = P.CreateStreamSet(1);
+    AndCombine(P, insertedHexPositions, nonLFAhead, spaceInsertMarks);
+    SHOW_STREAM(spaceInsertMarks);
+
+    StreamSet * spaceSpreadMask = P.CreateStreamSet(1);
+    UnitInsertionSpreadMask(P, spaceInsertMarks, spaceSpreadMask, kernel::InsertPosition::After);
+    SHOW_STREAM(spaceSpreadMask);
+
+    StreamSet * finalSpreadBasis = P.CreateStreamSet(8);
+    SpreadByMask(P, spaceSpreadMask, hexBasis, finalSpreadBasis);
+    SHOW_BIXNUM(finalSpreadBasis);
+
+    StreamSet * finalBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<AddSpaces>(spaceSpreadMask, finalSpreadBasis, finalBasis);
+    SHOW_BIXNUM(finalBasis);
+
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
     StreamSet * hexLines = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(hexBasis, hexLines);
+    P.CreateKernelCall<P2SKernel>(finalBasis, hexLines);
     SHOW_BYTES(hexLines);
 
     //  The StdOut kernel writes a byte stream to standard output.
