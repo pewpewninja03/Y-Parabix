@@ -68,6 +68,7 @@ static cl::opt<bool> ByteReplace("ByteReplace", cl::desc("Perform byte merging u
 static cl::opt<int> SeparatedPipelineStages("SeparatedPipelineStages", cl::desc("Use multiple separated pipeline stages"), cl::init(0), cl::cat(NFD_Options));
 static cl::opt<bool> FilterViolations("FilterViolations", cl::desc("Only include reorderable sequences in work items if they are misordered or start with a decomposable character"), cl::init(false), cl::cat(NFD_Options));
 static cl::opt<bool> UseIndexedShiftBack("IndexedShiftBack", cl::desc("Use IndexedShiftBack in place of Filter/Spread combination"), cl::init(false), cl::cat(NFD_Options));
+static cl::opt<bool> UseLayers("UseLayers", cl::desc("Use pipeline layers"), cl::init(false), cl::cat(NFD_Options));
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -112,7 +113,12 @@ NFD_FilterFunctionType NFD_filter_pipeline(CPUDriver & driver) {
     StreamSet * const FinalWorkPlacementMask = P.getOutputStreamSet("FinalWorkPlacementMask");
     StreamSet * const WorkingBasis = P.getOutputStreamSet("WorkingBasis");
 
-    NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+    NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, WorkingBasis);
+    if (UseLayers) {
+        P.InsertPhaseBoundary();
+    }
+
+    NFD_builder.ComputeWorkPlacementMask(BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
     return P.compile();
 }
 
@@ -203,7 +209,8 @@ CombinedWorkFunctionType generate_combined_work_pipeline(CPUDriver & driver) {
     source_input_stage(P, fileDescriptor, ByteStream, BasisBits);
 
     StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
-    NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+    NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, WorkingBasis);
+    NFD_builder.ComputeWorkPlacementMask(BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
 
     NFD_builder.NFD_U8_Pipeline(WorkingBasis, TransformedBasis);
 
@@ -248,7 +255,8 @@ XfrmFunctionType generate_unitary_pipeline(CPUDriver & driver) {
         StreamSet * WorkSelectionMask = P.CreateStreamSet(1, 1);
         StreamSet * FinalWorkPlacementMask = P.CreateStreamSet(1, 1);
         StreamSet * WorkingBasis = P.CreateStreamSet(8, 1);
-        NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, FinalWorkPlacementMask, WorkingBasis);
+        NFD_builder.NFD_FilterStage(BasisBits, WorkSelectionMask, WorkingBasis);
+        NFD_builder.ComputeWorkPlacementMask(BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
 
         StreamSet * TransformedBasis = P.CreateStreamSet(8, 1);
         NFD_builder.NFD_U8_Pipeline(WorkingBasis, TransformedBasis);

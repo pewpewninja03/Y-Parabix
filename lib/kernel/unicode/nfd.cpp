@@ -666,7 +666,7 @@ void NFD_PipelineBuilder::DetermineNFD_WorkItems(StreamSet * U8_Basis, StreamSet
     SHOW_STREAM(NFD_WorkItems);
 }
 
-void NFD_PipelineBuilder::NFD_FilterStage(StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask, StreamSet * WorkingBasis) {
+void NFD_PipelineBuilder::NFD_FilterStage(StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * WorkingBasis) {
 
     StreamSet * const u8index = mPB.CreateStreamSet(1, 1);
     mPB.CreateKernelCall<UTF8_index>(BasisBits, u8index);
@@ -678,11 +678,13 @@ void NFD_PipelineBuilder::NFD_FilterStage(StreamSet * BasisBits, StreamSet * Wor
     mPB.CreateKernelCall<U8Spans>(NFD_WorkItems, u8index, WorkSelectionMask);
     SHOW_STREAM(WorkSelectionMask);
 
-    ComputeWorkPlacement(mPB, NFD_Data.UTF8_Insertion_BixNumCCs(), NFD_Data.UTF8_Deletion_BixNumCCs(), BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
-    SHOW_STREAM(FinalWorkPlacementMask);
-
     FilterByMask(mPB, WorkSelectionMask, BasisBits, WorkingBasis);
     SHOW_BIXNUM(WorkingBasis);
+}
+
+void NFD_PipelineBuilder::ComputeWorkPlacementMask(StreamSet * BasisBits, StreamSet * WorkSelectionMask, StreamSet * FinalWorkPlacementMask) {
+    ComputeWorkPlacement(mPB, NFD_Data.UTF8_Insertion_BixNumCCs(), NFD_Data.UTF8_Deletion_BixNumCCs(), BasisBits, WorkSelectionMask, FinalWorkPlacementMask);
+    SHOW_STREAM(FinalWorkPlacementMask);
 }
 
 void NFD_PipelineBuilder::NFD_U8_Pipeline(StreamSet * WorkingBasis, StreamSet * TransformedBasis) {
