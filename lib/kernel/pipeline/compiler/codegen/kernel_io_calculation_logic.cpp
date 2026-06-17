@@ -860,7 +860,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
         if (mustExpand) {
-            accumPAPIMeasurementWithoutReset(b, mKernelId, mustExpand, PAPI_BUFFER_EXPANSION, PAPI_BUFFER_COPY);
+            accumPAPIMeasurementWithoutReset(b, mKernelId, b.CreateIsNotNull(mustExpand), PAPI_BUFFER_EXPANSION, PAPI_BUFFER_COPY);
         } else {
             accumPAPIMeasurementWithoutReset(b, mKernelId, PAPI_BUFFER_EXPANSION);
         }

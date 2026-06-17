@@ -1173,9 +1173,6 @@ start_of_transfer_loop:
                 unsigned newPhaseId = numOfPhases;
                 for (auto e : make_iterator_range(out_edges(j, P))) {
                     const auto & TransferPart = P[target(e, P)];
-                    if (TransferPart.PhaseId  == 0) {
-                        errs() << "PH0: " << target(e, P) << "\n";
-                    }
                     assert (TransferPart.PhaseId > 0);
                     newPhaseId = std::min(newPhaseId, TransferPart.PhaseId);
                 }

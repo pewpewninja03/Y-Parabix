@@ -13,63 +13,79 @@ void PipelineAnalysis::makeConsumerGraph() {
 
     mConsumerGraph = ConsumerGraph(LastStreamSet + 1);
 
+    mConsumerGraph[0] = 0;
+
     if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
         return;
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        auto id = streamSet;
-        const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal() || bn.isConstant() || bn.hasZeroElementsOrWidth()) {
-            id = 0;
-        } else {
-restart:    auto & sn = mBufferGraph[id];
-            if (LLVM_UNLIKELY(sn.isInOutRedirect())) {
-                id = parent(id, InOutStreamSetReplacement);
-                assert (FirstStreamSet <= id && id < streamSet);
-                id = mConsumerGraph[id];
-                if (LLVM_LIKELY(id != 0)) goto restart;
-                assert (mBufferGraph[id].isThreadLocal());
-                goto skip_phase_check;
-            }
-            if (LLVM_UNLIKELY(sn.isTruncated())) {
-                for (auto ref : make_iterator_range(in_edges(id, mStreamGraph))) {
-                    const auto & v = mStreamGraph[ref];
-                    if (v.Reason == ReasonType::Reference) {
-                        id = source(ref, mBufferGraph);
-                        assert (FirstStreamSet <= id && id < streamSet);
-                        id = mConsumerGraph[id];
-                        if (LLVM_LIKELY(id != 0)) goto restart;
-                        assert (mBufferGraph[id].isThreadLocal());
-                        goto skip_phase_check;
-                    }
-                }
-            }
-            assert (FirstStreamSet <= id && id <= streamSet);
-            if (PartitionPhaseBoundaries.size() > 2) {
-                const auto producer = parent(streamSet, mBufferGraph);
-                assert (PipelineInput <= producer && producer <= PipelineOutput);
-                const auto prodPhaseId = mBufferGraph[producer].ProducedPhaseId;
-                for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                    const auto consumer = target(input, mBufferGraph);
-                    assert (producer < consumer && consumer <= PipelineOutput);
-                    const auto consPhaseId = mBufferGraph[consumer].ProducedPhaseId;
-                    if (LLVM_UNLIKELY(consPhaseId != prodPhaseId)) {
-                        #ifdef DISABLE_FD_BACKED_BUFFERS
-                        constexpr auto flags = BufferType::CrossesPhaseBoundary;
-                        #else
-                        constexpr auto flags = BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
-                        #endif
-                        sn.Type |= flags;
-                        break;
-                    }
+
+        unsigned flags = 0;
+
+        if (PartitionPhaseBoundaries.size() > 2) {
+            BufferNode & bn = mBufferGraph[streamSet];
+            const auto producer = parent(streamSet, mBufferGraph);
+            assert (PipelineInput <= producer && producer <= PipelineOutput);
+            const auto prodPhaseId = mBufferGraph[producer].ProducedPhaseId;
+            for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+                const auto consumer = target(input, mBufferGraph);
+                assert (producer < consumer && consumer <= PipelineOutput);
+                const auto consPhaseId = mBufferGraph[consumer].ProducedPhaseId;
+                if (LLVM_UNLIKELY(consPhaseId != prodPhaseId)) {
+                    #ifdef DISABLE_FD_BACKED_BUFFERS
+                    flags = BufferType::CrossesPhaseBoundary;
+                    #else
+                    flags = BufferType::PreserveEntireStreamSet | BufferType::CrossesPhaseBoundary;
+                    #endif
+                    bn.Type |= flags;
+                    break;
                 }
             }
         }
-skip_phase_check:
+
+        auto id = streamSet;
+redo_inout_check:
+        const BufferNode & in = mBufferGraph[id];
+        if (LLVM_UNLIKELY(in.isInOutRedirect())) {
+            for (;;) {
+                id = parent(id, InOutStreamSetReplacement);
+                assert (FirstStreamSet <= id && id < streamSet);
+                assert (mBufferGraph[id].Locality == in.Locality);
+                if (LLVM_UNLIKELY(flags)) {
+                    mBufferGraph[id].Type |= flags;
+                }
+                if (LLVM_LIKELY(in_degree(id, InOutStreamSetReplacement) == 0)) {
+                    break;
+                }
+            }
+        }
+
+        const BufferNode & bn = mBufferGraph[id];
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            for (auto ref : make_iterator_range(in_edges(id, mStreamGraph))) {
+                const auto & v = mStreamGraph[ref];
+                if (v.Reason == ReasonType::Reference) {
+                    id = source(ref, mBufferGraph);
+                    assert (mBufferGraph[id].Locality == bn.Locality);
+                    assert (FirstStreamSet <= id && id < streamSet);
+                    if (LLVM_UNLIKELY(flags)) {
+                        mBufferGraph[id].Type |= flags;
+                    }
+                    break;
+                }
+            }
+            goto redo_inout_check;
+        }
+
+        if ((id == streamSet) && (bn.isThreadLocal() || bn.isConstant() || bn.hasZeroElementsOrWidth())) {
+            id = 0;
+        }
+
         mConsumerGraph[streamSet] = id;
     }
 
+#if 0
     // FIXME: for now we cannot safely release fd-backed buffers as output buffers.
     for (auto output : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {
         auto streamSet = source(output, mBufferGraph);
@@ -83,6 +99,7 @@ skip_phase_check:
             }
         }
     }
+#endif
 
     std::vector<size_t> lastConsumer(LastStreamSet - FirstStreamSet + 1U, 0U);
 
@@ -91,7 +108,7 @@ skip_phase_check:
         // as we would then have to retain a scalar for it. If this streamset is
         // returned to the outside environment, we cannot ever release data from it
         // even if it has an internal consumer.
-        const auto id = mConsumerGraph[streamSet];
+        const auto id = mConsumerGraph[mConsumerGraph[streamSet]];
         if (id == 0) {
             continue;
         }

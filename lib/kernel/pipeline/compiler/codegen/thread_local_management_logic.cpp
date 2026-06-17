@@ -50,7 +50,8 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
         Value * maxStrides = segmentSize;
         const BufferPort & bp = mBufferGraph[in_edge(streamSet, mBufferGraph)];
         if (LLVM_UNLIKELY(bp.RequiredOverflowSpace)) {
-            const auto k = ceiling(Rational{bp.RequiredOverflowSpace, bw});
+            const auto producer = parent(streamSet, mBufferGraph);
+            const auto k = ceiling((bp.Maximum * StrideStepLength[producer] + Rational{bp.RequiredOverflowSpace}) / bw);
             maxStrides = b.CreateAdd(maxStrides, b.getSize(k));
         }
 
@@ -274,9 +275,9 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
 
     Value * const hasEnough = b.CreateICmpULE(maximumNumOfStrides, initialMaxStride);
 
-    Value * const recalcOrReallocNeeded = b.CreateAnd(hasEnough, mExecutedAtLeastOnceAtLoopEntryPhi);
+    Value * const noRecalcOrReallocNeeded = b.CreateAnd(hasEnough, mExecutedAtLeastOnceAtLoopEntryPhi);
 
-    b.CreateCondBr(recalcOrReallocNeeded, allocateThreadLocalExit, allocateThreadLocal);
+    b.CreateCondBr(noRecalcOrReallocNeeded, allocateThreadLocalExit, allocateThreadLocal);
 
     b.SetInsertPoint(allocateThreadLocal);
 
@@ -323,36 +324,28 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
             assert (v != u);
             auto & T = toVisit[v];
             assert (T > 0);
-            T--;
-            if (T == 0) {
+            if (--T == 0) {
                 const auto streamSet = v + FirstStreamSet - PartitionCount;
                 const BufferNode & bn = mBufferGraph[streamSet];
 
                 assert (bn.isThreadLocal());
-                assert (!bn.isInOutRedirect());
                 assert (mThreadLocalStartOffset[streamSet] == nullptr);
                 assert (mThreadLocalEndOffset[streamSet] == nullptr);
 
-
-
                 Value * start = nullptr;
                 Value * end = nullptr;
-                Value * maxStrides = maximumNumOfStrides;
 
                 const auto output = in_edge(streamSet, mBufferGraph);
+                const BufferPort & bp = mBufferGraph[output];
+                const auto producer = parent(streamSet, mBufferGraph);
+                const auto strideSize = getKernel(producer)->getStride();
+                const auto overflow = (bp.Maximum * StrideStepLength[producer] + Rational{bp.RequiredOverflowSpace}) / strideSize;
 
-                const auto producer = source(output, mBufferGraph);
+                Value * const maxStrides = b.CreateAdd(maximumNumOfStrides, b.getSize(ceiling(overflow)));
+
                 assert (FirstKernelInPartition[mCurrentPartitionId] <= producer && producer < FirstKernelInPartition[mCurrentPartitionId + 1]);
                 if (producer == mKernelId) {
                     selected.push_back(streamSet);
-                }
-
-                const BufferPort & bp = mBufferGraph[output];
-                auto overflow = (bp.Maximum * StrideStepLength[mKernelId] + Rational{bp.RequiredOverflowSpace}) / bw;
-                const auto k = ceiling(overflow);
-
-                if (LLVM_UNLIKELY(k > 1)) {
-                    maxStrides = b.CreateAdd(maxStrides, b.getSize(k - 1));
                 }
 
                 Value * const off = b.CreateShl(b.CreateCeilUMulRational(maxStrides, ThreadLocalPlacement[e]), LOG_2_PAGE_SIZE);
@@ -361,7 +354,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                     end = off;
                 } else {
                     for (auto in : make_iterator_range(in_edges(v, ThreadLocalPlacement))) {
-                        const auto src = source(in, ThreadLocalPlacement) + FirstStreamSet - PartitionCount;
+                        const auto src = FirstStreamSet + source(in, ThreadLocalPlacement)  - PartitionCount;
                         assert (mThreadLocalEndOffset[src]);
                         start = b.CreateUMax(start, mThreadLocalEndOffset[src]);
                     }
@@ -423,9 +416,10 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
                 b.CreateAssert(b.CreateOr(before, after),
                         "Thread-local "
                         "streamset %" PRIu64 " [%" PRIx64 ",%" PRIx64 ") overlaps "
-                        "streamset %" PRIu64 " [%" PRIx64 ",%" PRIx64 ")",
+                        "streamset %" PRIu64 " [%" PRIx64 ",%" PRIx64 ") when max strides=%" PRIu64,
                         b.getSize(x), mThreadLocalStartOffset[x], mThreadLocalEndOffset[x],
-                        b.getSize(y), mThreadLocalStartOffset[y], mThreadLocalEndOffset[y]);
+                        b.getSize(y), mThreadLocalStartOffset[y], mThreadLocalEndOffset[y],
+                        maximumNumOfStrides);
             }
         }
     }
@@ -522,6 +516,7 @@ void PipelineCompiler::allocateThreadLocalMemoryForMaximumNumOfStrides(KernelBui
     }
 
     const auto oneAfterLastKernel = FirstKernelInPartition[mCurrentPartitionId + 1];
+
     for (auto kernel = mKernelId + 1U; kernel < oneAfterLastKernel; ++kernel) {
         for (auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
             const auto streamSet = target(output, mBufferGraph);

@@ -449,6 +449,9 @@ std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(Kernel
  * @brief isCachable
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineKernel::isCachable() const {
+    if (codegen::DebugOptionIsSet(codegen::ForcePipelineRecompilation)) {
+        return false;
+    }
     return (getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0;
 }
 

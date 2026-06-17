@@ -3,13 +3,6 @@
 #include "evolutionary_algorithm.hpp"
 #include <boost/container/flat_set.hpp>
 #include <unistd.h>
-#include <z3.h>
-
-#if Z3_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 7, 0)
-    typedef int64_t Z3_int64;
-#else
-    typedef long long int        Z3_int64;
-#endif
 
 // TODO: any buffers that exist only to satisfy the output dependencies are unnecessary.
 // We could prune away kernels if none of their outputs are needed but we'd want some
