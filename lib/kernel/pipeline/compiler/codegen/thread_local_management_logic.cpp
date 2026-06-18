@@ -18,7 +18,7 @@ void PipelineCompiler::addThreadLocalPartitionProperties(KernelBuilder & b, cons
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeThreadLocalMemory
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * const segmentSize) {
+void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * segmentSize) {
 
     if (num_edges(ThreadLocalPlacement) == 0) {
         return;
@@ -33,6 +33,8 @@ void PipelineCompiler::initializeThreadLocalMemory(KernelBuilder & b, Value * co
 
     std::vector<Value *> precalculatedOffset(n, nullptr);
     ConstantInt * const sz_ZERO = b.getSize(0);
+
+    segmentSize = b.CreateUMax(segmentSize, b.getSize(MinimumThreadLocalSegmentSize));
 
     const Rational T{mTarget->getStride(), b.getBitBlockWidth()};
 

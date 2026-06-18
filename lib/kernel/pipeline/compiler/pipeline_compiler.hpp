@@ -655,6 +655,7 @@ protected:
     const unsigned                              LastScalar;
     const unsigned                              PartitionCount;
     const unsigned                              ManagedBufferStructCount;
+    const size_t                                MinimumThreadLocalSegmentSize;
 
     #ifdef ENABLE_PAPI
     const unsigned                              NumOfPAPIEvents;
@@ -964,6 +965,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , LastScalar(P.LastScalar)
 , PartitionCount(P.PartitionCount)
 , ManagedBufferStructCount(P.ManagedBufferStructCount)
+, MinimumThreadLocalSegmentSize(P.MinimumThreadLocalSegmentSize)
 #ifdef ENABLE_PAPI
 , NumOfPAPIEvents([&]() -> unsigned {
     const auto & S = codegen::PapiCounterOptions;

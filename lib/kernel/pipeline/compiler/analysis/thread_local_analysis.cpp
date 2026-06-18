@@ -619,7 +619,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
         #endif
 
         const auto cfg = Z3_mk_config();
-        Z3_set_param_value(cfg, "model", "false");
+        Z3_set_param_value(cfg, "model", "true");
         Z3_set_param_value(cfg, "proof", "false");
 
         const auto ctx = Z3_mk_context(cfg);
@@ -635,12 +635,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         auto constant_int = [&](const size_t value) {
             return Z3_mk_int(ctx, value, intType);
-        };
-
-        auto constant_real = [&](const Rational value) {
-            assert (value.numerator() > 0);
-            assert (value.denominator() == 1);
-            return Z3_mk_int(ctx, value.numerator(), intType);
         };
 
         auto add = [&](Z3_ast X, Z3_ast Y) {
@@ -687,9 +681,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         std::queue<Vertex> S;
 
-        std::vector<Z3_ast> controlVar(PartitionCount);
-
-        std::vector<size_t> nodePartitionId(m);
+        std::vector<Z3_ast> controlVar(PartitionCount, nullptr);
 
         SmallVector<Z3_ast, 16> endOffset;
 
@@ -748,6 +740,8 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                                      endOffset[c++] = D[s].End; assert (D[s].End);
                                  }
                                  assert (c == d);
+
+                                 assert (check() == Z3_L_TRUE);
 
                                  for (size_t i = 1; i < d; ++i ) {
                                      for (size_t j = 0; j < i; ++j) {
@@ -830,44 +824,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
             }
         }
 
-        // We've worked out the streamset start and end positions but now want to calculate the total initial memory
-        // required for a particular segment size. Similar to above, some partition memory requirements may always
-        // exceed others.
-
-        const auto realType = Z3_mk_real_sort(ctx);
-        const Z3_ast segmentSizeVar = Z3_mk_fresh_const(ctx, nullptr, realType);
-
-        hard_assert(Z3_mk_gt(ctx, segmentSizeVar, Z3_mk_real(ctx, 1, 1)));
-
-        assert (S.empty());
-
-        std::vector<Z3_ast> disj;
-
-        for (auto u = m;;) {
-            for (auto e : make_iterator_range(in_edges(u, T))) {
-                const auto s = source(e, T);
-                if (controlVar[s] == nullptr) {
-                    assert (s >= PartitionCount);
-                    const auto streamSet = FirstStreamSet + s - PartitionCount;
-                    const BufferNode & bn = mBufferGraph[streamSet];
-                    const auto & Ds = D[s];
-                    const auto v = multiply(segmentSizeVar, constant_real(bn.RelativeIORate * Ds.Value));
-                    const auto uc = Ds.UnitCost;
-                    hard_assert(Z3_mk_ge(ctx, v, uc));
-                    disj.push_back(Z3_mk_eq(ctx, v, uc));
-                    controlVar[s] = v;
-                    S.push(s);
-                }
-            }
-            if (S.empty()) {
-                break;
-            }
-            u = S.front();
-            S.pop();
-        }
-
-        // at least one must match or the solution will be too trivial to use
-        hard_assert(Z3_mk_or(ctx, disj.size(), disj.data()));
+        assert (check() == Z3_L_TRUE);
 
         const auto d = in_degree(m, D); assert (d > 0);
 
@@ -876,47 +833,76 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
         endOffset.resize(d);
 
+        SmallVector<Z3_ast, 16> cVar(d);
+
         size_t c = 0;
-        for (auto ei = ei_begin; ei != ei_end; ++ei) {
+        for (auto ei = ei_begin; ei != ei_end; ++ei, ++c) {
             const auto s = source(*ei, D);
             T[s] = true;
-            const auto & Di = D[s];
-            endOffset[c++] = Di.End; assert (Di.End);
+            endOffset[c] = D[s].End;
+            assert (endOffset[c]);
+            assert (endOffset[c] != z3_ZERO);
+            const auto streamSet = FirstStreamSet + s - PartitionCount;
+            const auto producer = parent(streamSet, mBufferGraph);
+            const auto partId = KernelPartitionId[producer];
+            cVar[c] = controlVar[partId];
         }
         assert (c == d);
 
         for (size_t i = 1; i < d; ++i ) {
+            assert (cVar[i]);
             for (size_t j = 0; j < i; ++j) {
-                if (endOffset[j]) {
+                if (cVar[j]) {
+                    Z3_solver_push(ctx, solver);
+                    hard_assert(Z3_mk_eq(ctx, cVar[i], cVar[j]));
                     if (neverGreaterThan(endOffset[i], endOffset[j])) {
-                        endOffset[i] = nullptr;
+                        cVar[i] = nullptr;
+                        Z3_solver_pop(ctx, solver, 1);
                         break;
                     }
-
                     if (neverGreaterThan(endOffset[j], endOffset[i])) {
-                        endOffset[j] = nullptr;
+                        cVar[j] = nullptr;
                     }
+                    Z3_solver_pop(ctx, solver, 1);
                 }
             }
         }
 
-//        const auto model = Z3_solver_get_model(ctx, solver);
-//        Z3_model_inc_ref(ctx, model);
-//        Z3_int64 num, denom;
-//        if (LLVM_UNLIKELY(Z3_get_numeral_rational_int64(ctx, segmentSizeVar, &num, &denom) != Z3_L_TRUE)) {
-//            report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
-//        }
-//        Z3_model_dec_ref(ctx, model);
-//        errs() << "segmentSizeVar: " << num << "/" << denom << "\n";
+        const auto r = check();
+        assert (r == Z3_L_TRUE);
 
-        Z3_solver_dec_ref(ctx, solver);
-        Z3_del_context(ctx);
+        const auto model = Z3_solver_get_model(ctx, solver);
+        Z3_model_inc_ref(ctx, model);
+
+        Z3_int64 minSegmentSize = 0;
 
         for (size_t i = 0; i < d; ++i ) {
-            if (endOffset[i]) {
+            if (cVar[i]) {
+
+                Z3_ast value;
+                if (LLVM_UNLIKELY(Z3_model_eval(ctx, model, cVar[i], Z3_L_TRUE, &value) != Z3_L_TRUE)) {
+                    report_fatal_error("Unexpected Z3 error when attempting to obtain value from model!");
+                }
+
+                Z3_int64 num;
+                if (LLVM_UNLIKELY(Z3_get_numeral_int64(ctx, value, &num) != Z3_L_TRUE)) {
+                    report_fatal_error("Unexpected Z3 error when attempting to convert model value to number!");
+                }
+
+                minSegmentSize = std::max(minSegmentSize, num);
+
                 add_edge(source(*(ei_begin + i), D), m, Rational{}, T);
             }
         }
+
+        Z3_model_dec_ref(ctx, model);
+        Z3_solver_dec_ref(ctx, solver);
+        Z3_del_context(ctx);
+
+        assert (in_degree(m, T) > 0);
+        assert (minSegmentSize > 0);
+
+        MinimumThreadLocalSegmentSize = minSegmentSize;
 
         #ifdef PRINT_Z3_OPTIMIZATION
         BEGIN_SCOPED_REGION

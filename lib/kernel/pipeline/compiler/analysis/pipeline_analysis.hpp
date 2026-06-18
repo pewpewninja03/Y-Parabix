@@ -292,6 +292,8 @@ public:
     unsigned                        PartitionCount = 0;
     unsigned                        ManagedBufferStructCount = 0;
 
+    size_t                          MinimumThreadLocalSegmentSize = 0;
+
     bool                            HasZeroExtendedStream = false;
     bool                            RequiresIllustratorObject = false;
 
