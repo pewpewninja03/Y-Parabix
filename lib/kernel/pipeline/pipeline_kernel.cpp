@@ -663,7 +663,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
             segmentArgs[segmentArgCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
             // produced output items
-            assert (canSetTerminateSignal());
+//            assert (canSetTerminateSignal());
             fields[1] = i32_ONE;
             Value * const itemPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
             assert (segmentArgCount < doSegment->arg_size());

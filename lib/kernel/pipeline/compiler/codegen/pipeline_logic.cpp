@@ -430,6 +430,8 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
         }
         if (bufferScaling) {
             expectedSourceOutputSize = b.CreateCeilUDivRational(bufferScaling, b.getBitBlockWidth());
+        } else {
+            expectedSourceOutputSize = segmentSize;
         }
     }
 
