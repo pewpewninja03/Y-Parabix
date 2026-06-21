@@ -1141,4 +1141,21 @@ parens:  ()
   ]=[   )-(   backwards
 &lt;7&gt;  left/right angles - not brackets but bidi-mirrored
 </datafile>
+<datafile id="permuted">wxyz
+wxzy
+wyxz
+wyzx
+wzxy
+wzyx
+xwyz
+xwzy
+xywz
+xyzw
+xzyw
+xzwy
+</datafile>
+<grepcase regexp="\A{x|y|z|w}" datafile="permuted" greplines="1 2 3 4 5 6 7 8 9 10 11 12"/>
+<grepcase regexp="\A{x|y|z}" datafile="permuted" greplines="1 2 3 4 5 6 10 11"/>
+<grepcase regexp="\A{xy|wz}" datafile="permuted" greplines="5 9"/>
+<grepcase regexp="\A{xy|w}" datafile="permuted" greplines="1 9"/>
 </greptest>

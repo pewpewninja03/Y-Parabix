@@ -39,12 +39,12 @@ RE * ExpandPermutes::transformPermute(Permute * p) {
     }
     std::vector<RE *> elems(perm_size + 1);
     RE * anyAlt = makeAlt(alts.begin(), alts.end());
-    elems.push_back(makeRep(anyAlt, perm_size, perm_size));
-    i = 1;
+    elems[0] = makeRep(anyAlt, perm_size, perm_size);
+    i = 0;
     for (auto perm : *p) {
         unsigned remlgth = total_length - alt_lgth[i];
         RE * r = makeSeq({perm, makeRep(makeAny(mLengthAlphabet), 0, remlgth)});
-        elems[i] = makeLookBehindAssertion(r);
+        elems[i+1] = makeLookBehindAssertion(r);
         i++;
     }
     return makeSeq(elems.begin(), elems.end());
