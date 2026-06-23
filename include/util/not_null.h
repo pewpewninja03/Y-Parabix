@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cassert>
+
 template<typename T>
 struct not_null {
     not_null(T const value) : _value(value) { assert(_value); }
