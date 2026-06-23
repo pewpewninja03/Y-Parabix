@@ -413,6 +413,7 @@ add_subdirectory(lib/ucd/data)
 add_subdirectory(lib/ucd/utf)
 add_subdirectory(lib/audio)
 add_subdirectory(lib/csv)
+add_subdirectory(lib/image)
 
 # Kernel Libraries
 add_subdirectory(lib/kernel/basis)
@@ -441,6 +442,7 @@ if (GENERATE_TOOLS)
     add_subdirectory(tools/audio)
     add_subdirectory(tools/util)
     add_subdirectory(tools/csv)
+    add_subdirectory(tools/image)
 endif()
 
 # Kernel Tests
