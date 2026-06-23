@@ -31,3 +31,6 @@ public:
 
 }
 
+//llvm::Value * IDISA_Builder::hsimd_pairwisesum(unsigned fw, llvm::Value * a, llvm::Value * b) {
+//    UnsupportedFieldWidthError(fw, "hsimd_pairwisesum");
+//}

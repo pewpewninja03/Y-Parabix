@@ -115,6 +115,38 @@ CallInst * IDISA_Builder::CallPrintRegister(StringRef name, Value * const value,
     }
     return CreateCall(printRegister->getFunctionType(), printRegister, {getInt32(static_cast<uint32_t>(fd)), GetString(name), CreateBitCast(value, getBitBlockType())});
 }
+//pairwise
+
+llvm::Value * IDISA_Builder::hsimd_pairwisesum(unsigned fw, llvm::Value * Val_a, llvm::Value * Val_b){
+  
+//    // Extract upper 16 bits
+//    llvm::Value * highA = simd_srli(2*fw, Val_a, fw);  // fw to make it work for any power of 2**k = fw
+//    llvm::Value * highB = simd_srli(2*fw, Val_b, fw);
+//
+//    // Mask with all elements set to 0xFFFF
+//    llvm::Value * mask = simd_fill(2*fw, getIntN(2*fw, (1ULL<<fw) - 1ULL));  // 0xFFFF = 16 - 1s
+//    
+//  
+//    // Mask lower 16 bits
+//    llvm::Value * lowA = simd_and(Val_a, mask);
+//    llvm::Value * lowB = simd_and(Val_b, mask);
+//
+//    // Sum the upper and lower 16-bit parts for pairwise sum
+//    llvm::Value * sumA = simd_add(2*fw, lowA, highA);
+//    llvm::Value * sumB = simd_add(2*fw, lowB, highB);
+
+    // Truncate to 16-bit values
+//        llvm::Value * shortA = b.CreateTrunc(sumA, getIntNTy(16));
+//        llvm::Value * shortB = b.CreateTrunc(sumB, getIntNTy(16));
+
+    //llvm::Value * result = hsimd_packl(2*fw, sumA, sumB);  // hsimd_packl - takes the lower half and packs them into a single vector
+    llvm::Value * result = simd_add(fw, hsimd_packl(2*fw, Val_a, Val_b), hsimd_packh(2*fw, Val_a, Val_b));
+    // Shuffle to concatenate results
+//        llvm::Value * result = b.shufflevector(shortA, shortB, {0, 1, 2, 3, 4, 5, 6, 7});
+
+    return result;
+}
+
 
 Constant *IDISA_Builder::getSplat(const unsigned fieldCount, Constant *Elt) {
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(12, 0, 0)
