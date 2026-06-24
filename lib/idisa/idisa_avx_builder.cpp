@@ -873,11 +873,7 @@ Value * IDISA_AVX512F_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, c
 }
 
 Value * IDISA_AVX512F_Builder::mvmd_shuffle(unsigned fw, Value * data_table, Value * index_vector) {
-<<<<<<< HEAD
-        return mvmd_shuffle2(fw, data_table, data_table, index_vector);
-=======
     return mvmd_shuffle2(fw, data_table, data_table, index_vector);
->>>>>>> upstream/master
 }
 
 
