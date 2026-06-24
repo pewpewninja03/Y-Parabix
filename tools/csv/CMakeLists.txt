@@ -9,9 +9,29 @@ NAME
 SRC
     csv2json.cpp
 DEPS
+    csv
+    jsonlib
     pablo
+    grep
     kernel.basis
     kernel.bitwise
+    kernel.io
+    kernel.pipeline
+    kernel.re
+    kernel.streamutils
+    kernel.util
+    toolchain
+)
+
+parabix_add_executable(
+NAME
+    csvcut
+SRC
+    csvcut.cpp
+DEPS
+    csv
+    pablo
+    kernel.basis
     kernel.io
     kernel.pipeline
     kernel.streamutils
@@ -21,14 +41,17 @@ DEPS
 
 parabix_add_executable(
 NAME
-    csv_column
+    csvgrep
 SRC
-    csv_column.cpp
+    csvgrep.cpp
 DEPS
+    csv
     pablo
+    grep
     kernel.basis
     kernel.io
     kernel.pipeline
+    kernel.re
     kernel.streamutils
     kernel.util
     toolchain

@@ -37,7 +37,7 @@ DEPS
     fileselect
     kernel.basis
     kernel.io
+    kernel.unicode
     re.cc
     re.parse
-    grep
 )

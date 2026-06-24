@@ -72,6 +72,7 @@ public:
                      StreamSet * index, StreamSet * markers, StreamSet * shifted);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+    unsigned mNumMarkerStreams;
 };
 
 }

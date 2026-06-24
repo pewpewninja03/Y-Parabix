@@ -97,13 +97,11 @@ namespace ustats
 
             kernel::StreamSet* outputStream = P.CreateStreamSet(1);
 
-            re::RE * wordProp = re::makePropertyExpression(re::PropertyExpression::Kind::Codepoint, property);
-            wordProp = UCD::linkAndResolve(wordProp);
-            re::Name * word = re::makeName(property, re::Name::Type::UnicodeProperty);
-            word->setDefinition(wordProp);
+            re::PropertyExpression * wordProp = re::makePropertyExpression(re::PropertyExpression::Kind::Codepoint, property);
+            wordProp = cast<re::PropertyExpression>(UCD::linkAndResolve(wordProp));
 
             P.CreateKernelFamilyCall<kernel::UnicodePropertyKernelBuilder>(
-                word,
+                wordProp,
                 BasisBits,
                 outputStream
             );

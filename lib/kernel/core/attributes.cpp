@@ -49,6 +49,7 @@ void Attribute::print(llvm::raw_ostream & out) const noexcept {
         NAME(InfrequentlyUsed);
         NAME(Linear);
         NAME(None);
+        NAME(EmptyReadOverflow);
         NAME(EmptyWriteOverflow);
         NAME(ExecuteStridesIndividually);
         NAME(Statefree);

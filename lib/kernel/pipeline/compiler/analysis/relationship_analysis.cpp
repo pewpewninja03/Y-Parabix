@@ -41,6 +41,8 @@ using CommandLineScalarVec = std::array<Relationship *, (unsigned)CommandLineSca
 
 using RedundantStreamSetMap = PipelineAnalysis::RedundantStreamSetMap;
 
+using StreamSetVertexMap = flat_map<Relationship *, ProgramGraph::Vertex>;
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateInitialPipelineGraph
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -119,6 +121,9 @@ struct RelationshipGraphBuilder {
             assert (isa<RepeatingStreamSet>(rel) || isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
             auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel, addRelationship || isa<RepeatingStreamSet>(rel));
             add_edge(relationship, binding, RelationshipType{portType, i}, G);
+            if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(rel))) {
+                RepeatingStreamSets.emplace(rel, relationship);
+            }
         }
     }
 
@@ -269,13 +274,26 @@ struct RelationshipGraphBuilder {
         }
     }
 
-
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief associateRepeatingStreamSets
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void associateRepeatingStreamSets(const unsigned pipelineInput) {
+        const auto m = RepeatingStreamSets.size();
+        for (unsigned i = 0; i < m; ++i) {
+            const auto r = RepeatingStreamSets.nth(i);
+            const unsigned outDeg = mPipelineKernel->getNumOfStreamInputs() + i;
+            Binding * const repeating = new Binding("#repeating" + std::to_string(outDeg), r->first, GreedyRate(0));
+            mInternalBindings.emplace_back(repeating);
+            const auto repeatingBinding = G.add(RelationshipNode::IsBinding, repeating, RelationshipNodeFlag::ImplicitlyAdded);
+            add_edge(pipelineInput, repeatingBinding, RelationshipType{PortType::Output, outDeg, ReasonType::ImplicitRepeatingStreamSet}, G);
+            add_edge(repeatingBinding, r->second, RelationshipType{PortType::Output, outDeg, ReasonType::ImplicitRepeatingStreamSet}, G);
+        }
+    }
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief mapInOutStreamSets
      ** ------------------------------------------------------------------------------------------------------------- */
     void mapInOutStreamSets(KernelVertexVec & kernelList) {
-
 
         assert (!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes));
         assert (kernelList.size() == mKernels.size());
@@ -306,16 +324,14 @@ struct RelationshipGraphBuilder {
                         bool notFound = true;
                         for (unsigned j = 0; j < inputs.size(); ++j) {
                             const Binding & input = inputs[j];
-                            if (attr.label().compare(input.getName())==0) {
+                            if (attr.label().compare(input.getName()) == 0) {
 
-                                if (LLVM_UNLIKELY(InOutRemap.count(input.getRelationship()) != 0)) {
+                                if (LLVM_UNLIKELY(!InOutRemap.emplace(input.getRelationship(), vertex).second)) {
                                     SmallVector<char, 256> tmp;
                                     raw_svector_ostream msg(tmp);
                                     msg << kernel->getName() << "." << output.getName()
                                         << " is an InOut value for a streamset that is already an InOut for a prior kernel.";
                                 }
-
-                                InOutRemap.emplace(input.getRelationship(), vertex);
 
                                 notFound = false;
                                 break;
@@ -336,6 +352,9 @@ struct RelationshipGraphBuilder {
 
         if (LLVM_LIKELY(InOutRemap.empty())) return;
 
+        // Suppose we have a streamset S that is an input to kernels A and B and both A before B and B before A are valid topological orderings
+        // of the program. If S is an inout of B, we want to ensure that we cannot produce a B before A ordering or A would end up reading B's
+        // modified version of S instead of the original.
 
         for (unsigned i = 0; i < n; ++i) {
             const Kernel * const kernel = mKernels[i].Object;
@@ -354,12 +373,7 @@ struct RelationshipGraphBuilder {
                 }
             }
         }
-
-
     }
-
-
-
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief addPopCountKernels
@@ -390,7 +404,7 @@ struct RelationshipGraphBuilder {
 
             auto addPopCountDependency = [&](const ProgramGraph::vertex_descriptor bindingVertex,
                                              const RelationshipType & port) {
-
+                assert (port.Reason != ReasonType::OrderingConstraint);
                 const RelationshipNode & rn = G[bindingVertex];
                 assert (rn.Type == RelationshipNode::IsBinding);
                 const Binding & binding = rn.Binding;
@@ -516,6 +530,9 @@ struct RelationshipGraphBuilder {
             vertex.push_back(k);
             addConsumerStreamSets(PortType::Input, k, popCountKernel->getInputStreamSetBindings(), false);
             addProducerStreamSets(PortType::Output, k, popCountKernel->getOutputStreamSetBindings());
+            #ifndef NDEBUG
+            unsigned _FlagCheck = 0;
+            #endif
 
             // subsitute the popcount relationships
             for (const auto e : make_iterator_range(out_edges(i, H))) {
@@ -523,6 +540,9 @@ struct RelationshipGraphBuilder {
                 const Kernel * const kernel = kernels[target(e, H)].Object;
                 const auto consumer = G.find(RelationshipNode::IsKernel, kernel);
                 assert (ed.Type == CountingType::Positive || ed.Type == CountingType::Negative);
+                #ifndef NDEBUG
+                _FlagCheck |= ed.Type;
+                #endif
                 StreamSet * const stream = ed.Type == CountingType::Positive ? positive : negative; assert (stream);
                 const auto streamVertex = G.find(RelationshipNode::IsStreamSet, stream);
 
@@ -593,6 +613,8 @@ struct RelationshipGraphBuilder {
                     report_fatal_error("Internal error: failed to locate PopCount binding.");
                 }
             }
+            assert ((_FlagCheck & CountingType::Positive) != 0 || positive == nullptr);
+            assert ((_FlagCheck & CountingType::Negative) != 0 || negative == nullptr);
         }
     }
 
@@ -644,6 +666,10 @@ struct RelationshipGraphBuilder {
                         continue;
                     }
 
+                    if (LLVM_UNLIKELY(kernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+                        continue;
+                    }
+
                     const auto n = in_degree(i, G);
                     inputs.resize(n);
                     scalars.resize(n);
@@ -687,7 +713,6 @@ struct RelationshipGraphBuilder {
                         if (LLVM_UNLIKELY(out_degree(i, G) != m)) {
                             error = true;
                         } else {
-
                             // Collect all of the output information from kernel j.
                             outputs.resize(m);
                             scalars.resize(m);
@@ -743,7 +768,7 @@ struct RelationshipGraphBuilder {
                                     break;
                                 }
 
-                                RedundantStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
+                                RemappedStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
 
                                 struct EdgeReplacement {
                                     ProgramGraph::vertex_descriptor Source;
@@ -831,10 +856,12 @@ struct RelationshipGraphBuilder {
         }
         for (const auto & K : mKernels) {
             const Kernel * kernel = K.Object;
-            if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
+            #warning replace kernelflags with attribute?
+            if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting) || kernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
                 const auto k = G.find(RelationshipNode::IsKernel, kernel);
-                pending.push(k);
-                visited.insert_unique(k);
+                if (visited.insert(k).second) {
+                     pending.push(k);
+                }
             }
         }
 
@@ -865,11 +892,13 @@ struct RelationshipGraphBuilder {
                     for (const auto e : make_iterator_range(out_edges(v, G))) {
                         const auto b = target(e, G);
                         const RelationshipNode & rb = G[b];
-                        assert (rb.Type == RelationshipNode::IsBinding || rb.Type == RelationshipNode::IsScalar);
+                        assert (rb.Type == RelationshipNode::IsBinding || rb.Type == RelationshipNode::IsScalar || G[e].Reason == ReasonType::OrderingConstraint);
                         visited.insert(b); // output binding/scalar
                         if (LLVM_LIKELY(rb.Type == RelationshipNode::IsBinding)) {
+                            assert (G[e].Reason != ReasonType::OrderingConstraint);
                             if (LLVM_LIKELY(out_degree(b, G) > 0)) {
                                 const auto f = first_out_edge(b, G);
+                                assert (G[f].Reason != ReasonType::OrderingConstraint);
                                 assert (G[f].Reason != ReasonType::Reference);
                                 visited.insert(target(f, G)); // output stream
                             }
@@ -879,7 +908,9 @@ struct RelationshipGraphBuilder {
             }
         }
 
-        for (const auto v : make_iterator_range(vertices(G))) {
+        const auto m = num_vertices(G);
+
+        for (size_t v = 0; v < m; ++v) {
             if (LLVM_UNLIKELY(visited.count(v) == 0)) {
                 RelationshipNode & rn = G[v];
                 clear_vertex(v, G);
@@ -890,7 +921,6 @@ struct RelationshipGraphBuilder {
 
     }
 
-
     RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
     : G(G)
     , mPipelineKernel(P.mPipelineKernel)
@@ -898,7 +928,7 @@ struct RelationshipGraphBuilder {
     , mInternalKernels(P.mInternalKernels)
     , mInternalBindings(P.mInternalBindings)
     , mInternalBuffers(P.mInternalBuffers)
-    , RedundantStreamSets(P.RedundantStreamSets) {
+    , RemappedStreamSets(P.RemappedStreamSets) {
         std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
     }
 
@@ -908,21 +938,44 @@ struct RelationshipGraphBuilder {
     OwningVector<Kernel> &          mInternalKernels;
     OwningVector<Binding> &         mInternalBindings;
     OwningVector<StreamSetBuffer> & mInternalBuffers;
-    RedundantStreamSetMap &         RedundantStreamSets;
+    RedundantStreamSetMap &         RemappedStreamSets;
     CommandLineScalarVec            CommandLineScalars;
     TruncatedStreamSetVec           TruncatedStreamSets;
+    StreamSetVertexMap              RepeatingStreamSets;
 
 };
-
+    const auto n = mKernels.size();
 
     RelationshipGraphBuilder B(Relationships, *this);
 
     // Copy the list of kernels and add in any internal kernels
     assert (num_vertices(Relationships) == 0);
-    const unsigned p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
+    const auto p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
-    const auto n = mKernels.size();
+
     KernelVertexVec vertex(n);
+
+    if (LLVM_UNLIKELY(mPipelineKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+        RequiresIllustratorObject = true;
+    }
+
+    size_t boundaryIndex = 0;
+    size_t nextBoundaryPosition;
+
+    const auto & boundaries = mPipelineKernel->mPhaseBoundaries;
+
+    if (boundaries.empty()) {
+        nextBoundaryPosition = -1U;
+    } else {
+        const auto & boundary = boundaries[boundaryIndex];
+        nextBoundaryPosition = boundary.second;
+        assert (nextBoundaryPosition < n);
+    }
+
+    KernelPhaseId.reserve(n);
+
+    KernelPhaseId.emplace_hint(KernelPhaseId.end(), p_in, boundaryIndex);
+
     for (unsigned i = 0; i < n; ++i) {
         const auto & P = mKernels[i];
         const Kernel * K = P.Object;
@@ -935,10 +988,35 @@ struct RelationshipGraphBuilder {
         }
 
         const auto flags = P.isFamilyCall() ? RelationshipNodeFlag::IndirectFamily : 0U;
-        vertex[i] = Relationships.add(RelationshipNode::IsKernel, K, flags);
+
+        assert (boundaryIndex <= boundaries.size());
+
+        if (LLVM_UNLIKELY(nextBoundaryPosition == i)) {
+            ++boundaryIndex;
+            if (boundaryIndex == boundaries.size()) {
+                nextBoundaryPosition = -1U;
+            } else {
+                const auto & boundary = boundaries[boundaryIndex];
+                nextBoundaryPosition = boundary.second;
+                assert (nextBoundaryPosition < n);
+            }
+        }
+
+        if (LLVM_UNLIKELY(K->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+            RequiresIllustratorObject = true;
+        }
+
+        const auto v = Relationships.add(RelationshipNode::IsKernel, K, flags);
+        KernelPhaseId.emplace_hint(KernelPhaseId.end(), v, boundaryIndex);
+        vertex[i] = v;
     }
-    const unsigned p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
+
+    assert (boundaryIndex == boundaries.size());
+
+    const auto p_out = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     PipelineOutput = p_out;
+
+    KernelPhaseId.emplace_hint(KernelPhaseId.end(), p_out, boundaryIndex);
 
     // From the pipeline's perspective, a pipeline input node "produces" the inputs of the pipeline and a
     // pipeline output node "consumes" its outputs. Internally this means the inputs and outputs of the
@@ -956,9 +1034,6 @@ struct RelationshipGraphBuilder {
         const Kernel * const K = mKernels[i].Object;
         B.addConsumerStreamSets(PortType::Input, vertex[i], K->getInputStreamSetBindings(), false);
     }
-    if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
-        B.mapInOutStreamSets(vertex);
-    }
     for (unsigned i = 0; i < n; ++i) {
         const Kernel * const K = mKernels[i].Object;
         B.addReferenceRelationships(PortType::Input, vertex[i], K->getInputStreamSetBindings());
@@ -969,6 +1044,7 @@ struct RelationshipGraphBuilder {
     }
     B.addTruncatedStreamSetContraints();
     B.addPopCountKernels(b, mKernels, vertex);
+
     B.addProducerScalars(PortType::Output, p_in, mPipelineKernel->getInputScalarBindings());
     B.addConsumerScalars(PortType::Input, p_out, mPipelineKernel->getOutputScalarBindings(), true);
     for (unsigned i = 0; i < n; ++i) {
@@ -985,6 +1061,11 @@ struct RelationshipGraphBuilder {
         B.addConsumerCalls(PortType::Input, C);
     }
 
+    B.associateRepeatingStreamSets(p_in);
+    if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+        B.mapInOutStreamSets(vertex);
+    }
+
     #ifndef NDEBUG
     for (auto v : make_iterator_range(vertices(B.G))) {
         const auto & vi = B.G[v];
@@ -997,17 +1078,14 @@ struct RelationshipGraphBuilder {
     #endif
 
     // Pipeline optimizations
-    if (LLVM_UNLIKELY(!codegen::EnableIllustrator)) {
-        B.combineDuplicateKernels(vertex);
-        B.removeUnusedKernels(p_in, p_out);
-    }
-
+    B.combineDuplicateKernels(vertex);
+    B.removeUnusedKernels(p_in, p_out);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief transcribeRelationshipGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph) {
+void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & partitionGraph) {
 
     using Vertices = Vec<unsigned, 64>;
 
@@ -1084,7 +1162,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     unsigned inputPartitionId = -1U;
     unsigned outputPartitionId = -1U;
-    unsigned currentGroupId = -1U;
+//    unsigned currentGroupId = -1U;
 
     assert (kernels[0] == PipelineInput);
     assert (kernels[numOfKernels - 1] == PipelineOutput);
@@ -1100,16 +1178,9 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
         assert (rep.denominator() == 1);
         const auto sl = rep.numerator();
         StrideRepetitionVector[newKernelId] = sl;
-        const auto cov3 = P.StridesPerSegmentCoV * Rational{3};
-        Rational ONE{1};
-        const auto min = (cov3 > ONE) ? 0U: floor(ONE - cov3);
-        const auto max = ceiling(ONE + cov3);
-        assert (min <= max);
-
-
-        MinimumNumOfStrides[newKernelId] = sl * min;
-        MaximumNumOfStrides[newKernelId] = sl * max;
     };
+
+    size_t priorPhaseId = -1U;
 
     for (unsigned i = 0; i < (numOfKernels - 1); ++i) {
         const auto in = kernels[i];
@@ -1125,27 +1196,31 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
         // renumber the partitions to reflect the selected ordering
         #ifdef FORCE_EACH_KERNEL_INTO_UNIQUE_PARTITION
-        ++outputPartitionId;
-        #else
+        inputPartitionId = -1U;
+        #endif
         if (origPartitionId != inputPartitionId) {
             inputPartitionId = origPartitionId;
+            ++outputPartitionId;
             const PartitionData & P = partitionGraph[origPartitionId];
-            const auto groupId = P.LinkedGroupId;
-            if (groupId != currentGroupId) {
-                ++outputPartitionId;
-                currentGroupId = groupId;
+            if (priorPhaseId != P.PhaseId && outputPartitionId > 0) {
+                PartitionPhaseBoundaries.push_back(outputPartitionId);
+                priorPhaseId = P.PhaseId;
             }
         }
-        #endif
         KernelPartitionId[out] = outputPartitionId;
+    }
+    if (LLVM_UNLIKELY(PartitionPhaseBoundaries.empty())) {
+        assert (numOfKernels == 2);
+        PartitionPhaseBoundaries.push_back(0);
     }
 
     const auto newPipelineOutput = LastKernel + 1U;
     KernelPartitionId[newPipelineOutput] = ++outputPartitionId;
     subsitution[PipelineOutput] = newPipelineOutput;
+    PartitionPhaseBoundaries.push_back(outputPartitionId);
+    assert (PartitionPhaseBoundaries.size() == mPipelineKernel->mPhaseBoundaries.size() + 2);
 
     BEGIN_SCOPED_REGION
-
     const auto f = PartitionIds.find(PipelineOutput);
     assert (f != PartitionIds.end());
     const auto origPartitionId = f->second;
@@ -1153,7 +1228,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     END_SCOPED_REGION
 
     PartitionCount = outputPartitionId + 1U;
-
     FirstKernelInPartition.resize(PartitionCount + 1U);
     FirstKernelInPartition[0] = PipelineInput;
 
@@ -1173,27 +1247,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     FirstKernelInPartition[PartitionCount - 1] = newPipelineOutput;
     FirstKernelInPartition[PartitionCount] = newPipelineOutput;
-#ifndef NDEBUG
-    if (LLVM_UNLIKELY(IsNestedPipeline && (MinimumNumOfStrides[PipelineInput] != 1))) {
-        auto checkIO = [](const Bindings & bindings) -> bool {
-            for (const Binding & binding : bindings) {
-                if (isCountable(binding) && !binding.isDeferred()) {
-                    return true;
-                }
-            }
-            return false;
-        };
-        if (checkIO(mPipelineKernel->getInputStreamSetBindings()) || checkIO(mPipelineKernel->getOutputStreamSetBindings())) {
-            errs() << "WARNING! nested pipeline "
-                   << mPipelineKernel->getName() <<
-                      " requires more than one stride of input but has at least one "
-                      "non-deferred Countable I/O rate. This may cause I/O errors "
-                      "with the outer pipeline.\n\n"
-                      "Check -PrintPipelineGraph for details.\n";
-        }
-    }
-#endif
-
 
     // Originally, if the pipeline kernel does not have external I/O, both the pipeline in/out
     // nodes would be placed into the same (ignored) set but this won't be true after scheduling.
@@ -1231,6 +1284,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
         assert (subsitution[streamSets[i]] == -1U);
         subsitution[streamSets[i]] = FirstStreamSet + i;
     }
+
     for (unsigned i = 0; i < numOfBindings; ++i) {
         assert (subsitution[bindings[i]] == -1U);
         subsitution[bindings[i]] = FirstBinding  + i;
@@ -1242,15 +1296,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     for (unsigned i = 0; i < numOfScalars; ++i) {
         assert (subsitution[scalars[i]] == -1U);
         subsitution[scalars[i]] = FirstScalar + i;
-    }
-    // When constructing the initial partition graph, we identified which streamsets were
-    // thread-local before we considered termination properties.
-    mNonThreadLocalStreamSets.reserve(num_edges(initialGraph));
-    for (auto e : make_iterator_range(edges(initialGraph))) {
-        const auto streamSet = initialGraph[e];
-        if (streamSet) {
-            mNonThreadLocalStreamSets.insert(subsitution[streamSet]);
-        }
     }
 
     SmallVector<std::pair<RelationshipType, unsigned>, 64> temp;
@@ -1350,29 +1395,31 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
     assert (node.Type == RelationshipNode::IsKernel);
     const Kernel * const kernelObj = node.Kernel; assert (kernelObj);
 
-    unsigned maxInputPort = -1U;
+    int maxInputPort = -1;
     for (auto e : reverse(make_iterator_range(in_edges(kernel, G)))) {
         const auto binding = source(e, G);
         const RelationshipNode & rn = G[binding];
         if (LLVM_LIKELY(rn.Type == RelationshipNode::IsBinding)) {
             const RelationshipType & port = G[e];
-            maxInputPort = port.Number;
-            break;
+            assert (port.Reason != ReasonType::OrderingConstraint);
+            maxInputPort = std::max<int>(maxInputPort, port.Number);
         }
     }
-    const auto numOfInputs = maxInputPort + 1U;
+    assert (maxInputPort >= -1);
+    const auto numOfInputs = maxInputPort + 1;
 
-    unsigned maxOutputPort = -1U;
+    int maxOutputPort = -1;
     for (auto e : reverse(make_iterator_range(out_edges(kernel, G)))) {
         const auto binding = target(e, G);
         const RelationshipNode & rn = G[binding];
         if (LLVM_LIKELY(rn.Type == RelationshipNode::IsBinding)) {
             const RelationshipType & port = G[e];
-            maxOutputPort = port.Number;
-            break;
+            assert (port.Reason != ReasonType::OrderingConstraint);
+            maxOutputPort = std::max<int>(maxOutputPort, port.Number);
         }
     }
-    const auto numOfOutputs = maxOutputPort + 1U;
+    assert (maxOutputPort >= -1);
+    const auto numOfOutputs = maxOutputPort + 1;
 
     // Evaluate the input/output ordering here and ensure that any reference port is stored first.
     const auto numOfPorts = numOfInputs + numOfOutputs;
@@ -1383,12 +1430,18 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
 
     Graph E(numOfPorts);
 
+    #ifndef NDEBUG
+    flat_set<size_t> _portCount;
+    #endif
+
     for (auto e : make_iterator_range(in_edges(kernel, G))) {
         const auto binding = source(e, G);
         const RelationshipNode & rn = G[binding];
         if (LLVM_LIKELY(rn.Type == RelationshipNode::IsBinding)) {
             const RelationshipType & port = G[e];
+            assert (port.Reason != ReasonType::OrderingConstraint);
             assert (port.Number < numOfInputs);
+            assert (_portCount.insert(port.Number).second);
             E[port.Number] = e;
             if (LLVM_UNLIKELY(in_degree(binding, G) != 1)) {
                 for (const auto f : make_iterator_range(in_edges(binding, G))) {
@@ -1408,16 +1461,18 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
                 }
             }
         }
-
     }
+    assert (_portCount.size() == numOfInputs);
 
     for (auto e : make_iterator_range(out_edges(kernel, G))) {
         const auto binding = target(e, G);
         const RelationshipNode & rn = G[binding];
         if (LLVM_LIKELY(rn.Type == RelationshipNode::IsBinding)) {
             const RelationshipType & port = G[e];
+            assert (port.Reason != ReasonType::OrderingConstraint);
             assert (port.Number < numOfOutputs);
             const auto portNum = port.Number + numOfInputs;
+            assert (_portCount.insert(portNum).second);
             E[portNum] = e;
             if (LLVM_UNLIKELY(in_degree(binding, G) != 1)) {
                 for (const auto f : make_iterator_range(in_edges(binding, G))) {
@@ -1434,6 +1489,7 @@ void PipelineAnalysis::addKernelRelationshipsInReferenceOrdering(const unsigned 
             }
         }
     }
+    assert (_portCount.size() == numOfPorts);
 
     BitVector V(numOfPorts);
     std::queue<Vertex> Q;

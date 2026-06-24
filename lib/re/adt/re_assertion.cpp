@@ -13,7 +13,6 @@ using namespace llvm;
 namespace re {
 
 Assertion::Kind Assertion::reverseKind(Assertion::Kind k) {
-    if (k == Assertion::Kind::Boundary) return k;
     return k == Assertion::Kind::LookAhead ? Assertion::Kind::LookBehind : Assertion::Kind::LookAhead;
 }
 
@@ -27,10 +26,6 @@ RE * makeAssertion(RE * asserted, Assertion::Kind k, Assertion::Sense s) {
         else return makeAlt();
     }
     if (isEmptySeq(asserted)) {
-        if (k == Assertion::Kind::Boundary) {
-            if (s == Assertion::Sense::Positive) return makeAlt();
-            else return makeSeq();
-        }
         if (s == Assertion::Sense::Positive) return makeSeq();
         else return makeAlt();
     }
@@ -53,21 +48,11 @@ RE * makeNegativeLookBehindAssertion(RE * r) {
     return makeAssertion(r, Assertion::Kind::LookBehind, Assertion::Sense::Negative);
 }
 
-RE * makeBoundaryAssertion(RE * r) {
-    return makeAssertion(r, Assertion::Kind::Boundary, Assertion::Sense::Positive);
-}
-
-RE * makeNegativeBoundaryAssertion(RE * r) {
-    return makeAssertion(r, Assertion::Kind::Boundary, Assertion::Sense::Negative);
-}
-    
 RE * makeSOT () {
-    //return makeNegativeLookBehindAssertion(makeByte(0x00,0xFF));
     return makeStart();
 }
 
 RE * makeEOT () {
-    //return makeNegativeLookAheadAssertion(makeByte(0x00,0xFF));
     return makeEnd();
 }
 

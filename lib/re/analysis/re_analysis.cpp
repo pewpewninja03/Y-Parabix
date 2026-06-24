@@ -10,9 +10,9 @@
 #include <re/analysis/validation.h>
 #include <re/transforms/remove_nullable.h>
 #include <re/transforms/to_utf8.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/utf/utf_encoder.h>
-
+#include <ucd/core/unicode_set.h>
+#include <ucd/utf/utf_encoder.h>
+#include <ucd/data/PropertyObjectTable.h>
 #include <util/small_flat_set.hpp>
 
 using namespace llvm;
@@ -154,6 +154,46 @@ std::pair<int, int> getLengthRange(const RE * re, const cc::Alphabet * indexAlph
         return getLengthRange(r->getCapture(), indexAlphabet);
     }
     return std::make_pair(0, INT_MAX);
+}
+
+struct LookaheadLengthInspector : public RE_Inspector {
+    LookaheadLengthInspector(const cc::Alphabet * lengthAlpha) : RE_Inspector(), 
+        mLengthAlphabet(lengthAlpha), mMaxLA(0) {}
+
+    void inspectAssertion(Assertion * a) override {
+        if (a->getKind() == Assertion::Kind::LookAhead) {
+            auto r = getLengthRange(a->getAsserted(), mLengthAlphabet);
+            mMaxLA = std::max(mMaxLA, static_cast<unsigned>(r.second));
+        }
+    }
+
+    void inspectPropertyExpression(PropertyExpression * pe) override {
+        if (pe->getKind() == PropertyExpression::Kind::Boundary) {
+            if (pe->getPropertyIdentifier() == "w") {
+                // Level 2 word boundaries have lookahead up to 2 Unicode cps. 
+                if (mLengthAlphabet == &cc::UTF8) {
+                    mMaxLA = std::max(mMaxLA, 8U);
+                } else {
+                    mMaxLA = std::max(mMaxLA, 2U);
+                }
+            } else {
+                if (mLengthAlphabet == &cc::UTF8) {
+                    mMaxLA = std::max(mMaxLA, 4U);
+                } else {
+                    mMaxLA = std::max(mMaxLA, 1U);
+                }
+            }
+        }
+    }
+
+    const cc::Alphabet * mLengthAlphabet;
+    unsigned mMaxLA;
+};
+
+unsigned maxLookaheadLength(const RE * re, const cc::Alphabet * lengthAlpha) {
+    LookaheadLengthInspector visitor(lengthAlpha);
+    visitor.inspectRE(const_cast<RE *>(re));
+    return visitor.mMaxLA;
 }
 
 CC * resolveToCC(RE * r) {
@@ -342,18 +382,42 @@ struct FixedUTF8Validator : public RE_Validator {
     }
 
     bool validateName(const Name * name) override {
-        RE * defn = name->getDefinition();
-        return (defn != nullptr) && validate(defn);
+        return false;
     }
 
     bool validatePropertyExpression(const PropertyExpression * pe) override {
-        RE * defn = pe->getResolvedRE();
-        return (defn != nullptr) && validate(defn);
+        return false;
     }
 };
 
 bool validateFixedUTF8(const RE * r) {
     return FixedUTF8Validator().validateRE(r);
+}
+
+struct ReferenceFree : public RE_Validator {
+    ReferenceFree() : RE_Validator("ReferenceFree") {}
+
+    bool validateReference(const Reference * ref) override {
+        return false;
+    }
+};
+
+bool hasReference(const RE * r) {
+    return !ReferenceFree().validateRE(r);
+}
+
+struct CodepointReferenceFree : public RE_Validator {
+    CodepointReferenceFree() : RE_Validator("CodepointReferenceFree") {}
+
+    bool validateReference(const Reference * ref) override {
+        UCD::property_t p = ref->getReferencedProperty();
+        UCD::PropertyObject * propObj = UCD::getPropertyObject(p);
+        return !isa<UCD::CodePointPropertyObject>(propObj);
+    }
+};
+
+bool hasCodepointReference(const RE * r) {
+    return !CodepointReferenceFree().validateRE(r);
 }
 
 bool hasAssertion(const RE * re) {
@@ -505,7 +569,7 @@ bool hasEndAnchor(const RE * re) {
 
 class StartFreeValidator : public RE_Validator {
 public:
-    StartFreeValidator() : RE_Validator("StartFreeValidator") {}
+    StartFreeValidator() : RE_Validator("StartFreeValidator", NameProcessingMode::ProcessDefinition) {}
     bool validateStart(const Start * s) override {return false;}
 };
 
@@ -514,7 +578,7 @@ bool anyStartAnchor(const RE * re) {
 }
 class EndFreeValidator : public RE_Validator {
 public:
-    EndFreeValidator() : RE_Validator("EndFreeValidator") {}
+    EndFreeValidator() : RE_Validator("EndFreeValidator", NameProcessingMode::ProcessDefinition) {}
     bool validateEnd(const End * e) override {return false;}
 };
 
@@ -587,6 +651,7 @@ bool DefiniteLengthBackReferencesOnly(const RE * re) {
     return true; // otherwise = CC, Any, Start, End, Range
 }
 
+# define End_Lookahead 1
 unsigned grepOffset(const RE * re) {
     if (const Alt * alt = dyn_cast<Alt>(re)) {
         unsigned altOffset = 0;
@@ -598,7 +663,7 @@ unsigned grepOffset(const RE * re) {
         if (seq->empty()) return 1;
         for (auto i = seq->rbegin(); i != seq->rend(); ++i) {
             unsigned o = grepOffset(*i);
-            if (!isa<Assertion>(*i)) return o;
+            if (!isa<Assertion>(*i) && !isa<End>(*i)) return o;
             if (o == 1) return o;
         }
         return 1;
@@ -608,12 +673,12 @@ unsigned grepOffset(const RE * re) {
     } else if (isa<Start>(re)) {
         return 1;
     } else if (isa<End>(re)) {
-        return 1;
+        return 1 - End_Lookahead;
     } else if (const Assertion * a = dyn_cast<Assertion>(re)) {
         if (a->getKind() == Assertion::Kind::LookBehind) {
             return grepOffset(a->getAsserted());
         }
-        return 1;
+        return 0;
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return grepOffset(diff->getLH());
     } else if (const Intersect * e = dyn_cast<Intersect>(re)) {

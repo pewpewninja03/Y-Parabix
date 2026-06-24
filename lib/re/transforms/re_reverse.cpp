@@ -79,9 +79,6 @@ public:
     RE * transformAssertion (Assertion * a) override {
         RE * asserted = a->getAsserted();
         RE * reversed = transform(asserted);
-        if ((a->getKind() == Assertion::Kind::Boundary) && (reversed == asserted)) {
-            return a;
-        }
         return makeAssertion(reversed, Assertion::reverseKind(a->getKind()), a->getSense());
     }
     

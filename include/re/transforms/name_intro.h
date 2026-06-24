@@ -8,7 +8,7 @@
 #include <string>
 #include <map>
 #include <re/transforms/re_transformer.h>
-#include <unicode/utf/utf_encoder.h>
+#include <ucd/utf/utf_encoder.h>
 
 namespace cc {class Alphabet;}
 
@@ -65,6 +65,6 @@ private:
     std::string genSym();
 };
 
-RE * canonicalizeExternals(RE * r, std::vector<std::string> & external_names);
+RE * canonicalizeExternals(RE * r, const std::vector<std::string> & external_names);
 
 }

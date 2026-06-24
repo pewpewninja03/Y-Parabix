@@ -14,6 +14,8 @@
 #include <pablo/pe_scanthru.h>
 #include <pablo/pe_matchstar.h>
 #include <pablo/pe_var.h>
+#include <pablo/pe_debugprint.h>
+#include <pablo/pe_illustrator.h>
 #include <pablo/pablo_toolchain.h>
 #ifndef NDEBUG
 #include <pablo/pabloverifier.hpp>
@@ -220,8 +222,7 @@ bool safe_replacement(const PabloAST * repl, const Statement * expr) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief redundancyElimination
  ** ------------------------------------------------------------------------------------------------------------- */
-bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & expressions, VariableTable & variables) {
-    bool hasSideEffects = false;
+void redundancyElimination(PabloBlock * const currentScope, ExpressionTable & expressions, VariableTable & variables) {
     const auto baseNonZeroEntries = mNonZero.size();
     Statement * stmt = currentScope->front();
     while (stmt) {
@@ -257,6 +258,7 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
             PabloAST * const folded = triviallyFold(stmt, currentScope);
             if (folded) {
                 assert (folded != stmt);
+                assert (!stmt->isSideEffecting());
                 Statement * const prior = stmt->getPrevNode();
                 stmt->replaceWith(folded);
                 // Since folding a statement may result in inserting new
@@ -275,16 +277,12 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
             bool added = false;
             std::tie(replacement, added) = expressions.findOrAdd(stmt);
             if (!added) {
+                assert (!stmt->isSideEffecting());
                 assert (safe_replacement(replacement, stmt));
                 Statement * const next = stmt->getNextNode();
                 stmt->replaceAllUsesWith(replacement);
                 stmt = next;
                 continue;
-            }
-
-            if (LLVM_UNLIKELY(stmt->isSideEffecting())) {
-                hasSideEffects = true;
-                mSideEffecting.insert(stmt);
             }
 
             // Attempt to extend our set of trivially non-zero statements.
@@ -310,7 +308,6 @@ bool redundancyElimination(PabloBlock * const currentScope, ExpressionTable & ex
 
     // Erase any local non-zero entries that were discovered while processing this scope
     mNonZero.erase(mNonZero.begin() + baseNonZeroEntries, mNonZero.end());
-    return hasSideEffects;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -368,16 +365,19 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
         if (LLVM_LIKELY(isa<If>(br))) {
             return flatten(br);
         } else {
+            assert (isa<While>(br));
+            PabloPrinter::print(br->getParent(), errs(), true);
+            errs() << " ----\n";
+            PabloPrinter::print(br, errs(), false);
+            errs() << " ----\n";
             report_fatal_error("While condition is guaranteed to be non-zero");
         }
     }
 
     // Process the Branch body
-    bool hasSideEffects = false;
-
     ExpressionTable nestedExpressions(&expressions);
     mNonZero.push_back(cond); // mark the cond as non-zero prior to processing the inner scope.
-    hasSideEffects = redundancyElimination(br->getBody(), nestedExpressions, nestedVariables);
+    redundancyElimination(br->getBody(), nestedExpressions, nestedVariables);
     assert (mNonZero.back() == cond);
     mNonZero.pop_back();
 
@@ -392,9 +392,6 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
     // 100% correct prediction rate exceeds the cost of the body itself
     if (LLVM_LIKELY(isa<If>(br)) && LLVM_UNLIKELY(isTrivial(br->getBody()))) {
         return flatten(br);
-    }
-    if (LLVM_UNLIKELY(hasSideEffects)) {
-        mSideEffecting.insert(br);
     }
     return nullptr;
 }
@@ -1176,8 +1173,10 @@ static bool isOutputExtract(const Var * var, const LiveVarSet & set) {
  * @brief isSideEffecting
  ** ------------------------------------------------------------------------------------------------------------- */
 bool isSideEffecting(const Statement * const stmt) const {
-    const auto f = mSideEffecting.find(stmt);
-    return f != mSideEffecting.end();
+    if (stmt->isSideEffecting()) {
+        return true;
+    }
+    return mSideEffecting.count(stmt);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1185,6 +1184,7 @@ bool isSideEffecting(const Statement * const stmt) const {
  ** ------------------------------------------------------------------------------------------------------------- */
 bool deadCodeElimination(PabloKernel * const kernel) {
     LiveVarSet variables;
+    mSideEffecting.clear();
     const auto n = kernel->getNumOfOutputs();
     for (unsigned i = 0; i < n; ++i) {
         variables.put(kernel->getOutput(i));
@@ -1205,10 +1205,13 @@ bool deadCodeElimination(PabloKernel * const kernel) {
  ** ------------------------------------------------------------------------------------------------------------- */
 bool deadCodeElimination(PabloBlock * const block, LiveVarSet & liveSet, const bool inspect) {
     bool flattened = false;
+    Branch * const outerBr = block->getBranch();
     for (Statement * stmt = block->back(), * prior; stmt; stmt = prior) {
         prior = stmt->getPrevNode();
-        if (LLVM_UNLIKELY(stmt->getNumUses() == 0)) {
-            const auto sideEffecting = isSideEffecting(stmt);
+        if (outerBr && isSideEffecting(stmt)) {
+            mSideEffecting.insert(outerBr);
+        }
+        if (LLVM_UNLIKELY(stmt->getNumUses() == 0)) {            
             if (LLVM_UNLIKELY(isa<Branch>(stmt))) {
                 Branch * const br = cast<Branch>(stmt);
                 auto escaped = br->getEscaped();
@@ -1221,7 +1224,7 @@ bool deadCodeElimination(PabloBlock * const block, LiveVarSet & liveSet, const b
                 }
 
                 // If none of the escaped vars from this branch are read, delete it.
-                if (LLVM_LIKELY(!nested.empty() || sideEffecting)) {
+                if (LLVM_LIKELY(!nested.empty() || isSideEffecting(br))) {
                     if (LLVM_UNLIKELY(isa<While>(br))) {
                         // The condition of a while loop may not have had any uses outside
                         // of its reassignment for the next loop iteration test.
@@ -1273,8 +1276,17 @@ bool deadCodeElimination(PabloBlock * const block, LiveVarSet & liveSet, const b
                     }
                 }
             }
-            if (LLVM_LIKELY(!inspect && !sideEffecting)) {
-                stmt->eraseFromParent();
+            if (LLVM_UNLIKELY(stmt->isSideEffecting())) {
+                for (unsigned i = 0; i < stmt->getNumOperands(); ++i) {
+                    PabloAST * const op = stmt->getOperand(i);
+                    if (LLVM_UNLIKELY(isa<Var>(op))) {
+                        liveSet.put(cast<Var>(op));
+                    }
+                }
+                continue;
+            }
+            if (LLVM_LIKELY(!inspect)) {
+                 stmt->eraseFromParent();
             }
         } else {
             assert (!isa<Branch>(stmt) && !isa<Assign>(stmt));

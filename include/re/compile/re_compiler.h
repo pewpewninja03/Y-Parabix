@@ -25,16 +25,18 @@ class RE_Compiler {
     public:
 
 /*   The regular expression compiler works in terms of three fundamental bit stream
-     concepts: barrier streams, index streams and marker streams.
+     concepts: region streams, index streams and marker streams.
 
      It is often desirable to consider that the input stream is divided
      into separate matching regions, such that any matched string must be
      wholly contained within one region.   For example, in grep-style
      matching, the matching regions are the individual lines of the line,
      and matches do not extend across more than one line.
-     A barrier stream is used to separate the input into regions broken by
-     positions marked by 1 bits.   Thus a matched substring will always
-     correspond to a consecutive run of 0 bits in the barrier stream.
+     Two region streams are used to separate the input into regions broken by
+     positions marked by 1 bits.   Region start streams mark the first
+     matchable position of a region and region follow streams mark the position
+     immediately after a region.   Regions may be empty, indicated by
+     positions at which both the region start and region follow bits are 1.
 
      Index streams mark positions corresponding to whole matching units.
      For example, if the matching units are UTF-8 sequences, then the index
@@ -78,12 +80,13 @@ class RE_Compiler {
 
     class Marker {
     public:
-        Marker(pablo::PabloAST * strm, unsigned offset = 0) : mOffset(offset), mStream(strm) {}
+        enum class Position : unsigned {AtEnd, AtNextCodeUnit, AtNextChar};
+        Marker(pablo::PabloAST * strm, Position p = Position::AtEnd) : mPosition(p), mStream(strm) {}
         Marker & operator =(const Marker &) = default;
-        unsigned offset() {return mOffset;}
+        Position position() {return mPosition;}
         pablo::PabloAST * stream() {return mStream;}
     private:
-        unsigned mOffset;
+        Position mPosition;
         pablo::PabloAST * mStream;
     };
 
@@ -98,25 +101,33 @@ class RE_Compiler {
     // normally zero, indicating that the marker is placed on the last
     // matched character of the named object.   An offset of 1 is used
     // when the length is zero or potentially zero (e.g., zero-width assertions).
+    // When the from_first parameter is true, offsets are counted from
+    // the first matched character; these are intended for externals
+    // used for lookahead assertions.
     //
     class ExternalStream {
     public:
-        ExternalStream(Marker m, std::pair<int, int> lgthRange) :
-            mMarker(m), mLengthRange(lgthRange) {}
+        ExternalStream(pablo::PabloAST * s, unsigned offset, std::pair<int, int> lgthRange, bool from_first = false) :
+            mStream(s), mOffset(offset), mLengthRange(lgthRange), mFromFirst(from_first) {}
         ExternalStream & operator = (const ExternalStream &) = default;
+        pablo::PabloAST * stream() {return mStream;}
+        unsigned offset() {return mOffset;}
         std::pair<int, int> lengthRange() {return mLengthRange;}
         unsigned minLength() {return mLengthRange.first;}
         unsigned maxLength() {return mLengthRange.second;}
-        Marker & marker() {return mMarker;}
+        bool fromFirst() {return mFromFirst;}
     private:
-        Marker mMarker;
+        pablo::PabloAST * mStream;
+        unsigned mOffset;
         std::pair<int, int> mLengthRange;
+        bool mFromFirst;
     };
 
     void addPrecompiled(std::string externalName, ExternalStream s);
 
     RE_Compiler(pablo::PabloBlock * scope,
-                pablo::PabloAST * barrierStream,
+                pablo::PabloAST * regionStartStream,
+                pablo::PabloAST * regionFollowStream,
                 const cc::Alphabet * codeUnitAlphabet = &cc::UTF8);
 
     void setIndexing(const cc::Alphabet * indexingAlphabet, pablo::PabloAST * idxStream);
@@ -151,6 +162,8 @@ private:
     const cc::Alphabet *                            mCodeUnitAlphabet;
     const cc::Alphabet *                            mIndexingAlphabet;
     pablo::PabloAST *                               mIndexStream;
+    pablo::PabloAST *                               mRegionStart;
+    pablo::PabloAST *                               mRegionFollow;
     pablo::PabloAST *                               mMatchable;
     std::vector<const cc::Alphabet *>               mAlphabets;
     std::vector<std::vector<pablo::PabloAST *>>     mBasisSets;

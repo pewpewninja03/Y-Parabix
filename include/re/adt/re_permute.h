@@ -20,6 +20,7 @@ public:
     static inline bool classof(const void *) {
         return false;
     }
+    template<typename iterator> static Permute * Create(const iterator begin, const iterator end) {return new Permute(begin, end);}
 protected:
     template<typename iterator> friend RE * makePermute(iterator, iterator);
     Permute() : RE(ClassTypeId::Permute), std::vector<RE*, ProxyAllocator<RE *>>(mAllocator) {}

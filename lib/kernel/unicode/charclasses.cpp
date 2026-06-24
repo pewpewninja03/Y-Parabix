@@ -10,7 +10,7 @@
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
 #include <re/adt/re_name.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/utf/utf_compiler.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
 #include <llvm/Support/ErrorHandling.h>
@@ -54,11 +54,15 @@ CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts,
 CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses, BitMovementMode mode)
 : PabloKernel(ts, "cc_" + getStringHash(signature) + UTF::kernelAnnotation() +
               pablo::BitMovementMode_string(mode)
-, {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
+, {}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
 , mSignature(signature)
 , mBitMovement(mode) {
-
+    if (mode == pablo::BitMovementMode::LookAhead) {
+        mInputStreamSets.push_back(Binding{"basis", BasisBits, FixedRate(), LookAhead(3)});
+    } else {
+        mInputStreamSets.push_back(Binding{"basis", BasisBits});
+    }
 }
 
 llvm::StringRef CharClassesKernel::getSignature() const {

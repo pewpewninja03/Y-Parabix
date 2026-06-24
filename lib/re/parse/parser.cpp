@@ -22,8 +22,8 @@
 #include <re/adt/adt.h>
 #include <re/adt/re_utility.h>
 #include <re/printer/re_printer.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/RadicalSets.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/RadicalSets.h>
 
 using namespace llvm;
 
@@ -316,15 +316,14 @@ unsigned RE_Parser::parse_int() {
 
 
 const uint64_t setEscapeCharacters = bit3C('b') | bit3C('p') | bit3C('q') | bit3C('d') | bit3C('w') | bit3C('s') | bit3C('<') | bit3C('>') |
-                                     bit3C('B') | bit3C('P') | bit3C('Q') | bit3C('D') | bit3C('W') | bit3C('S') | bit3C('N') | bit3C('X');
+                                     bit3C('B') | bit3C('P') | bit3C('Q') | bit3C('D') | bit3C('W') | bit3C('S') | bit3C('N') | bit3C('X') |
+                                     bit3C('A');
 
 bool RE_Parser::isSetEscapeChar(char c) {
     return c >= 0x3C && c <= 0x7B && ((setEscapeCharacters >> (c - 0x3C)) & 1) == 1;
 }
                                  
-
 RE * RE_Parser::parse_escaped() {
-    
     if (isSetEscapeChar(*mCursor)) {
         return parseEscapedSet();
     }
@@ -354,7 +353,7 @@ RE * RE_Parser::parseEscapedSet() {
                 re = parsePropertyExpression(PropertyExpression::Kind::Boundary);
                 require('}');
             } else {
-                re = makeZeroWidth("\\b");
+                re = makePropertyExpression(PropertyExpression::Kind::Boundary, "word");
             }
             return complemented ? makeZerowidthComplement(re) : re;
         case 'd':
@@ -386,6 +385,8 @@ RE * RE_Parser::parseEscapedSet() {
             re = parseNamePatternExpression();
             assert (re);
             return re;
+        case 'A':
+            return parse_permute();
         case '<':
             return makeWordBegin();
         case '>':
@@ -533,6 +534,20 @@ RE * RE_Parser::parsePropertyExpression(PropertyExpression::Kind k) {
             ++mCursor;
         }
         return makePropertyExpression(k, prop, op, std::string(val_start, mCursor.pos()));
+    }
+}
+
+RE * RE_Parser::parse_permute() {
+    auto alreadyNested = fNested;
+    fNested = true;
+    accept('{');
+    RE * e = parse_alt();
+    require('}');
+    fNested = alreadyNested;
+    if (Alt * a = dyn_cast<Alt>(e)) {
+        return Permute::Create(a->begin(), a->end());
+    } else {
+        return e;
     }
 }
 

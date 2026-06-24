@@ -12,6 +12,7 @@
 #include <llvm/IR/Constants.h>
 #include <toolchain/toolchain.h>
 #include "compiler/pipeline_compiler.hpp"
+#include <boost/format.hpp>
 
 // TODO: the builders should detect if there is only one kernel in a pipeline / both branches are equivalent and return the single kernel. Modify addOrDeclareMainFunction.
 
@@ -103,7 +104,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
     bool canTerminate = false;
     bool sideEffecting = false;
     bool fatalTermination = false;
-    unsigned stride = 0;
     for (const auto & K : kernels) {
         Kernel * kernel = K.Object;
         for (const Attribute & attr : kernel->getAttributes()) {
@@ -123,12 +123,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
                 default: continue;
             }
         }
-        assert (kernel->getStride());
-        if (stride) {
-            stride = boost::lcm(stride, kernel->getStride());
-        } else {
-            stride = kernel->getStride();
-        }
     }
 
     if (fatalTermination) {
@@ -142,7 +136,39 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
     if (sideEffecting) {
         output->addAttribute(SideEffecting());
     }
-    output->setStride(stride);
+
+    auto & inputs = output->getInputStreamSetBindings();
+    const auto n = inputs.size();
+    if (LLVM_UNLIKELY(n > 0)) {
+        SmallVector<size_t, 4> LA(n, 0);
+        for (const auto & K : kernels) {
+            Kernel * kernel = K.Object;
+            const auto & I = kernel->getInputStreamSetBindings();
+            const auto m = I.size();
+            for (size_t j = 0; j < m; ++j) {
+                const Relationship * const r = I[j].getRelationship(); assert (r);
+                for (size_t k = 0; k < n; ++k) {
+                    const auto & in = inputs[k];
+                    assert (in.getRelationship());
+                    if (LLVM_UNLIKELY(in.getRelationship() == r)) {
+                        for (const Attribute & attr : I[j].getAttributes()) {
+                            if (LLVM_UNLIKELY(attr.getKind() == AttrId::LookAhead)) {
+                                LA[k] = std::max<size_t>(LA[k], attr.amount());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (size_t i = 0; i < n; ++i) {
+            if (LLVM_UNLIKELY(LA[i] > 0)) {
+                inputs[i].findOrAddAttribute(AttrId::LookAhead, LA[i]);
+            }
+        }
+
+    }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -181,6 +207,10 @@ Kernel * PipelineBuilder::makeKernel() {
     }
     #endif
 
+    auto requiresIllustratorObj = !mTarget->mIllustratorBindings.empty();
+
+    addKernelProperties(kernels, mTarget);
+
     if (LLVM_LIKELY(signature.empty())) {
 
         constexpr auto pipelineInput = 0U;
@@ -205,29 +235,37 @@ Kernel * PipelineBuilder::makeKernel() {
         };
 
         signature.reserve(4096);
-        raw_string_ostream out(signature);
+        raw_string_ostream sig(signature);
 
-        out << 'P';
+        sig << 'P';
         if (mExternallySynchronized) {
-            out << 'E';
+            sig << 'E';
+            mTarget->addAttribute(InternallySynchronized());
         }
+        sig << mTarget->getStride();
+
         for (unsigned i = 0; i < numOfKernels; ++i) {
-            out << '_';
             const auto & K = kernels[i];
             auto obj = K.Object;
             obj->ensureLoaded();
+            sig << '\n';
+            if (LLVM_UNLIKELY(obj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+                requiresIllustratorObj = true;
+            }
             if (K.isFamilyCall()) {
-                // this differs for icgrep kernel?
-                out << 'F' << obj->getFamilyName();
-                numOfNestedKernelFamilyCalls++;
+                ++numOfNestedKernelFamilyCalls;
+                sig << 'F';
             } else {
-                out << 'K';
                 const auto m = obj->getNumOfNestedKernelFamilyCalls();
                 numOfNestedKernelFamilyCalls += m;
+                if (LLVM_UNLIKELY(m > 0)) {
+                    sig << 'f' << m;
+                }
+                sig << 'K';
                 if (obj->hasSignature()) {
-                    out << obj->getSignature();
+                    sig << obj->getSignature();
                 } else {
-                    out << obj->getName();
+                    sig << obj->getName();
                 }
             }
             if (LLVM_UNLIKELY(obj->hasInternallyGeneratedStreamSets())) {
@@ -238,6 +276,12 @@ Kernel * PipelineBuilder::makeKernel() {
                 }
             }
         }
+
+        if (numOfNestedKernelFamilyCalls) {
+            sig << '\n';
+            mTarget->recursivelyListFamilyKernels(sig);
+        }
+        sig << '\n';
 
         auto enumerateProducerBindings = [&](const Vertex producer, const Bindings & bindings) {
             const auto n = bindings.size();
@@ -365,9 +409,9 @@ Kernel * PipelineBuilder::makeKernel() {
         enumerateConsumerBindings(pipelineOutput, mTarget->mOutputStreamSets);
 
         for (unsigned i = 0; i < numOfCalls; ++i) {
-            out << "_C" << calls[i].Name;
+            sig << "_C" << calls[i].Name;
         }
-        out << '@';
+        sig << '@';
 
         const auto firstRelationship = pipelineOutput + 1;
         const auto lastRelationship = num_vertices(G);
@@ -388,12 +432,12 @@ Kernel * PipelineBuilder::makeKernel() {
 
             assert ((unsigned)r->getClassTypeId() < (unsigned)TypeId::__Count);
 
-            out << typeCode[(unsigned)r->getClassTypeId()];
+            sig << typeCode[(unsigned)r->getClassTypeId()];
 
             if (LLVM_UNLIKELY(isa<RepeatingStreamSet>(r))) {
                 const RepeatingStreamSet * rs = cast<RepeatingStreamSet>(r);
                 if (rs->isUnaligned()) {
-                    out << 'U';
+                    sig << 'U';
                 }
                 if (LLVM_LIKELY(rs->isDynamic())) {
                     const auto j = addAndMapInternallyGenerated(r);
@@ -406,7 +450,7 @@ Kernel * PipelineBuilder::makeKernel() {
                     for (unsigned i = 0;;) {
                         assert (i < numElements);
                         const auto & vec = rs->getPattern(i);
-                        out << ':';
+                        sig << ':';
                         // write to hex code
                         for (auto v : vec) {
                             unsigned j = 0;
@@ -421,10 +465,10 @@ Kernel * PipelineBuilder::makeKernel() {
                                 ++j;
                             }
                             for (auto k = j; k < width; ++k) {
-                                out << '0';
+                                sig << '0';
                             }
                             while (j) {
-                                out << tmp[--j];
+                                sig << tmp[--j];
                             }
                         }
                         if ((++i) == numElements) {
@@ -432,28 +476,52 @@ Kernel * PipelineBuilder::makeKernel() {
                         }
                     }
                 }
-                out << ':';
+                sig << ':';
             } else if (LLVM_UNLIKELY(isa<TruncatedStreamSet>(r))) {
                 auto f = M.find(cast<TruncatedStreamSet>(r)->getData());
                 if (LLVM_UNLIKELY(f == M.end())) {
                     report_fatal_error("Truncated streamset data has no producer");
                 }
-                out << f->second << ':';
+                sig << f->second << ':';
             }
 
             if (LLVM_LIKELY(out_degree(i, G) != 0)) {
                 const auto e = out_edge(i, G);
                 const auto j = target(e, G);
-                out << j << '.' << G[e];
+                sig << j << '.' << G[e];
             }
 
             for (const auto e : make_iterator_range(in_edges(i, G))) {
                 const auto k = source(e, G);
-                out << '_' << k << '.' << G[e];
+                sig << '_' << k << '.' << G[e];
+            }
+
+            const auto & L = mTarget->mPhaseBoundaries;
+            const auto numOfLayers = L.size();
+            for (size_t i = 0; i < numOfLayers; ++i) {
+                const auto & layerBoundary = L[i];
+                sig << '$' << layerBoundary.second;
+                for (const auto & r : layerBoundary.first->getRestrictions()) {
+                    const auto f = M.find(r.first);
+                    if (LLVM_UNLIKELY(f == M.end())) {
+                        SmallVector<char, 256> tmp;
+                        raw_svector_ostream out(tmp);
+                        out << "Layer boundary " << (i + 1) << " references streamset that does not produced by or passed into the pipeline.";
+                        report_fatal_error(StringRef(out.str()));
+                    }
+                    const auto d = r.second;
+                    const auto ds = (boost::format("%.2f") % d).str();
+                    if (LLVM_UNLIKELY(d < 0.0 || d > 1.0)) {
+                        SmallVector<char, 256> tmp;
+                        raw_svector_ostream out(tmp);
+                        out << "Layer boundary " << (i + 1) << " segment-size ratio (" << ds << ") must be between 0.0 and 1.0.";
+                        report_fatal_error(StringRef(out.str()));
+                    }
+                    sig << '.' << ds;
+                }
             }
         }
-
-        out.flush();
+        sig.flush();
 
     } else { // the programmer provided a unique name
 
@@ -461,6 +529,9 @@ Kernel * PipelineBuilder::makeKernel() {
             const auto & K = kernels[i];
             Kernel * const obj = K.Object;
             obj->ensureLoaded();
+            if (LLVM_UNLIKELY(obj->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
+                requiresIllustratorObj = true;
+            }
             if (K.isFamilyCall()) {
                 numOfNestedKernelFamilyCalls++;
             } else {
@@ -476,22 +547,22 @@ Kernel * PipelineBuilder::makeKernel() {
 
     mTarget->mNumOfKernelFamilyCalls = numOfNestedKernelFamilyCalls;
 
-    if (mExternallySynchronized) {
-        mTarget->addAttribute(InternallySynchronized());
+    if (LLVM_UNLIKELY(requiresIllustratorObj)) {
+        mTarget->mFlags |= Kernel::KernelFlags::RequiresIllustratorObject;
     }
-
-    addKernelProperties(kernels, mTarget);
 
     signature = PipelineKernel::annotateSignatureWithPipelineFlags(std::move(signature));
 
     mTarget->mKernelName =
-        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline,
-            PipelineKernel::makePipelineHashName(signature));
+        Kernel::annotateKernelNameWithDebugFlags(Kernel::TypeId::Pipeline, mTarget->mFlags, PipelineKernel::makePipelineHashName(signature));
 
     mTarget->setCompilationStatus(Kernel::CompilationStatus::FullyInitialized);
 
+
+
     return mTarget;
 }
+
 
 using AttributeCombineSet = flat_map<AttrId, unsigned>;
 
@@ -648,7 +719,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
 Bindings replaceManagedWithSharedManagedBuffers(const Bindings & bindings) {
     Bindings replaced;
     replaced.reserve(bindings.size());
-    for (const Binding & binding : bindings) {        
+    for (const Binding & binding : bindings) {
         Binding newBinding(binding.getName(), binding.getRelationship(), binding.getRate());
         for (const Attribute & attr : binding.getAttributes()) {
             if (attr.getKind() == Attribute::KindId::ManagedBuffer) {

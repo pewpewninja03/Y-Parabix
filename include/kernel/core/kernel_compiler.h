@@ -338,7 +338,7 @@ protected:
 
     virtual void addBaseInternalProperties(KernelBuilder & b);
 
-    ScalarRef getThreadLocalScalarFieldPtr(KernelBuilder & b, llvm::Value * handle, const llvm::StringRef name) const;
+    ScalarRef getScalarFieldPtr(KernelBuilder & b, llvm::Value * handle,  const ScalarType type, const llvm::StringRef name) const;
 
 private:
 
@@ -346,7 +346,7 @@ private:
 
     void initializeIOBindingMap();
 
-    void initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions options);
+    void initializeOwnedBufferHandles(KernelBuilder & b, const InitializeOptions options, llvm::Value * expectedNumOfStrides = nullptr);
 
 protected:
 
@@ -386,7 +386,15 @@ protected:
 
     void captureStreamData(KernelBuilder & b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * streamData, llvm::Value * from, llvm::Value * to) const;
 
+protected:
 
+    llvm::Value * getReportExpansionCallback() const {
+        return mReportExpansionCallback;
+    }
+
+    llvm::Value * getPipelineHandle() const {
+        return mPipelineHandle;
+    }
 
 protected:
 
@@ -430,6 +438,9 @@ protected:
     llvm::Value *                   mPAPIEventSetId = nullptr;
     #endif
 
+    llvm::Value *                   mReportExpansionCallback = nullptr;
+    llvm::Value *                   mPipelineHandle = nullptr;
+
     Vec<llvm::Value *>              mInputIsClosed;
 
     Vec<llvm::Value *>              mProcessedInputItemPtr;
@@ -438,6 +449,7 @@ protected:
     Vec<llvm::Value *>              mAvailableInputItems;
     Vec<llvm::Value *>              mProducedOutputItemPtr;
     Vec<llvm::Value *>              mUpdatableOutputBaseVirtualAddressPtr;
+    Vec<llvm::Value *>              mUpdatableOutputCapacityPtr;
     Vec<llvm::Value *>              mInitiallyProducedOutputItems;
 
     Vec<llvm::Value *>              mWritableOutputItems;

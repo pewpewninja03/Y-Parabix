@@ -13,13 +13,13 @@
 #include <re/alphabet/alphabet.h>
 #include <re/transforms/re_transformer.h>
 #include <re/unicode/decomposition.h>
-#include <unicode/core/unicode_set.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/data/PropertyValueAliases.h>
-#include <unicode/data/Equivalence.h>
-#include <unicode/data/PrecomposedMappings.h>
+#include <ucd/core/unicode_set.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyValueAliases.h>
+#include <ucd/data/Equivalence.h>
+#include <ucd/data/PrecomposedMappings.h>
 
 using namespace re;
 using namespace llvm;

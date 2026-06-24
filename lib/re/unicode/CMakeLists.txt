@@ -13,6 +13,7 @@ SRC
     equivalence.cpp
     re_name_resolve.cpp
     resolve_properties.cpp
+    regex_passes.cpp
 DEPS
     re.adt
     re.analysis

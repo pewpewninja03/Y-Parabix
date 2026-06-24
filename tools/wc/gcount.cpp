@@ -16,6 +16,7 @@
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
+#include <kernel/unicode/utf8_support.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
@@ -23,9 +24,9 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <grep/grep_kernel.h>
+#include <kernel/re/regexp_kernel.h>
 #include <toolchain/toolchain.h>
 #include <fileselect/file_select.h>
 #include <fcntl.h>
@@ -72,8 +73,8 @@ GCountFunctionType pipelineGen(CPUDriver & driver) {
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     
     StreamSet * GCB = P.CreateStreamSet(1, 1);
-    re::UTF8_Transformer U8xfrmer;
-    GraphemeClusterLogic(P, BasisBits, u8index, GCB);
+    auto GCB_PE = re::makePropertyExpression(re::PropertyExpression::Kind::Boundary, "g");
+    UnicodePropertyLogic(P, GCB_PE, BasisBits, u8index, GCB);
 
     P.CreateKernelCall<PopcountKernel>(GCB, P.getOutputScalar("countResult"));
 
@@ -107,7 +108,7 @@ uint64_t gcount1(GCountFunctionType fn_ptr, const uint32_t fileIdx) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&gcFlags, codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&gcFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

@@ -118,6 +118,15 @@ public:
         mTarget->mCallBindings.emplace_back(std::move(name), type, reinterpret_cast<void *>(&functionPtr), std::move(args));
     }
 
+    PipelinePhaseBoundary * InsertPhaseBoundary() {
+        return mTarget->InsertPhaseBoundary();
+    }
+
+    template<typename... OtherBoundaryTypes>
+    PipelinePhaseBoundary * InsertPhaseBoundary(const StreamSet * const streamSet, const double restriction, OtherBoundaryTypes... other) {
+        return mTarget->InsertPhaseBoundary(streamSet, restriction, other...);
+    }
+
     StreamSet * getInputStreamSet(const unsigned i) {
         return static_cast<StreamSet *>(mTarget->mInputStreamSets[i].getRelationship());
     }
@@ -170,6 +179,10 @@ public:
         mTarget->mSignature.swap(name);
     }
 
+    void setStride(const unsigned stride) {
+        mTarget->setStride(stride);
+    }
+
     void captureByteData(llvm::StringRef streamName, StreamSet * byteData, char nonASCIIsubstitute = '.');
 
     void captureBitstream(llvm::StringRef streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
@@ -215,7 +228,6 @@ protected:
     BaseDriver &            mDriver;
     // eventual pipeline configuration
     PipelineKernel * const  mTarget;
-
     bool                    mExternallySynchronized = false;
 };
 

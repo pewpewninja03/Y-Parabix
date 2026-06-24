@@ -167,6 +167,8 @@ protected:
 
     virtual RE * parse_alt();
     
+    virtual RE * parse_permute();
+
     virtual RE * parse_seq();
 
     virtual RE * parse_next_item();

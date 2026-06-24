@@ -93,9 +93,9 @@ DEPS
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     re.cc
     toolchain
-    grep
 )
 
 parabix_add_executable(
@@ -111,42 +111,44 @@ DEPS
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     re.cc
     toolchain
-    grep
 )
 
 parabix_add_executable(
 NAME
-    hangul-nfd
+    nfkd
 SRC
-    hangul-nfd.cpp
+    nfkd.cpp
 DEPS
     pablo
     pablo.bixnum
     kernel.basis
+    kernel.bitwise
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     re.cc
     toolchain
-    grep
 )
 
 parabix_add_executable(
 NAME
-    hangul-nfc
+    nfc
 SRC
-    hangul-nfc.cpp
+    nfc.cpp
 DEPS
     pablo
     pablo.bixnum
     kernel.basis
+    kernel.bitwise
     kernel.io
     kernel.pipeline
     kernel.streamutils
+    kernel.unicode
     re.cc
     toolchain
-    grep
 )
 

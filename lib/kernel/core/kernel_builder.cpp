@@ -107,7 +107,8 @@ StoreInst * KernelBuilder::CreateMonitoredScalarFieldStore(const StringRef field
 Value * KernelBuilder::getTerminationSignal() {
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (ptr) {
-        return CreateIsNotNull(CreateAlignedLoad(getSizeTy(), ptr, sizeof(size_t)));
+        auto & dl = getModule()->getDataLayout();
+        return CreateIsNotNull(CreateAlignedLoad(getSizeTy(), ptr, dl.getABITypeAlign(getSizeTy()).value()));
     } else {
         return getFalse();
     }
@@ -117,17 +118,23 @@ Value * KernelBuilder::getTerminationSignal() {
  * @brief setTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelBuilder::setTerminationSignal(Value * const value) {
+    auto & dl = getModule()->getDataLayout();
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (LLVM_UNLIKELY(ptr == nullptr)) {
         report_fatal_error(StringRef(COMPILER->getName()) + " does not have CanTerminateEarly or MustExplicitlyTerminate set.");
     }
-    CreateStore(value, ptr);    
+    CreateAlignedStore(value, ptr, dl.getABITypeAlign(getSizeTy()).value());
 }
 
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * const processed = CreateAlignedLoad(sizeTy, processedPtr, sizeTyAlign);
+    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -139,7 +146,12 @@ Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * cons
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * const processed = CreateAlignedLoad(sizeTy, processedPtr, sizeTyAlign);
+    Value * blockIndex = CreateLShr(processed, floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -149,31 +161,72 @@ Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const
 }
 
 Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
-    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     const auto bw = getBitBlockWidth();
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(bw));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * const processed = CreateAlignedLoad(sizeTy, processedPtr, sizeTyAlign);
+    Value * blockIndex = CreateLShr(processed, floor_log2(bw));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
+    VectorType * const blockTy = getBitBlockType();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
+        CreateAssert(sanityCheck, "stream index exceeds stream set count");
+        Value * const start = CreateRoundDownRational(processed, bw);
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
+    }
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    return buf->loadStreamBlock(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, unaligned);
+    size_t blockAlign = 1;
+    if (LLVM_LIKELY(!unaligned)) {
+        blockAlign = DL.getABITypeAlign(blockTy).value();
+    }
+    return CreateAlignedLoad(blockTy, ptr, blockAlign);
 }
 
 Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
-    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
+
     const auto bw = getBitBlockWidth();
+    const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(bw));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * const processed = CreateAlignedLoad(sizeTy, processedPtr, sizeTyAlign);
+    Value * blockIndex = CreateLShr(processed, floor_log2(bw));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
+    Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
+    VectorType * const blockTy = getBitBlockType();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
+        CreateAssert(sanityCheck, "stream index exceeds stream set count");
+        Value * const start = CreateRoundDownRational(processed, bw);
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
+    }
     const auto unaligned = COMPILER->getInputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    return buf->loadStreamPack(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex, unaligned);
+    size_t blockAlign = 1;
+    if (LLVM_LIKELY(!unaligned)) {
+        blockAlign = DL.getABITypeAlign(blockTy).value();
+    }
+    return CreateAlignedLoad(blockTy, ptr, blockAlign);
 }
 
 Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
@@ -184,7 +237,11 @@ Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
 Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * streamIndex, Value * const blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(sizeTy, producedPtr, sizeTyAlign), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -196,7 +253,11 @@ Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * str
 Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(sizeTy, producedPtr, sizeTyAlign), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -206,49 +267,73 @@ Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * stre
 }
 
 StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * streamIndex, Value * blockOffset, Value * toStore) {
-    SmallVector<char, 256> tmp;
-    raw_svector_ostream out(tmp);
-    out << COMPILER->getName() << '.' << name;
-    if (ConstantInt * c = dyn_cast<ConstantInt>(streamIndex)) {
-        out << "[" << c->getZExtValue() << "]";
-    }
-    toStore->setName(out.str());
 
+    const auto bw = getBitBlockWidth();
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * produced = CreateAlignedLoad(sizeTy, producedPtr, sizeTyAlign);
+    Value * blockIndex = CreateLShr(produced, floor_log2(bw));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     Value * const ptr = buf->getStreamBlockPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex);
+    VectorType * const blockTy = getBitBlockType();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
+        CreateAssert(sanityCheck, "stream index exceeds stream set count");
+        Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
+    }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    const auto bw = getBitBlockWidth();
-    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
+    size_t blockAlign = 1;
+    if (LLVM_LIKELY(!unaligned)) {
+        blockAlign = DL.getABITypeAlign(blockTy).value();
+    }
+    return CreateAlignedStore(toStore, ptr, blockAlign);
 }
 
 StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset, Value * toStore) {
-    SmallVector<char, 256> tmp;
-    raw_svector_ostream out(tmp);
-    out << COMPILER->getName() << '.' << name;
-    if (ConstantInt * c = dyn_cast<ConstantInt>(streamIndex)) {
-        out << "[" << c->getZExtValue() << "]";
-    }
-    toStore->setName(out.str());
 
+    const auto bw = getBitBlockWidth();
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
+    Module * const m = getModule();
+    auto & DL = m->getDataLayout();
+    IntegerType * sizeTy = getSizeTy();
+    const auto sizeTyAlign = DL.getABITypeAlign(sizeTy).value();
+    Value * produced = CreateAlignedLoad(sizeTy, producedPtr, sizeTyAlign);
+    Value * blockIndex = CreateLShr(produced, floor_log2(bw));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(entry.Index);
     assert ("buffer is not accessible in this context!" && buf->getHandle());
     Value * const ptr = buf->getStreamPackPtr(*this, buf->getBaseAddress(*this), streamIndex, blockIndex, packIndex);
+    VectorType * const blockTy = getBitBlockType();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
+        CreateAssert(sanityCheck, "stream index exceeds stream set count");
+        Value * const start = CreateRoundDownRational(produced, getBitBlockWidth());
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(DL, blockTy), start, end);
+    }
     const auto unaligned = COMPILER->getOutputStreamSetBinding(entry.Index).hasAttribute(Attribute::KindId::AllowsUnalignedAccess);
-    const auto bw = getBitBlockWidth();
-    return CreateAlignedStore(toStore, ptr, unaligned ? 1U : (bw / 8));
+    size_t blockAlign = 1;
+    if (LLVM_LIKELY(!unaligned)) {
+        blockAlign = DL.getABITypeAlign(blockTy).value();
+    }
+    return CreateAlignedStore(toStore, ptr, blockAlign);
 }
 
 Value * KernelBuilder::getOutputStreamSetCount(const StringRef name) {
@@ -258,7 +343,7 @@ Value * KernelBuilder::getOutputStreamSetCount(const StringRef name) {
 
 Value * KernelBuilder::getRawInputPointer(const StringRef name, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(name);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
         CreateAssert(sanityCheck, "stream index must be explicit");
     }
@@ -270,9 +355,80 @@ Value * KernelBuilder::getRawInputPointer(const StringRef name, Value * const st
     return buf->getRawItemPointer(*this, streamIndex, absolutePosition);
 }
 
+Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Value * absolutePosition) {
+    const auto & binding = COMPILER->getBinding(BindingType::StreamInput, name);
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(binding.Index);
+    Value * ptr = buf->getRawItemPointer(*this, getSize(0), absolutePosition);
+    auto & dl = getModule()->getDataLayout();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
+        CreateAssert(sanityCheck, "stream index must be explicit");
+        Value * startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
+        Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
+    }
+    const auto fw = buf->getFieldWidth();
+    if (fw < 8) {
+        IntegerType * const int8Ty = getInt8Ty();
+        ptr = CreatePointerCast(ptr, int8Ty->getPointerTo(buf->getAddressSpace()));
+        Value * val = CreateZExt(CreateAlignedLoad(int8Ty, ptr, 1), getSizeTy());
+        const auto fieldsPerByte = 8U / fw;
+        Value * pos = CreateZExtOrTrunc(absolutePosition, getSizeTy());
+        pos = CreateAnd(pos, getSize(fieldsPerByte - 1));
+        pos = CreateShl(pos, getSize(floor_log2(fw)));
+        val = CreateLShr(val, pos);
+        val = CreateAnd(val, getSize((1UL << fw) - 1UL));
+        return CreateTrunc(val, ty);
+    } else {
+        ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
+        const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+        const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+        return CreateAlignedLoad(ty, ptr, alignment);
+    }
+}
+
+Value * KernelBuilder::readRawInputPointer(Type * ty, const StringRef name, Value * const streamIndex, Value * absolutePosition) {
+    const auto & binding = COMPILER->getBinding(BindingType::StreamInput, name);
+    const StreamSetBuffer * const buf = COMPILER->getInputStreamSetBuffer(binding.Index);
+    auto & dl = getModule()->getDataLayout();
+    Value * ptr = buf->getRawItemPointer(*this, streamIndex, absolutePosition);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
+        CreateAssert(sanityCheck, "stream index exceeds stream set count");
+        Value * const startPtr = COMPILER->getProcessedInputItemsPtr(binding.Index);
+        Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
+    }
+
+    const auto fw = buf->getFieldWidth();
+    if (fw < 8) {
+        IntegerType * const int8Ty = getInt8Ty();
+        ptr = CreatePointerCast(ptr, int8Ty->getPointerTo(buf->getAddressSpace()));
+        Value * val = CreateZExt(CreateAlignedLoad(int8Ty, ptr, 1), getSizeTy());
+        const auto fieldsPerByte = 8U / fw;
+        Value * pos = CreateZExtOrTrunc(absolutePosition, getSizeTy());
+        pos = CreateAnd(pos, getSize(fieldsPerByte - 1));
+        pos = CreateShl(pos, getSize(floor_log2(fw)));
+        val = CreateLShr(val, pos);
+        val = CreateAnd(val, getSize((1UL << fw) - 1UL));
+        return CreateTrunc(val, ty);
+    } else {
+        ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
+        const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+        const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+        return CreateAlignedLoad(ty, ptr, alignment);
+    }
+
+
+}
+
 Value * KernelBuilder::getRawOutputPointer(const StringRef name, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
         Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
         CreateAssert(sanityCheck, "stream index must be explicit");
     }
@@ -282,6 +438,50 @@ Value * KernelBuilder::getRawOutputPointer(const StringRef name, Value * absolut
 Value * KernelBuilder::getRawOutputPointer(const StringRef name, Value * const streamIndex, Value * absolutePosition) {
     const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(name);
     return buf->getRawItemPointer(*this, streamIndex, absolutePosition);
+}
+
+Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * absolutePosition, Value * value) {
+    const auto & binding = COMPILER->getBinding(BindingType::StreamOutput, name);
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(binding.Index);
+    Value * ptr = buf->getRawItemPointer(*this, getSize(0), absolutePosition);
+    Type * const ty = value->getType();
+    auto & dl = getModule()->getDataLayout();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const sanityCheck = CreateICmpEQ(buf->getStreamSetCount(*this), getSize(1));
+        CreateAssert(sanityCheck, "stream index must be explicit");
+        Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
+        Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
+    }
+    ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
+    const auto fw = buf->getFieldWidth();
+    const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+    const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+    return CreateAlignedStore(value, ptr, alignment);
+}
+
+Value * KernelBuilder::writeRawOutputPointer(const StringRef name, Value * const streamIndex, Value * absolutePosition, Value * value) {
+    const auto & binding = COMPILER->getBinding(BindingType::StreamOutput, name);
+    const StreamSetBuffer * const buf = COMPILER->getOutputStreamSetBuffer(binding.Index);
+    Value * ptr = buf->getRawItemPointer(*this, streamIndex, absolutePosition);
+    Type * const ty = value->getType();
+    auto & dl = getModule()->getDataLayout();
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableStreamSetAsserts, codegen::EnableAsserts))) {
+        Value * const count = buf->getStreamSetCount(*this);
+        Value * const index = CreateZExtOrTrunc(streamIndex, count->getType());
+        Value * const sanityCheck = CreateICmpULE(index, count);
+        CreateAssert(sanityCheck, "stream index exceeds stream set count");
+        Value * const startPtr = COMPILER->getProducedOutputItemsPtr(binding.Index); assert (startPtr);
+        Value * const start = CreateAlignedLoad(getSizeTy(), startPtr, dl.getABITypeAlign(getSizeTy()).value());
+        Value * const end = buf->getCapacity(*this);
+        buf->assertAccessIsWithinStreamSetMemory(*this, GetString(name), ptr, getTypeSize(dl, ty), start, end);
+    }
+    ptr = CreatePointerCast(ptr, ty->getPointerTo(buf->getAddressSpace()));
+    const auto fw = buf->getFieldWidth();
+    const auto dataWidth = fw > 8 ? fw >> 3 : 1U;
+    const auto alignment = boost::gcd<size_t>(dl.getABITypeAlign(ty).value(), dataWidth);
+    return CreateAlignedStore(value, ptr, alignment);
 }
 
 Value * KernelBuilder::getBaseAddress(const StringRef name) {
@@ -300,6 +500,139 @@ void KernelBuilder::setCapacity(const StringRef name, Value * capacity) {
     COMPILER->getStreamSetBuffer(name)->setCapacity(*this, capacity);
 }
 
+void KernelBuilder::reserveCapacity(const StringRef name, Value * capacity) {
+    const auto port = COMPILER->getStreamPort(name);
+    if (LLVM_LIKELY(port.Type == PortType::Output)) {
+        StreamSetBuffer * const buffer = COMPILER->getOutputStreamSetBuffer(port.Number);
+        if (LLVM_LIKELY(buffer->isDynamic())) {
+
+            Module * const m = getModule();
+            assert ("unspecified module" && m);
+            auto & DL = m->getDataLayout();
+            auto & C = getContext();
+            IntegerType * const intPtrTy = DL.getIntPtrType(C);
+            const auto intPtrTyAlign = DL.getABITypeAlign(intPtrTy).value();
+
+            Value * const producedItemPtr = COMPILER->getProducedOutputItemsPtr(port.Number);
+            Value * const producedItems = CreateAlignedLoad(intPtrTy, producedItemPtr,  intPtrTyAlign);
+            Value * const consumedItems = COMPILER->getConsumedOutputItems(port.Number);
+
+            SmallVector<char, 200> buf;
+            raw_svector_ostream name(buf);
+
+            const auto traceDynamicBuffers = codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers);
+
+            name << "__KB_ManagedDynamicBuffer";
+            if (buffer->isLinear()) {
+                name << "Linear";
+            }
+            name << "_reserve_capacity" << buffer->getAddressSpace();
+            if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                name << 'T';
+            }
+
+            PointerType * const voidPtrTy = getVoidPtrTy();
+
+            Function * f = m->getFunction(name.str());
+
+            if (f == nullptr) {
+
+                StructType * const handleTy = buffer->getHandleType(*this);
+                PointerType * const handlePtrTy = handleTy->getPointerTo(buffer->getAddressSpace());
+
+                SmallVector<Type *, 7> paramTypes(traceDynamicBuffers ? 7 : 4);
+                paramTypes[0] = voidPtrTy; // shared struct ptr
+                paramTypes[1] = intPtrTy;
+                paramTypes[2] = intPtrTy;
+                paramTypes[3] = intPtrTy;
+
+                if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                    paramTypes[4] = voidPtrTy;
+                    paramTypes[5] = voidPtrTy;
+                    paramTypes[6] = intPtrTy;
+                }
+
+                FunctionType * funcTy = FunctionType::get(getVoidTy(), paramTypes, false);
+
+                const auto ip = saveIP();
+                auto currentSharedHandle = buffer->getHandle();
+                f = Function::Create(funcTy, Function::InternalLinkage, name.str(), m);
+                f->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
+
+                BasicBlock * const entry = BasicBlock::Create(C, "entry", f);
+                BasicBlock * const expandInternalBuffer = BasicBlock::Create(C, "expandInternalBuffer", f);
+                BasicBlock * const exit = BasicBlock::Create(C, "exit", f);
+
+                SetInsertPoint(entry);
+
+                auto arg = f->arg_begin();
+                auto nextArg = [&]() {
+                    assert (arg != f->arg_end());
+                    Value * const v = &*arg;
+                    std::advance(arg, 1);
+                    return v;
+                };
+
+                Value * const handle = CreatePointerCast(nextArg(), handlePtrTy);
+                buffer->setHandle(handle);
+                handle->setName("handle");
+                Value * const produced = nextArg();
+                produced->setName("produced");
+                Value * const consumed = nextArg();
+                consumed->setName("consumed");
+                Value * const required = nextArg();
+                required->setName("required");
+                Value * reportExpansionCallback = nullptr;
+                Value * pipelineHandle = nullptr;
+                Value * portNum = nullptr;
+                if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                    reportExpansionCallback = nextArg();
+                    reportExpansionCallback->setName("reportExpansionCallback");
+                    pipelineHandle = nextArg();
+                    pipelineHandle->setName("pipelineHandle");
+                    portNum = nextArg();
+                    portNum->setName("portNum");
+                }
+                assert (arg == f->arg_end());
+
+                ConstantInt * const BLOCK_WIDTH = getSize(getBitBlockWidth());
+
+
+                Value * const consumedChunks = CreateUDiv(consumed, BLOCK_WIDTH);
+                Value * const requiredChunks = CreateCeilUDiv(CreateAdd(produced, required), BLOCK_WIDTH);
+
+                Value * const currentCapacity = buffer->getInternalCapacity(*this);
+                Value * const capacityChunks = CreateExactUDiv(currentCapacity, BLOCK_WIDTH);
+                Value * const newCapacityChunks = CreateAdd(consumedChunks, capacityChunks);
+                CreateUnlikelyCondBr(CreateICmpUGT(requiredChunks, newCapacityChunks), expandInternalBuffer, exit);
+
+                SetInsertPoint(expandInternalBuffer);
+                buffer->reserveCapacity(*this, produced, consumed, required, reportExpansionCallback, pipelineHandle, portNum);
+                CreateBr(exit);
+
+                SetInsertPoint(exit);
+                CreateRetVoid();
+
+                restoreIP(ip);
+                buffer->setHandle(currentSharedHandle);
+            }
+
+            SmallVector<Value *, 7> args(traceDynamicBuffers ? 7 : 4);
+            args[0] = CreatePointerCast(buffer->getHandle(), voidPtrTy);
+            args[1] = producedItems;
+            args[2] = consumedItems;
+            args[3] = capacity;
+            if (LLVM_UNLIKELY(traceDynamicBuffers)) {
+                args[4] = COMPILER->getReportExpansionCallback();
+                args[5] = COMPILER->getPipelineHandle();
+                args[6] = getSize(port.Number);
+            }
+            CreateCall(f, args);
+            return;
+        }
+    }
+    report_fatal_error("Cannot call reserveCapacity on streamset " + name + ": is not a managed output streamset");
+}
 
 Value * KernelBuilder::getAvailableItemCount(const StringRef name) const noexcept {
     return COMPILER->getAvailableInputItems(name);
@@ -310,20 +643,25 @@ Value * KernelBuilder::getAccessibleItemCount(const StringRef name) const noexce
 }
 
 Value * KernelBuilder::getProcessedItemCount(const StringRef name) {
-    return CreateAlignedLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name), sizeof(size_t));
+    auto & dl = getModule()->getDataLayout();
+    return CreateAlignedLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 void KernelBuilder::setProcessedItemCount(const StringRef name, Value * value) {
+    auto & dl = getModule()->getDataLayout();
     assert (value->getType() == getSizeTy());
-    CreateAlignedStore(value, COMPILER->getProcessedInputItemsPtr(name), sizeof(size_t));
+    CreateAlignedStore(value, COMPILER->getProcessedInputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 Value * KernelBuilder::getProducedItemCount(const StringRef name) {
-    return CreateAlignedLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name), sizeof(size_t));
+    auto & dl = getModule()->getDataLayout();
+    return CreateAlignedLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 void KernelBuilder::setProducedItemCount(const StringRef name, Value * value) {
-    CreateAlignedStore(value, COMPILER->getProducedOutputItemsPtr(name), sizeof(size_t));
+    auto & dl = getModule()->getDataLayout();
+    assert (value->getType() == getSizeTy());
+    CreateAlignedStore(value, COMPILER->getProducedOutputItemsPtr(name), dl.getABITypeAlign(getSizeTy()).value());
 }
 
 Value * KernelBuilder::getWritableOutputItems(const StringRef name) const noexcept {
@@ -764,36 +1102,5 @@ std::string KernelBuilder::getKernelName() const noexcept {
 }
 
 
-#ifndef NDEBUG
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isFromCurrentFunction
- ** ------------------------------------------------------------------------------------------------------------- */
-bool isFromCurrentFunction(const KernelBuilder & b, const Value * const value, const bool allowNull) {
-    if (value == nullptr) {
-        assert ("value is null?" && allowNull);
-        return allowNull;
-    }
-    if (LLVM_UNLIKELY(&b.getContext() != &value->getContext())) {
-        assert (!"not from same context?");
-        return false;
-    }
-    BasicBlock * const ip = b.GetInsertBlock();
-    assert (ip);
-    if (isa<Constant>(value)) {
-        return true;
-    }
-    const Function * const builderFunction = ip->getParent();
-    assert (builderFunction);
-    const Function * function = builderFunction;
-    if (isa<Argument>(value)) {
-        function = cast<Argument>(value)->getParent();
-    } else if (isa<Instruction>(value)) {
-        function = cast<Instruction>(value)->getParent()->getParent();
-    }
-    assert (function);
-    assert ("not from same function?" && (builderFunction == function));
-    return (builderFunction == function);
-}
-#endif
 
 }

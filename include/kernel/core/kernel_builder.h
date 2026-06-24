@@ -129,6 +129,17 @@ public:
 
     llvm::Value * getRawOutputPointer(const llvm::StringRef name, llvm::Value * const streamIndex, llvm::Value * absolutePosition);
 
+    llvm::Value * readRawInputPointer(llvm::Type * ty, const llvm::StringRef name, llvm::Value * absolutePosition);
+
+    llvm::Value * writeRawOutputPointer(const llvm::StringRef name, llvm::Value * absolutePosition, llvm::Value * value);
+
+
+    llvm::Value * readRawInputPointer(llvm::Type * ty, const llvm::StringRef name, llvm::Value * const streamIndex, llvm::Value * absolutePosition);
+
+    llvm::Value * writeRawOutputPointer(const llvm::StringRef name, llvm::Value * const streamIndex, llvm::Value * absolutePosition, llvm::Value * value);
+
+
+
     llvm::Value * getBaseAddress(const llvm::StringRef name);
 
     void setBaseAddress(const llvm::StringRef name, llvm::Value * addr);
@@ -136,6 +147,8 @@ public:
     llvm::Value * getCapacity(const llvm::StringRef name);
 
     void setCapacity(const llvm::StringRef name, llvm::Value * capacity);
+
+    void reserveCapacity(const llvm::StringRef name, llvm::Value * capacity);
 
     // internal state
 
@@ -306,10 +319,6 @@ public:
 
     }
 };
-
-#ifndef NDEBUG
-bool isFromCurrentFunction(const KernelBuilder & b, const llvm::Value * const value, const bool allowNull = true);
-#endif
 
 }
 

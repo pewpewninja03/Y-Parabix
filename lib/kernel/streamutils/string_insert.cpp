@@ -64,15 +64,18 @@ void ZeroInsertBixNum::generatePabloMethod() {
     }
 }
 
-LLVM_READONLY std::string StringReplaceName(const std::vector<std::string> & insertStrs, const StreamSet * insertMarks, int markOffset) {
-    std::string name = "StringReplaceBixNum";
+static std::string StringReplaceName(const std::vector<std::string> & insertStrs, const StreamSet * insertMarks, int markOffset) {
+    std::string name;
+    raw_string_ostream nm(name);
+    nm << "StringReplaceBixNum";
+    if (insertMarks->getNumElements() < insertStrs.size()) {
+        nm << insertMarks->getNumElements() << ':';
+    }
+    nm << markOffset;
     for (const auto & s : insertStrs) {
         name += "_" + s;
     }
-    if (insertMarks->getNumElements() < insertStrs.size()) {
-        name += "_multiplexed";
-    }
-    name += std::to_string(markOffset);
+    nm.flush();
     return name;
 }
 
@@ -80,17 +83,29 @@ StringReplaceKernel::StringReplaceKernel(LLVMTypeSystemInterface & ts, const std
                                          StreamSet * basis, StreamSet * spreadMask,
                                          StreamSet * insertMarks, StreamSet * runIndex,
                                          StreamSet * output, int markOffset)
-: PabloKernel(ts, "StringReplaceBixNum" + Kernel::getStringHash(StringReplaceName(insertStrs, insertMarks, markOffset)),
+: StringReplaceKernel(ts, StringReplaceName(insertStrs, insertMarks, markOffset),
+                      insertStrs, basis, spreadMask, insertMarks, runIndex, output, markOffset) {
+
+}
+
+StringReplaceKernel::StringReplaceKernel(LLVMTypeSystemInterface & ts, std::string && signature,
+                                         const std::vector<std::string> & insertStrs,
+                                         StreamSet * basis, StreamSet * spreadMask,
+                                         StreamSet * insertMarks, StreamSet * runIndex,
+                                         StreamSet * output, int markOffset)
+: PabloKernel(ts, "StringReplaceBixNum" + Kernel::getStringHash(signature),
              {Binding{"basis", basis}, Binding{"spreadMask", spreadMask},
-              Binding{"insertMarks", insertMarks, FixedRate(1), LookAhead(1 << (runIndex->getNumElements()))},
+              Binding{"insertMarks", insertMarks, FixedRate(1), LookAhead(1U << (runIndex->getNumElements()))},
               Binding{"runIndex", runIndex}},
              {Binding{"output", output}})
 , mInsertStrings(insertStrs)
 , mMultiplexing(insertMarks->getNumElements() < insertStrs.size())
 , mMarkOffset(markOffset)
-, mSignature(StringReplaceName(insertStrs, insertMarks, markOffset)) {
+, mSignature(std::move(signature)) {
 
 }
+
+
 
 void StringReplaceKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());

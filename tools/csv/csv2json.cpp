@@ -6,43 +6,55 @@
 
 #include <cstdio>
 #include <vector>
+#include <csv/csv_cmdline.h>
+#include <csv/csv_parser.h>
+#include <json/json_support.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/ManagedStatic.h>
 #include <llvm/IR/Module.h>
-#include <re/adt/re_name.h>
-#include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
+#include <kernel/streamutils/sentinel.h>
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/util/linebreak_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/bitwise/bixnum_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
+#include <kernel/re/regexp_kernel.h>
 #include <kernel/scan/scanmatchgen.h>
-#include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
+#include <re/adt/adt.h>
+#include <re/adt/re_re.h>
+#include <re/parse/parser.h>
+#include <re/unicode/regex_passes.h>
+#include <grep/grep_engine.h>
+#include <grep/grep_kernel.h>
 #include <string>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/builder.hpp>
+#include <pablo/pe_ones.h>
 #include <pablo/pablo_kernel.h>
 #include <fcntl.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include "csv_util.hpp"
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
 #endif
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::ceil_log2;
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
@@ -52,69 +64,312 @@ using namespace kernel;
 using namespace llvm;
 using namespace pablo;
 
-//  These declarations are for command line processing.
-//  See the LLVM CommandLine Library Manual https://llvm.org/docs/CommandLine.html
-static cl::OptionCategory CSV_Options("CSV Processing Options", "CSV Processing Options.");
-static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
-static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
-static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
-
-static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(CSV_Options));
-static cl::opt<bool> UseMergeByMaskKernel("merge-by-mask", cl::desc("Use MergeByMask kernel"), cl::init(false), cl::cat(CSV_Options));
+static cl::opt<bool> TestDynamicRepeatingFile("dyn", cl::desc("Test Dynamic Repeating StreamSet"), cl::init(true), cl::cat(csv::CSV_Options), cl::Hidden);
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
-class Invert : public PabloKernel {
+std::vector<std::string> JSONfieldPrefixes(std::vector<std::string> fieldNames) {
+    std::vector<std::string> tmp;
+    if (fieldNames.size() == 0) return tmp;
+    for (unsigned i = 0; i < fieldNames.size(); i++) {
+        tmp.push_back("\"" + fieldNames[i] + "\":");
+    }
+    tmp[0] = "{" + tmp[0];
+    return tmp;
+}
+
+//
+//  JSON_Expansion_Candidates
+//
+//  Certain characters must be expanded into escape sequences if they
+//  are to be included in JSON data strings.   JSON_Expansion_Candidates
+//  returns a mask identifying all CSV characters that potentially need
+//  such expansion by excluding certain reserved CSV characters:
+//  (a) CR and LF outside of CSV quoted strings
+//  (b) quote marks (including paired quote marks within strings)
+//  Paired quote marks within CSV data do not expand, but just
+//  require the translation of the first quote mark to a backslash escape.
+//
+
+class JSON_ExpansionCandidates : public PabloKernel {
 public:
-    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(ts, "Invert",
-                      {Binding{"mask", mask}},
-                      {Binding{"inverted", inverted}}) {}
+    JSON_ExpansionCandidates(LLVMTypeSystemInterface & ts, StreamSet * csvCCs, StreamSet * quotedData,
+        StreamSet * candidates)
+        : PabloKernel(ts, "JSON_ExpansionCandidates",
+                      {Binding{"csvCCs", csvCCs},
+                       Binding{"quotedData", quotedData}},
+                      {Binding{"candidates", candidates}}) {}
 protected:
     void generatePabloMethod() override;
 };
 
-void Invert::generatePabloMethod() {
+void JSON_ExpansionCandidates::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
-    PabloAST * mask = getInputStreamSet("mask")[0];
-    PabloAST * inverted = pb.createInFile(pb.createNot(mask));
-    Var * outVar = getOutputStreamVar("inverted");
-    pb.createAssign(pb.createExtract(outVar, pb.getInteger(0)), inverted);
+    std::vector<PabloAST *> csvCCs = getInputStreamSet("csvCCs");
+    std::vector<PabloAST *> quotedData = getInputStreamSet("quotedData");
+    PabloAST * outsideOfQuotes =  pb.createNot(quotedData[0]);
+    PabloAST * CSV_reserved = pb.createAnd(pb.createOr(csvCCs[csv::markCR], csvCCs[csv::markLF]), outsideOfQuotes);
+    CSV_reserved = pb.createOr(CSV_reserved, csvCCs[csv::markDQ]);
+    PabloAST * candidates = pb.createInFile(pb.createNot(CSV_reserved));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("candidates"), pb.getInteger(0)), candidates);
 }
 
-class BasisCombine : public PabloKernel {
+class CSVdataFieldMask : public PabloKernel {
 public:
-    BasisCombine(LLVMTypeSystemInterface & ts, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
-        : PabloKernel(ts, "BasisCombine",
-                      {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
-                      {Binding{"combined", combined}}) {}
+    CSVdataFieldMask(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * recordSeparators,
+        StreamSet * toKeep, bool deleteHeader = true)
+        : PabloKernel(ts, "CSVdataFieldMask" + std::to_string(deleteHeader),
+                      {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
+                       Binding{"recordSeparators", recordSeparators}},
+                      {Binding{"toKeep", toKeep}})
+    , mDeleteHeader(deleteHeader) {}
+protected:
+    void generatePabloMethod() override;
+    bool mDeleteHeader;
+};
+
+void CSVdataFieldMask::generatePabloMethod() {
+    pablo::PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> csvMarks = getInputStreamSet("csvMarks");
+    PabloAST * recordMarks = pb.createExtract(getInputStreamVar("recordSeparators"), pb.getInteger(0));
+    PabloAST * CRbeforeLF = pb.createAnd(csvMarks[csv::markCR], pb.createLookahead(csvMarks[csv::markLF], 1));
+    PabloAST * toDelete = CRbeforeLF;
+    if (mDeleteHeader) {
+        PabloAST * afterHeader = pb.createMatchStar(pb.createAdvance(recordMarks, 1), pb.createOnes());
+        toDelete = pb.createOr(toDelete, pb.createNot(afterHeader));
+    }
+    PabloAST * toKeep = pb.createInFile(pb.createNot(toDelete));
+    pb.createAssign(pb.createExtract(getOutputStreamVar("toKeep"), pb.getInteger(0)), toKeep);
+}
+
+class QuoteEscape2Backslash : public PabloKernel {
+public:
+    QuoteEscape2Backslash(LLVMTypeSystemInterface & ts, StreamSet * quotedData, StreamSet * basis,
+                         StreamSet * translatedBasis)
+        : PabloKernel(ts, std::string("QuoteEscape2Backslash") + (codegen::DebugOptionIsSet(codegen::DisableInOutAttributes) ? "-InOut" : ""),
+                      {Binding{"quotedData", quotedData}, Binding{"basis", basis}},
+                      {}) {
+    mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
+    if (mUseInOut) {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis, FixedRate(), InOut("basis")});
+    } else {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis});
+    }
+}
+protected:
+    void generatePabloMethod() override;
+private:
+    bool mUseInOut;
+};
+
+void QuoteEscape2Backslash::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * quoteEscape = getInputStreamSet("quotedData")[1];
+    auto nested = pb.createScope();
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    Var * outputVar = getOutputStreamVar("translatedBasis");
+    pb.createIf(quoteEscape, nested);
+    //
+    // Replace the quote escape character with \ = 0x5C
+    std::vector<PabloAST *> translated_basis(8, nullptr);
+    PabloAST * notQuoteEscape = nested.createNot(quoteEscape);
+    // Low 2 bits zeroed out whenever we have quoteEscape
+    translated_basis[0] = nested.createAnd(basis[0], notQuoteEscape);
+    translated_basis[1] = nested.createAnd(basis[1], notQuoteEscape);
+    // Next 2 bits set whenever we have quoteEscape
+    translated_basis[2] = nested.createOr(basis[2], quoteEscape);
+    translated_basis[3] = nested.createOr(basis[3], quoteEscape);
+
+    translated_basis[4] = nested.createOr(basis[4], quoteEscape);
+    translated_basis[5] = nested.createAnd(basis[5], notQuoteEscape);
+    translated_basis[6] = nested.createOr(basis[6], quoteEscape);
+    translated_basis[7] = nested.createAnd(basis[7], notQuoteEscape);
+    if (mUseInOut) {
+        for (unsigned i = 0; i < 8; i++) {
+            nested.createAssign(nested.createExtract(outputVar, nested.getInteger(i)), translated_basis[i]);
+        } 
+    } else {
+        for (unsigned i = 0; i < 8; i++) {
+            pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), translated_basis[i]);
+        } 
+    }
+}
+
+class FinalCommaToRBracket : public PabloKernel {
+public:
+    FinalCommaToRBracket(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * EOFmark,
+                         StreamSet * translatedBasis)
+        : PabloKernel(ts, std::string("FinalCommaToRBracket") + (codegen::DebugOptionIsSet(codegen::DisableInOutAttributes) ? "-InOut" : ""),
+                      {Binding{"basis", basis}, Binding{"EOFmark", EOFmark, FixedRate(), LookAhead(2)}},
+                      {}) {
+    mUseInOut = !codegen::DebugOptionIsSet(codegen::DisableInOutAttributes);
+    if (mUseInOut) {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis, FixedRate(), InOut("basis")});
+    } else {
+        mOutputStreamSets.push_back(Binding{"translatedBasis", translatedBasis});
+    }
+}
+protected:
+    void generatePabloMethod() override;
+    void translationLogic(PabloBuilder & pb, PabloAST * FinalCommaPos, std::vector<PabloAST *> & basis);
+private:
+    bool mUseInOut;
+};
+
+void FinalCommaToRBracket::translationLogic(PabloBuilder & pb, PabloAST * FinalCommaPos, std::vector<PabloAST *> & basis) {
+    std::vector<PabloAST *> translated_basis(basis.size());
+    Var * outputVar = getOutputStreamVar("translatedBasis");
+    // Replace the comma (0x2C) character with ] = 0x5D
+    pb.createAssign(pb.createExtract(outputVar, pb.getInteger(0)), pb.createOr(FinalCommaPos, basis[0]));
+    for (unsigned i = 1; i < 4; i++) {
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), basis[i]);
+    }
+    for (unsigned i = 4; i < 7; i++) {
+        translated_basis[i] = pb.createXor(basis[i], FinalCommaPos, "xlated" + std::to_string(i));
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), translated_basis[i]);
+    }
+    for (unsigned i = 7; i < basis.size(); i++) {
+        pb.createAssign(pb.createExtract(outputVar, pb.getInteger(i)), basis[i]);
+    }
+}
+
+void FinalCommaToRBracket::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * EOFmark = getInputStreamSet("EOFmark")[0];
+    PabloAST * FinalCommaPos = pb.createLookahead(EOFmark, 2);
+
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    if (mUseInOut) {
+        auto nested = pb.createScope();
+        pb.createIf(FinalCommaPos, nested);
+        translationLogic(nested, FinalCommaPos, basis);
+    } else {
+        translationLogic(pb, FinalCommaPos, basis);
+    }
+}
+
+class CalcQuoteBixNum : public PabloKernel {
+public:
+    CalcQuoteBixNum(LLVMTypeSystemInterface & ts, StreamSet * stringStarts, StreamSet * stringFollows,
+                         StreamSet * quoteBixNum)
+        : PabloKernel(ts, std::string("CalcQuoteBixNum"),
+                      {Binding{"stringStarts", stringStarts}, Binding{"stringFollows", stringFollows}},
+                      {Binding{"quoteBixNum", quoteBixNum}}) {}
 protected:
     void generatePabloMethod() override;
 };
 
-void BasisCombine::generatePabloMethod() {
-    pablo::PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis1 = getInputStreamSet("basis1");
-    std::vector<PabloAST *> basis2 = getInputStreamSet("basis2");
-    Var * outVar = getOutputStreamVar("combined");
-    for (unsigned i = 0; i < basis1.size(); i++) {
-        PabloAST * combined = pb.createOr(basis1[i], basis2[i]);
-        pb.createAssign(pb.createExtract(outVar, pb.getInteger(i)), combined);
-    }
+void CalcQuoteBixNum::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    PabloAST * stringStarts = getInputStreamSet("stringStarts")[0];
+    PabloAST * stringFollows = getInputStreamSet("stringFollows")[0];
+
+    std::vector<PabloAST *> insertBixNum(2);
+    insertBixNum[0] = pb.createXor(stringStarts, stringFollows);
+    insertBixNum[1] = pb.createAnd(stringStarts, stringFollows);
+    writeOutputStreamSet("quoteBixNum", insertBixNum);
 }
 
-inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
-    unsigned elems = merged->getNumElements();
-    if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
-        llvm::report_fatal_error("MergeByMask called with incompatible element counts");
-    }
-    StreamSet * expandedA = P.CreateStreamSet(elems);
-    SpreadByMask(P, mask, a, expandedA);
-    StreamSet * inverted = P.CreateStreamSet(1);
-    P.CreateKernelCall<Invert>(mask, inverted);
-    StreamSet * expandedB = P.CreateStreamSet(elems);
-    SpreadByMask(P, inverted, b, expandedB);
-    P.CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
+class EnQuote : public PabloKernel {
+public:
+    EnQuote(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * spreadMask,
+                         StreamSet * quotedBasis)
+        : PabloKernel(ts, std::string("EnQuote") + basis->shapeString(),
+                      {Binding{"basis", basis}, Binding{"spreadMask", spreadMask}},
+                      {Binding{"quotedBasis", quotedBasis}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void EnQuote::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    PabloAST * spreadMask = getInputStreamSet("spreadMask")[0];
+    PabloAST * quotePos = pb.createNot(spreadMask);
+    //
+    // Convert the nulls at quotePos to 0x22 (double quote)
+    // This requires only setting bits 1 and 5
+    basis[1] = pb.createOr(basis[1], quotePos);
+    basis[5] = pb.createOr(basis[5], quotePos);
+    writeOutputStreamSet("quotedBasis", basis);
+}
+
+class EnQuoteValues : public PabloKernel {
+public:
+    EnQuoteValues(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * spreadMask, StreamSet * fieldStarts, StreamSet * fieldFollows,
+                         StreamSet * quotedBasis, StreamSet * remainingMask)
+        : PabloKernel(ts, std::string("EnQuote") + basis->shapeString(),
+                      {Binding{"basis", basis}, Binding{"spreadMask", spreadMask},
+                       Binding{"fieldStarts", fieldStarts},
+                       Binding{"fieldFollows", fieldFollows, FixedRate(), LookAhead(1)}},
+                      {Binding{"quotedBasis", quotedBasis}, Binding{"remainingMask", remainingMask}}) {}
+protected:
+    void generatePabloMethod() override;
+};
+
+void EnQuoteValues::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> basis = getInputStreamSet("basis");
+    PabloAST * spreadMask = getInputStreamSet("spreadMask")[0];
+    PabloAST * fieldStarts = getInputStreamSet("fieldStarts")[0];
+    PabloAST * fieldFollows = getInputStreamSet("fieldFollows")[0];
+    PabloAST * insertedZeroes = pb.createNot(spreadMask);
+    PabloAST * quotePos = pb.createAnd(pb.createOr(fieldStarts, pb.createLookahead(fieldFollows, 1)), insertedZeroes);
+    //
+    // Convert the nulls at quotePos to 0x22 (double quote)
+    // This requires only setting bits 1 and 5
+    basis[1] = pb.createOr(basis[1], quotePos);
+    basis[5] = pb.createOr(basis[5], quotePos);
+    PabloAST * remainingMask = pb.createOr(spreadMask, quotePos);
+    writeOutputStreamSet("quotedBasis", basis);
+    writeOutputStreamSet("remainingMask", std::vector<PabloAST *>{remainingMask});
+}
+
+StreamSet * QuoteInsertionBixNum(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows) {
+    StreamSet * literalMatches = P.CreateStreamSet(1);
+    json::JSON_ValueKind no_quotes_needed_set =
+        static_cast<json::JSON_ValueKind>(json::NullLiteral|
+                                          json::NumericLiteral|
+                                          json::TrueLiteral|
+                                          json::FalseLiteral|
+                                          json::QuotedString);
+
+    JSON_Value_Matching(P, no_quotes_needed_set, BasisBits, fieldStarts, fieldFollows, literalMatches);
+
+    StreamSet * const literalFollows = P.CreateStreamSet(1);
+    P.CreateKernelCall<MatchedLinesKernel>(literalMatches, fieldFollows, literalFollows);
+    SHOW_STREAM(literalFollows);
+
+    StreamSet * stringFollows = P.CreateStreamSet(1);
+    XorCombine(P, literalFollows, fieldFollows, stringFollows);
+    SHOW_STREAM(stringFollows);
+
+    StreamSet * stringsByField = P.CreateStreamSet(1);
+    FilterByMask(P, fieldFollows, stringFollows, stringsByField);
+    SHOW_STREAM(stringsByField);
+
+    StreamSet * const stringStarts = P.CreateStreamSet(1);
+    SpreadByMask(P, fieldStarts, stringsByField, stringStarts);
+    SHOW_STREAM(stringStarts);
+
+    StreamSet * const quoteInsertBixNum = P.CreateStreamSet(2);
+    P.CreateKernelCall<CalcQuoteBixNum>(stringStarts, stringFollows, quoteInsertBixNum);
+    SHOW_BIXNUM(quoteInsertBixNum);
+    return quoteInsertBixNum;
+}
+
+void JSON_Value_Quoting(PipelineBuilder & P, StreamSet * BasisBits, StreamSet * fieldStarts, StreamSet * fieldFollows, StreamSet * QuotedBasis) {
+    StreamSet * const quoteInsertBixNum = QuoteInsertionBixNum(P, BasisBits, fieldStarts, fieldFollows);
+
+    StreamSet * const BasisSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, quoteInsertBixNum, BasisSpreadMask, kernel::InsertPosition::Before);
+    SHOW_STREAM(BasisSpreadMask);
+
+    StreamSet * ExpandedBasis = P.CreateStreamSet(BasisBits->getNumElements());
+    SpreadByMask(P, BasisSpreadMask, BasisBits, ExpandedBasis);
+
+    P.CreateKernelCall<EnQuote>(ExpandedBasis, BasisSpreadMask, QuotedBasis);
+    SHOW_BIXNUM(QuotedBasis);
 }
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
@@ -128,46 +383,65 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
     P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P.CreateStreamSet(8);
     Selected_S2P(P, ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
-    //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P.CreateStreamSet(5);
-    P.CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
-    StreamSet * recordSeparators = P.CreateStreamSet(1);
-    StreamSet * fieldSeparators = P.CreateStreamSet(1);
-    StreamSet * quoteEscape = P.CreateStreamSet(1);
 
-    P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
-    SHOW_STREAM(recordSeparators);
-    SHOW_STREAM(fieldSeparators);
-    SHOW_STREAM(quoteEscape);
+    csv::CSV_Parser parser(P, csv::QuoteChar, csv::FieldDelimiter);
+
+    parser.setSource(BasisBits);
+
     StreamSet * toKeep = P.CreateStreamSet(1);
-    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
+    P.CreateKernelCall<CSVdataFieldMask>(parser.getCsvCCs(), parser.getLineEnds(), toKeep, csv::HeaderSpec == "");
     SHOW_STREAM(toKeep);
-    //
-    // Create a short stream which is 1-to-1 with the (field/record) separators,
-    // having 0 bits for field separators and 1 bits for record separators.
-    // Normally this will be a stream having exactly one bit set for every
-    // N positions, where N is the number of entries per row.
-    StreamSet * recordsByField = P.CreateStreamSet(1);
-    FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
-    SHOW_STREAM(recordsByField);
-
-    StreamSet * translatedBasis = P.CreateStreamSet(8);
-    P.CreateKernelCall<CSV_Char_Replacement>(quoteEscape, BasisBits, translatedBasis);
-    SHOW_BIXNUM(translatedBasis);
 
     StreamSet * filteredBasis = P.CreateStreamSet(8);
-    StreamSet * filteredFieldSeparators = P.CreateStreamSet(1);
-    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    FilterByMask(P, toKeep, BasisBits, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
-    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
-    SHOW_STREAM(filteredFieldSeparators);
+    BasisBits = filteredBasis;
+    parser.setSource(BasisBits);
+    StreamSet * fieldStarts = parser.getFieldStarts();
+    StreamSet * fieldFollows = parser.getFieldFollows();
+
+    StreamSet * const quoteInsertBixNum = QuoteInsertionBixNum(P, BasisBits, fieldStarts, fieldFollows);
+    StreamSet * expansionCandidates = P.CreateStreamSet(1);
+    P.CreateKernelCall<JSON_ExpansionCandidates>(parser.getCsvCCs(), parser.getQuotedData(), expansionCandidates);
+    StreamSet * escapeInsertBixNum = json::EscapeSequenceExpansionBixNum(P, BasisBits, expansionCandidates);
+
+    StreamSet * combinedInsertBixNum = P.CreateStreamSet(3); // Three significant bits suffice.
+    P.CreateKernelCall<bixnum::Add>(quoteInsertBixNum, escapeInsertBixNum, combinedInsertBixNum);
+
+    StreamSet * const spreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, combinedInsertBixNum, spreadMask, kernel::InsertPosition::Before);
+    SHOW_STREAM(spreadMask);
+
+    StreamSet * ExpandedBasis = P.CreateStreamSet(BasisBits->getNumElements());
+    SpreadByMask(P, spreadMask, BasisBits, ExpandedBasis);
+
+    // Parse the expanded stream
+    parser.setSource(ExpandedBasis);
+
+    fieldStarts = parser.getFieldStarts();
+    fieldFollows = parser.getFieldFollows();
+
+    StreamSet * QuotedBasis = P.CreateStreamSet(filteredBasis->getNumElements());
+    StreamSet * remainingSpreadMask = P.CreateStreamSet(1);
+    P.CreateKernelCall<EnQuoteValues>(ExpandedBasis, spreadMask, fieldStarts, fieldFollows, QuotedBasis, remainingSpreadMask);
+
+    StreamSet * translatedBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<QuoteEscape2Backslash>(parser.getQuotedData(), QuotedBasis, translatedBasis);
+    SHOW_BIXNUM(translatedBasis);
+    BasisBits = translatedBasis;
+
+    StreamSet * EscapedBasis = P.CreateStreamSet(BasisBits->getNumElements());
+    json::EscapeStringTranslation(P, BasisBits, remainingSpreadMask, EscapedBasis);
+    SHOW_BIXNUM(EscapedBasis);
+    BasisBits = EscapedBasis;
 
     std::vector<uint64_t> insertionAmts;
     unsigned maxInsertAmt = 0;
@@ -180,34 +454,30 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     StreamSet * PrefixLgths = P.CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
 
-    StreamSet * fieldStarts = P.CreateStreamSet(1);
-    P.CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
-    SHOW_STREAM(fieldStarts);
-
     StreamSet * PrefixInsertBixNum = P.CreateStreamSet(insertLengthBits);
     SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
     SHOW_BIXNUM(PrefixInsertBixNum);
 
     std::vector<uint64_t> fieldSuffixLgths;
     for (unsigned i = 0; i < templateStrs.size() - 1; i++) {
-        // Insertion of a single quote to terminate each field.
-        fieldSuffixLgths.push_back(1);
+        fieldSuffixLgths.push_back(0);
     }
-    // Insertion of |"},| to terminate each record
-    fieldSuffixLgths.push_back(3);
+    // Insertion of |},| to terminate each record
+    fieldSuffixLgths.push_back(2);
 
     const unsigned suffixLgthBits = 2;  // insert 1-3 characters.
     StreamSet * RepeatingSuffixLgths = P.CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
     StreamSet * SuffixInsertBixNum = P.CreateStreamSet(suffixLgthBits);
-    SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
+    SpreadByMask(P, fieldFollows, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
-    StreamSet * InsertBixNum = P.CreateStreamSet(insertLengthBits);
+    StreamSet * InsertBixNum = P.CreateStreamSet(ceil_log2(maxInsertAmt+suffixLgthBits+1));
     P.CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
 
-    StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, kernel::InsertPosition::Before);
+    StreamSet * const BasisSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, InsertBixNum, BasisSpreadMask, kernel::InsertPosition::Before);
     SHOW_STREAM(BasisSpreadMask);
     
     std::vector<uint64_t> templateBytes;
@@ -215,7 +485,6 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
         for (auto ch : templateStrs[i]) {
             templateBytes.push_back(static_cast<uint64_t>(ch));
         }
-        templateBytes.push_back(static_cast<uint64_t>('"'));
         if (i == templateStrs.size() - 1) {
             templateBytes.push_back(static_cast<uint64_t>('}'));
             templateBytes.push_back(static_cast<uint64_t>(','));
@@ -223,45 +492,29 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     }
     StreamSet * TemplateBasis = P.CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
+    StreamSet * MergedBasis = P.CreateStreamSet(8);
+    MergeByMask(P, BasisSpreadMask, BasisBits, TemplateBasis, MergedBasis);
+    SHOW_BIXNUM(MergedBasis);
+
+    StreamSet * EOFmark = P.CreateStreamSet(1);
+    P.CreateKernelCall<EOFbit>(MergedBasis, EOFmark);
     StreamSet * FinalBasis = P.CreateStreamSet(8);
-    if (UseMergeByMaskKernel) {
-        MergeByMask(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
-    } else {
-        MergeByMask01(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
-    }
-    SHOW_BIXNUM(FinalBasis);
+    P.CreateKernelCall<FinalCommaToRBracket>(MergedBasis, EOFmark, FinalBasis);
+
     StreamSet * Instantiated = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
     P.CreateKernelCall<StdOutKernel>(Instantiated);
     return P.compile();
 }
 
-const unsigned MaxHeaderSize = 24;
-
 int main(int argc, char *argv[]) {
-    //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
-    //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&CSV_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    llvm_shutdown_obj shutdown;
+    csv::InitializeCommandLineInterface(argc, argv);
 
-    std::vector<std::string> headers;
-    if (HeaderSpec == "") {
-        headers = get_CSV_headers(inputFile);
-    } else if (HeaderSpecNamesFile) {
-        headers = get_CSV_headers(HeaderSpec);
-    } else {
-        headers = parse_CSV_headers(HeaderSpec);
-    }
-    for (auto & s : headers) {
-        if (s.size() > MaxHeaderSize) {
-            s = s.substr(0, MaxHeaderSize);
-        }
-    }
+    std::vector<std::string> headers = csv::get_CSV_headers();
+
     const auto templateStrs = JSONfieldPrefixes(headers);
-    //for (auto & s : templateStrs) {
-    //    llvm::errs() << "template string: |" << s << "|\n";
-    //}
     std::string templatePrologue = "[\n";
-    std::string templateEpilogue = "\"}\n]\n";
     //  A CPU driver is capable of compiling and running Parabix programs on the CPU.
     CPUDriver driver("csv_function");
     //  Build and compile the Parabix pipeline by calling the Pipeline function above.
@@ -270,9 +523,9 @@ int main(int argc, char *argv[]) {
     //  descriptor as an input, which is specified by the filename given by
     //  the inputFile command line option.]
 
-    const int fd = open(inputFile.c_str(), O_RDONLY);
+    const int fd = open(csv::inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
-        llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
+        llvm::report_fatal_error(llvm::StringRef("Cannot open ") + csv::inputFile);
     } else {
         #ifdef REPORT_PAPI_TESTS
         papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
@@ -284,11 +537,10 @@ int main(int argc, char *argv[]) {
         fflush(stdout);
         fn(fd);
         close(fd);
-        printf("%s", templateEpilogue.c_str());
         #ifdef REPORT_PAPI_TESTS
         jitExecution.stop();
         jitExecution.write(std::cerr);
         #endif
     }
-    return 0;
+    return csv::SuccessExitCode;
 }

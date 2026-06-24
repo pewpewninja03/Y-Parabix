@@ -20,9 +20,10 @@ class UntilNkernel final : public MultiBlockKernel {
 public:
     enum Mode {ZeroAfterN, TerminateAtN, ReportAcceptedLengthAtAndBeforeN};
     UntilNkernel(LLVMTypeSystemInterface & ts, Scalar * N, StreamSet * Markers, StreamSet * FirstN,
-                 UntilNkernel::Mode m = UntilNkernel::Mode::TerminateAtN);
+                 UntilNkernel::Mode m = UntilNkernel::Mode::ZeroAfterN);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
+    bool mUseInOut;
     UntilNkernel::Mode mMode;
 };
 

@@ -207,7 +207,7 @@ std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * const a
 #endif
 
 Value * IDISA_SSE2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_vector) {
-    if ((mBitBlockWidth == 128) && (fw == 64)) {
+    if ((getVectorBitWidth(a) == SSE_width) && (fw == 64)) {
         // First create a vector with exchanged values of the 2 fields.
         Constant * idx[2] = {ConstantInt::get(getInt32Ty(), 1), ConstantInt::get(getInt32Ty(), 0)};
         Value * exchanged = CreateShuffleVector(a, UndefValue::get(fwVectorType(fw)), ConstantVector::get({idx, 2}));
@@ -225,7 +225,7 @@ Value * IDISA_SSE2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_v
 }
     
 std::vector<Value *> IDISA_SSE2_Builder::simd_pext(unsigned fw, std::vector<Value *> v, Value * extract_mask) {
-    if (fw > 8) {
+    if ((getVectorBitWidth(v[0]) == SSE_width) && (fw > 8)) {
         std::vector<Value *> w = v;
         w.push_back(extract_mask); // Compress the masks as well.
         w = simd_pext(fw/2, w, extract_mask);
@@ -241,7 +241,7 @@ std::vector<Value *> IDISA_SSE2_Builder::simd_pext(unsigned fw, std::vector<Valu
 }
 
 Value * IDISA_SSSE3_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
-    if ((fw == 1) || (fw == 2)) {
+    if ((getVectorBitWidth(a) == SSE_width) && ((fw == 1) || (fw == 2))) {
         Constant * interleave_table = bit_interleave_byteshuffle_table(fw);
         // Merge the bytes.
         Value * byte_merge = esimd_mergeh(8, a, b);
@@ -258,7 +258,7 @@ Value * IDISA_SSSE3_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_SSSE3_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
-    if ((fw == 1) || (fw == 2)) {
+    if ((getVectorBitWidth(a) == SSE_width) && ((fw == 1) || (fw == 2))) {
         Constant * interleave_table = bit_interleave_byteshuffle_table(fw);
         // Merge the bytes.
         Value * byte_merge = esimd_mergel(8, a, b);
@@ -275,7 +275,7 @@ Value * IDISA_SSSE3_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_SSSE3_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_vector) {
-    if (LLVM_LIKELY(mBitBlockWidth == 128)) {
+    if (getVectorBitWidth(a) == SSE_width) {
         if (fw > 8) {
             // Create a table for shuffling with smaller field widths.
             const unsigned fieldCount = mBitBlockWidth/fw;
@@ -320,17 +320,17 @@ Value * IDISA_SSSE3_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_
 }
 
 Value * IDISA_SSSE3_Builder::mvmd_compress(unsigned fw, Value * a, Value * select_mask) {
-    if (LLVM_LIKELY(mBitBlockWidth == 128)) {
+    //if (LLVM_LIKELY(mBitBlockWidth == 128)) {
         // simd_pext
 
-    }
+    //}
     return IDISA_SSE2_Builder::mvmd_compress(fw, a, select_mask);
 }
 
 Value * IDISA_SSSE3_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_mask)  {
-    if (LLVM_LIKELY(mBitBlockWidth == 128)) {
+    //if (LLVM_LIKELY(mBitBlockWidth == 128)) {
         // simd_pdep
-    }
+    //}
     return IDISA_SSE2_Builder::mvmd_expand(fw, a, select_mask);
 }
 

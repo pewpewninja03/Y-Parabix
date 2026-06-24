@@ -9,8 +9,6 @@ namespace re {
 
 class RE;
 
-RE * expandBoundaryAssertions(RE * r);
-    
 RE * lookaheadPromotion(RE * r);
 
 }

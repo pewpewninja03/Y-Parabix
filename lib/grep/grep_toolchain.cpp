@@ -7,13 +7,13 @@ constexpr auto DefaultByteCClimit = 6;
 
 namespace grep {
 
-int Threads;
-static cl::opt<int, true> OptThreads("t", cl::location(Threads),
-                                     cl::desc("Total number of threads."), cl::init(2));
-
 bool UnicodeIndexing;
 static cl::opt<bool, true> OptUnicodeIndexing("UnicodeIndexing", cl::location(UnicodeIndexing),
                                               cl::desc("Enable CC multiplexing and Unicode indexing."), cl::init(false));
+
+bool UnicodeBasisMode;
+static cl::opt<bool, true> OptUnicodeBasis("UnicodeBasisMode", cl::location(UnicodeBasisMode),
+                                              cl::desc("Require full Unioode basis."), cl::init(false));
 
 bool PropertyKernels;
 static cl::opt<bool, true> OptPropertyKernels("enable-property-kernels", cl::location(PropertyKernels),
@@ -52,4 +52,10 @@ static cl::opt<bool, true> OptUseByteFilterByMask("UseByteFilterByMask", cl::loc
 bool UseNestedColourizationPipeline;
 static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),
                                          cl::desc("Use a nested pipeline for colourization."), cl::init(true));
+
+bool UsePhaseForColourization;
+static cl::opt<bool, true> UsePhaseForColourizationOption("UsePhaseForColourization", cl::location(UsePhaseForColourization),
+                                                          cl::desc("Use independent phase for colourization"), cl::init(true));
+
+
 }

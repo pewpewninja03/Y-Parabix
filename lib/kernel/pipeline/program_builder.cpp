@@ -49,7 +49,7 @@ Kernel * ProgramBuilder::makeKernel() {
     } else {
         ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
     }
-    ADD_CL_SCALAR(BUFFER_SEGMENT_LENGTH, BufferSegmentLength);
+    // ADD_CL_SCALAR(BUFFER_SEGMENT_LENGTH, BufferSegmentLength);
     mDriver.generateUncachedKernels();
     return PipelineBuilder::makeKernel();
 

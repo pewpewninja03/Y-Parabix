@@ -4,8 +4,9 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <re/adt/re_cc.h>
 #include <re/adt/re_re.h>
-#include <unicode/data/PropertyAliases.h>
+#include <ucd/data/PropertyAliases.h>
 #include <llvm/ADT/Twine.h>
+#include <sstream>
 namespace UCD {
     class UnicodeSet;
 }
@@ -15,6 +16,10 @@ namespace re {
 using length_t = std::string::size_type;
 class Name : public RE {
 public:
+    enum NameFlags {
+        None = 0,
+        External = 1
+    };
     static inline bool classof(const RE * re) {
         return re->getClassTypeId() == ClassTypeId::Name;
     }
@@ -26,6 +31,12 @@ public:
     std::string getName() const;
     std::string getFullName() const;
     RE * getDefinition() const;
+    void setExternal() {
+        mFlags |= NameFlags::External;
+    }
+    bool isExternal() const {
+        return (mFlags & NameFlags::External) != 0;
+    }
     bool operator<(const Name & other) const;
     bool operator<(const CC & other) const;
     bool operator>(const CC & other) const;
@@ -43,7 +54,8 @@ protected:
     , mNamespace(replicateString(nameSpace, namespaceLength))
     , mNameLength(nameLength)
     , mName(replicateString(name, nameLength))
-    , mDefinition(defn) {
+    , mDefinition(defn)
+    , mFlags(NameFlags::None) {
 
     }
 
@@ -53,6 +65,7 @@ private:
     const length_t      mNameLength;
     const char * const  mName;
     RE *                mDefinition;
+    size_t              mFlags;
 };
 
 inline std::string Name::getNamespace() const {
@@ -228,6 +241,7 @@ public:
     std::string getValueString() const { return mValue;}
     int getPropertyCode() const { return mPropertyCode;}
     RE * getResolvedRE() const { return mResolvedRE;}
+    std::string getFullName();
 
     static PropertyExpression * Create(PropertyExpression::Kind k,
                                        std::string id,
@@ -255,6 +269,18 @@ private:
     RE * mResolvedRE;
 };
 
+inline std::string PropertyExpression::getFullName() {
+    std::stringstream s;
+    s << mIdentifier;
+    if (mOperator == PropertyExpression::Operator::NEq) {
+        s << "!";
+    }
+    if (mValue != "") {
+        s << ":";
+    }
+    s << mValue;
+    return s.str();
+}
 
 inline PropertyExpression * makePropertyExpression(PropertyExpression::Kind k, std::string ident, PropertyExpression::Operator op = PropertyExpression::Operator::Eq, std::string v = "") {
     return PropertyExpression::Create(k, ident, op, v);
@@ -270,7 +296,7 @@ inline PropertyExpression * makeBoundaryExpression(std::string ident, std::strin
 
 inline void UnresolvedPropertyExpressionError(const PropertyExpression * pe) {
     std::string prop = pe->getPropertyIdentifier();
-    llvm::report_fatal_error(llvm::Twine("Error: Unresolved procperty expression in RE: ") + prop);
+    llvm::report_fatal_error(llvm::Twine("Error: Unresolved property expression in RE: ") + prop);
 }
 
 

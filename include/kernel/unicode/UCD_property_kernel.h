@@ -7,7 +7,7 @@
 #include <pablo/pablo_kernel.h>  // for PabloKernel
 #include <pablo/pablo_toolchain.h>
 
-namespace re { class Name; }
+namespace re { class Name; class PropertyExpression;}
 namespace UCD { class EnumeratedPropertyObject; }
 
 namespace kernel {
@@ -19,16 +19,21 @@ public:
                                  StreamSet * BasisBits,
                                  StreamSet * property,
                                  pablo::BitMovementMode mode = pablo::BitMovementMode::Advance);
+    UnicodePropertyKernelBuilder(LLVMTypeSystemInterface & ts,
+                                 re::PropertyExpression * pe,
+                                 StreamSet * BasisBits,
+                                 StreamSet * property,
+                                 pablo::BitMovementMode mode = pablo::BitMovementMode::Advance);
 protected:
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
     void generatePabloMethod() override;
 private:
-    UnicodePropertyKernelBuilder(LLVMTypeSystemInterface & ts, re::Name * property_value_name,
+    UnicodePropertyKernelBuilder(LLVMTypeSystemInterface & ts, re::PropertyExpression * pe,
                                  StreamSet * BasisBits, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName);
 private:
     std::string mPropNameValue;
-    re::Name * mName;
+    re::PropertyExpression * mPropertyExpr;
     pablo::BitMovementMode mBitMovement;
 };
 

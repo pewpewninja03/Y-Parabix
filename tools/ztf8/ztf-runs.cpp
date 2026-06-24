@@ -14,7 +14,6 @@
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
 #include <llvm/Support/Debug.h>                    // for dbgs
 #include <pablo/pablo_kernel.h>                    // for PabloKernel
-#include <pablo/pablo_toolchain.h>
 #include <pablo/parse/pablo_source_kernel.h>
 #include <pablo/parse/pablo_parser.h>
 #include <pablo/parse/simple_lexer.h>
@@ -205,7 +204,8 @@ ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(source, ztfRunsBasis);
     StreamSet * const ztfRunLengths = P.CreateStreamSet(3);
     P.CreateKernelCall<ZTF_Run_Length_Decoder>(ztfRunsBasis, ztfRunLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfRunLengths);
+    StreamSet * const ztfRunSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, ztfRunSpreadMask, ztfRunLengths);
     StreamSet * const ztfRuns_u8_Basis = P.CreateStreamSet(8);
     SpreadByMask(P, ztfRunSpreadMask, ztfRunsBasis, ztfRuns_u8_Basis);
     StreamSet * const ztfRunCodes = P.CreateStreamSet(1);
@@ -220,7 +220,7 @@ ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ztfRunsOptions, pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&ztfRunsOptions, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     
     CPUDriver driver("ztfRuns");
     const int fd = open(inputFile.c_str(), O_RDONLY);
