@@ -14,38 +14,40 @@
 #include <re/adt/re_re.h>
 #include <pablo/codegenstate.h>
 #include <pablo/pe_zeroes.h>        // for Zeroes
-#include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
 #include <kernel/streamutils/string_insert.h>
+#include <kernel/streamutils/stream_shift.h>
+#include <kernel/unicode/char_replacement.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/basis/p2s_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamsetptr.h>
 #include <kernel/unicode/charclasses.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/utf8_support.h>
 #include <re/adt/re_name.h>
 #include <re/cc/cc_kernel.h>
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
 #include <string>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/utf/utf_compiler.h>
-#include <unicode/utf/transchar.h>
-#include <codecvt>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/utf/utf_compiler.h>
+#include <ucd/utf/transchar.h>
+#include <boost/locale/encoding_utf.hpp>
 #include <re/toolchain/toolchain.h>
 
 using namespace kernel;
@@ -443,42 +445,50 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
     writeOutputStreamSet("output_basis", basis);
 }
 
-class ApplyTransform : public pablo::PabloKernel {
-public:
-    ApplyTransform(LLVMTypeSystemInterface & ts,
-                   StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
-protected:
-    void generatePabloMethod() override;
-};
-
-ApplyTransform::ApplyTransform (LLVMTypeSystemInterface & ts,
-                                StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
-: PabloKernel(ts, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
-// inputs
-{Binding{"basis", Basis},
- Binding{"xfrms", Xfrms}
-},
-// output
-{Binding{"output_basis", Output}}) {
-}
-
-void ApplyTransform::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<PabloAST *> xfrms = getInputStreamSet("xfrms");
-    std::vector<PabloAST *> transformed(basis.size());
-    for (unsigned i = 0; i < basis.size(); i++) {
-        if (i < xfrms.size()) {
-            transformed[i] = pb.createXor(xfrms[i], basis[i]);
-        } else {
-            transformed[i] = basis[i];
-        }
-    }
-    writeOutputStreamSet("output_basis", transformed);
-}
-
 typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
 
+
+XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
+                                      std::vector<unicode::BitTranslationSets> tr,
+                                      unicode::BitTranslationSets ins_bixnum) {
+
+    auto P = CreatePipeline(driver, Output<streamset_t>("OutputBytes",  1, 8, ReturnedBuffer(1)), Input<uint32_t>("inputFileDecriptor"));
+
+    //  The program will use a file descriptor as an input.
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    // File data from mmap
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
+    //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
+    //  from a file descriptor.
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    SHOW_BYTES(ByteStream);
+
+    //  The Parabix basis bits representation is created by the Parabix S2P kernel.
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    SHOW_BIXNUM(BasisBits);
+
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    SHOW_STREAM(u8index);
+
+    StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+
+    StreamSet * U21 = P.CreateStreamSet(21, 1);
+    FilterByMask(P, u8index, U21_u8indexed, U21);
+    SHOW_BIXNUM(U21);
+
+    StreamSet * ResultBasis = U21_CharToShortStringPipeline(P, ins_bixnum, tr, U21);
+
+    StreamSet * const OutputBasis = P.CreateStreamSet(8);
+    U21_to_UTF8(P, ResultBasis, OutputBasis);
+
+    SHOW_BIXNUM(OutputBasis);
+    StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
+    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    return P.compile();
+}
 
 XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
                                       unicode::BitTranslationSets tr) {
@@ -519,7 +529,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     SHOW_BIXNUM(XfrmBasis);
 
     StreamSet * u32basis = P.CreateStreamSet(21, 1);
-    P.CreateKernelCall<ApplyTransform>(U21, XfrmBasis, u32basis);
+    XorCombine(P, U21, XfrmBasis, u32basis);
     SHOW_BIXNUM(u32basis);
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
@@ -568,7 +578,8 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
         P.CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
         SHOW_BIXNUM(AdjustedBixNum);
 
-        SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, kernel::InsertPosition::Before);
+        SpreadMask = P.CreateStreamSet(1);
+        InsertionSpreadMask(P, AdjustedBixNum, SpreadMask, kernel::InsertPosition::Before);
         SHOW_STREAM(SpreadMask);
 
         StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
@@ -627,33 +638,42 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
     //  standard Parabix command line options such as -help, -ShowPablo and many others.
-    codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&Xch_Options, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
-    unicode::BitTranslationSets xfrms;
+    std::vector<unicode::BitTranslationSets> xfrms;
     unicode::BitTranslationSets insertion_bixnum;
     unicode::BitTranslationSets deletion_bixnum;
     if (XfrmProperty != "") {
         UCD::property_t prop = UCD::getPropertyCode(XfrmProperty);
         UCD::PropertyObject * propObj = UCD::getPropertyObject(prop);
         if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
-            xfrms = p->GetBitTransformSets();
+            xfrms.resize(1);
+            xfrms[0] = p->GetBitTransformSets();
             if (!U21) {
                 insertion_bixnum = p->GetUTF8insertionBixNum();
                 deletion_bixnum = p->GetUTF8deletionBixNum();
             }
+        } else if (UCD::StringOverridePropertyObject * p = dyn_cast<UCD::StringOverridePropertyObject>(propObj)) {
+            U21 = true;
+            for (unsigned i = 0; i < p->MaxUnicodeInsertLength(); i++) {
+                xfrms.push_back(p->GetBitTransformSets(i));
+            }
+            insertion_bixnum = p->GetUnicodeInsertLengthBixNumSets();
+        } else {
+            llvm::report_fatal_error("Specified property is neither codepoint nor string override property.");
         }
     } else if (SrcChars != "" && TgtChars != "") {
         unicode::TranslationMap charmap;
-        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
-        std::u32string src = conv.from_bytes(SrcChars);
-        std::u32string tgt = conv.from_bytes(TgtChars);
+        std::u32string src = boost::locale::conv::utf_to_utf<char32_t>(SrcChars);
+        std::u32string tgt = boost::locale::conv::utf_to_utf<char32_t>(TgtChars);
         for (unsigned i = 0; i < src.size(); i++) {
             if (i < tgt.size()) {
                 charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[i]));
             } else {
                 charmap.emplace(UCD::codepoint_t(src[i]), UCD::codepoint_t(tgt[tgt.size()-1]));
             }
-            xfrms = unicode::ComputeBitTranslationSets(charmap);
+            xfrms.resize(1);
+            xfrms[0] = unicode::ComputeBitTranslationSets(charmap);
             if (!U21) {
                 insertion_bixnum = unicode::ComputeUTF8_insertionBixNum(charmap);
                 deletion_bixnum = unicode::ComputeUTF8_deletionBixNum(charmap);
@@ -667,9 +687,9 @@ int main(int argc, char *argv[]) {
     XfrmFunctionType fn;
     StreamSetPtr xlated;
     if (U21) {
-        fn = generateU21_pipeline(driver, xfrms);
+        fn = generateU21_pipeline(driver, xfrms, insertion_bixnum);
     } else {
-        fn = generateUTF8_pipeline(driver, xfrms, insertion_bixnum, deletion_bixnum);
+        fn = generateUTF8_pipeline(driver, xfrms[0], insertion_bixnum, deletion_bixnum);
     }
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {

@@ -25,14 +25,42 @@ using CodeGenOptLevel = CodeGenOpt::Level;
 
 namespace codegen {
 
+extern llvm::cl::OptionCategory JIT_InfoOptions;
 extern llvm::cl::OptionCategory CodeGenOptions;
+extern llvm::cl::OptionCategory InstrumentationOptions;
 
 const llvm::cl::OptionCategory * LLVM_READONLY codegen_flags();
 
 // Command Parameters
+enum InfoFlags {
+    PrintPipelineGraph,
+    PrintKernelSizes,
+    InfoFlagSentinel
+};
+
 enum DebugFlags {
     VerifyIR,
     SerializeThreads,
+    EnableAsserts,
+    EnableStreamSetAsserts,
+    EnablePipelineAsserts,
+    EnableMProtect,
+    DisableIndirectBranch,
+    DisableThreadLocalStreamSets,
+    DisableCacheAlignedKernelStructs,
+    DisableInOutAttributes,
+    ForcePipelineRecompilation,
+    DebugFlagSentinel
+};
+
+enum StatisticsFlags {
+    EnableCycleCounter,
+    GenerateTransferredItemCountHistogram,
+    GenerateDeferredItemCountHistogram,
+    #ifdef ENABLE_PAPI
+    DisplayPAPICounterThreadTotalsOnly,
+    #endif
+    EnableBlockingIOCounter,
     TraceCounts,
     TraceDynamicBuffers,
     TraceDynamicMultithreading,
@@ -40,24 +68,7 @@ enum DebugFlags {
     TraceProducedItemCounts,
     TraceUnconsumedItemCounts,
     TraceBlockedIO,
-    GenerateTransferredItemCountHistogram,
-    GenerateDeferredItemCountHistogram,
-    EnableAsserts,
-    EnablePipelineAsserts,
-    EnableMProtect,
-    EnableCycleCounter,
-    EnableBlockingIOCounter,
-    #ifdef ENABLE_PAPI
-    DisplayPAPICounterThreadTotalsOnly,
-    #endif
-    DisableIndirectBranch,
-    DisableThreadLocalStreamSets,
-    DisableCacheAlignedKernelStructs,
-    DisableInOutAttributes,
-    PrintPipelineGraph,
-    PrintKernelSizes,
-    ForcePipelineRecompilation,
-    DebugFlagSentinel
+    StatisticsFlagSentinel
 };
 
 enum PipelineCompilationModeOptions {
@@ -70,6 +81,12 @@ extern bool SplitTransposition;
 
 bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag);
 
+bool LLVM_READONLY DebugOptionIsSet(const DebugFlags flag1, const DebugFlags flag2);
+
+bool LLVM_READONLY InfoOptionIsSet(const InfoFlags flag);
+
+bool LLVM_READONLY StatisticsOptionIsSet(const StatisticsFlags flag);
+
 bool LLVM_READONLY AnyDebugOptionIsSet();
 
 bool LLVM_READONLY AnyAssertionOptionIsSet();
@@ -78,8 +95,12 @@ bool LLVM_READONLY AnyAssertionOptionIsSet();
 const std::string OmittedOption = ".";
 extern std::string ShowUnoptimizedIROption;
 extern std::string ShowIROption;
+extern std::string ShowIRFilter;
 extern std::string TraceOption;
 extern std::string CCCOption;
+extern std::string ThreadLocalPermittedOptions;
+extern std::string PreserveAllStreamSetDataOptions;
+extern std::string DoubleStreamSetSizeOptions;
 extern PipelineCompilationModeOptions PipelineCompilationMode;
 #ifdef ENABLE_PAPI
 extern std::string PapiCounterOptions;
@@ -111,7 +132,6 @@ extern int IllustratorDisplay;
 extern float DynamicMultithreadingAddThreshold;
 extern float DynamicMultithreadingRemoveThreshold;
 extern size_t DynamicMultithreadingPeriod;
-extern bool EnableJumpGuidedSynchronizationVariables;
 extern bool UseProcessThreadForIO;
 
 void ParseCommandLineOptions(int argc, const char *const *argv, std::initializer_list<const llvm::cl::OptionCategory *> hiding = {});

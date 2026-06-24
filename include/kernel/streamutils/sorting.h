@@ -4,7 +4,6 @@
  */
 #pragma once
 
-#include <kernel/streamutils/sorting.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <pablo/builder.hpp>
@@ -28,7 +27,7 @@ class BitonicCompareStep : public pablo::PabloKernel {
 public:
     BitonicCompareStep(LLVMTypeSystemInterface & ts,
                        unsigned distance, unsigned region_size,
-                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks, StreamSet * Debug = nullptr);
+                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks);
 protected:
     void generatePabloMethod() override;
 private:

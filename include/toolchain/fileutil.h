@@ -10,6 +10,8 @@
 
 extern bool NoOSFileCaching;
 
+extern bool MMapPreference; // From -mmap flag
+
 bool canMMap(const std::string & fileName);
 
 class AlignedFileBuffer {

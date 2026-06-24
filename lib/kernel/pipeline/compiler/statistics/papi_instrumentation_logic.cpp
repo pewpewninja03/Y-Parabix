@@ -77,7 +77,7 @@ void PipelineCompiler::addPAPIEventCounterKernelProperties(KernelBuilder & b, co
         ArrayType * const papiDataTy = ArrayType::get(getPAPIEventCounterType(b), NUM_OF_PAPI_KERNEL_COUNTERS);
         const auto prefix = makeKernelName(kernel) + STATISTICS_PAPI_COUNT_ARRAY_SUFFIX;
         const auto groupId = getCacheLineGroupId(kernel);
-        if (mIsStatelessKernel.test(kernel)) {
+        if (isDataParallel(kernel)) {
             mTarget->addThreadLocalScalar(papiDataTy, prefix, groupId, ThreadLocalScalarAccumulationRule::Sum);
         } else {
             mTarget->addInternalScalar(papiDataTy, prefix, groupId);
@@ -104,7 +104,7 @@ void PipelineCompiler::readPAPIMeasurement(KernelBuilder & b, Value * const meas
     // went wrong?
 
     Value * const retVal = b.CreateCall(PAPIReadFn->getFunctionType(), PAPIReadFn, args);
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         Value * valid = b.CreateICmpEQ(retVal, ConstantInt::get(retVal->getType(), PAPI_OK));
         b.CreateAssert (valid, "PAPI_read failed");
     }
@@ -284,7 +284,7 @@ void PipelineCompiler::accumPAPIMeasurementWithoutReset(KernelBuilder & b, const
 
             b.CreateAssert(b.CreateICmpULE(beforeVal, afterVal), "%s.papi%" PRIu64 " or %" PRIu64 ".%" PRIu64 " : %" PRIu64 ", %" PRIu64, mCurrentKernelName, b.getSize(ifTrue), b.getSize(ifFalse), b.getSize(i), beforeVal, afterVal);
 
-            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
+            Value * const diff = b.CreateUnsignedSaturatingSub(afterVal, beforeVal);
             update[2] = from[1];
             Value * const ptr = b.CreateGEP(eventCounterSumty, eventCounterSumArray, update);
             Value * const curr = b.CreateAlignedLoad(papiCounterTy, ptr, papiCounterAlign);
@@ -323,7 +323,7 @@ void PipelineCompiler::recordTotalPAPIMeasurement(KernelBuilder & b) const {
 
             b.CreateAssert(b.CreateICmpULE(beforeVal, afterVal), "total");
 
-            Value * const diff = b.CreateSaturatingSub(afterVal, beforeVal);
+            Value * const diff = b.CreateUnsignedSaturatingSub(afterVal, beforeVal);
             Value * const ptr = b.CreateGEP(counterArrayTy, eventCounterSumArray, from);
             Value * const curr = b.CreateAlignedLoad(counterTy, ptr, papiCounterAlign);
             assert (curr->getType() == diff->getType());

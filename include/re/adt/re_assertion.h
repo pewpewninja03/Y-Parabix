@@ -13,7 +13,7 @@ namespace re {
 
 class Assertion : public RE {
 public:
-    enum class Kind {LookBehind, LookAhead, Boundary};
+    enum class Kind {LookBehind, LookAhead};
     enum class Sense {Positive, Negative};
     
     RE * getAsserted() const {return mAsserted;}
@@ -42,10 +42,6 @@ RE * makeNegativeLookAheadAssertion(RE * r);
 RE * makeLookBehindAssertion(RE * r);
 
 RE * makeNegativeLookBehindAssertion(RE * r);
-
-RE * makeBoundaryAssertion(RE * r);
-
-RE * makeNegativeBoundaryAssertion(RE * r);
 
 // Start-of-text boundary assertion.
 RE * makeSOT();

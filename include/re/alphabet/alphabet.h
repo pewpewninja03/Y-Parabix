@@ -7,7 +7,7 @@
 
 #include <string>
 #include <vector>
-#include <unicode/core/unicode_set.h>
+#include <ucd/core/unicode_set.h>
 #include <util/slab_allocator.h>
 
 namespace cc {

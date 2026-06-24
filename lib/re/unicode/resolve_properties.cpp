@@ -13,10 +13,10 @@
 #include <re/parse/parser.h>
 #include <re/compile/re_compiler.h>
 #include <re/unicode/boundaries.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
-#include <unicode/data/PropertyObjectTable.h>
-#include <unicode/data/PropertyValueAliases.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
+#include <ucd/data/PropertyObjectTable.h>
+#include <ucd/data/PropertyValueAliases.h>
 #include <util/aligned_allocator.h>
 
 using namespace UCD;
@@ -67,13 +67,19 @@ RE * PropertyResolver::resolveCC (std::string value, bool is_negated) {
 
 RE * PropertyResolver::resolveBoundary (std::string val, bool is_negated) {
     RE * resolved = nullptr;
-    if (mPropCode == UCD::g) { // Grapheme cluster boundary
-        resolved = generateGraphemeClusterBoundaryRule();
+    if (BoundaryPropertyObject * b = dyn_cast<BoundaryPropertyObject>(mPropObj)) {
+        resolved = b->GetBoundaryExpression();
+        if (resolved  == nullptr) {
+            if (mPropCode == UCD::g) { // Grapheme cluster boundary
+                resolved = generateGraphemeClusterBoundaryRule();
+            } else if (mPropCode == UCD::w) { // Unicode word boundary
+                resolved = generateWordBoundaryRule();
+            }
+            b->SetBoundaryExpression(resolved);
+        }
         if (is_negated) {
             resolved = makeDiff(makeAny(), resolved);
         }
-    } else if (mPropCode == UCD::w) { // Unicode word boundary
-        UnicodePropertyExpressionError("\\b{w} not yet supported.");
     } else if (isa<EnumeratedPropertyObject>(mPropObj) && (val == "")) {
         // Boundary between codepoints with any two different values for an
         // enumerated property.
@@ -124,6 +130,8 @@ RE * resolveProperties(RE * r, GrepLinesFunctionType grep) {
 struct PropertyLinker : public RE_Transformer {
     PropertyLinker() : RE_Transformer("PropertyLinker") {}
     RE * transformPropertyExpression (PropertyExpression * exp) override {
+        // If already linked, simply return.
+        if (exp->getPropertyCode() >= 0) return exp;
         std::string id = exp->getPropertyIdentifier();
         std::string canon = UCD::canonicalize_value_name(id);
         // In the case of a property expression without a value,

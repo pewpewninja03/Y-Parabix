@@ -10,7 +10,6 @@
 #include <testing/runtime.h>
 #include <testing/stream_gen.hpp>
 #include <toolchain/toolchain.h>
-#include <pablo/pablo_toolchain.h>
 
 #define TEST_CASE(NAME, ...)                                                                                    \
 template<typename... Ps>                                                                                        \
@@ -41,8 +40,7 @@ void test_case_##NAME<Ps...>::run(engine_t & T, pipeline_t P)
 #define RUN_TESTS(...)                                                                                          \
 int main(int argc, char ** argv) {                                                                              \
     codegen::ParseCommandLineOptions(argc, argv, {                                                              \
-        codegen::codegen_flags(),                                                                               \
-        pablo::pablo_toolchain_flags(),                                                                         \
+        &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions,                                            \
         testing::cli::testFlags()                                                                               \
     });                                                                                                         \
     return testing::RunTestSuite({__VA_ARGS__});                                                                \

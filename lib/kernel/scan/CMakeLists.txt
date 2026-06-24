@@ -15,5 +15,4 @@ SRC
     scanmatchgen.cpp
 DEPS
     kernel.pipeline
-    kernel.streamutils
 )

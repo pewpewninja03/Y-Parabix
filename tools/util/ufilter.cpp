@@ -20,6 +20,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamset.h>
 #include <kernel/unicode/utf8_decoder.h>
+#include <kernel/unicode/utf8_support.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/streamutils/deletion.h>
 #include <llvm/IR/Function.h>
@@ -29,9 +30,7 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <grep/grep_kernel.h>
 #include <toolchain/toolchain.h>
 #include <fileselect/file_select.h>
 #include <fcntl.h>
@@ -108,7 +107,7 @@ UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     CPUDriver driver("ufilter");
 
     UFiltertFunctionType fnPtr = nullptr;

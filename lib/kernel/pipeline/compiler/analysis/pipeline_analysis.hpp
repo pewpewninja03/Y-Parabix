@@ -34,42 +34,24 @@ public:
 
         // Initially, we gather information about our partition to determine what kernels
         // are within each partition in a topological order
-        auto initialGraph = P.initialPartitioningPass();
+        auto initialGraph = P.generatePartitionGraph();
 
         P.computeIntraPartitionRepetitionVectors(initialGraph);
 
-        switch (codegen::PipelineCompilationMode) {
-            case codegen::PipelineCompilationModeOptions::DefaultFast:
-                P.simpleEstimateInterPartitionDataflow(initialGraph, rng);
-                break;
-            case codegen::PipelineCompilationModeOptions::Expensive:
-                P.estimateInterPartitionDataflow(initialGraph, rng);
-                break;
-        }
-
-        auto partitionGraph = P.postDataflowAnalysisPartitioningPass(initialGraph);
-
-        switch (codegen::PipelineCompilationMode) {
-            case codegen::PipelineCompilationModeOptions::DefaultFast:
-                P.simpleSchedulePartitionedProgram(partitionGraph, rng);
-                break;
-            case codegen::PipelineCompilationModeOptions::Expensive:
-                P.schedulePartitionedProgram(partitionGraph, rng);
-                break;
-        }
+        P.simpleSchedulePartitionedProgram(initialGraph, rng);
 
         // Construct the Stream and Scalar graphs
-        P.transcribeRelationshipGraph(initialGraph, partitionGraph);
+        P.transcribeRelationshipGraph(initialGraph);
 
-        P.generateInitialBufferGraph();
+        P.generateInitialBufferGraph(b);
 
         P.updateInterPartitionThreadLocalBuffers();
+
+        P.calculateRelativeToInputDataTransferIORates();
 
         P.identifyOutputNodeIds();
 
         P.identifyInterPartitionSymbolicRates();
-
-        P.addFlowControlAnnotations();
 
         P.identifyTerminationChecks();
 
@@ -83,38 +65,43 @@ public:
 
         // Finish annotating the buffer graph
         P.identifyOwnedBuffers();
+
         P.identifyZeroExtendedStreamSets();
 
         P.identifyLinearBuffers();
-        if (codegen::EnableIllustrator) {
+        if (P.RequiresIllustratorObject) {
             P.identifyIllustratedStreamSets();
         }
-        P.calculatePartialSumStepFactors(b);
-        P.determineBufferSize(b);
+
+        P.estimateInitialBufferSizes(b);
 
         P.makeConsumerGraph();
 
         P.buildZeroInputGraph();
 
+        P.calculatePartialSumStepFactors(b);
+
         P.identifyPortsThatModifySegmentLength();
 
         P.mapInternallyGeneratedStreamSets();
 
-        P.identifySynchronizationVariableLevels();
-
         // Finish the buffer graph
 
-        P.determineInitialThreadLocalBufferLayout(b, rng);
-
         P.addStreamSetsToBufferGraph(b);
+
+        P.determineInitialThreadLocalBufferLayout(b, rng);
 
         P.scanFamilyKernelBindings();
 
         P.setStreamSetLockIds();
 
+        P.calculateUnwrittenDataZeroLength(b);
+
+        P.identifyManagedBufferStructIds(rng);
+
         P.gatherInfo();
 
-        if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
+        if (codegen::InfoOptionIsSet(codegen::PrintPipelineGraph)) {
             assert (b.getModule() == pipelineKernel->getModule());
             P.printBufferGraph(b, errs());
         }
@@ -130,10 +117,11 @@ private:
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
     , mKernels(pipelineKernel->mKernels)
-    , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
-    , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
+    , mTraceProcessedProducedItemCounts(codegen::StatisticsOptionIsSet(codegen::TraceCounts))
+    , mTraceDynamicBuffers(codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))
     , mTraceIndividualConsumedItemCounts(mTraceProcessedProducedItemCounts || mTraceDynamicBuffers)
-    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized)) {
+    , IsNestedPipeline(pipelineKernel->hasAttribute(AttrId::InternallySynchronized))
+    , PreserveAllStreamSetData(parseCommaDelimitedList(codegen::PreserveAllStreamSetDataOptions)) {
 
     }
 
@@ -143,7 +131,7 @@ private:
 
     void identifyPipelineInputs();
 
-    void transcribeRelationshipGraph(const PartitionGraph & initialGraph, const PartitionGraph & partitionGraph);
+    void transcribeRelationshipGraph(const PartitionGraph & partitionGraph);
 
     void gatherInfo() {
         MaxNumOfInputPorts = in_degree(PipelineOutput, mBufferGraph);
@@ -159,8 +147,7 @@ private:
 
 
     // partitioning analysis
-    PartitionGraph initialPartitioningPass();
-    PartitionGraph postDataflowAnalysisPartitioningPass(PartitionGraph & initial);
+    PartitionGraph generatePartitionGraph();
 
     PartitionGraph identifyKernelPartitions();
 
@@ -193,9 +180,10 @@ private:
     // buffer management analysis functions
 
     void addStreamSetsToBufferGraph(KernelBuilder & b);
-    void generateInitialBufferGraph();
 
-    void determineBufferSize(KernelBuilder & b);
+    void generateInitialBufferGraph(KernelBuilder & b);
+
+    void estimateInitialBufferSizes(KernelBuilder & b);
 
     void identifyOwnedBuffers();
 
@@ -209,9 +197,11 @@ private:
 
     void buildZeroInputGraph();
 
-    void addFlowControlAnnotations();
+    void calculateUnwrittenDataZeroLength(KernelBuilder & b);
 
     void setStreamSetLockIds();
+
+    void identifyManagedBufferStructIds(pipeline_random_engine & rng);
 
     // thread local analysis
 
@@ -232,6 +222,8 @@ private:
     void identifyInterPartitionSymbolicRates();
 
     void calculatePartialSumStepFactors(KernelBuilder & b);
+
+    void calculateRelativeToInputDataTransferIORates();
 
     void simpleEstimateInterPartitionDataflow(PartitionGraph & P, pipeline_random_engine & rng);
 
@@ -264,10 +256,6 @@ private:
 
     void mapInternallyGeneratedStreamSets();
 
-    // Synchronization Level Analysis
-
-    void identifySynchronizationVariableLevels();
-
 public:
 
     // Debug functions
@@ -281,6 +269,8 @@ public:
     Kernels                         mKernels;
     ProgramGraph                    Relationships;
     KernelPartitionIds              PartitionIds;
+    std::vector<size_t>             PartitionPhaseBoundaries;
+    flat_map<size_t, size_t>        KernelPhaseId;
 
     const bool                      mTraceProcessedProducedItemCounts;
     const bool                      mTraceDynamicBuffers;
@@ -300,13 +290,12 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        FirstComputePartitionId = 0;
-    unsigned                        LastComputePartitionId = 0;
-    bool                            AllowIOProcessThread = false;
+    unsigned                        ManagedBufferStructCount = 0;
+
+    size_t                          MinimumThreadLocalSegmentSize = 0;
 
     bool                            HasZeroExtendedStream = false;
-
-    size_t                          RequiredThreadLocalStreamSetMemory = 0;
+    bool                            RequiresIllustratorObject = false;
 
     unsigned                        MaxNumOfInputPorts = 0;
     unsigned                        MaxNumOfOutputPorts = 0;
@@ -319,18 +308,20 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
+    std::vector<unsigned>           TerminalPhaseSet;
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;
+    ThreadLocalPlacementGraph       ThreadLocalPlacement;
+
+    ThreadLocalConflictGraphType    ThreadLocalConflictGraph;
 
     std::vector<unsigned>           PartitionJumpTargetId;
-    RedundantStreamSetMap           RedundantStreamSets;
+    RedundantStreamSetMap           RemappedStreamSets;
 
     ConsumerGraph                   mConsumerGraph;
 
     PartialSumStepFactorGraph       mPartialSumStepFactorGraph;
-
-    flat_set<unsigned>              mNonThreadLocalStreamSets;
 
     TerminationChecks               mTerminationCheck;
 
@@ -341,6 +332,8 @@ public:
 
     FamilyScalarGraph               mFamilyScalarGraph;
     ZeroInputGraph                  mZeroInputGraph;
+
+    IntervalSet                     PreserveAllStreamSetData;
 
     IllustratedStreamSetMap         mIllustratedStreamSetBindings;
 

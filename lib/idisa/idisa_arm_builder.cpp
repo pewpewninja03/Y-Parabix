@@ -106,7 +106,7 @@ Value * IDISA_ARM_Builder::simd_bitreverse(unsigned fw, Value * a) {
     return CreateCall(refBytesInFields->getFunctionType(), refBytesInFields, fwCast(fw, bitsInBytesRevsd));
 }
 
-Value * IDISA_ARM_Builder::mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) {
+Value * IDISA_ARM_Builder::mvmd_shuffle(unsigned fw, Value * data_table, Value * index_vector) {
   if (mBitBlockWidth == 128 && fw > 8) {
     // Create a table for shuffling with smaller field widths.
     const unsigned fieldCount = mBitBlockWidth/fw;
@@ -131,6 +131,15 @@ Value * IDISA_ARM_Builder::mvmd_shuffle(unsigned fw, llvm::Value * data_table, l
     return fwCast(8, CreateCall(shuf8Func->getFunctionType(), shuf8Func, {fwCast(8, data_table), fwCast(8, simd_select_lo(fw, index_vector))}));
   }
   return IDISA_Builder::mvmd_shuffle(fw, data_table, index_vector);
+}
+
+Value * IDISA_ARM_Builder::mvmd_shuffle2(unsigned fw, Value * table0, Value * table1, Value * index_vector) {
+    if (mBitBlockWidth == 128 && fw == 8) {
+        Function * shuf8Func = Intrinsic::getDeclaration(getModule(), Intrinsic::aarch64_neon_tbl2, FixedVectorType::get(getInt8Ty(), 16));
+        Value * rslt = CreateCall(shuf8Func->getFunctionType(), shuf8Func, {fwCast(8, table0), fwCast(8, table1), fwCast(8, index_vector)});
+            return rslt;
+    }
+    return IDISA_Builder::mvmd_shuffle2(fw, table0, table1, index_vector);
 }
 
 Value * IDISA_ARM_Builder::hsimd_packl(unsigned fw, Value * a, Value * b) {

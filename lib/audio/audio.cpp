@@ -302,7 +302,7 @@ namespace audio
         b.SetInsertPoint(loop);
         PHINode *blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
         blockOffsetPhi->addIncoming(ZERO, entry);
-        Value *bytepack[inputPacksPerStride];
+        std::vector<Value *> bytepack(inputPacksPerStride);
         for (unsigned i = 0; i < inputPacksPerStride; ++i)
         {
             bytepack[i] = b.loadInputStreamPack("inputStream", ZERO, b.getInt32(i), blockOffsetPhi);

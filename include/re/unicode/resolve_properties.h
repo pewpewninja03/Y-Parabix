@@ -3,8 +3,8 @@
 #include <string>
 #include <set>
 #include <llvm/Support/Compiler.h>
-#include <unicode/data/PropertyAliases.h>
-#include <unicode/data/PropertyObjects.h>
+#include <ucd/data/PropertyAliases.h>
+#include <ucd/data/PropertyObjects.h>
 #include <re/transforms/name_intro.h>
 #include <re/transforms/re_transformer.h>
 

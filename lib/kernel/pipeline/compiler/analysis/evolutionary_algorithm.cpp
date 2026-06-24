@@ -343,7 +343,7 @@ const PermutationBasedEvolutionaryAlgorithm & PermutationBasedEvolutionaryAlgori
         nextGenLock.lock();
         nextGenLock.unlock();
 
-        assert (workQueue.empty());        
+        assert (workQueue.empty());
         while (LLVM_UNLIKELY(nextGeneration.size() < 2)) {
             nextGeneration.push_back(population.back());
             population.pop_back();

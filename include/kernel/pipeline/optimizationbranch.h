@@ -54,8 +54,6 @@ protected:
 
     void addInternalProperties(KernelBuilder & b) override;
 
-    LLVM_READNONE bool allocatesInternalStreamSets() const final;
-
     void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) override;
 
     void generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, llvm::Value * expectedNumOfStrides) override;

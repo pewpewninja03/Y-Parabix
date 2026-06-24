@@ -62,10 +62,10 @@ void PipelineCompiler::computeFullyProcessedItemCounts(KernelBuilder & b, Value 
         Value * const fullyProcessed = b.CreateSelect(terminated, avail, processed);
 
         mFullyProcessedItemCount[port] = fullyProcessed;
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
-            if (bn.Locality == BufferLocality::ThreadLocal) {
+            if (bn.isThreadLocal()) {
                 Value * const produced = mLocallyAvailableItems[streamSet]; assert (produced);
                 Value * const fullyConsumed = b.CreateICmpEQ(produced, processed);
                 Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
@@ -105,7 +105,7 @@ void PipelineCompiler::computeFullyProducedItemCounts(KernelBuilder & b, Value *
             const Binding & output = br.Binding;
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::Delayed))) {
                 const auto & D = output.findAttribute(AttrId::Delayed);
-                produced = b.CreateSaturatingSub(produced, b.getSize(D.amount()));
+                produced = b.CreateUnsignedSaturatingSub(produced, b.getSize(D.amount()));
             }
             if (LLVM_UNLIKELY(output.hasAttribute(AttrId::BlockSize))) {
                 Constant * const BLOCK_WIDTH = b.getSize(b.getBitBlockWidth());
@@ -138,7 +138,7 @@ Value * PipelineCompiler::subtractLookahead(KernelBuilder & b, const BufferPort 
     }
     Constant * const lookAhead = b.getSize(inputPort.LookAhead);
     Value * const closed = isClosed(b, inputPort.Port);
-    Value * const reducedItemCount = b.CreateSaturatingSub(itemCount, lookAhead);
+    Value * const reducedItemCount = b.CreateUnsignedSaturatingSub(itemCount, lookAhead);
     return b.CreateSelect(closed, itemCount, reducedItemCount);
 }
 
@@ -152,14 +152,14 @@ Value * PipelineCompiler::getThreadLocalHandlePtr(KernelBuilder & b, const unsig
     Value * handle = nullptr;
     if (LLVM_UNLIKELY(commonThreadLocal)) {
         assert (mCommonThreadLocalHandle);
-        handle = getThreadLocalScalarFieldPtr(b, mCommonThreadLocalHandle, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
+        handle = getScalarFieldPtr(b, mCommonThreadLocalHandle, ScalarType::ThreadLocal, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
         assert (handle);
     } else {
         handle = getScalarFieldPtr(b, prefix + KERNEL_THREAD_LOCAL_SUFFIX).first;
     }
     if (LLVM_UNLIKELY(isKernelFamilyCall(kernelIndex))) {
         StructType * const localStateTy = kernel->getThreadLocalStateType();
-        if (LLVM_UNLIKELY(CheckAssertions)) {
+        if (LLVM_UNLIKELY(CheckAssertions())) {
             b.CreateAssert(handle, "null handle load");
         }
         handle = b.CreateAlignedLoad(localStateTy->getPointerTo(), handle, PtrTyABIAlignment);
@@ -194,17 +194,6 @@ bool PipelineCompiler::hasAnyGreedyInput(const unsigned kernelId) const {
         }
     }
     return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isDataParallel
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::isDataParallel(const size_t kernel) const {
-    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
-    return mIsStatelessKernel.test(kernel) || mIsInternallySynchronized.test(kernel);
-    #else
-    return mIsStatelessKernel.test(kernel);
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -314,7 +303,7 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     // TODO: make it so these are only needed in debug mode for assertion checks?
 
     mExecuteStridesIndividually = false;
-    mCurrentKernelIsStateFree = false;
+    mAllowDataParallelExecution = false;
     mAllowDataParallelExecution = false;
     mHasPrincipalInput = false;
 
@@ -323,7 +312,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mStrideStepSize = nullptr;
     mAnyClosed = nullptr;
 
-    mPrincipalFixedRateFactor = nullptr;
     mHasExhaustedClosedInput = nullptr;
     mStrideStepSizeAtLoopEntryPhi = nullptr;
     mKernelInsufficientInput = nullptr;
@@ -332,7 +320,6 @@ void PipelineCompiler::clearInternalStateForCurrentKernel() {
     mKernelInitiallyTerminatedExit = nullptr;
     mInitiallyTerminated = nullptr;
 
-    mMaximumNumOfStrides = nullptr;
     mNumOfLinearStridesPhi = nullptr;
     mNumOfLinearStrides = nullptr;
     mFixedRateFactorPhi = nullptr;
@@ -441,6 +428,34 @@ LLVM_READNONE std::string PipelineCompiler::makeBufferName(const size_t kernelIn
     #endif
     out.flush();
     return tmp;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief nonNestedPipelineHasAnyInternalInput
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::nonNestedPipelineHasAnyInternalInput() const {
+    if (mIsNestedPipeline) {
+        return false;
+    }
+    for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = source(input, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (LLVM_LIKELY(bn.isInternal())) {
+            return true;
+        }
+        const auto producer = parent(streamSet, mBufferGraph);
+        if (producer != PipelineInput) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief currentKernelOnlyHasNonCountableInputs
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::currentKernelOnlyHasNonCountableInputs() const {
+return false;
 }
 
 }

@@ -22,7 +22,7 @@
 #include <re/adt/re_group.h>
 #include <re/adt/re_permute.h>
 #include <re/alphabet/alphabet.h>
-#include <unicode/data/PropertyAliases.h>
+#include <ucd/data/PropertyAliases.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace re;
@@ -31,8 +31,6 @@ using namespace llvm;
 struct REStringBuilder {
 
     REStringBuilder() : tmp(), out(tmp) {}
-
-    REStringBuilder(std::set<std::string> externals) : tmp(), out(tmp), mExternals(externals) {}
 
     void buildString(const RE * re);
 
@@ -45,7 +43,6 @@ struct REStringBuilder {
  private:
     std::string tmp;
     raw_string_ostream out;
-    std::set<std::string> mExternals;
 };
 
 void REStringBuilder::buildString(const RE * re) {
@@ -70,7 +67,7 @@ void REStringBuilder::buildString(const RE * re) {
         out << re_cc->canonicalName();
         out << "\" ";
     } else if (const Name* re_name = dyn_cast<const Name>(re)) {
-        if (mExternals.find(re_name->getFullName()) != mExternals.end()) {
+        if (re_name->isExternal()) {
             out << "Name \"";
             if (re_name->hasNamespace()) {
                 out << re_name->getNamespace() << ':';
@@ -115,9 +112,6 @@ void REStringBuilder::buildString(const RE * re) {
                 break;
             case Assertion::Kind::LookBehind:
                 out << "LookBehind";
-                break;
-            case Assertion::Kind::Boundary:
-                out << "Boundary";
                 break;
         }
         out << "Assertion(";
@@ -214,12 +208,6 @@ void REStringBuilder::buildString(const RE * re) {
 
 const std::string Printer_RE::PrintRE(const RE * re) {
     REStringBuilder sb;
-    sb.buildString(re);
-    return sb.toString();
-}
-
-const std::string Printer_RE::PrintRE(const RE * re, std::set<std::string> ext) {
-    REStringBuilder sb(ext);
     sb.buildString(re);
     return sb.toString();
 }

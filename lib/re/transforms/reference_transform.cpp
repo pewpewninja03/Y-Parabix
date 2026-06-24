@@ -3,7 +3,7 @@
 #include <re/adt/adt.h>
 #include <re/analysis/capture-ref.h>
 #include <re/analysis/re_analysis.h>
-#include <unicode/data/PropertyAliases.h>
+#include <ucd/data/PropertyAliases.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;

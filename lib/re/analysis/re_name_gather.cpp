@@ -32,32 +32,27 @@ void gatherNames(RE * const re, std::set<Name *> & nameSet) {
 
 struct ExternalCollector final : public RE_Inspector {
 
-    ExternalCollector()
-    : RE_Inspector() {}
+    ExternalCollector(std::set<std::string> & externals,
+                      std::set<std::string> & alphabets)
+    : RE_Inspector(), mExternals(externals), mAlphabets(alphabets) {}
 
-    void inspectName(Name * n) final {
-        ExternalSet.insert(n->getFullName());
+    void inspectName(Name * n) override {
+        mExternals.insert(n->getFullName());
     }
 
-    void inspectCC(CC * cc) final {
+    void inspectCC(CC * cc) override {
         auto alpha = cc->getAlphabet();
-        if ((alpha == &cc::Unicode) || (alpha == &cc::UTF8)) {
-            ExternalSet.insert("basis");
-        } else {
-            ExternalSet.insert(alpha->getName() + "_basis");
-        }
+        mAlphabets.insert(alpha->getName());
     }
 
-    std::set<std::string> ExternalSet;
+    std::set<std::string> & mExternals;
+    std::set<std::string> & mAlphabets;
 };
 
-std::vector<std::string> gatherExternals(RE * const re) {
-    ExternalCollector collector;
+void gatherExternals(RE * const re,
+                     std::set<std::string> & externals,
+                     std::set<std::string> & alphabets) {
+    ExternalCollector collector(externals, alphabets);
     collector.inspectRE(re);
-    std::vector<std::string> externals;
-    for (auto & e : collector.ExternalSet) {
-        externals.emplace_back(std::move(e));
-    }
-    return externals;
 }
 }

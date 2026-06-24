@@ -25,4 +25,6 @@ DEPS
     pablo.bixnum
     kernel.pipeline
     kernel.basis
+    kernel.bitwise
+    kernel.scan
 )

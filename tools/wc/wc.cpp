@@ -9,7 +9,7 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/adt/adt.h>
 #include <re/unicode/resolve_properties.h>
-#include <unicode/utf/utf_compiler.h>
+#include <ucd/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
@@ -21,7 +21,6 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <pablo/pe_zeroes.h>
-#include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/program_builder.h>
 #include <toolchain/toolchain.h>
@@ -288,7 +287,7 @@ void wc(WordCountFunctionType fn_ptr, const uint32_t fileIdx) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&wcFlags, pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&wcFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }

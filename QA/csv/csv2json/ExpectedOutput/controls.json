@@ -1,0 +1,7 @@
+[
+{"Line":1,"Desc":"Embedded backspace","Data":"BS:\b"},
+{"Line":2,"Desc":"Three nulls","Data":"NULs:\u0000\u0000\u0000"},
+{"Line":3,"Desc":"quoted string with CRLF","Data":"\n\r"},
+{"Line":4,"Desc":"TAB:\b","Data":"TAB:\b"},
+{"Line":5,"Desc":"bare ACK x06","Data":"\u0006"},
+{"Line":6,"Desc":"x07 x08 x09 x0a x0b x0c x0d x0e x11","Data":"\u0007 \b \t \n \u000B \f \r \u000E \u0011"}]

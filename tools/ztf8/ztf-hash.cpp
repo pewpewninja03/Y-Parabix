@@ -14,7 +14,6 @@
 #include <llvm/Support/CommandLine.h>              // for ParseCommandLineOp...
 #include <llvm/Support/Debug.h>                    // for dbgs
 #include <pablo/pablo_kernel.h>                    // for PabloKernel
-#include <pablo/pablo_toolchain.h>
 #include <pablo/parse/pablo_source_kernel.h>
 #include <pablo/parse/pablo_parser.h>
 #include <pablo/parse/simple_lexer.h>
@@ -137,7 +136,8 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P.CreateKernelCall<S2PKernel>(source, ztfHashBasis);
     StreamSet * const ztfInsertionLengths = P.CreateStreamSet(4);
     P.CreateKernelCall<ZTF_ExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfInsertionLengths);
+    StreamSet * const ztfRunSpreadMask = P.CreateStreamSet(1);
+    InsertionSpreadMask(P, ztfRunSpreadMask, ztfInsertionLengths);
 
     StreamSet * const ztfHash_u8_Basis = P.CreateStreamSet(8);
     SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
@@ -188,7 +188,7 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
 }
 
 int main(int argc, char *argv[]) {
-    codegen::ParseCommandLineOptions(argc, argv, {&ztfHashOptions, pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&ztfHashOptions, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
     CPUDriver driver("ztfHash");
     const int fd = open(inputFile.c_str(), O_RDONLY);

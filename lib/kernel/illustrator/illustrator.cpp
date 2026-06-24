@@ -228,7 +228,7 @@ inline void registerStreamDataCapture(const char * kernelName, const char * stre
                 SmallVector<char, 256> tmp;
                 raw_svector_ostream msg(tmp);
                 msg << "Illustrator error: multiple instances of " << streamName << " was registered for " << kernelName << "\n";
-                report_fatal_error(msg.str());
+                llvm::errs() << msg.str();
             }
             assert (strcmp(current->StreamName, streamName) != 0);
             StreamDataCapture * next = current->Next;
@@ -314,34 +314,10 @@ inline StreamDataStateObject * getStateObject(const void * address) const {
     return r->second;
 }
 
-
-// using DisplayOrderGraph = adjacency_list<hash_setS, vecS, bidirectionalS>;
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief printGraph
- ** ------------------------------------------------------------------------------------------------------------- */
-template <typename Graph>
-static void printGraph(const Graph & G, raw_ostream & out, const StringRef name = "G") {
-
-    out << "digraph \"" << name << "\" {\n";
-    for (auto v : make_iterator_range(vertices(G))) {
-        out << "v" << v << " [label=\"" << v << "\"];\n";
-    }
-    for (auto e : make_iterator_range(edges(G))) {
-        const auto s = source(e, G);
-        const auto t = target(e, G);
-        out << "v" << s << " -> v" << t << ";\n";
-    }
-
-    out << "}\n\n";
-    out.flush();
-}
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief displayCapturedData
  ** ------------------------------------------------------------------------------------------------------------- */
 inline void displayCapturedData(const size_t blockWidth) const {
-
     struct KernelNameNode {
         StringRef Label;
         size_t NumOfCopies;
@@ -583,7 +559,7 @@ inline void displayCapturedData(const size_t blockWidth) const {
                         }
                     } else {
                         auto va = vi, vb = vj;
-                        assert (A[a]->Data != B[b]->Data);
+                        assert (A[a]->Data != B[b]->Data || A[a]->Data == nullptr);
                         if (A[a]->SequenceNum > B[b]->SequenceNum) {
                             std::swap(va, vb);
                         } else {
@@ -851,7 +827,7 @@ updated_trie:
 
                         // each chunk is aligned in blockWidth x itemWidth bits
 
-                        const auto from = E->From * scale;
+                        const auto from = (E->From * scale);
                         const auto to = (E->To * scale);
 
                         if (to <= position) {

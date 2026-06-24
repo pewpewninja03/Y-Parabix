@@ -370,10 +370,10 @@ int main(int argc, char *argv[]) {
     CPUDriver driver("test");
     std::random_device rd;
     std::default_random_engine rng(rd());
-
-    bool testResult = false;
     for (unsigned rounds = 0; rounds < optTrials; ++rounds) {
-        testResult |= runTestCase(driver, rng);
+        if (runTestCase(driver, rng)) {
+            return -1;
+        }
     }
-    return testResult ? -1 : 0;
+    return 0;
 }

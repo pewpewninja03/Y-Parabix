@@ -1,6 +1,5 @@
 [
-{"date":"2020-01-21","county":"Snohomish","state":"Washington","fips":"53061","cases":"1","deaths":"0"},
-{"date":"2020-01-22","county":"Snohomish","state":"Washington","fips":"53061","cases":"1","deaths":"0"},
-{"date":"2020-01-23","county":"Snohomish","state":"Washington","fips":"53061","cases":"1","deaths":"0"},
-{"date":"2020-01-24","county":"Cook","state":"Illinois","fips":"17031","cases":"1","deaths":"0"}
-]
+{"date":"2020-01-21","county":"Snohomish","state":"Washington","fips":53061,"cases":1,"deaths":0},
+{"date":"2020-01-22","county":"Snohomish","state":"Washington","fips":53061,"cases":1,"deaths":0},
+{"date":"2020-01-23","county":"Snohomish","state":"Washington","fips":53061,"cases":1,"deaths":0},
+{"date":"2020-01-24","county":"Cook","state":"Illinois","fips":17031,"cases":1,"deaths":0}]

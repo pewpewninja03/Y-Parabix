@@ -24,7 +24,6 @@
 #include <kernel/util/linebreak_kernel.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Path.h>
-#include <pablo/pablo_toolchain.h>
 #include <pablo/parse/pablo_source_kernel.h>
 #include <pablo/parse/pablo_parser.h>
 #include <pablo/parse/simple_lexer.h>
@@ -306,7 +305,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
 
 
 int main(int argc, char ** argv) {
-    codegen::ParseCommandLineOptions(argc, argv, {&xmlFlags, pablo_toolchain_flags(), codegen::codegen_flags()});
+    codegen::ParseCommandLineOptions(argc, argv, {&xmlFlags, &codegen::JIT_InfoOptions, &codegen::InstrumentationOptions});
 
     struct stat sb;
     const int fd = open(inputFile.c_str(), O_RDONLY);

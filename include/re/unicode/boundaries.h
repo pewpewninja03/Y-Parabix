@@ -11,7 +11,9 @@ class EnumeratedPropertyObject;
 
 bool hasGraphemeClusterBoundary(const RE * re);
 
-bool hasWordBoundary(const RE * re);
+bool hasSimpleWordBoundary(const RE * re);
+
+bool hasLevel2WordBoundary(const RE * re);
 
 bool hasUnicodeLookahead(const RE * re);
 
@@ -19,8 +21,8 @@ RE * resolveGraphemeMode(RE * re, bool inGraphemeMode);
 
 RE * generateGraphemeClusterBoundaryRule(bool extendedGraphemeClusters = true);
 
-RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj);
+RE * generateWordBoundaryRule();
 
-RE * resolveBoundaryProperties(RE * r);
+RE * EnumeratedPropertyBoundary(UCD::EnumeratedPropertyObject * enumObj);
 }
 

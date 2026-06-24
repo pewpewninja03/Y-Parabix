@@ -89,5 +89,18 @@ void PipelineCompiler::illustrateStreamSet(KernelBuilder & b, const size_t strea
     }
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief kernelHasAnyPipelineIllustratedStreamSet
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool PipelineCompiler::kernelHasAnyPipelineIllustratedStreamSet(const size_t kernel) const {
+    for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+        const BufferPort & br = mBufferGraph[e];
+        if (LLVM_UNLIKELY(br.isIllustrated())) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 }

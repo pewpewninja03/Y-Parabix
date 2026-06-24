@@ -13,6 +13,7 @@
 #include <re/analysis/collect_ccs.h>
 #include <re/analysis/re_analysis.h>
 #include <re/transforms/re_transformer.h>
+#include <kernel/core/kernel.h>
 #include <map>
 #include <memory>
 
@@ -20,9 +21,14 @@ using namespace llvm;
 
 namespace re {
 
+const unsigned maxNameLength = 50;
+
 Name * NameIntroduction::createName(std::string name, RE * defn) {
     auto f = mNameMap.find(name);
     if (f == mNameMap.end()) {
+        if (name.size() > maxNameLength) {
+            name = kernel::Kernel::getStringHash(name);
+        }
         mNameMap.emplace(name, defn);
         return makeName(name, defn);
     } else {
@@ -82,13 +88,8 @@ RE * FixedSpanNamer::transform(RE * r) {
         } else {
             defn = makeAlt(grp.second.begin(), grp.second.end());
         }
-        if (lgth == 0) {
-            // Zero length alts do not generate spans.
-            mNewAlts.push_back(defn);
-        } else {
-            Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
-            mNewAlts.push_back(n);
-        }
+        Name * n = createName(mLgthPrefix + std::to_string(lgth), defn);
+        mNewAlts.push_back(n);
     }
     if (mNewAlts.size() == 1) return mNewAlts[0];
     return makeAlt(mNewAlts.begin(), mNewAlts.end());
@@ -264,14 +265,14 @@ RE * Repeated_CC_Seq_Namer::transform(RE * r) {
 
 class Canonical_External_Names : public RE_Transformer {
 public:
-    Canonical_External_Names(std::vector<std::string> & external_names);
+    Canonical_External_Names(const std::vector<std::string> & external_names);
 protected:
     RE * transformName (Name * n) override;
 private:
     std::map<std::string, Name *>  mExternalMap;
 };
 
-Canonical_External_Names::Canonical_External_Names(std::vector<std::string> & external_names)
+Canonical_External_Names::Canonical_External_Names(const std::vector<std::string> & external_names)
 : RE_Transformer("Canonical_External_Names") {
     for (unsigned i = 0; i < external_names.size(); i++) {
         mExternalMap.emplace(external_names[i], makeName("@" + std::to_string(i)));
@@ -280,15 +281,18 @@ Canonical_External_Names::Canonical_External_Names(std::vector<std::string> & ex
 
 RE * Canonical_External_Names::transformName(Name * name) {
     auto f = mExternalMap.find(name->getFullName());
-    if (f == mExternalMap.end()) return name;
-    Name * canon_name = f->second;
+    if (f == mExternalMap.end()) {
+        return name;
+    }
+    Name * const canon_name = f->second;
     if (canon_name->getDefinition() == nullptr) {
+        canon_name->setExternal();
         canon_name->setDefinition(name->getDefinition());
     }
     return canon_name;
 }
 
-RE * canonicalizeExternals(RE * r, std::vector<std::string> & external_names) {
+RE * canonicalizeExternals(RE * r, const std::vector<std::string> & external_names) {
     return Canonical_External_Names(external_names).transformRE(r);
 }
 

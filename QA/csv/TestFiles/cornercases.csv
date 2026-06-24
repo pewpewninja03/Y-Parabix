@@ -1,0 +1,11 @@
+Line,Data,Desc
+1,,
+2,"",quoted null
+3,null,"null"
+4,-43e+7,"float1"
+5,89.333,"fixed point"
+6,+44.88,"not JSON number"
+7,true,"true literal"
+8,"false","quoted false"
+9,,null
+10,,

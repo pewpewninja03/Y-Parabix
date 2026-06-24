@@ -1,5 +1,5 @@
 #include <grep/nested_grep_engine.h>
-#include <grep/regex_passes.h>
+#include <re/unicode/regex_passes.h>
 #include <re/unicode/casing.h>
 #include <re/transforms/exclude_CC.h>
 #include <re/transforms/to_utf8.h>
@@ -12,6 +12,7 @@
 #include <kernel/core/kernel_builder.h>
 #include <llvm/Support/raw_ostream.h>
 #include <grep/grep_toolchain.h>
+#include <kernel/unicode/utf8_support.h>
 
 #include <re/printer/re_printer.h>
 
@@ -85,11 +86,10 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
     re::CC * breakCC = nullptr;
 
     if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-        breakCC = re::makeByte(0x0);
+        breakCC = re::makeCC(0x0, &cc::UTF8);
     } else {// if (mGrepRecordBreak == GrepRecordBreakKind::LF)
-        breakCC = re::makeByte(0x0A);
+        breakCC = re::makeCC(0x0A, &cc::UTF8);
     }
-
     P.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, basisBits, breaks);
     StreamSet * const U8index = P.CreateStreamSet();
     P.CreateKernelCall<UTF8_index>(basisBits, U8index);
@@ -121,6 +121,8 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
             Output<streamset_t>{"matches", matches, Add1(), ManagedBuffer()},
             InternallySynchronized());
 
+        E.setStride(E.getBitBlockWidth());
+
         std::string tmp;
         raw_string_ostream name(tmp);
         name << "gitignore";
@@ -143,6 +145,14 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
             resultSoFar = chained->getOutputStreamSet(0); assert (resultSoFar);
         }
 
+        RE_CompilerContext ctxt;
+        ctxt.setCodeUnitContext(&cc::UTF8, basisBits);
+        ctxt.setIndexingContext(&cc::Unicode, U8index);
+        StreamSet * matchStarts = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<LineStartsKernel>(breaks, matchStarts);
+        ctxt.setMatchRegions(matchStarts, breaks);
+        RE_PipelineBuilder RE_PB(E, ctxt);
+
         for (unsigned i = 0; i != n; ++i) {
             StreamSet * MatchResults = nullptr;
             if (LLVM_UNLIKELY(i == (n - 1UL))) {
@@ -152,25 +162,17 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
                 MatchResults = E.CreateStreamSet();
             }
 
-            auto options = std::make_unique<GrepKernelOptions>();
-
             auto r = resolveCaseInsensitiveMode(patterns[i].second, mCaseInsensitive);
             r = regular_expression_passes(r);
-            r = re::exclude_CC(r, breakCC);
-            r = resolveAnchors(r, breakCC);
+            //r = re::exclude_CC(r, breakCC);
+            //r = resolveAnchors(r, breakCC);
             r = toUTF8(r);
-
-            options->setRE(r);
-            options->setBarrier(breaks);
-            options->addAlphabet(&cc::UTF8, basisBits);
-            options->setResults(MatchResults);
             // check if we need to combine the current result with the new set of matches
             const bool exclude = (patterns[i].first == re::PatternKind::Exclude);
             if (i || outerKernel || exclude) {
-                options->setCombiningStream(exclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultSoFar);
+                ctxt.setCombiningStream(resultSoFar, exclude ? RE_CombiningType::Exclude : RE_CombiningType::Include);
             }
-            options->addExternal("UTF8_index", U8index);
-            Kernel * K = E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+            Kernel * K = E.CreateKernelFamilyCall<RE_Kernel>(ctxt, r, MatchResults);
             pipeline.push_back(K);
             resultSoFar = MatchResults;
 
@@ -233,6 +235,7 @@ void NestedInternalSearchEngine::pop() {
 void NestedInternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
     assert (mMainMethod.size() > 0);
     auto f = mMainMethod.back(); assert (f);
+    assert ((((uintptr_t)search_buffer) % (512 / 8)) == 0);
     f(search_buffer, bufferLength, accum);
 }
 

@@ -1,4 +1,4 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 #include <kernel/pipeline/optimizationbranch.h>
 
 // TODO: if we have multiple copies of the same type of kernel executing sequentially, we could avoid
@@ -11,31 +11,30 @@ namespace kernel {
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::executeKernel(KernelBuilder & b) {
+
     #ifndef NDEBUG
     Value * const initialSegNum = mSegNo;
     #endif
+    if (LLVM_UNLIKELY(mTraceDynamicBuffers)) {
+        mBufferExpansionFunction = generateBufferExpansionFunctionForCurrentKernel(b, mKernelId);
+    }
     assert (FirstKernel <= mKernelId && mKernelId <= LastKernel);
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
-    assert ("every kernel ought to be marked a partition root if jumping is disabled" && (!mIsIOProcessThread || mIsPartitionRoot));
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
+    mKernelMustTerminateExplicitly = mKernel->hasAttribute(AttrId::MustExplicitlyTerminate);
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mRecordHistogramData = recordsAnyHistogramData();
+    mHasPipelineIllustratedStreamSet = kernelHasAnyPipelineIllustratedStreamSet(mKernelId);
+    mKernelRequiresIllustratorObject = (mKernel->getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) != 0;
+    assert (PipelineRequiresIllustratorObject || !mKernelRequiresIllustratorObject);
     mExecuteStridesIndividually =
         mKernel->hasAttribute(AttrId::ExecuteStridesIndividually)
-            || ((mRecordHistogramData || mUsesIllustrator) && !hasAnyGreedyInput(mKernelId));
-    mCurrentKernelIsStateFree = mIsStatelessKernel.test(mKernelId);
-    mProducesCrossThreadedData = mKernelProducesCrossThreadedData.test(mKernelId);
+            || ((mRecordHistogramData || mKernelRequiresIllustratorObject || mHasPipelineIllustratedStreamSet) && !hasAnyGreedyInput(mKernelId));
+    mAllowDataParallelExecution = isDataParallel(mKernelId);
     mHasPrincipalInputRate = hasPrincipalInputRate();
-    #ifndef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
-    #ifdef ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL
-    mAllowDataParallelExecution = mCurrentKernelIsStateFree || mKernelIsInternallySynchronized;
-    #else
-    mAllowDataParallelExecution = mCurrentKernelIsStateFree;
-    #endif
-    #endif
 
     bool checkInputChannels = false;
     for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -44,14 +43,11 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mHasPrincipalInput |= port.isPrincipal();
     }
 
-    bool checkOutputChannels = false;
-    for (const auto output : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
-        const BufferPort & port = mBufferGraph[output];
-        if (port.canModifySegmentLength()) {
-            checkOutputChannels = true;
-            break;
-        }
-    }
+    // We could immediately free the old buffer if one is stored in thread local data, it relies on the idea
+    // that if we have N threads, we will invoke this kernel every N segments. This isn't true if we allow
+    // threads to immediately restart upon reaching a jump that branches to the end of the pipeline.
+
+    const auto checkOutputChannels = initializeOutputStreamSetBuffersBeforeSegmentInvocation(b);
 
     mMayHaveInsufficientIO = checkInputChannels || checkOutputChannels;
 
@@ -82,11 +78,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mKernelInitiallyTerminated = nullptr;
     mKernelJumpToNextUsefulPartition = nullptr;
 
-    assert (mIsPartitionRoot || !mIsIOProcessThread);
-
     if (LLVM_UNLIKELY(mIsPartitionRoot || mKernelCanTerminateEarly)) {
         mKernelInitiallyTerminated = b.CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-        if (LLVM_LIKELY(mIsPartitionRoot && !mIsIOProcessThread && !mUsesNestedSynchronizationVariable)) {
+        if (LLVM_LIKELY(mIsPartitionRoot)) {
             // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
             const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
             assert (jumpId > mCurrentPartitionId);
@@ -115,10 +109,10 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     readProcessedItemCounts(b);
     readProducedItemCounts(b);
     readAvailableItemCounts(b);
-    readConsumedItemCounts(b);
     recordUnconsumedItemCounts(b);
-    detemineMaximumNumberOfStrides(b);
-    remapThreadLocalBufferMemory(b);
+    if (!mIsPartitionRoot) {
+        remapThreadLocalBufferMemory(b);
+    }
     checkForSufficientIO(b);
     mFinalPartialStrideFixedRateRemainderPhi = nullptr;
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
@@ -144,6 +138,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     initializeKernelTerminatedPhis(b);
     initializeKernelLoopExitPhis(b);
     initializeKernelExitPhis(b);
+    if (mIsPartitionRoot) {
+        initializeThreadLocalMemoryPhiNodes(b);
+    }
 
     /// -------------------------------------------------------------------------------------
     /// KERNEL LOOP ENTRY
@@ -153,7 +150,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     checkPropagatedTerminationSignals(b);
     determineNumOfLinearStrides(b);
     mIsFinalInvocation = mIsFinalInvocationPhi;
-
     // When tracing blocking I/O, test all I/O streams but do not execute the
     // kernel if any stream is insufficient.
     if (LLVM_UNLIKELY(TraceIO && mMayHaveInsufficientIO)) {
@@ -209,31 +205,17 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
+    calculateTerminatedProducedItemCounts(b);
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
-    clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
-    if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
+    clearUnwrittenOutputData(b);
+
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution && !mKernelIsInternallySynchronized)) {
         writeInternalProcessedAndProducedItemCounts(b, true);
-    } else if (LLVM_UNLIKELY(mProducesCrossThreadedData)) {
-        // When we have a cross-threaded buffer, we need to write out their produced counts
-        // prior to writing the termination signal otherwise we risk a consumer assuming
-        // a streamset is closed but does not know the correct item count. Rather than
-        // potentially slowing down the loop exit by writing an unnecessary value to the
-        // global state, we just write it here despite knowing it'll be written again later.
-        writeCrossThreadedProducedItemCountAfterTermination(b);
     }
     if (HasTerminationSignal.test(mKernelId)) {
-        // Synchronization numbers continually increase as pipelines acquire/release their locks
-        // but when we have a cross-threaded buffer, we also store the synchronization number
-        // of the terminating segment so that a cross-threaded consumer knows can determine
-        // whether every producer of a buffer it's reading has completed the same terminating
-        // segment and only then treating the closed state as truthful.
-        if (LLVM_UNLIKELY(mProducesCrossThreadedData)) {
-            b.setScalarField(CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX + std::to_string(mKernelId), mSegNo);
-        }
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
     }
@@ -268,9 +250,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     computeFullyProcessedItemCounts(b, terminated);
     computeMinimumConsumedItemCounts(b);
     computeFullyProducedItemCounts(b, terminated);
-    if (mIsPartitionRoot && !mIsIOProcessThread) {
-        updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtLoopExitPhi, mPotentialSegmentLengthAtLoopExitPhi);
-    }
     replacePhiCatchWithCurrentBlock(b, mKernelLoopExitPhiCatch, mKernelExit);
     b.CreateBr(mKernelExit);
 
@@ -287,7 +266,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     /// -------------------------------------------------------------------------------------
 
     if (mKernelJumpToNextUsefulPartition) {
-        assert (!mIsIOProcessThread);
         writeJumpToNextPartition(b);
     }
 
@@ -303,6 +281,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
     }
     recordProducedItemCountDeltas(b);
+
     // chain the progress state so that the next one carries on from this one
     assert (isFromCurrentFunction(b, mAnyProgressedAtExitPhi, false));
     mPipelineProgress = mAnyProgressedAtExitPhi;
@@ -311,20 +290,9 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
         mNumOfPartitionStrides = mTotalNumOfStridesAtExitPhi;
         assert (isFromCurrentFunction(b, mFinalPartitionSegmentAtExitPhi, false));
         mFinalPartitionSegment = mFinalPartitionSegmentAtExitPhi;
-        if (LLVM_UNLIKELY(mIsIOProcessThread)) {
-            mThreadLocalScalingFactor = nullptr;
-        } else {
-            // NOTE: we use the partition root's max num of strides as a common scaling factor for
-            // thread local buffer memory placement. Since we won't actually know how many strides
-            // have been executed until after the root kernel has finished processing, we assume the
-            // maximum was used.
-            mThreadLocalScalingFactor =
-                b.CreateCeilUDivRational(mMaximumNumOfStridesAtExitPhi, MaximumNumOfStrides[mKernelId]);
-        }
-
+        mThreadLocalStreamSetBaseAddress = mThreadLocalStreamSetBaseAddressAtExitPhi;
     }
-
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         verifyPostInvocationTerminationSignal(b);
     }
     assert ("segment number should not have been modified prior to kernel exit" && initialSegNum == mSegNo);
@@ -337,12 +305,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
 void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
 
     ConstantInt * const i1_TRUE = b.getTrue();
-
-    if (LLVM_LIKELY(!mAllowDataParallelExecution)) {
-        mHasMoreInput = hasMoreInput(b);
-    }
-
-    assert (mHasMoreInput);
 
     BasicBlock * const exitBlockAfterLoopAgainTest = b.GetInsertBlock();
     if (mStrideStepSizeAtLoopEntryPhi) {
@@ -374,7 +336,9 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
     mAlreadyProgressedPhi->addIncoming(i1_TRUE, exitBlockAfterLoopAgainTest);
     mExecutedAtLeastOnceAtLoopEntryPhi->addIncoming(i1_TRUE, exitBlockAfterLoopAgainTest);
     mCurrentNumOfStridesAtLoopEntryPhi->addIncoming(mUpdatedNumOfStrides, exitBlockAfterLoopAgainTest);
-
+    if (mIsPartitionRoot) {
+        updateThreadLocalMemoryLoopEntryPhiNodes(b);
+    }
     if (LLVM_UNLIKELY(mIsOptimizationBranch)) {
         assert (mOptimizationBranchSelectedBranch);
         mOptimizationBranchPriorScanStatePhi->addIncoming(mOptimizationBranchSelectedBranch, exitBlockAfterLoopAgainTest);
@@ -382,30 +346,17 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
 
     const auto prefix = makeKernelName(mKernelId);
     BasicBlock * const isFinalCheck = b.CreateBasicBlock(prefix + "_isFinalCheck", mKernelTerminated);
+    assert (mHasMoreInput);
     b.CreateUnlikelyCondBr(mHasMoreInput, mKernelLoopEntry, isFinalCheck);
 
     b.SetInsertPoint(isFinalCheck);
     Value * terminationSignal = nullptr;
-    if (LLVM_UNLIKELY(mKernel->hasAttribute(AttrId::MustExplicitlyTerminate))) {
-        if (mIsPartitionRoot) {
-            terminationSignal = getTerminationSignal(b, TerminationSignal::None);
-        } else {
-            const auto root = getTerminationSignalIndex(mKernelId);
-            assert (KernelPartitionId[root] == mCurrentPartitionId);
-            terminationSignal = mKernelTerminationSignal[root];
-        }
+    if (LLVM_UNLIKELY(mKernelMustTerminateExplicitly)) {
+        terminationSignal = mTerminatedExplicitly;
     } else {
         terminationSignal = mIsFinalInvocationPhi; assert (terminationSignal);
-        if (!mIsPartitionRoot) {
-            const auto root = FirstKernelInPartition[mCurrentPartitionId];
-            assert (KernelPartitionId[root] == mCurrentPartitionId);
-            Value * const rootSignal = mKernelTerminationSignal[root];
-            Value * const isFinal = b.CreateIsNotNull(terminationSignal);
-            terminationSignal = b.CreateSelect(isFinal, terminationSignal, rootSignal);
-        }
     }
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
         acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
     BasicBlock * const exitBlock = b.GetInsertBlock();
@@ -421,7 +372,7 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         assert (mProducedItemCount[port]);
         mProducedAtTerminationPhi[port]->addIncoming(mProducedItemCount[port], exitBlock);
     }
-    assert (terminationSignal->getType() == mTerminatedSignalPhi->getType());
+    assert (terminationSignal && terminationSignal->getType() == mTerminatedSignalPhi->getType());
     mTerminatedSignalPhi->addIncoming(terminationSignal, exitBlock);
     mCurrentNumOfStridesAtTerminationPhi->addIncoming(mUpdatedNumOfStrides, exitBlock);
     Value * const isFinal = b.CreateIsNotNull(terminationSignal);
@@ -429,11 +380,9 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         assert (mUpdatedNumOfStrides);
         Value * const updatedNumOfStrides = b.CreateMulRational(mUpdatedNumOfStrides, mPartitionStrideRateScalingFactor);
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(updatedNumOfStrides, exitBlock);
-        mPotentialSegmentLengthAtTerminationPhi->addIncoming(mPotentialSegmentLength, exitBlock);
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi->addIncoming(mFinalPartialStrideFixedRateRemainderPhi, exitBlock);
-        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b.getFalse(), exitBlock);
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLength, exitBlock);
+        updateThreadLocalMemoryLoopExitPhiNodes(b);
     }
     b.CreateUnlikelyCondBr(isFinal, mKernelTerminated, mKernelLoopExit);
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
@@ -538,10 +487,15 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(KernelBuilder & b) {
     const auto makeExhaustedInputPhi =
         mKernelIsInternallySynchronized && StrideStepLength[mKernelId] > 1 && mIsPartitionRoot;
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto inputPort = mBufferGraph[e].Port;
+        const auto & bp = mBufferGraph[e];
+        const auto inputPort = bp.Port;
         const auto prefix = makeBufferName(mKernelId, inputPort);
-        PHINode * const phi = b.CreatePHI(sizeTy, 2, prefix + "_linearlyAccessible");
+        PHINode * const phi = b.CreatePHI(sizeTy, 2, prefix + "_linearlyAccessiblePhi");
         mLinearInputItemsPhi[inputPort] = phi;
+        if (LLVM_UNLIKELY(mCheckStreamSets)) {
+            PHINode * const capacityPhi = b.CreatePHI(sizeTy, 2, prefix + "_inputBufferCapacityPhi");
+            mInputBufferCapacityPhi[inputPort] = capacityPhi;
+        }
         mCurrentLinearInputItems[inputPort] = phi;
         Type * const bufferTy = getInputBuffer(inputPort)->getPointerType();
         mInputVirtualBaseAddressPhi[inputPort] = b.CreatePHI(bufferTy, 2, prefix + "_baseAddress");
@@ -566,6 +520,7 @@ void PipelineCompiler::initializeKernelCheckOutputSpacePhis(KernelBuilder & b) {
     if (mIsPartitionRoot) {
         mFinalPartialStrideFixedRateRemainderPhi = b.CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesPhi");
     }
+    mPenultimateSubSegmentPhi = b.CreatePHI(b.getInt1Ty(), 2, prefix + "_isPenultimateSubSegmentPhi");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -578,8 +533,6 @@ void PipelineCompiler::initializeKernelTerminatedPhis(KernelBuilder & b) {
     mTerminatedSignalPhi = b.CreatePHI(sizeTy, 2, prefix + "_terminatedSignal");
     mCurrentNumOfStridesAtTerminationPhi = b.CreatePHI(sizeTy, 2, prefix + "_currentNumOfStridesAtTermination");
     if (mIsPartitionRoot) {
-        mPotentialSegmentLengthAtTerminationPhi =
-            b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtTermination");
         mFinalPartialStrideFixedRateRemainderAtTerminationPhi =
             b.CreatePHI(sizeTy, 2, prefix + "_partialPartitionStridesAtTerminationPhi");
     }
@@ -613,7 +566,6 @@ void PipelineCompiler::initializeJumpToNextUsefulPartitionPhis(KernelBuilder & b
         const auto prefix = makeBufferName(mKernelId, port);
         mProducedAtJumpPhi[port] = b.CreatePHI(sizeTy, 2, prefix + "_producedAtJumpPhi");
     }
-    mMaximumNumOfStridesAtJumpPhi = b.CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtJumpPhi");
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -652,13 +604,8 @@ void PipelineCompiler::initializeKernelLoopExitPhis(KernelBuilder & b) {
     if (mIsPartitionRoot) {
         mTotalNumOfStridesAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtLoopExit");
         mFinalPartitionSegmentAtLoopExitPhi = b.CreatePHI(boolTy, 2, prefix + "_finalPartitionSegmentAtLoopExitPhi");
-        mMaximumNumOfStridesAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtLoopExit");
-        mPotentialSegmentLengthAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtLoopExit");
-    } else {
-        mTotalNumOfStridesAtLoopExitPhi = nullptr;
-        mFinalPartitionSegmentAtLoopExitPhi = nullptr;
-        mMaximumNumOfStridesAtLoopExitPhi = nullptr;
-        mPotentialSegmentLengthAtLoopExitPhi = nullptr;
+//        mPotentialSegmentLengthAtLoopExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_potentialSegmentLengthAtLoopExit");
+        mThreadLocalStreamSetBaseAddressAtExitPhi = b.CreatePHI(b.getInt8PtrTy(), 2, prefix + "_threadLocalBaseAddressAtLoopExit");
     }
 }
 
@@ -673,12 +620,6 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
 
     b.SetInsertPoint(mKernelInsufficientInput);
 
-    if (LLVM_UNLIKELY(CheckAssertions && mAllowDataParallelExecution)) {
-        b.CreateAssert(b.CreateNot(mExecutedAtLeastOnceAtLoopEntryPhi),
-                        "%s: is a data-parallel kernel with an invalid loop again check",
-                        mCurrentKernelName);
-    }
-
     Value * currentNumOfStrides = nullptr;
     assert (mCurrentNumOfStridesAtLoopEntryPhi);
     currentNumOfStrides = b.CreateMulRational(mCurrentNumOfStridesAtLoopEntryPhi, mPartitionStrideRateScalingFactor);
@@ -687,7 +628,6 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
 
     if (mKernelJumpToNextUsefulPartition) {
         assert (mIsPartitionRoot);
-        mMaximumNumOfStridesAtJumpPhi->addIncoming(mMaximumNumOfStrides, b.GetInsertBlock());
         // TODO: check whether we need to release/acquire the pre/post locks here too
         b.CreateLikelyCondBr(mExecutedAtLeastOnceAtLoopEntryPhi, mKernelLoopExit, mKernelJumpToNextUsefulPartition);
         hasBranchToLoopExit = true;
@@ -696,20 +636,16 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
         // whether the partition is out of input
         hasBranchToLoopExit = true;
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-            assert (!mIsIOProcessThread);
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
             acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
         }
         b.CreateBr(mKernelLoopExit);
     }
+    if (mIsPartitionRoot) {
 
+    }
 
     BasicBlock * const exitBlock = b.GetInsertBlock();
-
-    if (hasBranchToLoopExit && mIsPartitionRoot) {
-        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(b.getSize(0), exitBlock);
-    }
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto & br = mBufferGraph[e];
         const auto port = br.Port;
@@ -731,6 +667,18 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
     if (mIsPartitionRoot) {
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b.getFalse(), exitBlock);
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(currentNumOfStrides, exitBlock);
+        mThreadLocalStreamSetBaseAddressAtExitPhi->addIncoming(UndefValue::get(b.getInt8PtrTy()), exitBlock);
+        const auto oneAfterLastKernel = FirstKernelInPartition[mCurrentPartitionId + 1];
+        Constant * undefVal = UndefValue::get(b.getSizeTy());
+        for (auto kernel = mKernelId; kernel < oneAfterLastKernel; ++kernel) {
+            for (auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isThreadLocal()) {
+                    mThreadLocalStartOffsetAtExitPhi[streamSet]->addIncoming(undefVal, exitBlock);
+                }
+            }
+        }
     }
 
     assert (isFromCurrentFunction(b, mAlreadyProgressedPhi, false));
@@ -774,8 +722,8 @@ void PipelineCompiler::initializeKernelExitPhis(KernelBuilder & b) {
         assert (mTotalNumOfStridesAtLoopExitPhi);
         mTotalNumOfStridesAtExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_totalNumOfStridesAtExit");
         mTotalNumOfStridesAtExitPhi->addIncoming(mTotalNumOfStridesAtLoopExitPhi, mKernelLoopExitPhiCatch);
-        mMaximumNumOfStridesAtExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtExit");
-        mMaximumNumOfStridesAtExitPhi->addIncoming(mMaximumNumOfStridesAtLoopExitPhi, mKernelLoopExitPhiCatch);
+//        mMaximumNumOfStridesAtExitPhi = b.CreatePHI(sizeTy, 2, prefix + "_maxNumOfStridesAtExit");
+//        mMaximumNumOfStridesAtExitPhi->addIncoming(mMaximumNumOfStridesAtLoopExitPhi, mKernelLoopExitPhiCatch);
     }
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
@@ -829,7 +777,7 @@ void PipelineCompiler::updateKernelExitPhisAfterInitiallyTerminated(KernelBuilde
     if (mIsPartitionRoot) {
         Constant * const ZERO = b.getSize(0);
         mTotalNumOfStridesAtExitPhi->addIncoming(ZERO, mKernelInitiallyTerminatedExit);
-        mMaximumNumOfStridesAtExitPhi->addIncoming(ZERO, mKernelInitiallyTerminatedExit);
+//        mMaximumNumOfStridesAtExitPhi->addIncoming(ZERO, mKernelInitiallyTerminatedExit);
         mFinalPartitionSegmentAtExitPhi->addIncoming(b.getTrue(), mKernelInitiallyTerminatedExit);
     }
 }
@@ -852,9 +800,21 @@ void PipelineCompiler::updatePhisAfterTermination(KernelBuilder & b) {
             finalNumOfStrides = b.CreateMulRational(finalNumOfStrides, mPartitionStrideRateScalingFactor);
         }
         mTotalNumOfStridesAtLoopExitPhi->addIncoming(finalNumOfStrides, exitBlock);
-        mMaximumNumOfStridesAtLoopExitPhi->addIncoming(mMaximumNumOfStrides, exitBlock);
-        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLengthAtTerminationPhi, exitBlock);
         mFinalPartitionSegmentAtLoopExitPhi->addIncoming(b.getTrue(), exitBlock);
+//        mPotentialSegmentLengthAtLoopExitPhi->addIncoming(mPotentialSegmentLengthAtTerminationPhi, exitBlock);
+        mThreadLocalStreamSetBaseAddressAtExitPhi->addIncoming(mThreadLocalStreamSetBaseAddress, exitBlock);
+        const auto oneAfterLastKernel = FirstKernelInPartition[mCurrentPartitionId + 1];
+        for (auto kernel = mKernelId; kernel < oneAfterLastKernel; ++kernel) {
+            for (auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                const auto streamSet = target(output, mBufferGraph);
+                const BufferNode & bn = mBufferGraph[streamSet];
+                if (bn.isThreadLocal()) {
+                    mThreadLocalStartOffsetAtExitPhi[streamSet]->addIncoming(mThreadLocalStartOffset[streamSet], exitBlock);
+                    mThreadLocalStartOffset[streamSet] = mThreadLocalStartOffsetAtExitPhi[streamSet];
+                }
+            }
+        }
+
     }
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;

@@ -76,6 +76,12 @@ public:
         , PopCountKernel
     };
 
+    enum KernelFlags {
+        RequiresIllustratorObject = 1
+        , HasInternallyManagedStreamSet = 2
+        , HasInOutStreamSet = 4
+    };
+
     using InitArgs = llvm::SmallVector<llvm::Value *, 32>;
 
     using NestedStateObjs = llvm::SmallVector<llvm::Value *, 16>;
@@ -260,7 +266,7 @@ public:
         return mKernelName;
     }
 
-    LLVM_READNONE virtual std::string getFamilyName() const;
+    LLVM_READNONE std::string getFamilyName() const;
 
     virtual bool isCachable() const { return true; }
 
@@ -280,7 +286,9 @@ public:
         return mThreadLocalStateType != nullptr;
     }
 
-    LLVM_READNONE virtual bool allocatesInternalStreamSets() const;
+    LLVM_READNONE bool allocatesInternalStreamSets() const {
+        return (mFlags & Kernel::KernelFlags::HasInternallyManagedStreamSet) != 0;
+    }
 
     virtual bool requiresExplicitPartialFinalStride() const;
 
@@ -441,7 +449,33 @@ public:
     template <typename ExternalFunctionType>
     void link(std::string name, ExternalFunctionType & functionPtr);
 
-    static bool isLocalBuffer(const Binding & output, bool & shared, bool & managed, bool & returned);
+    struct LocalBufferFlagSet {
+        enum LocalBufferFlagType : uint32_t {
+            LBF_Shared = 1,
+            LBF_Managed = 2,
+            LBF_Returned = 4
+        };
+
+        bool isShared() const {
+            return (Flags & LocalBufferFlagType::LBF_Shared) != 0;
+        }
+
+        bool isManaged() const {
+            return (Flags & LocalBufferFlagType::LBF_Managed) != 0;
+        }
+
+        bool isReturned() const {
+            return (Flags & LocalBufferFlagType::LBF_Returned) != 0;
+        }
+
+        bool any() const { return Flags != 0; }
+
+        uint32_t Flags = 0;
+    };
+
+    LLVM_READNONE static LocalBufferFlagSet isLocalBuffer(const Binding & output);
+
+    LLVM_READNONE static bool isManagedBuffer(const Binding & output);
 
     LLVM_READNONE bool canSetTerminateSignal() const;
 
@@ -454,6 +488,12 @@ public:
     LLVM_READNONE virtual unsigned getNumOfNestedKernelFamilyCalls() const {
         return 0;
     }
+
+    LLVM_READNONE unsigned getKernelFlags() const {
+        return mFlags;
+    }
+
+    bool noMutableSharedScalars() const;
 
 protected:
 
@@ -531,6 +571,8 @@ protected:
 
     virtual void recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const;
 
+    virtual void recursivelyListFamilyKernels(llvm::raw_ostream & familyName) const;
+
 protected:
 
     llvm::Value * createInstance(KernelBuilder & b) const;
@@ -541,10 +583,11 @@ protected:
 
     void finalizeThreadLocalInstance(KernelBuilder & b, llvm::ArrayRef<llvm::Value *> args) const;
 
-protected:
+public:
 
     static std::string getStringHash(const llvm::StringRef str);
 
+protected:
     LLVM_READNONE bool hasFixedRateIO() const;
 
     virtual void addInternalProperties(KernelBuilder &) { }
@@ -573,10 +616,6 @@ protected:
 
     virtual void generateFinalizeMethod(KernelBuilder &) { }
 
-private:
-
-    bool hasInternalScalars(const ScalarType type) const;
-
 protected:
 
     // Constructor
@@ -585,7 +624,8 @@ protected:
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars,
-           CompilationStatus status = CompilationStatus::FullyInitialized);
+           CompilationStatus status = CompilationStatus::FullyInitialized,
+           unsigned flags = 0);
 
     // Constructor used by pipeline
     Kernel(LLVMTypeSystemInterface & ts,
@@ -593,14 +633,16 @@ protected:
            AttributeSet && attributes,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
-           CompilationStatus status = CompilationStatus::Uninitialized);
+           CompilationStatus status = CompilationStatus::Uninitialized,
+           unsigned flags = 0);
 
-    static std::string annotateKernelNameWithDebugFlags(TypeId id, std::string && name);
+    static std::string annotateKernelNameWithDebugFlags(const TypeId id, const unsigned flags, std::string && name);
 
 protected:
 
     const TypeId                mTypeId;
     unsigned                    mStride;
+    unsigned                    mFlags;
     llvm::Module *              mModule = nullptr;
     llvm::StructType *          mSharedStateType = nullptr;
     llvm::StructType *          mThreadLocalStateType = nullptr;
@@ -640,7 +682,8 @@ protected:
                           Bindings &&stream_outputs,
                           Bindings &&scalar_parameters,
                           Bindings &&scalar_outputs,
-                          InternalScalars && internal_scalars);
+                          InternalScalars && internal_scalars,
+                          unsigned flags = 0);
 public:
 
     virtual void generateDoSegmentMethod(KernelBuilder & b) = 0;
@@ -668,7 +711,8 @@ protected:
                      Bindings && stream_outputs,
                      Bindings && scalar_parameters,
                      Bindings && scalar_outputs,
-                     InternalScalars && internal_scalars);
+                     InternalScalars && internal_scalars,
+                     unsigned flags = 0);
 
     MultiBlockKernel(LLVMTypeSystemInterface & ts,
                      const TypeId kernelTypId,
@@ -677,7 +721,8 @@ protected:
                      Bindings && stream_outputs,
                      Bindings && scalar_parameters,
                      Bindings && scalar_outputs,
-                     InternalScalars && internal_scalars);
+                     InternalScalars && internal_scalars,
+                     unsigned flags = 0);
 
     virtual void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) = 0;
 
@@ -723,7 +768,8 @@ protected:
                         Bindings && stream_outputs,
                         Bindings && scalar_parameters,
                         Bindings && scalar_outputs,
-                        InternalScalars && internal_scalars);
+                        InternalScalars && internal_scalars,
+                        const unsigned flags = 0);
 
 private:
 

@@ -434,7 +434,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             b.SetInsertPoint(checkForUpdateOrInsert);
             offset[1] = i32_ZERO;
             Value * const currentItemCount = b.CreateAlignedLoad(i64Ty, b.CreateGEP(listTy, currentEntry, offset), PtrTyABIAlignment);
-            if (LLVM_UNLIKELY(CheckAssertions)) {
+            if (LLVM_UNLIKELY(CheckAssertions())) {
                 Value * const valid = b.CreateICmpULT(lastItemCount, currentItemCount);
                 b.CreateAssert(valid, "Histogram history error: last position (%" PRIu64
                                 ") >= current position (%" PRIu64 ")", lastItemCount, currentItemCount);
@@ -484,7 +484,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
         const ProcessingRate & pr = bd.getRate();
 
         auto calculateDiff = [&](Value * const A, Value * const B, StringRef Name) -> Value * {
-            if (LLVM_UNLIKELY(CheckAssertions)) {
+            if (LLVM_UNLIKELY(CheckAssertions())) {
                 Value * const valid = b.CreateICmpUGE(A, B);
                 b.CreateAssert(valid, "Expected %s.%s (%" PRIu64 ") to exceed %s rate (%" PRIu64 ")",
                                 mCurrentKernelName, b.GetString(bd.getName()), A, b.GetString(Name), B);
@@ -519,7 +519,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             }
 
             if (LLVM_LIKELY(isa<ArrayType>(type))) {
-                if (LLVM_UNLIKELY(CheckAssertions)) {
+                if (LLVM_UNLIKELY(CheckAssertions())) {
                     Value * const maxSize = b.getSize(type->getArrayNumElements() - 1);
                     Value * const valid = b.CreateICmpULE(diff, maxSize);
                     Constant * const bindingName = b.GetString(bd.getName());

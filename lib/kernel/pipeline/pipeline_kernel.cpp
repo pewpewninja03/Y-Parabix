@@ -138,13 +138,6 @@ void PipelineKernel::addKernelDeclarations(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief hasInternalStreamSets
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineKernel::allocatesInternalStreamSets() const {
-    return true;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateAllocateSharedInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) {
@@ -162,7 +155,8 @@ void PipelineKernel::generateAllocateThreadLocalInternalStreamSetsMethod(KernelB
  * @brief linkExternalMethods
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::linkExternalMethods(KernelBuilder & b) {
-    PipelineCompiler::linkPThreadLibrary(b);
+    PipelineCompiler::linkPipelineExternalMethods(b);
+    StreamSetBuffer::linkFunctions(b);
     for (const auto & k : mKernels) {
         k.Object->linkExternalMethods(b);
     }
@@ -174,7 +168,6 @@ void PipelineKernel::linkExternalMethods(KernelBuilder & b) {
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
-    StreamSetBuffer::linkFunctions(b);
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         PipelineCompiler::linkInstrumentationFunctions(b);
         PipelineCompiler::linkHistogramFunctions(b);
@@ -216,7 +209,11 @@ void PipelineKernel::addAdditionalInitializationArgTypes(KernelBuilder & b, Init
         // If this is a kernel family call, the "main" will pass in the required pointers.
         // However, a non-family call could still refer to a kernel that has nested family
         // calls of its own. During initialization, we pass in the pointers that that
-        m += k.isFamilyCall() ? 1U : k.Object->getNumOfNestedKernelFamilyCalls();
+        if (k.isFamilyCall()) {
+            ++m;
+        } else {
+            m += k.Object->getNumOfNestedKernelFamilyCalls();
+        }
     }
     assert ("reported number of nested kernels does not match actual?" && (m == n));
     #endif
@@ -245,6 +242,21 @@ void PipelineKernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitAr
             kernel->constructFamilyKernels(b, args, params, toFree);
         } else if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls() > 0)) {
             kernel->recursivelyConstructFamilyKernels(b, args, params, toFree);
+        }
+    }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief recursivelyListFamilyKernels
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineKernel::recursivelyListFamilyKernels(llvm::raw_ostream & familyName) const {
+    assert (mKernels.size() > 0);
+    for (const auto & k : mKernels) {
+        const Kernel * const kernel = k.Object;
+        if (LLVM_UNLIKELY(k.isFamilyCall())) {
+            familyName << '\n' << kernel->getFamilyName();
+        } else if (LLVM_UNLIKELY(kernel->getNumOfNestedKernelFamilyCalls() > 0)) {
+            kernel->recursivelyListFamilyKernels(familyName);
         }
     }
 }
@@ -437,7 +449,10 @@ std::unique_ptr<KernelCompiler> PipelineKernel::instantiateKernelCompiler(Kernel
  * @brief isCachable
  ** ------------------------------------------------------------------------------------------------------------- */
 bool PipelineKernel::isCachable() const {
-    return codegen::EnablePipelineObjectCache && !codegen::EnableIllustrator;
+    if (codegen::DebugOptionIsSet(codegen::ForcePipelineRecompilation)) {
+        return false;
+    }
+    return (getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject) == 0;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -494,12 +509,16 @@ void PipelineKernel::writeInternallyGeneratedStreamSetScaleVector(const Relation
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const MainMethodGenerationType method) const {
 
-    unsigned suppliedArgs = 0;
+    unsigned suppliedArgs = 1; // segment size
     if (LLVM_LIKELY(isStateful())) {
         suppliedArgs += 1;
     }
     if (LLVM_LIKELY(hasThreadLocal())) {
         suppliedArgs += 1;
+    }
+    const auto tdb = allocatesInternalStreamSets() && codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers);
+    if (LLVM_UNLIKELY(tdb)) {
+        suppliedArgs += 2;
     }
 
     Module * const m = b.getModule();
@@ -519,6 +538,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     PointerType * streamSetPtrTy = nullptr;
     PointerType * voidPtrTy = b.getVoidPtrTy();
     IntegerType * int64Ty = b.getInt64Ty();
+    IntegerType * sizeTy = b.getSizeTy();
     if (numOfStreamSets) {
         // must match streamsetptr.h
         FixedArray<Type *, 2> fields;
@@ -544,7 +564,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     Function * createIllustrator = nullptr;
     Function * displayCapturedData = nullptr;
     Function * destroyIllustrator = nullptr;
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         PointerType * voidPtrTy = b.getVoidPtrTy();
         createIllustrator = b.LinkFunction("__createStreamDataIllustrator", FunctionType::get(voidPtrTy, false), (void*)&createStreamDataIllustrator);
         BEGIN_SCOPED_REGION
@@ -566,7 +586,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
     SmallVector<char, 256> tmp;
     raw_svector_ostream funcNameGen(tmp);
-    funcNameGen << getName() << '@' << codegen::SegmentSize << "_main";
+    funcNameGen << getName() << "_main";
     const auto funcName = funcNameGen.str();
 
     Function * main = m->getFunction(funcName);
@@ -592,8 +612,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         std::advance(arg, 1);
         return v;
     };
+
     SmallVector<Value *, 16> segmentArgs(doSegment->arg_size());
     auto segmentArgCount = suppliedArgs;
+
 
     if (LLVM_UNLIKELY(numOfStreamSets > 0)) {
 
@@ -605,12 +627,15 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         FixedArray<Value *, 2> fields;
         fields[0] = i32_ZERO;
 
+        const auto checkStreamSet = codegen::DebugOptionIsSet(codegen::EnableAsserts, codegen::EnableStreamSetAsserts);
+
         for (auto i = mInputStreamSets.size(); i--; ) {
             Value * const streamSetArg = nextArg();
             assert (streamSetArg->getType() == streamSetPtrTy);
             // virtual base input address
             fields[1] = i32_ZERO;
             Value * const vbaPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
+            assert ((segmentArgCount + 3) <= doSegment->arg_size());
             segmentArgs[segmentArgCount++] = b.CreateLoad(voidPtrTy, vbaPtr);
             // processed input items
             fields[1] = i32_ONE;
@@ -618,24 +643,54 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             b.CreateStore(sz_ZERO, processedPtr);
             segmentArgs[segmentArgCount++] = processedPtr; // updatable
             // accessible input items
-            segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
+            Value * accessible = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
+            segmentArgs[segmentArgCount++] = accessible;
+            if (LLVM_UNLIKELY(checkStreamSet)) {
+                // TODO: how best should this be fixed? we can't trust the user to properly allocate an array that meets
+                // the needs of the internal kernels when overflows are needed?
+                Value * capacity = b.CreateAdd(accessible, b.getSize(b.getBitBlockWidth()));
+                segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(capacity, b.getBitBlockWidth()); // capacity
+            }
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
+
             Value * const streamSetArg = nextArg();
             assert (streamSetArg->getType() == streamSetPtrTy);
-
             // shared dynamic buffer handle or virtual base output address
             fields[1] = i32_ZERO;
-            segmentArgs[segmentArgCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
+            assert (segmentArgCount < doSegment->arg_size());
 
+            segmentArgs[segmentArgCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
             // produced output items
+//            assert (canSetTerminateSignal());
             fields[1] = i32_ONE;
             Value * const itemPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
+            assert (segmentArgCount < doSegment->arg_size());
             segmentArgs[segmentArgCount++] = itemPtr;
-            segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, itemPtr);
+            const auto isLocal = isLocalBuffer(mOutputStreamSets[i]);
+            assert (!isLocal.isShared());
+            if (LLVM_UNLIKELY(isLocal.any())) {
+                assert (segmentArgCount < doSegment->arg_size());
+                segmentArgs[segmentArgCount++] = b.getSize(0);
+                if (LLVM_UNLIKELY(checkStreamSet)) {
+                    assert (segmentArgCount < doSegment->arg_size());
+#warning keep this in array to read out
+                    segmentArgs[segmentArgCount++] = b.CreateAllocaAtEntryPoint(sizeTy, nullptr);
+                }
+            } else {
+                Value * writeable = b.CreateLoad(int64Ty, itemPtr);
+                assert (segmentArgCount < doSegment->arg_size());
+                segmentArgs[segmentArgCount++] = writeable; // writable
+                if (LLVM_UNLIKELY(checkStreamSet)) {
+                    assert (segmentArgCount < doSegment->arg_size());
+                    Value * capacity = b.CreateAdd(writeable, b.getSize(b.getBitBlockWidth()));
+                    segmentArgs[segmentArgCount++] = b.CreateRoundUpRational(capacity, b.getBitBlockWidth()); // capacity
+                }
+            }
         }
     }
+
     assert (segmentArgCount == doSegment->arg_size());
 
     Value * sharedHandle = nullptr;
@@ -681,7 +736,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
                     value = b.getSize(codegen::DynamicMultithreadingPeriod);
                     break;
                 case C::BufferSegmentLength:
-                    value = b.getSize(codegen::BufferSegments);
+                    value = b.getSize(codegen::BufferSegments); assert (false);
                     break;
                 case C::DynamicMultithreadingAddSynchronizationThreshold:
                     value = ConstantFP::get(b.getFloatTy(), codegen::DynamicMultithreadingAddThreshold); // %
@@ -711,7 +766,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
     InitArgs args;
     sharedHandle = constructFamilyKernels(b, args, paramMap, toFree);
-    assert (isStateful() || sharedHandle == nullptr);
+    assert (isStateful() == (sharedHandle != nullptr));
 
     size_t argCount = 0;
     if (LLVM_LIKELY(isStateful())) {
@@ -729,6 +784,18 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         toFree.push_back(threadLocalHandle);
     }
 
+#warning this is being compiled into the kernel, not passed in
+
+    const auto segLength = (codegen::SegmentSize + getStride()  - 1U) / getStride();
+
+    segmentArgs[argCount++] = b.getSize(segLength);
+
+    if (LLVM_UNLIKELY(tdb)) {
+        Constant * const nil = ConstantPointerNull::get(b.getVoidPtrTy());
+        segmentArgs[argCount++] = nil;
+        segmentArgs[argCount++] = nil;
+    }
+
     assert (argCount == suppliedArgs);
 
     if (LLVM_UNLIKELY(hasAttribute(AttrId::InternallySynchronized))) {
@@ -737,14 +804,21 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
-        Constant * const sz_ONE = b.getSize(1);
+
+        ConstantInt * const sz_BufferSize = b.getSize(segLength * codegen::BufferSegments);
+
         Function * const allocShared = getAllocateSharedInternalStreamSetsFunction(b);
-        SmallVector<Value *, 2> allocArgs;
+        SmallVector<Value *, 4> allocArgs;
         if (LLVM_LIKELY(isStateful())) {
             allocArgs.push_back(sharedHandle);
         }
         // pass in the desired number of segments
-        allocArgs.push_back(sz_ONE);
+        allocArgs.push_back(sz_BufferSize);
+        if (LLVM_UNLIKELY(codegen::StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
+            Constant * nil = ConstantPointerNull::get(b.getVoidPtrTy());
+            allocArgs.push_back(nil);
+            allocArgs.push_back(nil);
+        }
         b.CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
@@ -753,7 +827,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
                 allocArgs.push_back(sharedHandle);
             }
             allocArgs.push_back(threadLocalHandle);
-            allocArgs.push_back(sz_ONE);
+            allocArgs.push_back(sz_BufferSize);
             b.CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
@@ -791,7 +865,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     } else {
         b.CreateCall(doSegment->getFunctionType(), doSegment, segmentArgs);
     }
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+    if (LLVM_UNLIKELY(getKernelFlags() & Kernel::KernelFlags::RequiresIllustratorObject)) {
         BEGIN_SCOPED_REGION
         FixedArray<Value *, 2> args;
         args[0] = illustratorObj;
@@ -844,41 +918,47 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (codegen::EnableDynamicMultithreading) {
         out << "+DM";
     }
-    if (codegen::EnableJumpGuidedSynchronizationVariables) {
-        out << "+JGS";
-    }
     if (codegen::UseProcessThreadForIO) {
         out << "+IOT";
     }
+    if (!codegen::ThreadLocalPermittedOptions.empty()) {
+        out << "+TLP:" << codegen::ThreadLocalPermittedOptions;
+    }
+    if (!codegen::PreserveAllStreamSetDataOptions.empty()) {
+        out << "+PAS:" << codegen::PreserveAllStreamSetDataOptions;
+    }
+    if (!codegen::DoubleStreamSetSizeOptions.empty()) {
+        out << "+DSS:" << codegen::DoubleStreamSetSizeOptions;
+    }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableCycleCounter))) {
             out << "+CYC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::EnableBlockingIOCounter))) {
             out << "+BIC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceBlockedIO))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceBlockedIO))) {
             out << "+TBIO";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicBuffers))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceDynamicBuffers))) {
             out << "+TDB";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceDynamicMultithreading))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceDynamicMultithreading))) {
             out << "+TDM";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceProducedItemCounts))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceProducedItemCounts))) {
             out << "+TPIC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceUnconsumedItemCounts))) {
             out << "+TUIC";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::TraceStridesPerSegment))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::TraceStridesPerSegment))) {
             out << "+TSS";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::GenerateTransferredItemCountHistogram))) {
             out << "+GTH";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::GenerateDeferredItemCountHistogram))) {
             out << "+GDH";
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
@@ -890,7 +970,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
         out << "+PAPI";
         out << (std::count_if(S.begin(), S.end(), [](std::string::value_type c){return c == ',';}) + 1);
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
+        if (LLVM_UNLIKELY(StatisticsOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
             out << "+T";
         }
     }
@@ -921,7 +1001,8 @@ PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
                                Bindings && stream_inputs, Bindings && stream_outputs,
                                Bindings && scalar_inputs, Bindings && scalar_outputs,
                                Relationships && internallyGenerated,
-                               LengthAssertions && lengthAssertions)
+                               LengthAssertions && lengthAssertions,
+                               PhaseBoundaries && layerBoundaries)
 : PipelineKernel(Internal{}
 , ts
 , annotateSignatureWithPipelineFlags(std::move(signature))
@@ -934,6 +1015,7 @@ PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
 , std::move(scalar_outputs)
 , std::move(internallyGenerated)
 , std::move(lengthAssertions)
+, std::move(layerBoundaries)
 ) {
 
 
@@ -946,18 +1028,22 @@ PipelineKernel::PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs,
                Relationships && internallyGenerated,
-               LengthAssertions && lengthAssertions)
+               LengthAssertions && lengthAssertions,
+               PhaseBoundaries && layerBoundaries)
 : Kernel(ts, TypeId::Pipeline,
          makePipelineHashName(signature),
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs),
-         {} /* Internal scalars are generated by the PipelineCompiler */)
+         {} /* Internal scalars are generated by the PipelineCompiler */,
+         CompilationStatus::FullyInitialized,
+         KernelFlags::HasInternallyManagedStreamSet)
 , mNumOfKernelFamilyCalls(numOfKernelFamilyCalls)
 , mSignature(std::move(signature))
 , mInternallyGeneratedStreamSets(std::move(internallyGenerated))
 , mKernels(std::move(kernels))
 , mCallBindings(std::move(callBindings))
-, mLengthAssertions(std::move(lengthAssertions)) {
+, mLengthAssertions(std::move(lengthAssertions))
+, mPhaseBoundaries(std::move(layerBoundaries)){
 
 }
 
@@ -972,9 +1058,11 @@ PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
 : Kernel(ts, TypeId::Pipeline,
          std::move(attributes),
          std::move(stream_inputs), std::move(stream_outputs),
-         std::move(scalar_inputs), std::move(scalar_outputs))
+         std::move(scalar_inputs), std::move(scalar_outputs),
+         CompilationStatus::Uninitialized,
+         KernelFlags::HasInternallyManagedStreamSet)
 , mSignature(std::move(signature)) {
-
+    setStride(ts.getBitBlockWidth());
 }
 
 PipelineKernel::~PipelineKernel() {

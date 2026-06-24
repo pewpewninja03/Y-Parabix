@@ -1115,9 +1115,7 @@ void PipelineAnalysis::estimateInterPartitionDataflow(PartitionGraph & P, pipeli
                                 break;
                             case AttrId::BlockSize:
                                 BEGIN_SCOPED_REGION
-                                const auto b = attr.amount() * N.Repetitions[kernelIdx];
-                                assert (b.denominator() == 1);
-                                blockSize = b.numerator();
+                                blockSize = attr.amount() * N.Repetitions[kernelIdx];
                                 END_SCOPED_REGION
                                 break;
                             default:

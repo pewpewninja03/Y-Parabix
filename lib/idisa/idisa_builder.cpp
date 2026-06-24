@@ -15,8 +15,11 @@
 #include <toolchain/toolchain.h>
 #include <unistd.h>
 #include <boost/intrusive/detail/math.hpp>
+#include <pthread.h>
 
 using boost::intrusive::detail::floor_log2;
+
+// #define PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
 
 using namespace llvm;
 
@@ -72,6 +75,9 @@ CallInst * IDISA_Builder::CallPrintRegister(StringRef name, Value * const value,
         auto arg = function->arg_begin();
         std::string tmp;
         raw_string_ostream out(tmp);
+        #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+        out << "%016" PRIx64 "  ";
+        #endif
         out << "%-40s =";
         for(unsigned i = 0; i < (getBitBlockWidth() / 8); ++i) {
             out << " %02" PRIx32;
@@ -86,10 +92,18 @@ CallInst * IDISA_Builder::CallPrintRegister(StringRef name, Value * const value,
         value->setName("value");
         Type * const byteFixedVectorType = FixedVectorType::get(getInt8Ty(), (mBitBlockWidth / 8));
         value = builder.CreateBitCast(value, byteFixedVectorType);
-
         std::vector<Value *> args;
         args.push_back(fdInt);
         args.push_back(GetString(out.str()));
+        #ifdef PRINT_DEBUG_MESSAGES_INCLUDE_THREAD_NUM
+        Function * pthreadSelfFn = m->getFunction("pthread_self");
+        if (pthreadSelfFn == nullptr) {
+            IntegerType * const pThreadTy = IntegerType::getIntNTy(getContext(), sizeof(pthread_t) * CHAR_BIT);
+            FunctionType * funTy = FunctionType::get(pThreadTy, false);
+            pthreadSelfFn = LinkFunction("pthread_self", funTy, (void*)&pthread_self);
+        }
+        args.push_back(builder.CreateCall(pthreadSelfFn));
+        #endif
         args.push_back(name);
         for(unsigned i = (getBitBlockWidth() / 8); i != 0; --i) {
             args.push_back(builder.CreateZExt(builder.CreateExtractElement(value, builder.getInt32(i - 1)), builder.getInt32Ty()));
@@ -1037,9 +1051,12 @@ Value * IDISA_Builder::hsimd_signmask(unsigned fw, Value * a) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "hsimd_signmask");
     Value * a1 = fwCast(fw, a);
     Value * mask = CreateICmpSLT(a1, ConstantAggregateZero::get(a1->getType()));
-    mask = CreateBitCast(mask, getIntNTy(mBitBlockWidth/fw));
-    if (mBitBlockWidth/fw < 32) return CreateZExt(mask, getInt32Ty());
-    else return mask;
+    const auto maskWidth = mBitBlockWidth / fw;
+    mask = CreateBitCast(mask, getIntNTy(maskWidth));
+    if (maskWidth < 32)  {
+        mask = CreateZExt(mask, getInt32Ty());
+    }
+    return mask;
 }
 
 Value * IDISA_Builder::mvmd_extract(unsigned fw, Value * a, unsigned fieldIndex) {

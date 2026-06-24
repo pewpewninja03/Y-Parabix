@@ -1,5 +1,5 @@
-# Copyright (c) 2019 International Characters.
-# This software is licensed to the public under the Open Software License 3.0.
+#  Part of the Parabix Project, under the Open Software License 3.0.
+#  SPDX-License-Identifier: OSL-3.0
 
 # IMPORTANT:
 #
@@ -407,16 +407,19 @@ add_subdirectory(lib/re/transforms)
 add_subdirectory(lib/re/unicode)
 add_subdirectory(lib/testing)
 add_subdirectory(lib/toolchain)
-add_subdirectory(lib/unicode/algo)
-add_subdirectory(lib/unicode/core)
-add_subdirectory(lib/unicode/data)
-add_subdirectory(lib/unicode/utf)
+add_subdirectory(lib/ucd/algo)
+add_subdirectory(lib/ucd/core)
+add_subdirectory(lib/ucd/data)
+add_subdirectory(lib/ucd/utf)
 add_subdirectory(lib/audio)
+add_subdirectory(lib/csv)
+add_subdirectory(lib/json)
 
 # Kernel Libraries
 add_subdirectory(lib/kernel/basis)
 add_subdirectory(lib/kernel/bitwise)
 add_subdirectory(lib/kernel/io)
+add_subdirectory(lib/kernel/re)
 add_subdirectory(lib/kernel/scan)
 add_subdirectory(lib/kernel/streamutils)
 add_subdirectory(lib/kernel/unicode)
@@ -430,6 +433,7 @@ if (GENERATE_TOOLS)
     add_subdirectory(tools/icgrep)
     add_subdirectory(tools/idisa_test)
     add_subdirectory(tools/json)
+    add_subdirectory(tools/lex)
     add_subdirectory(tools/transcoders)
     add_subdirectory(tools/wc)
     # add_subdirectory(tools/wc/wc-pablo)
@@ -488,6 +492,11 @@ add_test(
   NAME nfd_test
   WORKING_DIRECTORY ${QA_DIR}/nfd
   COMMAND ./test_nfd "${BIN_DIR}/nfd")
+
+add_test(
+  NAME nfc_test
+  WORKING_DIRECTORY ${QA_DIR}/nfc
+  COMMAND ./test_nfc "${BIN_DIR}/nfc")
 
 add_test(
     NAME editd_test
@@ -551,6 +560,10 @@ add_custom_target(gb18030_test
 add_custom_target(nfd_test
   WORKING_DIRECTORY ${QA_DIR}/nfd
   COMMAND ./test_nfd "${BIN_DIR}/nfd")
+
+add_custom_target(nfc_test
+  WORKING_DIRECTORY ${QA_DIR}/nfc
+  COMMAND ./test_nfc "${BIN_DIR}/nfc")
 
 add_custom_target (abc_gen
     WORKING_DIRECTORY ${QA_DIR}

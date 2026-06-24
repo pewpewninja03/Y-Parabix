@@ -193,7 +193,7 @@ Value * PipelineCompiler::checkOptimizationBranchSpanLength(KernelBuilder & b, V
     Value * const isFinal = b.CreateICmpEQ(numOfLinearStrides, sz_ZERO);
     Value * const selectedNumOfStrides = b.CreateSelect(isFinal, sz_ZERO, finalNumOfStrides);
 
-    if (LLVM_UNLIKELY(CheckAssertions)) {
+    if (LLVM_UNLIKELY(CheckAssertions())) {
         Value * const valid = b.CreateICmpULE(selectedNumOfStrides, numOfLinearStrides);
         b.CreateAssert(valid, "%s: optimization branch span length (%" PRIu64 ") "
                                "exceeds maximum num of strides (%" PRIu64 ")",

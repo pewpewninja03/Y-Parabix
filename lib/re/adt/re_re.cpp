@@ -28,8 +28,8 @@ bool matchesEmptyString(const RE * re) {
         return true;
     } else if (isa<End>(re)) {
         return true;
-    } else if (isa<Assertion>(re)) {
-        return false;
+    } else if (const Assertion * a = dyn_cast<Assertion>(re)) {
+        return a->getSense() == Assertion::Sense::Negative;
     } else if (const Diff * diff = dyn_cast<Diff>(re)) {
         return matchesEmptyString(diff->getLH()) && !matchesEmptyString(diff->getRH());
     } else if (const Intersect * e = dyn_cast<Intersect>(re)) {

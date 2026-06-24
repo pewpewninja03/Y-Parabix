@@ -18,6 +18,9 @@ bool NoOSFileCaching;
 static cl::opt<bool, true> OptNoOSCaching("disable-file-caching", cl::location(NoOSFileCaching),
                                          cl::desc("Disable OS file caching."), cl::init(false));
 
+bool MMapPreference;
+static cl::opt<bool, true> PreferMMap("PreferMMap", cl::location(MMapPreference), cl::init(false), cl::desc("Prefer mmap for file input."));
+
 bool canMMap(const std::string & fileName) {
     if (fileName == "-") return false;
     namespace fs = boost::filesystem;

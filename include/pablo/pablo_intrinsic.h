@@ -76,7 +76,9 @@ protected:
     IntrinsicCall(Intrinsic intrinsic, llvm::Type * type, llvm::ArrayRef<PabloAST *> argv, const String * name, Allocator & allocator)
     : Statement(ClassTypeId::IntrinsicCall, type, argv, name, allocator)
     , mIntrinsic(intrinsic) {
-        setSideEffecting(intrinsic == pablo::Intrinsic::PrintRegister);
+        if (intrinsic == pablo::Intrinsic::PrintRegister) {
+            setSideEffecting(true);
+        }
     }
 
     const Intrinsic mIntrinsic;
