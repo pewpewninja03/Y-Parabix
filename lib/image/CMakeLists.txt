@@ -10,6 +10,7 @@ SRC
     bmp_loader.cpp
 DEPS
     pablo
+    pablo.bixnum
     kernel.io
     kernel.pipeline
     kernel.streamutils
