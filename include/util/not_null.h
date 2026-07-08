@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cassert>
+#include <cstddef>
+
 template<typename T>
 struct not_null {
     not_null(T const value) : _value(value) { assert(_value); }
@@ -21,5 +24,4 @@ struct no_conversion {
 private:
     T const  _value;
 };
-
 

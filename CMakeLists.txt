@@ -412,6 +412,7 @@ add_subdirectory(lib/ucd/core)
 add_subdirectory(lib/ucd/data)
 add_subdirectory(lib/ucd/utf)
 add_subdirectory(lib/audio)
+add_subdirectory(lib/image)
 add_subdirectory(lib/csv)
 add_subdirectory(lib/json)
 
