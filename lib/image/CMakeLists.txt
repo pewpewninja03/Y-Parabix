@@ -8,6 +8,7 @@ NAME
     image
 SRC
     bmp_loader.cpp
+    conv_filter.cpp
 DEPS
     pablo
     pablo.bixnum
