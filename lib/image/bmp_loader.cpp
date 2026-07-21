@@ -234,6 +234,8 @@ void PaletteLUTKernel::generatePabloMethod() {
                              pb.createZeroes());
     }
     pablo::BixNumTableCompiler c(tbl, idx, chan);
+    std::vector<unsigned> partitionLevels{ChannelBits};
+    c.setRecursivePartitionLevels(partitionLevels);
     c.compileSubTable(pb, 0, pb.createOnes()); // full 0..255 range
     for (unsigned i = 0; i < ChannelBits; ++i) {
       pb.createAssign(pb.createExtract(out, pb.getInteger(baseStream + i)),
@@ -259,6 +261,62 @@ void ParseBMPColorStreams(kernel::ProgramBuilder &P,
   P.CreateKernelCall<PaletteLUTKernel>(basisBits, colorStream, info.bTable,
                                        info.gTable, info.rTable);
   SHOW_BIXNUM(colorStream);
+}
+
+void CropImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
+               const BMPInfo &sourceInfo, uint32_t cropWidth,
+               uint32_t cropHeight, uint32_t cropX, uint32_t cropY,
+               kernel::StreamSet *&croppedImageData) {
+  if (sourceImageData->getNumElements() != ColorStreamCount ||
+      sourceImageData->getFieldWidth() != 1) {
+    throw std::runtime_error("BMP crop: source image data must be a 24x1 "
+                             "B/G/R color stream");
+  }
+  if (cropWidth == 0 || cropHeight == 0) {
+    throw std::runtime_error("BMP crop: zero-sized crop is not supported");
+  }
+  if (cropX > sourceInfo.width || cropWidth > sourceInfo.width - cropX) {
+    throw std::runtime_error("BMP crop: crop rectangle exceeds source width");
+  }
+  if (cropY > sourceInfo.height || cropHeight > sourceInfo.height - cropY) {
+    throw std::runtime_error("BMP crop: crop rectangle exceeds source height");
+  }
+
+  const uint32_t cropRight = cropX + cropWidth;
+  const uint32_t cropBottom = cropY + cropHeight;
+  const uint64_t sourcePixels =
+      static_cast<uint64_t>(sourceInfo.width) * sourceInfo.height;
+  std::vector<uint64_t> cropPattern(sourcePixels, 0u);
+
+  for (uint32_t storedRow = 0; storedRow < sourceInfo.height; ++storedRow) {
+    const uint32_t logicalRow =
+        sourceInfo.rowsBottomUp ? sourceInfo.height - storedRow - 1u
+                                : storedRow;
+    if (logicalRow < cropY || logicalRow >= cropBottom) {
+      continue;
+    }
+    const uint64_t rowBase =
+        static_cast<uint64_t>(storedRow) * sourceInfo.width;
+    std::fill_n(cropPattern.begin() + rowBase + cropX, cropRight - cropX, 1u);
+  }
+
+  kernel::StreamSet *cropMask =
+      P.CreateRepeatingStreamSet(1, cropPattern, false);
+  kernel::StreamSet *blue = kernel::streamutils::Select(
+      P, sourceImageData, kernel::streamutils::Range(0, 8));
+  kernel::StreamSet *green = kernel::streamutils::Select(
+      P, sourceImageData, kernel::streamutils::Range(8, 16));
+  kernel::StreamSet *red = kernel::streamutils::Select(
+      P, sourceImageData, kernel::streamutils::Range(16, 24));
+  kernel::StreamSet *croppedBlue = P.CreateStreamSet(ChannelBits);
+  kernel::StreamSet *croppedGreen = P.CreateStreamSet(ChannelBits);
+  kernel::StreamSet *croppedRed = P.CreateStreamSet(ChannelBits);
+  FilterByMask(P, cropMask, blue, croppedBlue);
+  FilterByMask(P, cropMask, green, croppedGreen);
+  FilterByMask(P, cropMask, red, croppedRed);
+  croppedImageData =
+      kernel::streamutils::Select(P, {croppedBlue, croppedGreen, croppedRed});
+  SHOW_BIXNUM(croppedImageData);
 }
 
 } // namespace image

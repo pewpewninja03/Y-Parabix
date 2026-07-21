@@ -57,4 +57,24 @@ void ParseBMPColorStreams(kernel::ProgramBuilder &P,
                           kernel::Scalar *fileDescriptor, const BMPInfo &info,
                           kernel::StreamSet *&colorStream);
 
+/*
+ * Crop a 24x1 B/G/R color stream using a one-bit crop mask.
+ *
+ * Arguments:
+ *   sourceImageData - 24x1 color stream from ParseBMPColorStreams().
+ *   sourceInfo      - dimensions and row order for sourceImageData.
+ *   cropWidth       - output width in pixels.
+ *   cropHeight      - output height in pixels.
+ *   cropX           - crop rectangle left edge, in top-left image coordinates.
+ *   cropY           - crop rectangle top edge, in top-left image coordinates.
+ *
+ * Output:
+ *   croppedImageData - 24x1 color stream containing cropWidth*cropHeight
+ *                      pixels in the source stream's native row order.
+ */
+void CropImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
+               const BMPInfo &sourceInfo, uint32_t cropWidth,
+               uint32_t cropHeight, uint32_t cropX, uint32_t cropY,
+               kernel::StreamSet *&croppedImageData);
+
 } // namespace image
