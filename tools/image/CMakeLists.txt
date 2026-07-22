@@ -8,4 +8,6 @@ SRC
     bmp_header_test.cpp
 DEPS
     image
+    kernel.basis
+    kernel.io
 )
