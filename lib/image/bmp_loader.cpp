@@ -6,7 +6,11 @@
 #include <image/bmp_loader.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
+#include <fcntl.h>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -14,6 +18,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <kernel/basis/p2s_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/pipeline/program_builder.h>
@@ -71,6 +76,44 @@ constexpr uint32_t PaletteEntryBytes = 4u;
 constexpr unsigned ChannelBits = 8u;
 constexpr unsigned ColorChannelCount = 3u;
 constexpr unsigned ColorStreamCount = ColorChannelCount * ChannelBits;
+constexpr uint16_t OutputBitsPerPixel = 24u;
+constexpr uint32_t BMPHeaderBytes =
+    sizeof(BMPFileHeader) + sizeof(BMPInfoHeader);
+
+uint32_t checkedBMP24ImageSize(const BMPInfo &info) {
+  if (info.height == 0 ||
+      info.height >
+          static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+    throw std::runtime_error("BMP output: height is outside the BMP range");
+  }
+  const uint64_t imageSize =
+      static_cast<uint64_t>(getBMP24RowStride(info.width)) * info.height;
+  if (imageSize >
+      std::numeric_limits<uint32_t>::max() - BMPHeaderBytes) {
+    throw std::runtime_error("BMP output: image is too large");
+  }
+  return static_cast<uint32_t>(imageSize);
+}
+
+void writeAll(int fd, const void *data, std::size_t size,
+              const std::string &outputPath) {
+  const uint8_t *bytes = static_cast<const uint8_t *>(data);
+  while (size != 0) {
+    const ssize_t written = write(fd, bytes, size);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      throw std::runtime_error("BMP output: failed to write " + outputPath +
+                               ": " + std::strerror(errno));
+    }
+    if (written == 0) {
+      throw std::runtime_error("BMP output: short write to " + outputPath);
+    }
+    bytes += written;
+    size -= static_cast<std::size_t>(written);
+  }
+}
 
 // Parse each pixel BGR value
 void readPalette(int fd, const BMPInfoHeader &ih, BMPInfo &info) {
@@ -104,6 +147,114 @@ void readPalette(int fd, const BMPInfoHeader &ih, BMPInfo &info) {
 }
 
 } // anonymous namespace
+
+uint32_t getBMP24RowStride(uint32_t width) {
+  if (width == 0 ||
+      width > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+    throw std::runtime_error("BMP output: width is outside the BMP range");
+  }
+  const uint64_t rowBytes =
+      static_cast<uint64_t>(width) * ColorChannelCount;
+  const uint64_t rowStride =
+      ((rowBytes + BMPRowAlignment - 1u) / BMPRowAlignment) *
+      BMPRowAlignment;
+  if (rowStride > std::numeric_limits<uint32_t>::max()) {
+    throw std::runtime_error("BMP output: row stride is too large");
+  }
+  return static_cast<uint32_t>(rowStride);
+}
+
+std::vector<uint8_t>
+createBMP24PixelData(const kernel::StreamSetPtr &redBytes,
+                     const kernel::StreamSetPtr &greenBytes,
+                     const kernel::StreamSetPtr &blueBytes,
+                     const BMPInfo &outputInfo) {
+  const uint32_t imageSize = checkedBMP24ImageSize(outputInfo);
+  const uint64_t pixelCount =
+      static_cast<uint64_t>(outputInfo.width) * outputInfo.height;
+  if (redBytes.length() != pixelCount ||
+      greenBytes.length() != pixelCount ||
+      blueBytes.length() != pixelCount) {
+    throw std::runtime_error(
+        "BMP output: channel buffer lengths do not match the image dimensions");
+  }
+  if (pixelCount != 0 &&
+      (redBytes.data() == nullptr || greenBytes.data() == nullptr ||
+       blueBytes.data() == nullptr)) {
+    throw std::runtime_error("BMP output: channel buffer is null");
+  }
+
+  const uint32_t rowStride = getBMP24RowStride(outputInfo.width);
+  std::vector<uint8_t> bmpPixelData(imageSize, 0u);
+  const uint8_t *red = redBytes.data();
+  const uint8_t *green = greenBytes.data();
+  const uint8_t *blue = blueBytes.data();
+  for (uint32_t row = 0; row < outputInfo.height; ++row) {
+    const std::size_t inputRow =
+        static_cast<std::size_t>(row) * outputInfo.width;
+    const std::size_t outputRow =
+        static_cast<std::size_t>(row) * rowStride;
+    for (uint32_t column = 0; column < outputInfo.width; ++column) {
+      const std::size_t inputPixel = inputRow + column;
+      const std::size_t outputPixel = outputRow + column * ColorChannelCount;
+      bmpPixelData[outputPixel] = blue[inputPixel];
+      bmpPixelData[outputPixel + 1u] = green[inputPixel];
+      bmpPixelData[outputPixel + 2u] = red[inputPixel];
+    }
+  }
+  return bmpPixelData;
+}
+
+void writeBMP24(const std::string &outputPath,
+                const std::vector<uint8_t> &bmpPixelData,
+                const BMPInfo &outputInfo) {
+  if (outputPath.empty()) {
+    throw std::runtime_error("BMP output: output path is empty");
+  }
+
+  const uint32_t imageSize = checkedBMP24ImageSize(outputInfo);
+  if (bmpPixelData.size() != imageSize) {
+    throw std::runtime_error(
+        "BMP output: pixel buffer length is " +
+        std::to_string(bmpPixelData.size()) + ", expected " +
+        std::to_string(imageSize));
+  }
+
+  BMPFileHeader fileHeader{};
+  fileHeader.signature[0] = 'B';
+  fileHeader.signature[1] = 'M';
+  fileHeader.fileSize = BMPHeaderBytes + imageSize;
+  fileHeader.dataOffset = BMPHeaderBytes;
+
+  BMPInfoHeader infoHeader{};
+  infoHeader.size = sizeof(BMPInfoHeader);
+  infoHeader.width = static_cast<int32_t>(outputInfo.width);
+  const int32_t height = static_cast<int32_t>(outputInfo.height);
+  infoHeader.height = outputInfo.rowsBottomUp ? height : -height;
+  infoHeader.planes = RequiredBMPPlanes;
+  infoHeader.bitsPerPixel = OutputBitsPerPixel;
+  infoHeader.imageSize = imageSize;
+
+  const int fd =
+      open(outputPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if (fd < 0) {
+    throw std::runtime_error("BMP output: failed to open " + outputPath +
+                             ": " + std::strerror(errno));
+  }
+
+  try {
+    writeAll(fd, &fileHeader, sizeof(fileHeader), outputPath);
+    writeAll(fd, &infoHeader, sizeof(infoHeader), outputPath);
+    writeAll(fd, bmpPixelData.data(), imageSize, outputPath);
+  } catch (...) {
+    close(fd);
+    throw;
+  }
+  if (close(fd) != 0) {
+    throw std::runtime_error("BMP output: failed to close " + outputPath +
+                             ": " + std::strerror(errno));
+  }
+}
 
 void readBMPHeader(int fd, BMPInfo &info) {
   BMPFileHeader fh;
@@ -317,6 +468,40 @@ void CropImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
   croppedImageData =
       kernel::streamutils::Select(P, {croppedBlue, croppedGreen, croppedRed});
   SHOW_BIXNUM(croppedImageData);
+}
+
+void CreateBMPColorByteStreams(kernel::ProgramBuilder &P,
+                               kernel::StreamSet *sourceImageData,
+                               kernel::StreamSet *redBytes,
+                               kernel::StreamSet *greenBytes,
+                               kernel::StreamSet *blueBytes) {
+  if (sourceImageData->getNumElements() != ColorStreamCount ||
+      sourceImageData->getFieldWidth() != 1) {
+    throw std::runtime_error("BMP output: source image data must be a 24x1 "
+                             "B/G/R color stream");
+  }
+  const auto isByteStream = [](const kernel::StreamSet *stream) {
+    return stream->getNumElements() == 1 &&
+           stream->getFieldWidth() == ChannelBits;
+  };
+  if (!isByteStream(redBytes) || !isByteStream(greenBytes) ||
+      !isByteStream(blueBytes)) {
+    throw std::runtime_error("BMP output: channel outputs must be 1x8 byte "
+                             "streams");
+  }
+
+  kernel::StreamSet *blueBasis = kernel::streamutils::Select(
+      P, sourceImageData, kernel::streamutils::Range(0, 8));
+  kernel::StreamSet *greenBasis = kernel::streamutils::Select(
+      P, sourceImageData, kernel::streamutils::Range(8, 16));
+  kernel::StreamSet *redBasis = kernel::streamutils::Select(
+      P, sourceImageData, kernel::streamutils::Range(16, 24));
+  P.CreateKernelCall<kernel::P2SKernel>(blueBasis, blueBytes);
+  P.CreateKernelCall<kernel::P2SKernel>(greenBasis, greenBytes);
+  P.CreateKernelCall<kernel::P2SKernel>(redBasis, redBytes);
+  SHOW_BYTES(redBytes);
+  SHOW_BYTES(greenBytes);
+  SHOW_BYTES(blueBytes);
 }
 
 } // namespace image

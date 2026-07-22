@@ -7,7 +7,9 @@
 
 #include <cstdint>
 #include <kernel/core/relationship.h>
+#include <kernel/core/streamsetptr.h>
 #include <kernel/pipeline/program_builder.h>
+#include <string>
 #include <vector>
 
 namespace image {
@@ -57,24 +59,39 @@ void ParseBMPColorStreams(kernel::ProgramBuilder &P,
                           kernel::Scalar *fileDescriptor, const BMPInfo &info,
                           kernel::StreamSet *&colorStream);
 
-/*
- * Crop a 24x1 B/G/R color stream using a one-bit crop mask.
- *
- * Arguments:
- *   sourceImageData - 24x1 color stream from ParseBMPColorStreams().
- *   sourceInfo      - dimensions and row order for sourceImageData.
- *   cropWidth       - output width in pixels.
- *   cropHeight      - output height in pixels.
- *   cropX           - crop rectangle left edge, in top-left image coordinates.
- *   cropY           - crop rectangle top edge, in top-left image coordinates.
- *
- * Output:
- *   croppedImageData - 24x1 color stream containing cropWidth*cropHeight
- *                      pixels in the source stream's native row order.
- */
 void CropImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
                const BMPInfo &sourceInfo, uint32_t cropWidth,
                uint32_t cropHeight, uint32_t cropX, uint32_t cropY,
                kernel::StreamSet *&croppedImageData);
+
+/*
+ * Materializes a 24x1 B/G/R color StreamSet as three byte streams.
+ */
+void CreateBMPColorByteStreams(kernel::ProgramBuilder &P,
+                               kernel::StreamSet *sourceImageData,
+                               kernel::StreamSet *redBytes,
+                               kernel::StreamSet *greenBytes,
+                               kernel::StreamSet *blueBytes);
+
+/*
+ * Returns the four-byte-aligned row stride for an uncompressed 24-bit BMP.
+ */
+uint32_t getBMP24RowStride(uint32_t width);
+
+/*
+ * Converts stored-order R/G/B byte streams to padded 24-bit BMP pixel data.
+ */
+std::vector<uint8_t>
+createBMP24PixelData(const kernel::StreamSetPtr &redBytes,
+                     const kernel::StreamSetPtr &greenBytes,
+                     const kernel::StreamSetPtr &blueBytes,
+                     const BMPInfo &outputInfo);
+
+/*
+ * Writes a complete uncompressed 24-bit BMP from padded BGR pixel data.
+ */
+void writeBMP24(const std::string &outputPath,
+                const std::vector<uint8_t> &bmpPixelData,
+                const BMPInfo &outputInfo);
 
 } // namespace image
