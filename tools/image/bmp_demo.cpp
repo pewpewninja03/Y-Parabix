@@ -210,17 +210,14 @@ int main(int argc, char **argv) {
   std::vector<uint8_t> outputRGB(croppedRGBBytes);
   const float weights[] = {1.f / 9.f, 1.f / 9.f, 1.f / 9.f, 1.f / 9.f, 1.f / 9.f,
                            1.f / 9.f, 1.f / 9.f, 1.f / 9.f, 1.f / 9.f};
-  kernel::image::ConvFilterConfig config{
-      kernel::image::ConvFilterMode::Default,
-      croppedInfo.width,
-      croppedInfo.height,
+  const kernel::image::DefaultConvFilter config{
       3,
       3,
-      weights,
-      9,
+      {weights, 9},
   };
-  if (!kernel::image::applyConvFilter(croppedRGB.data(), outputRGB.data(),
-                                      config)) {
+  const auto filter = kernel::image::compileConvFilter(
+      croppedInfo.width, croppedInfo.height, config);
+  if (!filter->apply(croppedRGB.data(), outputRGB.data(), nullptr)) {
     std::cerr << "applyConvFilter failed\n";
     return 4;
   }

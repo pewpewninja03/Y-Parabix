@@ -37,6 +37,7 @@ parabix_add_kernel_test(test_bytefilterandspread kernel.io kernel.streamutils)
 parabix_add_kernel_test(test_emptyprogram kernel.io)
 parabix_add_kernel_test(test_truncatedstreamset kernel.io)
 parabix_add_kernel_test(bmp_loader_tests image kernel.io kernel.basis kernel.streamutils)
+parabix_add_kernel_test(test_conv_filter image)
 
 # `make kernel-tests` to run all kernel tests
 add_custom_target(kernel-tests
