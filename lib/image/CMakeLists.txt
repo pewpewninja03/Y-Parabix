@@ -7,7 +7,8 @@ parabix_add_module(
 NAME
     image
 SRC
-    bmp_loader.cpp
+    bmp_io.cpp
+    bmp_pipeline.cpp
     conv_filter.cpp
 DEPS
     pablo

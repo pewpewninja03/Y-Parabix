@@ -3,9 +3,11 @@
 
 parabix_add_executable(
 NAME
-    bmp_header_test
+    bmp_demo
 SRC
-    bmp_header_test.cpp
+    bmp_demo.cpp
 DEPS
     image
+    kernel.basis
+    kernel.io
 )
