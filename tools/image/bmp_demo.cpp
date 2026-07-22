@@ -46,9 +46,6 @@ static llvm::cl::opt<std::string>
 typedef void (*BmpPipelineFn)(kernel::StreamSetPtr &redBytes,
                               kernel::StreamSetPtr &greenBytes,
                               kernel::StreamSetPtr &blueBytes,
-                              kernel::StreamSetPtr &croppedRedBytes,
-                              kernel::StreamSetPtr &croppedGreenBytes,
-                              kernel::StreamSetPtr &croppedBlueBytes,
                               uint32_t fd);
 
 static image::BMPInfo makeCroppedInfo(const image::BMPInfo &info,
@@ -65,17 +62,12 @@ BmpPipelineFn buildPipeline(CPUDriver &driver, const image::BMPInfo &info,
                             const uint32_t cropW, const uint32_t cropH,
                             const uint32_t cropLeft, const uint32_t cropTop) {
   auto P = kernel::CreatePipeline(
-      driver, kernel::Output<kernel::streamset_t>{"redBytes", 1, 8,
+      driver,
+      kernel::Output<kernel::streamset_t>{"redBytes", 1, 8,
                                            kernel::ReturnedBuffer(1)},
       kernel::Output<kernel::streamset_t>{"greenBytes", 1, 8,
                                            kernel::ReturnedBuffer(1)},
       kernel::Output<kernel::streamset_t>{"blueBytes", 1, 8,
-                                           kernel::ReturnedBuffer(1)},
-      kernel::Output<kernel::streamset_t>{"croppedRedBytes", 1, 8,
-                                           kernel::ReturnedBuffer(1)},
-      kernel::Output<kernel::streamset_t>{"croppedGreenBytes", 1, 8,
-                                           kernel::ReturnedBuffer(1)},
-      kernel::Output<kernel::streamset_t>{"croppedBlueBytes", 1, 8,
                                            kernel::ReturnedBuffer(1)},
       kernel::Input<uint32_t>{"fd"});
 
@@ -84,21 +76,19 @@ BmpPipelineFn buildPipeline(CPUDriver &driver, const image::BMPInfo &info,
   kernel::StreamSet *colorStream = nullptr;
   image::ParseBMPColorStreams(P, fdScalar, info, colorStream);
 
-  image::CreateBMPColorByteStreams(
-      P, colorStream, P.getOutputStreamSet("redBytes"),
-      P.getOutputStreamSet("greenBytes"), P.getOutputStreamSet("blueBytes"));
-
   kernel::StreamSet *croppedColorStream = nullptr;
   image::CropImage(P, colorStream, info, cropW, cropH, cropLeft, cropTop,
                    croppedColorStream);
   image::CreateBMPColorByteStreams(
-      P, croppedColorStream, P.getOutputStreamSet("croppedRedBytes"),
-      P.getOutputStreamSet("croppedGreenBytes"),
-      P.getOutputStreamSet("croppedBlueBytes"));
+      P, croppedColorStream, P.getOutputStreamSet("redBytes"),
+      P.getOutputStreamSet("greenBytes"), P.getOutputStreamSet("blueBytes"));
 
   return P.compile();
 }
 
+// Combine separate R/G/B byte streams (in stored row order) into interleaved
+// RGB bytes in logical top-down row order, which is what applyConvFilter
+// expects.
 static void interleaveRGB(const kernel::StreamSetPtr &redBytes,
                           const kernel::StreamSetPtr &greenBytes,
                           const kernel::StreamSetPtr &blueBytes,
@@ -120,17 +110,15 @@ static void interleaveRGB(const kernel::StreamSetPtr &redBytes,
   }
 }
 
-static void splitRGBToStoredChannels(const std::vector<uint8_t> &rgb,
-                                     const image::BMPInfo &info,
-                                     std::vector<uint8_t> &red,
-                                     std::vector<uint8_t> &green,
-                                     std::vector<uint8_t> &blue) {
+// Split interleaved top-down RGB back into separate R/G/B byte streams in
+// stored row order, which is what createBMP24PixelData expects.
+static void splitChannels(const std::vector<uint8_t> &rgb,
+                          const image::BMPInfo &info,
+                          std::vector<uint8_t> &red,
+                          std::vector<uint8_t> &green,
+                          std::vector<uint8_t> &blue) {
   const std::size_t pixelCount =
       static_cast<std::size_t>(info.width) * info.height;
-  if (rgb.size() != pixelCount * 3u) {
-    throw std::runtime_error(
-        "BMP output: RGB buffer length does not match the image dimensions");
-  }
   red.resize(pixelCount);
   green.resize(pixelCount);
   blue.resize(pixelCount);
@@ -146,80 +134,6 @@ static void splitRGBToStoredChannels(const std::vector<uint8_t> &rgb,
       blue[outputPixel] = rgb[inputPixel * 3u + 2u];
     }
   }
-}
-
-static bool compareCroppedRGB(const std::vector<uint8_t> &fullRGB,
-                              const std::vector<uint8_t> &croppedRGB,
-                              const image::BMPInfo &info,
-                              const uint32_t cropW, const uint32_t cropH,
-                              const uint32_t cropLeft,
-                              const uint32_t cropTop) {
-  for (uint32_t row = 0; row < cropH; ++row) {
-    for (uint32_t col = 0; col < cropW; ++col) {
-      const std::size_t fullPixel =
-          (static_cast<std::size_t>(cropTop + row) * info.width + cropLeft + col) * 3;
-      const std::size_t cropPixel =
-          (static_cast<std::size_t>(row) * cropW + col) * 3;
-      for (std::size_t channel = 0; channel < 3; ++channel) {
-        if (croppedRGB[cropPixel + channel] != fullRGB[fullPixel + channel]) {
-          std::cerr << "crop mismatch at row=" << row << " col=" << col
-                    << " channel=" << channel << ": expected "
-                    << static_cast<unsigned>(fullRGB[fullPixel + channel])
-                    << ", got "
-                    << static_cast<unsigned>(croppedRGB[cropPixel + channel])
-                    << "\n";
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-static bool verifyBMP24Pixels(const std::vector<uint8_t> &bmpPixelData,
-                              const kernel::StreamSetPtr &redBytes,
-                              const kernel::StreamSetPtr &greenBytes,
-                              const kernel::StreamSetPtr &blueBytes,
-                              const image::BMPInfo &info) {
-  const uint32_t rowStride = image::getBMP24RowStride(info.width);
-  const uint32_t rowBytes = info.width * 3u;
-  const uint64_t expectedBytes =
-      static_cast<uint64_t>(rowStride) * info.height;
-  if (bmpPixelData.size() != expectedBytes) {
-    std::cerr << "unexpected BMP pixel buffer length: "
-              << bmpPixelData.size() << ", expected " << expectedBytes
-              << "\n";
-    return false;
-  }
-
-  const uint8_t *bmp = bmpPixelData.data();
-  const uint8_t *red = redBytes.data();
-  const uint8_t *green = greenBytes.data();
-  const uint8_t *blue = blueBytes.data();
-  for (uint32_t row = 0; row < info.height; ++row) {
-    const std::size_t pixelRow =
-        static_cast<std::size_t>(row) * info.width;
-    const std::size_t bmpRow = static_cast<std::size_t>(row) * rowStride;
-    for (uint32_t column = 0; column < info.width; ++column) {
-      const std::size_t pixel = pixelRow + column;
-      const std::size_t output = bmpRow + column * 3u;
-      if (bmp[output] != blue[pixel] ||
-          bmp[output + 1u] != green[pixel] ||
-          bmp[output + 2u] != red[pixel]) {
-        std::cerr << "BMP pixel mismatch at stored row=" << row
-                  << " col=" << column << "\n";
-        return false;
-      }
-    }
-    for (uint32_t byte = rowBytes; byte < rowStride; ++byte) {
-      if (bmp[bmpRow + byte] != 0) {
-        std::cerr << "nonzero BMP padding at stored row=" << row
-                  << " byte=" << byte << "\n";
-        return false;
-      }
-    }
-  }
-  return true;
 }
 
 int main(int argc, char **argv) {
@@ -250,36 +164,31 @@ int main(int argc, char **argv) {
   std::cout << "rowsBottomUp = " << info.rowsBottomUp << "\n";
   std::cout << "total pixels = " << (info.width * info.height) << "\n";
 
-  if (cropWidth == 0 || cropHeight == 0 || cropX > info.width ||
-      cropWidth > info.width - cropX || cropY > info.height ||
-      cropHeight > info.height - cropY) {
-    std::cerr << "invalid crop rectangle\n";
+  CPUDriver driver("bmp_demo");
+  BmpPipelineFn pipelineFn;
+  try {
+    pipelineFn =
+        buildPipeline(driver, info, cropWidth, cropHeight, cropX, cropY);
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << "\n";
     close(fd);
     return 3;
   }
 
-  CPUDriver driver("bmp_header_test");
-  BmpPipelineFn pipelineFn =
-      buildPipeline(driver, info, cropWidth, cropHeight, cropX, cropY);
-
   kernel::StreamSetPtr redBytes;
   kernel::StreamSetPtr greenBytes;
   kernel::StreamSetPtr blueBytes;
-  kernel::StreamSetPtr croppedRedBytes;
-  kernel::StreamSetPtr croppedGreenBytes;
-  kernel::StreamSetPtr croppedBlueBytes;
-  pipelineFn(redBytes, greenBytes, blueBytes, croppedRedBytes,
-             croppedGreenBytes, croppedBlueBytes, static_cast<uint32_t>(fd));
+  pipelineFn(redBytes, greenBytes, blueBytes, static_cast<uint32_t>(fd));
   close(fd);
 
-  const uint64_t totalPixels = static_cast<uint64_t>(info.width) * info.height;
-  const uint64_t croppedPixels =
-      static_cast<uint64_t>(cropWidth) * cropHeight;
   const image::BMPInfo croppedInfo =
       makeCroppedInfo(info, cropWidth, cropHeight);
+  const uint64_t croppedPixels =
+      static_cast<uint64_t>(cropWidth) * cropHeight;
+
   uint64_t croppedBrightPixels = 0;
-  const uint8_t *croppedRed = croppedRedBytes.data();
-  for (uint64_t i = 0; i < croppedRedBytes.length(); ++i) {
+  const uint8_t *croppedRed = redBytes.data();
+  for (uint64_t i = 0; i < redBytes.length(); ++i) {
     if (croppedRed[i] >= 128) {
       ++croppedBrightPixels;
     }
@@ -293,39 +202,12 @@ int main(int argc, char **argv) {
             << (croppedPixels - croppedBrightPixels) << " / "
             << croppedPixels << "\n";
 
-  if (redBytes.length() < totalPixels || greenBytes.length() < totalPixels ||
-      blueBytes.length() < totalPixels ||
-      croppedRedBytes.length() < croppedPixels ||
-      croppedGreenBytes.length() < croppedPixels ||
-      croppedBlueBytes.length() < croppedPixels) {
-    std::cerr << "unexpected returned buffer length: full R/G/B="
-              << redBytes.length() << "/" << greenBytes.length() << "/"
-              << blueBytes.length() << ", cropped R/G/B="
-              << croppedRedBytes.length() << "/" << croppedGreenBytes.length()
-              << "/" << croppedBlueBytes.length() << ", expected at least full="
-              << totalPixels << ", expected at least cropped=" << croppedPixels
-              << "\n";
-    return 4;
-  }
-
-  const std::size_t rgbBytes =
-      static_cast<std::size_t>(info.width) * info.height * 3;
-  std::vector<uint8_t> inputRGB(rgbBytes);
-  interleaveRGB(redBytes, greenBytes, blueBytes, info, inputRGB);
-
   const std::size_t croppedRGBBytes =
       static_cast<std::size_t>(cropWidth) * cropHeight * 3;
   std::vector<uint8_t> croppedRGB(croppedRGBBytes);
+  interleaveRGB(redBytes, greenBytes, blueBytes, croppedInfo, croppedRGB);
+
   std::vector<uint8_t> outputRGB(croppedRGBBytes);
-  interleaveRGB(croppedRedBytes, croppedGreenBytes, croppedBlueBytes,
-                croppedInfo, croppedRGB);
-
-  if (!compareCroppedRGB(inputRGB, croppedRGB, info, cropWidth, cropHeight,
-                         cropX, cropY)) {
-    return 5;
-  }
-  std::cout << "crop verification = ok\n";
-
   const float weights[] = {1.f / 9.f, 1.f / 9.f, 1.f / 9.f, 1.f / 9.f, 1.f / 9.f,
                            1.f / 9.f, 1.f / 9.f, 1.f / 9.f, 1.f / 9.f};
   kernel::image::ConvFilterConfig config{
@@ -337,11 +219,10 @@ int main(int argc, char **argv) {
       weights,
       9,
   };
-
   if (!kernel::image::applyConvFilter(croppedRGB.data(), outputRGB.data(),
                                       config)) {
     std::cerr << "applyConvFilter failed\n";
-    return 6;
+    return 4;
   }
 
   std::cout << "\n=== ConvFilter output ===\n";
@@ -355,39 +236,20 @@ int main(int argc, char **argv) {
   std::vector<uint8_t> blurredRed;
   std::vector<uint8_t> blurredGreen;
   std::vector<uint8_t> blurredBlue;
-  try {
-    splitRGBToStoredChannels(outputRGB, croppedInfo, blurredRed, blurredGreen,
-                             blurredBlue);
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << "\n";
-    return 7;
-  }
+  splitChannels(outputRGB, croppedInfo, blurredRed, blurredGreen, blurredBlue);
 
   kernel::StreamSetPtr blurredRedBytes(blurredRed.data(), blurredRed.size());
   kernel::StreamSetPtr blurredGreenBytes(blurredGreen.data(),
                                          blurredGreen.size());
   kernel::StreamSetPtr blurredBlueBytes(blurredBlue.data(), blurredBlue.size());
 
-  std::vector<uint8_t> bmpPixelData;
   try {
-    bmpPixelData =
-        image::createBMP24PixelData(blurredRedBytes, blurredGreenBytes,
-                                    blurredBlueBytes, croppedInfo);
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << "\n";
-    return 8;
-  }
-  if (!verifyBMP24Pixels(bmpPixelData, blurredRedBytes, blurredGreenBytes,
-                         blurredBlueBytes, croppedInfo)) {
-    return 9;
-  }
-  std::cout << "BMP serialization verification = ok\n";
-
-  try {
+    std::vector<uint8_t> bmpPixelData = image::createBMP24PixelData(
+        blurredRedBytes, blurredGreenBytes, blurredBlueBytes, croppedInfo);
     image::writeBMP24(outputFile, bmpPixelData, croppedInfo);
   } catch (const std::exception &e) {
     std::cerr << e.what() << "\n";
-    return 10;
+    return 5;
   }
   std::cout << "wrote blurred BMP = " << outputFile << "\n";
 
