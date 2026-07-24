@@ -233,6 +233,87 @@ createBMP24PixelData(const kernel::StreamSetPtr &redBytes,
   return bmpPixelData;
 }
 
+BMP24Image createBMP24Image(const kernel::StreamSetPtr &redBytes,
+                            const kernel::StreamSetPtr &greenBytes,
+                            const kernel::StreamSetPtr &blueBytes,
+                            uint32_t width, uint32_t height,
+                            bool rowsBottomUp) {
+  if (width == 0 ||
+      width > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
+      height == 0 ||
+      height > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+    throw std::runtime_error("BMP output: image dimensions are outside the BMP range");
+  }
+  const std::size_t pixelCount =
+      static_cast<std::size_t>(width) * height;
+  if (redBytes.length() < pixelCount ||
+      greenBytes.length() < pixelCount ||
+      blueBytes.length() < pixelCount) {
+    throw std::runtime_error(
+        "BMP output: channel buffer lengths do not match the image dimensions");
+  }
+  if (pixelCount != 0 &&
+      (redBytes.data() == nullptr || greenBytes.data() == nullptr ||
+       blueBytes.data() == nullptr)) {
+    throw std::runtime_error("BMP output: channel buffer is null");
+  }
+
+  BMP24Image image(width, height, rowsBottomUp);
+  const uint8_t *red = redBytes.data();
+  const uint8_t *green = greenBytes.data();
+  const uint8_t *blue = blueBytes.data();
+  for (std::size_t outputRow = 0; outputRow < height; ++outputRow) {
+    const std::size_t inputRow =
+        rowsBottomUp ? height - outputRow - 1u : outputRow;
+    for (std::size_t column = 0; column < width; ++column) {
+      const std::size_t inputPixel = inputRow * width + column;
+      const std::size_t outputPixel = outputRow * width + column;
+      image.rgb[outputPixel * 3u + 0u] = red[inputPixel];
+      image.rgb[outputPixel * 3u + 1u] = green[inputPixel];
+      image.rgb[outputPixel * 3u + 2u] = blue[inputPixel];
+    }
+  }
+  return image;
+}
+
+void writeBMP24(const std::string &outputPath, const BMP24Image &image) {
+  if (outputPath.empty()) {
+    throw std::runtime_error("BMP output: output path is empty");
+  }
+
+  BMPInfo outputInfo{};
+  outputInfo.width = image.width;
+  outputInfo.height = image.height;
+  outputInfo.rowsBottomUp = image.rowsBottomUp;
+  const uint32_t imageSize = checkedBMP24ImageSize(outputInfo);
+  const uint32_t rowStride = getBMP24RowStride(image.width);
+
+  std::vector<uint8_t> bmpPixelData(imageSize, 0u);
+  const uint8_t *rgb = image.data();
+  for (uint32_t row = 0; row < image.height; ++row) {
+    // The image buffer is top-down; the BMP stores the first row at the
+    // beginning of the pixel data. For a bottom-up file that first stored row
+    // is the bottom of the image, so read the source rows in reverse.
+    const std::size_t sourceRow =
+        image.rowsBottomUp
+            ? static_cast<std::size_t>(image.height - row - 1u)
+            : static_cast<std::size_t>(row);
+    const std::size_t outputRow =
+        static_cast<std::size_t>(row) * rowStride;
+    for (uint32_t column = 0; column < image.width; ++column) {
+      const std::size_t inputPixel =
+          sourceRow * image.width + column;
+      const std::size_t outputPixel =
+          outputRow + column * OutputColorChannelCount;
+      bmpPixelData[outputPixel] = rgb[inputPixel * 3u + 2u];     // blue
+      bmpPixelData[outputPixel + 1u] = rgb[inputPixel * 3u + 1u]; // green
+      bmpPixelData[outputPixel + 2u] = rgb[inputPixel * 3u];      // red
+    }
+  }
+
+  writeBMP24(outputPath, bmpPixelData, outputInfo);
+}
+
 void writeBMP24(const std::string &outputPath,
                 const std::vector<uint8_t> &bmpPixelData,
                 const BMPInfo &outputInfo) {

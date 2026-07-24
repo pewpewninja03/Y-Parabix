@@ -43,4 +43,30 @@ void writeBMP24(const std::string &outputPath,
                 const std::vector<uint8_t> &bmpPixelData,
                 const BMPInfo &outputInfo);
 
+struct BMP24Image {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  bool rowsBottomUp = true;
+  std::vector<uint8_t> rgb;
+
+  BMP24Image() = default;
+  BMP24Image(uint32_t imageWidth, uint32_t imageHeight, bool bottomUp)
+      : width(imageWidth), height(imageHeight), rowsBottomUp(bottomUp),
+        rgb(static_cast<std::size_t>(imageWidth) * imageHeight * 3u, 0u) {}
+
+  std::size_t pixelCount() const {
+    return static_cast<std::size_t>(width) * height;
+  }
+  uint8_t *data() { return rgb.data(); }
+  const uint8_t *data() const { return rgb.data(); }
+};
+
+BMP24Image createBMP24Image(const kernel::StreamSetPtr &redBytes,
+                            const kernel::StreamSetPtr &greenBytes,
+                            const kernel::StreamSetPtr &blueBytes,
+                            uint32_t width, uint32_t height,
+                            bool rowsBottomUp);
+
+void writeBMP24(const std::string &outputPath, const BMP24Image &image);
+
 } // namespace image

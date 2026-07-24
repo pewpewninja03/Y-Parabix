@@ -1009,6 +1009,429 @@ void testWriteBMP24RoundTrip() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Test 10: createBMP24Image (host)
+//
+// Convert planar R/G/B byte streams in BMP stored row order into a top-down
+// interleaved RGB BMP24Image, for both bottom-up and top-down sources.
+// ---------------------------------------------------------------------------
+
+void testCreateBMP24Image() {
+  const uint32_t width = 3;
+  const uint32_t height = 2;
+  const uint32_t pixels = width * height;
+  std::vector<uint8_t> red(pixels), green(pixels), blue(pixels);
+  for (uint32_t i = 0; i < pixels; ++i) {
+    red[i] = static_cast<uint8_t>(0x10 + i);
+    green[i] = static_cast<uint8_t>(0x20 + i);
+    blue[i] = static_cast<uint8_t>(0x30 + i);
+  }
+
+  for (bool bottomUp : {true, false}) {
+    kernel::StreamSetPtr redPtr(red.data(), pixels);
+    kernel::StreamSetPtr greenPtr(green.data(), pixels);
+    kernel::StreamSetPtr bluePtr(blue.data(), pixels);
+
+    image::BMP24Image img;
+    run_test("createBMP24Image", [&]() {
+      img = image::createBMP24Image(redPtr, greenPtr, bluePtr, width, height,
+                                    bottomUp);
+    });
+    if (g_failureCount) return;
+
+    CHECK(img.width == width, "image width");
+    CHECK(img.height == height, "image height");
+    CHECK(img.rowsBottomUp == bottomUp, "image rowsBottomUp");
+    CHECK(img.rgb.size() == pixels * 3u, "rgb buffer size");
+
+    for (uint32_t row = 0; row < height; ++row) {
+      const uint32_t storedRow =
+          bottomUp ? height - row - 1u : row;
+      for (uint32_t col = 0; col < width; ++col) {
+        const uint32_t storedIdx = storedRow * width + col;
+        const uint32_t outIdx = (row * width + col) * 3u;
+        CHECK(img.rgb[outIdx + 0u] == red[storedIdx], "R byte top-down");
+        CHECK(img.rgb[outIdx + 1u] == green[storedIdx], "G byte top-down");
+        CHECK(img.rgb[outIdx + 2u] == blue[storedIdx], "B byte top-down");
+      }
+    }
+  }
+
+  // Over-allocated channel buffers (pipeline may produce these) must work;
+  // only the first width*height bytes are read.
+  {
+    std::vector<uint8_t> bigRed(pixels + 5u, 0u), bigGreen(pixels + 5u, 0u),
+        bigBlue(pixels + 5u, 0u);
+    for (uint32_t i = 0; i < pixels; ++i) {
+      bigRed[i] = red[i];
+      bigGreen[i] = green[i];
+      bigBlue[i] = blue[i];
+    }
+    kernel::StreamSetPtr redPtr(bigRed.data(), bigRed.size());
+    kernel::StreamSetPtr greenPtr(bigGreen.data(), bigGreen.size());
+    kernel::StreamSetPtr bluePtr(bigBlue.data(), bigBlue.size());
+    image::BMP24Image img;
+    run_test("createBMP24Image(over-allocated)", [&]() {
+      img = image::createBMP24Image(redPtr, greenPtr, bluePtr, width, height,
+                                    true);
+    });
+    if (g_failureCount) return;
+    CHECK(img.rgb.size() == pixels * 3u, "over-allocated rgb size");
+    // Bottom-up: top-down row 0 is stored row (height-1) = row 1, col 0 ->
+    // stored index `width`.
+    CHECK(img.rgb[0] == red[width] && img.rgb[1] == green[width] &&
+              img.rgb[2] == blue[width],
+          "over-allocated first pixel (bottom-up row 0 = stored row 1)");
+  }
+
+  // Short channel buffers must throw.
+  {
+    kernel::StreamSetPtr shortPtr(red.data(), pixels - 1u);
+    kernel::StreamSetPtr greenPtr(green.data(), pixels);
+    kernel::StreamSetPtr bluePtr(blue.data(), pixels);
+    expect_throw("createBMP24Image(length mismatch)", [&]() {
+      image::createBMP24Image(shortPtr, greenPtr, bluePtr, width, height, true);
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test 11: writeBMP24(path, BMP24Image) round-trip (host)
+//
+// Build a top-down RGB image, write it, re-open the file, and verify the
+// headers (including the height sign for both orientations) and the pixel
+// bytes round-trip with BGR ordering and zero padding.
+// ---------------------------------------------------------------------------
+
+void testWriteBMP24ImageRoundTrip() {
+  const uint32_t width = 2;   // rowBytes = 6 -> rowStride 8 (2 pad bytes)
+  const uint32_t height = 2;
+  const uint32_t pixels = width * height;
+
+  for (bool bottomUp : {true, false}) {
+    image::BMP24Image img(width, height, bottomUp);
+    for (uint32_t i = 0; i < pixels; ++i) {
+      img.rgb[i * 3u + 0u] = static_cast<uint8_t>(0xA0 + i); // R
+      img.rgb[i * 3u + 1u] = static_cast<uint8_t>(0xB0 + i); // G
+      img.rgb[i * 3u + 2u] = static_cast<uint8_t>(0xC0 + i); // B
+    }
+
+    TempFile tmp = TempFile::create("imgwr");
+    run_test("writeBMP24(BMP24Image)", [&]() {
+      image::writeBMP24(tmp.path(), img);
+    });
+    if (g_failureCount) return;
+
+    int fd = openReadOnly(tmp.path());
+    const uint32_t rowStride = image::getBMP24RowStride(width);
+    const uint32_t imageSize = rowStride * height;
+    std::vector<uint8_t> fileBuf(imageSize + 54u, 0u);
+    ssize_t total = 0;
+    while (static_cast<std::size_t>(total) < fileBuf.size()) {
+      ssize_t n = ::read(fd, fileBuf.data() + total, fileBuf.size() - total);
+      if (n <= 0) break;
+      total += n;
+    }
+    ::close(fd);
+    CHECK(static_cast<std::size_t>(total) == fileBuf.size(), "file size");
+
+    CHECK(fileBuf[0] == 'B' && fileBuf[1] == 'M', "signature");
+    const int32_t ihHeight = static_cast<int32_t>(
+        fileBuf[22] | (fileBuf[23] << 8) | (fileBuf[24] << 16) |
+        (static_cast<uint32_t>(fileBuf[25]) << 24));
+    const int32_t expectedSignedHeight =
+        bottomUp ? static_cast<int32_t>(height) : -static_cast<int32_t>(height);
+    CHECK(ihHeight == expectedSignedHeight, "info height sign/orientation");
+    const uint16_t ihBPP = fileBuf[28] | (fileBuf[29] << 8);
+    CHECK(ihBPP == 24u, "info bitsPerPixel");
+
+    // Stored row order: bottom-up files store the bottom row first.
+    for (uint32_t row = 0; row < height; ++row) {
+      const uint32_t sourceRow =
+          bottomUp ? height - row - 1u : row;
+      for (uint32_t col = 0; col < width; ++col) {
+        const uint32_t inIdx = (sourceRow * width + col) * 3u;
+        const uint32_t outIdx = row * rowStride + col * 3u;
+        CHECK(fileBuf[54u + outIdx + 0u] == img.rgb[inIdx + 2u], "B byte");
+        CHECK(fileBuf[54u + outIdx + 1u] == img.rgb[inIdx + 1u], "G byte");
+        CHECK(fileBuf[54u + outIdx + 2u] == img.rgb[inIdx + 0u], "R byte");
+      }
+      for (uint32_t p = width * 3u; p < rowStride; ++p) {
+        CHECK(fileBuf[54u + row * rowStride + p] == 0u, "padding not zero");
+      }
+    }
+  }
+
+  // Empty output path must throw.
+  image::BMP24Image img(2, 2, true);
+  expect_throw("writeBMP24(BMP24Image empty path)", [&]() {
+    image::writeBMP24("", img);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Test 12: LoadBMPCrop end-to-end (pipeline)
+//
+// Build a synthetic 8-bit BMP with the identity palette, crop a region, and
+// verify the returned top-down RGB image matches the expected palette
+// expansion for the cropped pixels. Exercises both orientations and the
+// invalid-crop error path.
+// ---------------------------------------------------------------------------
+
+void testLoadBMPCrop(CPUDriver &driver) {
+  const uint32_t width = 4;
+  const uint32_t height = 4;
+  const uint32_t pixels = width * height;
+  auto palette = makeIdentityPalette();
+  std::vector<uint8_t> indices(pixels);
+  for (uint32_t i = 0; i < pixels; ++i) {
+    indices[i] = static_cast<uint8_t>(i);
+  }
+
+  const image::BMPCrop crop{2u, 2u, 1u, 1u};
+
+  for (bool bottomUp : {true, false}) {
+    std::vector<uint8_t> bmp =
+        buildSyntheticBMP(width, height, bottomUp, 256u, palette, indices);
+    TempFile tmp = TempFile::create("loadcrop");
+    writeAllBytes(tmp.path(), bmp);
+
+    image::BMPCropResult result = image::LoadBMPCrop(driver, tmp.path(), crop);
+    if (g_failureCount) return;
+
+    CHECK(result.sourceInfo.width == width, "source width");
+    CHECK(result.sourceInfo.height == height, "source height");
+    CHECK(result.sourceInfo.rowsBottomUp == bottomUp, "source rowsBottomUp");
+    CHECK(result.image.width == crop.width, "crop width");
+    CHECK(result.image.height == crop.height, "crop height");
+    CHECK(result.image.rowsBottomUp == bottomUp, "crop rowsBottomUp");
+    CHECK(result.image.rgb.size() == crop.width * crop.height * 3u,
+          "crop rgb size");
+
+    for (uint32_t cr = 0; cr < crop.height; ++cr) {
+      for (uint32_t cc = 0; cc < crop.width; ++cc) {
+        const uint32_t logicalRow = crop.y + cr;
+        const uint32_t logicalCol = crop.x + cc;
+        const uint32_t storedRow =
+            bottomUp ? height - 1u - logicalRow : logicalRow;
+        const uint32_t idx = storedRow * width + logicalCol;
+        const uint8_t expB = static_cast<uint8_t>(idx & 0xFFu);
+        const uint8_t expG = static_cast<uint8_t>((idx * 2u) & 0xFFu);
+        const uint8_t expR = static_cast<uint8_t>((idx * 3u) & 0xFFu);
+        const uint32_t outIdx = (cr * crop.width + cc) * 3u;
+        CHECK(result.image.rgb[outIdx + 0u] == expR, "crop R byte");
+        CHECK(result.image.rgb[outIdx + 1u] == expG, "crop G byte");
+        CHECK(result.image.rgb[outIdx + 2u] == expB, "crop B byte");
+      }
+    }
+  }
+
+  // Invalid crop (exceeds source bounds) must throw.
+  {
+    std::vector<uint8_t> bmp =
+        buildSyntheticBMP(width, height, true, 256u, palette, indices);
+    TempFile tmp = TempFile::create("loadcropbad");
+    writeAllBytes(tmp.path(), bmp);
+    const image::BMPCrop badCrop{2u, 2u, width, 0u};
+    expect_throw("LoadBMPCrop(cropX out of bounds)", [&]() {
+      image::LoadBMPCrop(driver, tmp.path(), badCrop);
+    });
+  }
+
+  // Missing input file must throw.
+  expect_throw("LoadBMPCrop(missing file)", [&]() {
+    image::LoadBMPCrop(driver, "/tmp/parabix_bmp_does_not_exist_XXXXXX",
+                       crop);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: MaskImage pipeline behavior
+//
+// Build a synthetic 8-bit BMP with the identity palette (pixel index i ->
+// BGR(i, 2i, 3i)), parse it into a 24x1 color stream, apply MaskImage with a
+// repeating 1x1 mask, and convert the result back to channel bytes. Verify
+// that mask-1 pixels are black, mask-0 pixels are unchanged, and the output
+// position count is preserved. Uses non-black source pixels so polarity
+// errors are observable.
+// ---------------------------------------------------------------------------
+
+struct MaskPipelineResult {
+  kernel::StreamSetPtr redBytes;
+  kernel::StreamSetPtr greenBytes;
+  kernel::StreamSetPtr blueBytes;
+  image::BMPInfo info;
+};
+
+MaskPipelineResult runMaskPipeline(CPUDriver &driver, const std::string &path,
+                                   const std::vector<uint64_t> &maskPattern) {
+  MaskPipelineResult result{};
+  int fd = openReadOnly(path);
+  image::readBMPHeader(fd, result.info);
+
+  auto P = kernel::CreatePipeline(
+      driver,
+      kernel::Output<kernel::streamset_t>{"redBytes", 1, 8,
+                                           kernel::ReturnedBuffer(1)},
+      kernel::Output<kernel::streamset_t>{"greenBytes", 1, 8,
+                                           kernel::ReturnedBuffer(1)},
+      kernel::Output<kernel::streamset_t>{"blueBytes", 1, 8,
+                                           kernel::ReturnedBuffer(1)},
+      kernel::Input<uint32_t>{"fd"});
+
+  kernel::Scalar *fdScalar = P.getInputScalar("fd");
+  kernel::StreamSet *colorStream = nullptr;
+  image::ParseBMPColorStreams(P, fdScalar, result.info, colorStream);
+
+  kernel::StreamSet *maskStream = P.CreateRepeatingStreamSet(1, maskPattern);
+  kernel::StreamSet *maskedStream = nullptr;
+  image::MaskImage(P, colorStream, maskStream, maskedStream);
+
+  image::CreateBMPColorByteStreams(P, maskedStream,
+                                   P.getOutputStreamSet("redBytes"),
+                                   P.getOutputStreamSet("greenBytes"),
+                                   P.getOutputStreamSet("blueBytes"));
+
+  auto pipelineFn = P.compile();
+  pipelineFn(result.redBytes, result.greenBytes, result.blueBytes,
+             static_cast<uint32_t>(fd));
+  ::close(fd);
+  return result;
+}
+
+void testMaskImage(CPUDriver &driver) {
+  const uint32_t width = 4;   // multiple of 4 -> no row padding
+  const uint32_t height = 4;
+  const uint32_t pixels = width * height;
+  auto palette = makeIdentityPalette();
+  std::vector<uint8_t> indices(pixels);
+  for (uint32_t i = 0; i < pixels; ++i) {
+    indices[i] = static_cast<uint8_t>(i);
+  }
+  std::vector<uint8_t> bmp =
+      buildSyntheticBMP(width, height, /*rowsBottomUp=*/false, 256u, palette,
+                        indices);
+  TempFile tmp = TempFile::create("mask");
+  writeAllBytes(tmp.path(), bmp);
+
+  auto expectedColor = [&](uint32_t i, uint8_t &expB, uint8_t &expG,
+                           uint8_t &expR) {
+    expB = static_cast<uint8_t>(i);
+    expG = static_cast<uint8_t>((i * 2u) & 0xFFu);
+    expR = static_cast<uint8_t>((i * 3u) & 0xFFu);
+  };
+
+  auto verifyAgainst = [&](const MaskPipelineResult &r,
+                           const std::vector<uint64_t> &mask,
+                           const char *label) {
+    CHECK(r.info.width == width, std::string(label) + ": width");
+    CHECK(r.info.height == height, std::string(label) + ": height");
+    CHECK(r.redBytes.length() >= pixels, std::string(label) + ": red length");
+    CHECK(r.greenBytes.length() >= pixels, std::string(label) + ": green length");
+    CHECK(r.blueBytes.length() >= pixels, std::string(label) + ": blue length");
+    if (g_failureCount) return;
+    const uint8_t *red = r.redBytes.data();
+    const uint8_t *green = r.greenBytes.data();
+    const uint8_t *blue = r.blueBytes.data();
+    for (uint32_t i = 0; i < pixels; ++i) {
+      if (mask[i] == 1u) {
+        if (red[i] != 0u || green[i] != 0u || blue[i] != 0u) {
+          llvm::errs() << "[FAIL] " << label << ": pixel " << i
+                       << " expected black, got BGR("
+                       << static_cast<unsigned>(blue[i]) << ","
+                       << static_cast<unsigned>(green[i]) << ","
+                       << static_cast<unsigned>(red[i]) << ")\n";
+          ++g_failureCount;
+          return;
+        }
+      } else {
+        uint8_t expB, expG, expR;
+        expectedColor(i, expB, expG, expR);
+        if (blue[i] != expB || green[i] != expG || red[i] != expR) {
+          llvm::errs() << "[FAIL] " << label << ": pixel " << i
+                       << " expected BGR(" << static_cast<unsigned>(expB) << ","
+                       << static_cast<unsigned>(expG) << ","
+                       << static_cast<unsigned>(expR) << ") got BGR("
+                       << static_cast<unsigned>(blue[i]) << ","
+                       << static_cast<unsigned>(green[i]) << ","
+                       << static_cast<unsigned>(red[i]) << ")\n";
+          ++g_failureCount;
+          return;
+        }
+      }
+    }
+  };
+
+  // Mixed mask: black out even-indexed pixels, keep odd-indexed pixels.
+  {
+    std::vector<uint64_t> maskPattern(pixels, 0u);
+    for (uint32_t i = 0; i < pixels; ++i) {
+      maskPattern[i] = (i % 2u == 0u) ? 1u : 0u;
+    }
+    MaskPipelineResult r = runMaskPipeline(driver, tmp.path(), maskPattern);
+    if (g_failureCount) return;
+    verifyAgainst(r, maskPattern, "MaskImage(mixed)");
+  }
+
+  // All-zero mask: nothing is blacked out, every pixel is unchanged.
+  {
+    std::vector<uint64_t> maskPattern(pixels, 0u);
+    MaskPipelineResult r = runMaskPipeline(driver, tmp.path(), maskPattern);
+    if (g_failureCount) return;
+    verifyAgainst(r, maskPattern, "MaskImage(all-zero)");
+  }
+
+  // All-one mask: every pixel is blacked out.
+  {
+    std::vector<uint64_t> maskPattern(pixels, 1u);
+    MaskPipelineResult r = runMaskPipeline(driver, tmp.path(), maskPattern);
+    if (g_failureCount) return;
+    verifyAgainst(r, maskPattern, "MaskImage(all-one)");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: MaskImage input validation
+//
+// MaskImage validates the source color stream and mask stream shapes and
+// throws std::runtime_error synchronously during pipeline construction.
+// ---------------------------------------------------------------------------
+
+void testMaskImageValidation(CPUDriver &driver) {
+  // Invalid source color stream (must be 24x1).
+  {
+    auto P = kernel::CreatePipeline(driver);
+    kernel::StreamSet *invalidColorStream = P.CreateStreamSet(23);
+    kernel::StreamSet *maskStream = P.CreateStreamSet(1);
+    kernel::StreamSet *maskedStream = nullptr;
+    expect_throw("MaskImage(invalid color stream)", [&]() {
+      image::MaskImage(P, invalidColorStream, maskStream, maskedStream);
+    });
+  }
+
+  // Invalid mask stream (wrong element count).
+  {
+    auto P = kernel::CreatePipeline(driver);
+    kernel::StreamSet *colorStream = P.CreateStreamSet(24);
+    kernel::StreamSet *invalidMask = P.CreateStreamSet(2);
+    kernel::StreamSet *maskedStream = nullptr;
+    expect_throw("MaskImage(invalid mask element count)", [&]() {
+      image::MaskImage(P, colorStream, invalidMask, maskedStream);
+    });
+  }
+
+  // Invalid mask stream (wrong field width).
+  {
+    auto P = kernel::CreatePipeline(driver);
+    kernel::StreamSet *colorStream = P.CreateStreamSet(24);
+    kernel::StreamSet *invalidMask = P.CreateStreamSet(1, 8);
+    kernel::StreamSet *maskedStream = nullptr;
+    expect_throw("MaskImage(invalid mask field width)", [&]() {
+      image::MaskImage(P, colorStream, invalidMask, maskedStream);
+    });
+  }
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1036,6 +1459,11 @@ int main(int argc, char **argv) {
   run_test("testCropImage", testCropImage, driver);
   run_test("testCreateBMP24PixelData", testCreateBMP24PixelData);
   run_test("testWriteBMP24RoundTrip", testWriteBMP24RoundTrip);
+  run_test("testCreateBMP24Image", testCreateBMP24Image);
+  run_test("testWriteBMP24ImageRoundTrip", testWriteBMP24ImageRoundTrip);
+  run_test("testLoadBMPCrop", testLoadBMPCrop, driver);
+  run_test("testMaskImage", testMaskImage, driver);
+  run_test("testMaskImageValidation", testMaskImageValidation, driver);
 
   if (g_failureCount != 0) {
     llvm::errs() << "bmp_loader_tests: " << g_failureCount
