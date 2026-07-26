@@ -20,6 +20,7 @@
 #include <kernel/core/streamsetptr.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/program_builder.h>
+#include <kernel/streamutils/stream_select.h>
 #include <toolchain/toolchain.h>
 
 #include <llvm/Support/CommandLine.h>
@@ -36,6 +37,7 @@
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using namespace kernel;
@@ -250,9 +252,6 @@ int openReadOnly(const std::string &path) {
   return fd;
 }
 
-// Try a list of candidate paths and return the first that opens, or -1.
-// This makes the lena smoke test robust to whichever directory the test is
-// launched from (build/tests/bin, build/, tests/, repo root, ...).
 int openFirstCandidate(const std::vector<std::string> &paths) {
   for (const std::string &p : paths) {
     int fd = ::open(p.c_str(), O_RDONLY);
@@ -1432,6 +1431,189 @@ void testMaskImageValidation(CPUDriver &driver) {
   }
 }
 
+
+image::ColorStreamTransform buildChannelMSBMaskTransform(
+    std::vector<uint32_t> msbIndices) {
+  return [indices = std::move(msbIndices)](
+             kernel::ProgramBuilder &P,
+             kernel::StreamSet *sourceImageData) -> kernel::StreamSet * {
+    kernel::StreamSet *maskStream =
+        kernel::streamutils::Merge(P, sourceImageData, indices);
+    kernel::StreamSet *maskedImageData = nullptr;
+    image::MaskImage(P, sourceImageData, maskStream, maskedImageData);
+    return maskedImageData;
+  };
+}
+
+void testLoadBMPCropWithTransform(CPUDriver &driver) {
+  const uint32_t width = 4;
+  const uint32_t height = 4;
+  auto palette = makeIdentityPalette();
+
+  // Palette indices chosen so each channel MSB (value >= 128) is exercised:
+  //   i=10  -> BGR(10, 20, 30)     none
+  //   i=43  -> BGR(43, 86, 129)    red
+  //   i=86  -> BGR(86, 172, 2)     green
+  //   i=128 -> BGR(128, 0, 128)    blue + red
+  //   i=20  -> BGR(20, 40, 60)     none
+  //   i=64  -> BGR(64, 128, 192)   green + red
+  //   i=192 -> BGR(192, 128, 64)   blue + green
+  //   i=170 -> BGR(170, 84, 254)   blue + red
+  //   i=30  -> BGR(30, 60, 90)     none
+  //   i=224 -> BGR(224, 192, 160)  blue + green + red
+  //   i=65  -> BGR(65, 130, 195)   green + red
+  //   i=200 -> BGR(200, 144, 88)   blue + green
+  //   i=5   -> BGR(5, 10, 15)      none
+  //   i=160 -> BGR(160, 64, 224)   blue + red
+  //   i=225 -> BGR(225, 194, 163)  blue + green + red
+  //   i=180 -> BGR(180, 104, 28)   blue only
+  // This guarantees some pixels are blacked out and some are kept for every
+  // single-channel mask, and that the blue-only pixel distinguishes the
+  // combined mask from the red/green-only masks.
+  const std::vector<uint8_t> indices = {
+      10u, 43u, 86u, 128u, 20u, 64u, 192u, 170u,
+      30u, 224u, 65u, 200u, 5u, 160u, 225u, 180u};
+
+  const image::BMPCrop crop{width, height, 0u, 0u};
+
+  auto expectedColor = [&](uint32_t i, uint8_t &expB, uint8_t &expG,
+                           uint8_t &expR) {
+    expB = static_cast<uint8_t>(i);
+    expG = static_cast<uint8_t>((i * 2u) & 0xFFu);
+    expR = static_cast<uint8_t>((i * 3u) & 0xFFu);
+  };
+
+  constexpr uint32_t kBlueMSB = 7u;
+  constexpr uint32_t kGreenMSB = 15u;
+  constexpr uint32_t kRedMSB = 23u;
+
+  struct MaskCase {
+    const char *label;
+    std::vector<uint32_t> msbIndices;
+    bool selBlue;
+    bool selGreen;
+    bool selRed;
+  };
+  const MaskCase cases[] = {
+      {"red", {kRedMSB}, false, false, true},
+      {"green", {kGreenMSB}, false, true, false},
+      {"blue", {kBlueMSB}, true, false, false},
+      {"red+green+blue", {kRedMSB, kGreenMSB, kBlueMSB}, true, true, true},
+  };
+
+  for (const MaskCase &mc : cases) {
+    image::ColorStreamTransform mask =
+        buildChannelMSBMaskTransform(mc.msbIndices);
+
+    for (bool bottomUp : {true, false}) {
+      std::vector<uint8_t> bmp =
+          buildSyntheticBMP(width, height, bottomUp, 256u, palette, indices);
+      TempFile tmp = TempFile::create("loadcropxform");
+      writeAllBytes(tmp.path(), bmp);
+
+      image::BMPCropResult masked =
+          image::LoadBMPCrop(driver, tmp.path(), crop, mask);
+      if (g_failureCount) return;
+
+      const std::string labelBase = std::string(mc.label) +
+                                    (bottomUp ? "/bottomUp" : "/topDown");
+      CHECK(masked.sourceInfo.width == width, labelBase + ": source width");
+      CHECK(masked.sourceInfo.height == height, labelBase + ": source height");
+      CHECK(masked.image.width == crop.width, labelBase + ": crop width");
+      CHECK(masked.image.height == crop.height, labelBase + ": crop height");
+      CHECK(masked.image.rgb.size() == crop.width * crop.height * 3u,
+            labelBase + ": rgb size");
+
+      // The plain overload (no transform) must reproduce the unmasked crop, so
+      // the transform overload is a strict superset of the original behavior.
+      image::BMPCropResult plain =
+          image::LoadBMPCrop(driver, tmp.path(), crop);
+      if (g_failureCount) return;
+
+      for (uint32_t r = 0; r < height; ++r) {
+        for (uint32_t c = 0; c < width; ++c) {
+          const uint32_t storedRow = bottomUp ? height - 1u - r : r;
+          const uint32_t idx = storedRow * width + c;
+          uint8_t expB, expG, expR;
+          expectedColor(indices[idx], expB, expG, expR);
+          const uint32_t outIdx = (r * width + c) * 3u;
+
+          CHECK(plain.image.rgb[outIdx + 0u] == expR,
+                labelBase + ": plain R byte");
+          CHECK(plain.image.rgb[outIdx + 1u] == expG,
+                labelBase + ": plain G byte");
+          CHECK(plain.image.rgb[outIdx + 2u] == expB,
+                labelBase + ": plain B byte");
+
+          const bool shouldMask =
+              (mc.selRed && expR >= 128u) ||
+              (mc.selGreen && expG >= 128u) ||
+              (mc.selBlue && expB >= 128u);
+          if (shouldMask) {
+            if (masked.image.rgb[outIdx + 0u] != 0u ||
+                masked.image.rgb[outIdx + 1u] != 0u ||
+                masked.image.rgb[outIdx + 2u] != 0u) {
+              llvm::errs() << "[FAIL] " << labelBase << ": pixel (" << r
+                           << "," << c << ") expected black, got RGB("
+                           << static_cast<unsigned>(masked.image.rgb[outIdx + 0u])
+                           << ","
+                           << static_cast<unsigned>(masked.image.rgb[outIdx + 1u])
+                           << ","
+                           << static_cast<unsigned>(masked.image.rgb[outIdx + 2u])
+                           << ")\n";
+              ++g_failureCount;
+              return;
+            }
+          } else {
+            CHECK(masked.image.rgb[outIdx + 0u] == expR,
+                  labelBase + ": masked R byte");
+            CHECK(masked.image.rgb[outIdx + 1u] == expG,
+                  labelBase + ": masked G byte");
+            CHECK(masked.image.rgb[outIdx + 2u] == expB,
+                  labelBase + ": masked B byte");
+          }
+        }
+      }
+    }
+  }
+
+  // A transform that returns the source unchanged must equal the plain crop.
+  {
+    std::vector<uint8_t> bmp =
+        buildSyntheticBMP(width, height, true, 256u, palette, indices);
+    TempFile tmp = TempFile::create("loadcroppassthrough");
+    writeAllBytes(tmp.path(), bmp);
+
+    image::ColorStreamTransform passthrough =
+        []([[maybe_unused]] kernel::ProgramBuilder &P,
+           kernel::StreamSet *sourceImageData) -> kernel::StreamSet * {
+      return sourceImageData;
+    };
+    image::BMPCropResult passthroughResult =
+        image::LoadBMPCrop(driver, tmp.path(), crop, passthrough);
+    if (g_failureCount) return;
+    image::BMPCropResult plain = image::LoadBMPCrop(driver, tmp.path(), crop);
+    if (g_failureCount) return;
+    CHECK(passthroughResult.image.rgb == plain.image.rgb,
+          "passthrough transform equals plain crop");
+  }
+
+  // A transform that returns null must throw.
+  {
+    std::vector<uint8_t> bmp =
+        buildSyntheticBMP(width, height, true, 256u, palette, indices);
+    TempFile tmp = TempFile::create("loadcropnull");
+    writeAllBytes(tmp.path(), bmp);
+    image::ColorStreamTransform nullTransform =
+        []([[maybe_unused]] kernel::ProgramBuilder &P,
+           [[maybe_unused]] kernel::StreamSet *sourceImageData)
+        -> kernel::StreamSet * { return nullptr; };
+    expect_throw("LoadBMPCrop(null transform)", [&]() {
+      image::LoadBMPCrop(driver, tmp.path(), crop, nullTransform);
+    });
+  }
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1464,6 +1646,7 @@ int main(int argc, char **argv) {
   run_test("testLoadBMPCrop", testLoadBMPCrop, driver);
   run_test("testMaskImage", testMaskImage, driver);
   run_test("testMaskImageValidation", testMaskImageValidation, driver);
+  run_test("testLoadBMPCropWithTransform", testLoadBMPCropWithTransform, driver);
 
   if (g_failureCount != 0) {
     llvm::errs() << "bmp_loader_tests: " << g_failureCount

@@ -291,9 +291,6 @@ void MaskImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
   requireColorStream(sourceImageData, "BMP mask");
   requireMaskStream(maskImageData, "BMP mask");
 
-  // A mask bit of 1 means "black out". ZeroByMask zeroes positions where its
-  // mask is 0, so invert the black-out mask into a keep mask first: keep=1
-  // preserves the source pixel, keep=0 forces every channel bit to 0 (black).
   kernel::StreamSet *keepMask = P.CreateStreamSet(1);
   kernel::Invert(P, maskImageData, keepMask);
 
@@ -324,7 +321,8 @@ void CreateBMPColorByteStreams(kernel::ProgramBuilder &P,
 }
 
 BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
-                          const BMPCrop &crop) {
+                          const BMPCrop &crop,
+                          const ColorStreamTransform &transform) {
   if (inputPath.empty()) {
     throw std::runtime_error("BMP: input path is empty");
   }
@@ -360,8 +358,16 @@ BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
     kernel::StreamSet *croppedColorStream = nullptr;
     CropImage(P, colorStream, result.sourceInfo, crop.width, crop.height,
               crop.x, crop.y, croppedColorStream);
+
+    kernel::StreamSet *transformedColorStream =
+        transform ? transform(P, croppedColorStream) : croppedColorStream;
+    if (transformedColorStream == nullptr) {
+      throw std::runtime_error(
+          "BMP crop: color-stream transform returned a null stream");
+    }
+
     CreateBMPColorByteStreams(
-        P, croppedColorStream, P.getOutputStreamSet("redBytes"),
+        P, transformedColorStream, P.getOutputStreamSet("redBytes"),
         P.getOutputStreamSet("greenBytes"), P.getOutputStreamSet("blueBytes"));
 
     auto pipelineFn = P.compile();
@@ -375,6 +381,11 @@ BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
   result.image = createBMP24Image(redBytes, greenBytes, blueBytes, crop.width,
                                   crop.height, result.sourceInfo.rowsBottomUp);
   return result;
+}
+
+BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
+                          const BMPCrop &crop) {
+  return LoadBMPCrop(driver, inputPath, crop, ColorStreamTransform{});
 }
 
 } // namespace image

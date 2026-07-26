@@ -291,9 +291,6 @@ void writeBMP24(const std::string &outputPath, const BMP24Image &image) {
   std::vector<uint8_t> bmpPixelData(imageSize, 0u);
   const uint8_t *rgb = image.data();
   for (uint32_t row = 0; row < image.height; ++row) {
-    // The image buffer is top-down; the BMP stores the first row at the
-    // beginning of the pixel data. For a bottom-up file that first stored row
-    // is the bottom of the image, so read the source rows in reverse.
     const std::size_t sourceRow =
         image.rowsBottomUp
             ? static_cast<std::size_t>(image.height - row - 1u)
