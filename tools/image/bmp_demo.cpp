@@ -56,7 +56,7 @@ static llvm::cl::opt<bool>
            llvm::cl::init(false));
 static llvm::cl::opt<std::string>
     outputFile("o",
-               llvm::cl::desc("write the (optionally blurred) crop as a 24-bit BMP"),
+               llvm::cl::desc("write the (optionally blurred) crop as an 8-bit indexed BMP"),
                llvm::cl::value_desc("output.bmp"), llvm::cl::Required);
 
 int main(int argc, char **argv) {
@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
                 << static_cast<unsigned>(blurred.data()[2]) << "\n";
     }
     try {
-      image::writeBMP24(outputFile, blurred);
+      image::writeBMP8(outputFile, blurred);
     } catch (const std::exception &e) {
       std::cerr << e.what() << "\n";
       return 3;
@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
   } else {
     std::cout << "\n=== ConvFilter skipped (--no-blur) ===\n";
     try {
-      image::writeBMP24(outputFile, cropped);
+      image::writeBMP8(outputFile, cropped);
     } catch (const std::exception &e) {
       std::cerr << e.what() << "\n";
       return 3;

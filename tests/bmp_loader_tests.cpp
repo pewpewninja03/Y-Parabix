@@ -283,33 +283,64 @@ static llvm::cl::opt<std::string>
              llvm::cl::init("../../../tools/image/lena_gray.bmp"));
 
 // ---------------------------------------------------------------------------
-// Test 1: getBMP24RowStride (pure function)
+// Test 1: getBMP8RowStride (pure function)
 // ---------------------------------------------------------------------------
 
-void testGetBMP24RowStride() {
+void testGetBMP8RowStride() {
   struct Case {
     uint32_t width;
     uint32_t expected;
   };
   const Case cases[] = {
-      {1u, 4u},   // 3  -> 4
-      {2u, 8u},   // 6  -> 8
-      {3u, 12u},  // 9  -> 12
-      {4u, 12u},  // 12 -> 12
-      {5u, 16u},  // 15 -> 16
-      {6u, 20u},  // 18 -> 20
-      {512u, 1536u}, // 1536 -> 1536
+      {1u, 4u},   // 1  -> 4
+      {2u, 4u},   // 2  -> 4
+      {3u, 4u},   // 3  -> 4
+      {4u, 4u},   // 4  -> 4
+      {5u, 8u},   // 5  -> 8
+      {6u, 8u},   // 6  -> 8
+      {512u, 512u}, // 512 -> 512
   };
   for (const Case &c : cases) {
-    const uint32_t got = image::getBMP24RowStride(c.width);
+    const uint32_t got = image::getBMP8RowStride(c.width);
     CHECK(got == c.expected,
-          "getBMP24RowStride(" + std::to_string(c.width) +
+          "getBMP8RowStride(" + std::to_string(c.width) +
               ") = " + std::to_string(got) + ", expected " +
               std::to_string(c.expected));
   }
-  expect_throw("getBMP24RowStride(0) throws", [](uint32_t w) {
-    image::getBMP24RowStride(w);
+  expect_throw("getBMP8RowStride(0) throws", [](uint32_t w) {
+    image::getBMP8RowStride(w);
   }, 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Test 1b: quantizeRGB332 (pure function)
+//
+// Verify the RRRGGGBB bit layout and that the extremes (0x00/0xFF) map to
+// palette indices 0 and 0xFF respectively.
+// ---------------------------------------------------------------------------
+
+void testQuantizeRGB332() {
+  struct Case {
+    uint8_t r, g, b;
+    uint8_t expected;
+  };
+  const Case cases[] = {
+      {0x00, 0x00, 0x00, 0x00},   // black -> 0
+      {0xFF, 0xFF, 0xFF, 0xFF},   // white -> 0b111_111_11 = 0xFF
+      {0xFF, 0x00, 0x00, 0xE0},   // red   -> 0b111_000_00 = 0xE0
+      {0x00, 0xFF, 0x00, 0x1C},   // green -> 0b000_111_00 = 0x1C
+      {0x00, 0x00, 0xFF, 0x03},   // blue  -> 0b000_000_11 = 0x03
+      {0x20, 0x20, 0x40, 0x25},   // r3=1,g3=1,b2=1 -> 0b001_001_01 = 0x25
+      {0x1F, 0x1F, 0x3F, 0x00},   // below first step -> 0
+  };
+  for (const Case &c : cases) {
+    const uint8_t got = image::quantizeRGB332(c.r, c.g, c.b);
+    CHECK(got == c.expected,
+          "quantizeRGB332(" + std::to_string(c.r) + "," +
+              std::to_string(c.g) + "," + std::to_string(c.b) +
+              ") = " + std::to_string(got) + ", expected " +
+              std::to_string(c.expected));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -857,154 +888,162 @@ void testCropImage(CPUDriver &driver) {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for the output (24-bit) side
+// Helpers for the output (8-bit) side
 // ---------------------------------------------------------------------------
 
-image::BMPInfo makeOutputInfo(uint32_t width, uint32_t height, bool bottomUp) {
-  image::BMPInfo info{};
-  info.width = width;
-  info.height = height;
-  info.rowStride = ((width + 3u) / 4u) * 4u;
-  info.pixelOffset = 14u + 40u;
-  info.paletteOffset = 0u;
-  info.numColors = 0u;
-  info.rowsBottomUp = bottomUp;
-  return info;
+// Expected 8-bit palette entry (B, G, R) for RGB332 index `index`.
+std::array<uint8_t, 3> rgb332PaletteEntry(uint8_t index) {
+  const unsigned r3 = (static_cast<unsigned>(index) >> 5u) & 0x7u;
+  const unsigned g3 = (static_cast<unsigned>(index) >> 2u) & 0x7u;
+  const unsigned b2 = static_cast<unsigned>(index) & 0x3u;
+  return {static_cast<uint8_t>((b2 * 255u) / 3u),  // Blue
+          static_cast<uint8_t>((g3 * 255u) / 7u),  // Green
+          static_cast<uint8_t>((r3 * 255u) / 7u)}; // Red
 }
 
 // ---------------------------------------------------------------------------
-// Test 8: createBMP24PixelData (host)
+// Test 9: writeBMP8 round-trip (host)
 //
-// 3x2 image, distinct R/G/B per pixel. Verify size, BGR ordering, zero
-// padding, and that mismatched channel lengths throw.
-// ---------------------------------------------------------------------------
-
-void testCreateBMP24PixelData() {
-  const uint32_t width = 3;   // rowBytes = 9 -> rowStride 12 (3 pad bytes)
-  const uint32_t height = 2;
-  const uint32_t pixels = width * height;
-  std::vector<uint8_t> red(pixels), green(pixels), blue(pixels);
-  for (uint32_t i = 0; i < pixels; ++i) {
-    red[i] = static_cast<uint8_t>(0x10 + i);
-    green[i] = static_cast<uint8_t>(0x20 + i);
-    blue[i] = static_cast<uint8_t>(0x30 + i);
-  }
-  kernel::StreamSetPtr redPtr(red.data(), pixels);
-  kernel::StreamSetPtr greenPtr(green.data(), pixels);
-  kernel::StreamSetPtr bluePtr(blue.data(), pixels);
-
-  image::BMPInfo info = makeOutputInfo(width, height, true);
-  const uint32_t rowStride = image::getBMP24RowStride(width);
-  CHECK(rowStride == 12u, "rowStride for width 3");
-
-  std::vector<uint8_t> pixelData;
-  run_test("createBMP24PixelData", [&]() {
-    pixelData = image::createBMP24PixelData(redPtr, greenPtr, bluePtr, info);
-  });
-  if (g_failureCount) return;
-
-  const uint32_t expectedSize = rowStride * height;
-  CHECK(pixelData.size() == expectedSize, "pixel data size");
-
-  for (uint32_t row = 0; row < height; ++row) {
-    for (uint32_t col = 0; col < width; ++col) {
-      const uint32_t inIdx = row * width + col;
-      const uint32_t outIdx = row * rowStride + col * 3u;
-      CHECK(pixelData[outIdx + 0u] == blue[inIdx], "B byte");
-      CHECK(pixelData[outIdx + 1u] == green[inIdx], "G byte");
-      CHECK(pixelData[outIdx + 2u] == red[inIdx], "R byte");
-    }
-    for (uint32_t p = width * 3u; p < rowStride; ++p) {
-      CHECK(pixelData[row * rowStride + p] == 0u, "padding not zero");
-    }
-  }
-
-  // Mismatched channel lengths must throw.
-  kernel::StreamSetPtr shortPtr(red.data(), pixels - 1u);
-  expect_throw("createBMP24PixelData(length mismatch)", [&]() {
-    image::createBMP24PixelData(shortPtr, greenPtr, bluePtr, info);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Test 9: writeBMP24 round-trip (host)
-//
-// Build 24-bit pixel data, write it, re-open the file, and verify the 14+40
-// byte headers and the pixel bytes round-trip exactly. Also check that an
+// Build a BMP24Image, write it as an 8-bit indexed BMP, re-open the file, and
+// verify the 14+40 byte headers, the 256-entry RGB332 palette (BGR0), the
+// quantized index bytes in stored row order with zero padding, both row
+// orientations, and that readBMPHeader accepts the file. Also check that an
 // empty output path throws.
 // ---------------------------------------------------------------------------
 
-void testWriteBMP24RoundTrip() {
-  const uint32_t width = 2;   // rowBytes = 6 -> rowStride 8 (2 pad bytes)
+void testWriteBMP8RoundTrip() {
+  const uint32_t width = 3;   // rowStride 4 (1 pad byte/row)
   const uint32_t height = 2;
   const uint32_t pixels = width * height;
-  std::vector<uint8_t> red(pixels, 0xAA);
-  std::vector<uint8_t> green(pixels, 0xBB);
-  std::vector<uint8_t> blue(pixels, 0xCC);
-  kernel::StreamSetPtr redPtr(red.data(), pixels);
-  kernel::StreamSetPtr greenPtr(green.data(), pixels);
-  kernel::StreamSetPtr bluePtr(blue.data(), pixels);
+  const uint32_t rowStride = image::getBMP8RowStride(width);
+  const uint32_t imageSize = rowStride * height;
+  const uint32_t paletteBytes = 256u * 4u;
+  const uint32_t dataOffset = 14u + 40u + paletteBytes; // 1078
 
-  image::BMPInfo info = makeOutputInfo(width, height, true);
-  std::vector<uint8_t> pixelData =
-      image::createBMP24PixelData(redPtr, greenPtr, bluePtr, info);
-  const uint32_t rowStride = image::getBMP24RowStride(width);
+  for (bool bottomUp : {true, false}) {
+    image::BMP24Image img(width, height, bottomUp);
+    // Distinct RGB values per pixel that exercise the quantizer.
+    for (uint32_t i = 0; i < pixels; ++i) {
+      img.rgb[i * 3u + 0u] = static_cast<uint8_t>(0xA0 + i); // R
+      img.rgb[i * 3u + 1u] = static_cast<uint8_t>(0x40 + i * 2u); // G
+      img.rgb[i * 3u + 2u] = static_cast<uint8_t>(0x10 + i * 3u); // B
+    }
 
-  TempFile tmp = TempFile::create("writert");
-  run_test("writeBMP24", [&]() {
-    image::writeBMP24(tmp.path(), pixelData, info);
-  });
-  if (g_failureCount) return;
+    TempFile tmp = TempFile::create("writert8");
+    run_test("writeBMP8", [&]() {
+      image::writeBMP8(tmp.path(), img);
+    });
+    if (g_failureCount) return;
 
-  // Re-read and verify headers + pixel bytes.
-  int fd = openReadOnly(tmp.path());
-  std::vector<uint8_t> fileBuf(pixelData.size() + 54u, 0u);
-  ssize_t total = 0;
-  while (static_cast<std::size_t>(total) < fileBuf.size()) {
-    ssize_t n = ::read(fd, fileBuf.data() + total, fileBuf.size() - total);
-    if (n <= 0) break;
-    total += n;
+    // Read the whole file back.
+    int fd = openReadOnly(tmp.path());
+    std::vector<uint8_t> fileBuf(dataOffset + imageSize, 0u);
+    ssize_t total = 0;
+    while (static_cast<std::size_t>(total) < fileBuf.size()) {
+      ssize_t n = ::read(fd, fileBuf.data() + total, fileBuf.size() - total);
+      if (n <= 0) break;
+      total += n;
+    }
+    ::close(fd);
+    CHECK(static_cast<std::size_t>(total) == fileBuf.size(), "file size");
+
+    // File header.
+    CHECK(fileBuf[0] == 'B' && fileBuf[1] == 'M', "signature");
+    const uint32_t fileSize = fileBuf[2] | (fileBuf[3] << 8) |
+                              (fileBuf[4] << 16) |
+                              (static_cast<uint32_t>(fileBuf[5]) << 24);
+    const uint32_t fDataOffset = fileBuf[10] | (fileBuf[11] << 8) |
+                                 (fileBuf[12] << 16) |
+                                 (static_cast<uint32_t>(fileBuf[13]) << 24);
+    CHECK(fileSize == dataOffset + imageSize, "fileSize");
+    CHECK(fDataOffset == dataOffset, "dataOffset == 1078");
+
+    // Info header.
+    const uint32_t ihSize = fileBuf[14] | (fileBuf[15] << 8) |
+                            (fileBuf[16] << 16) |
+                            (static_cast<uint32_t>(fileBuf[17]) << 24);
+    const int32_t ihWidth = static_cast<int32_t>(
+        fileBuf[18] | (fileBuf[19] << 8) | (fileBuf[20] << 16) |
+        (static_cast<uint32_t>(fileBuf[21]) << 24));
+    const int32_t ihHeight = static_cast<int32_t>(
+        fileBuf[22] | (fileBuf[23] << 8) | (fileBuf[24] << 16) |
+        (static_cast<uint32_t>(fileBuf[25]) << 24));
+    const uint16_t ihPlanes = fileBuf[26] | (fileBuf[27] << 8);
+    const uint16_t ihBPP = fileBuf[28] | (fileBuf[29] << 8);
+    const uint32_t ihComp = fileBuf[30] | (fileBuf[31] << 8) |
+                            (fileBuf[32] << 16) |
+                            (static_cast<uint32_t>(fileBuf[33]) << 24);
+    const uint32_t ihImageSize = fileBuf[34] | (fileBuf[35] << 8) |
+                                 (fileBuf[36] << 16) |
+                                 (static_cast<uint32_t>(fileBuf[37]) << 24);
+    const uint32_t ihColorsUsed = fileBuf[46] | (fileBuf[47] << 8) |
+                                  (fileBuf[48] << 16) |
+                                  (static_cast<uint32_t>(fileBuf[49]) << 24);
+    CHECK(ihSize == 40u, "info header size");
+    CHECK(ihWidth == static_cast<int32_t>(width), "info width");
+    const int32_t expectedSignedHeight =
+        bottomUp ? static_cast<int32_t>(height) : -static_cast<int32_t>(height);
+    CHECK(ihHeight == expectedSignedHeight, "info height sign/orientation");
+    CHECK(ihPlanes == 1u, "info planes");
+    CHECK(ihBPP == 8u, "info bitsPerPixel");
+    CHECK(ihComp == 0u, "info compression");
+    CHECK(ihImageSize == imageSize, "info imageSize");
+    CHECK(ihColorsUsed == 256u, "info colorsUsed");
+
+    // Palette: 256 BGR0 entries matching the RGB332 expansion.
+    for (uint32_t i = 0; i < 256u; ++i) {
+      const std::size_t entry = 54u + i * 4u;
+      const auto expected = rgb332PaletteEntry(static_cast<uint8_t>(i));
+      CHECK(fileBuf[entry + 0u] == expected[0], "palette B byte");
+      CHECK(fileBuf[entry + 1u] == expected[1], "palette G byte");
+      CHECK(fileBuf[entry + 2u] == expected[2], "palette R byte");
+      CHECK(fileBuf[entry + 3u] == 0u, "palette reserved byte");
+    }
+
+    // Index bytes: quantized pixels in stored row order, zero padding.
+    for (uint32_t row = 0; row < height; ++row) {
+      const uint32_t sourceRow =
+          bottomUp ? height - row - 1u : row;
+      for (uint32_t col = 0; col < width; ++col) {
+        const uint32_t inIdx = sourceRow * width + col;
+        const uint8_t expIdx = image::quantizeRGB332(
+            img.rgb[inIdx * 3u + 0u], img.rgb[inIdx * 3u + 1u],
+            img.rgb[inIdx * 3u + 2u]);
+        CHECK(fileBuf[dataOffset + row * rowStride + col] == expIdx,
+              "index byte");
+      }
+      for (uint32_t p = width; p < rowStride; ++p) {
+        CHECK(fileBuf[dataOffset + row * rowStride + p] == 0u,
+              "padding not zero");
+      }
+    }
+
+    // readBMPHeader must accept the file we just wrote.
+    fd = openReadOnly(tmp.path());
+    image::BMPInfo info;
+    run_test("readBMPHeader(writeBMP8 output)", [&]() {
+      image::readBMPHeader(fd, info);
+    });
+    ::close(fd);
+    if (g_failureCount) return;
+    CHECK(info.width == width, "round-trip width");
+    CHECK(info.height == height, "round-trip height");
+    CHECK(info.rowStride == rowStride, "round-trip rowStride");
+    CHECK(info.pixelOffset == dataOffset, "round-trip pixelOffset");
+    CHECK(info.numColors == 256u, "round-trip numColors");
+    CHECK(info.rowsBottomUp == bottomUp, "round-trip rowsBottomUp");
+    for (uint32_t i = 0; i < 256u; ++i) {
+      const auto expected = rgb332PaletteEntry(static_cast<uint8_t>(i));
+      CHECK(info.bTable[i] == expected[0], "round-trip bTable");
+      CHECK(info.gTable[i] == expected[1], "round-trip gTable");
+      CHECK(info.rTable[i] == expected[2], "round-trip rTable");
+    }
   }
-  ::close(fd);
-  CHECK(static_cast<std::size_t>(total) == fileBuf.size(), "file size");
-
-  CHECK(fileBuf[0] == 'B' && fileBuf[1] == 'M', "signature");
-  const uint32_t fileSize = fileBuf[2] | (fileBuf[3] << 8) | (fileBuf[4] << 16) |
-                            (static_cast<uint32_t>(fileBuf[5]) << 24);
-  const uint32_t dataOffset = fileBuf[10] | (fileBuf[11] << 8) |
-                              (fileBuf[12] << 16) |
-                              (static_cast<uint32_t>(fileBuf[13]) << 24);
-  CHECK(fileSize == 54u + pixelData.size(), "fileSize");
-  CHECK(dataOffset == 54u, "dataOffset");
-
-  const uint32_t ihSize = fileBuf[14] | (fileBuf[15] << 8) | (fileBuf[16] << 16) |
-                          (static_cast<uint32_t>(fileBuf[17]) << 24);
-  const int32_t ihWidth = static_cast<int32_t>(
-      fileBuf[18] | (fileBuf[19] << 8) | (fileBuf[20] << 16) |
-      (static_cast<uint32_t>(fileBuf[21]) << 24));
-  const int32_t ihHeight = static_cast<int32_t>(
-      fileBuf[22] | (fileBuf[23] << 8) | (fileBuf[24] << 16) |
-      (static_cast<uint32_t>(fileBuf[25]) << 24));
-  const uint16_t ihPlanes = fileBuf[26] | (fileBuf[27] << 8);
-  const uint16_t ihBPP = fileBuf[28] | (fileBuf[29] << 8);
-  const uint32_t ihComp = fileBuf[30] | (fileBuf[31] << 8) | (fileBuf[32] << 16) |
-                          (static_cast<uint32_t>(fileBuf[33]) << 24);
-  CHECK(ihSize == 40u, "info header size");
-  CHECK(ihWidth == static_cast<int32_t>(width), "info width");
-  CHECK(ihHeight == static_cast<int32_t>(height), "info height (bottom-up)");
-  CHECK(ihPlanes == 1u, "info planes");
-  CHECK(ihBPP == 24u, "info bitsPerPixel");
-  CHECK(ihComp == 0u, "info compression");
-
-  for (uint32_t i = 0; i < pixelData.size(); ++i) {
-    CHECK(fileBuf[54u + i] == pixelData[i], "pixel byte round-trip");
-  }
-  (void)rowStride;
 
   // Empty output path must throw.
-  std::vector<uint8_t> dummy = image::createBMP24PixelData(redPtr, greenPtr, bluePtr, info);
-  expect_throw("writeBMP24(empty path)", [&]() {
-    image::writeBMP24("", dummy, info);
+  image::BMP24Image img(2, 2, true);
+  expect_throw("writeBMP8(empty path)", [&]() {
+    image::writeBMP8("", img);
   });
 }
 
@@ -1092,80 +1131,6 @@ void testCreateBMP24Image() {
       image::createBMP24Image(shortPtr, greenPtr, bluePtr, width, height, true);
     });
   }
-}
-
-// ---------------------------------------------------------------------------
-// Test 11: writeBMP24(path, BMP24Image) round-trip (host)
-//
-// Build a top-down RGB image, write it, re-open the file, and verify the
-// headers (including the height sign for both orientations) and the pixel
-// bytes round-trip with BGR ordering and zero padding.
-// ---------------------------------------------------------------------------
-
-void testWriteBMP24ImageRoundTrip() {
-  const uint32_t width = 2;   // rowBytes = 6 -> rowStride 8 (2 pad bytes)
-  const uint32_t height = 2;
-  const uint32_t pixels = width * height;
-
-  for (bool bottomUp : {true, false}) {
-    image::BMP24Image img(width, height, bottomUp);
-    for (uint32_t i = 0; i < pixels; ++i) {
-      img.rgb[i * 3u + 0u] = static_cast<uint8_t>(0xA0 + i); // R
-      img.rgb[i * 3u + 1u] = static_cast<uint8_t>(0xB0 + i); // G
-      img.rgb[i * 3u + 2u] = static_cast<uint8_t>(0xC0 + i); // B
-    }
-
-    TempFile tmp = TempFile::create("imgwr");
-    run_test("writeBMP24(BMP24Image)", [&]() {
-      image::writeBMP24(tmp.path(), img);
-    });
-    if (g_failureCount) return;
-
-    int fd = openReadOnly(tmp.path());
-    const uint32_t rowStride = image::getBMP24RowStride(width);
-    const uint32_t imageSize = rowStride * height;
-    std::vector<uint8_t> fileBuf(imageSize + 54u, 0u);
-    ssize_t total = 0;
-    while (static_cast<std::size_t>(total) < fileBuf.size()) {
-      ssize_t n = ::read(fd, fileBuf.data() + total, fileBuf.size() - total);
-      if (n <= 0) break;
-      total += n;
-    }
-    ::close(fd);
-    CHECK(static_cast<std::size_t>(total) == fileBuf.size(), "file size");
-
-    CHECK(fileBuf[0] == 'B' && fileBuf[1] == 'M', "signature");
-    const int32_t ihHeight = static_cast<int32_t>(
-        fileBuf[22] | (fileBuf[23] << 8) | (fileBuf[24] << 16) |
-        (static_cast<uint32_t>(fileBuf[25]) << 24));
-    const int32_t expectedSignedHeight =
-        bottomUp ? static_cast<int32_t>(height) : -static_cast<int32_t>(height);
-    CHECK(ihHeight == expectedSignedHeight, "info height sign/orientation");
-    const uint16_t ihBPP = fileBuf[28] | (fileBuf[29] << 8);
-    CHECK(ihBPP == 24u, "info bitsPerPixel");
-
-    // Stored row order: bottom-up files store the bottom row first.
-    for (uint32_t row = 0; row < height; ++row) {
-      const uint32_t sourceRow =
-          bottomUp ? height - row - 1u : row;
-      for (uint32_t col = 0; col < width; ++col) {
-        const uint32_t inIdx = (sourceRow * width + col) * 3u;
-        const uint32_t outIdx = row * rowStride + col * 3u;
-        CHECK(fileBuf[54u + outIdx + 0u] == img.rgb[inIdx + 2u], "B byte");
-        CHECK(fileBuf[54u + outIdx + 1u] == img.rgb[inIdx + 1u], "G byte");
-        CHECK(fileBuf[54u + outIdx + 2u] == img.rgb[inIdx + 0u], "R byte");
-      }
-      for (uint32_t p = width * 3u; p < rowStride; ++p) {
-        CHECK(fileBuf[54u + row * rowStride + p] == 0u, "padding not zero");
-      }
-    }
-  }
-
-  // Empty output path must throw.
-  image::BMP24Image img(2, 2, true);
-  expect_throw("writeBMP24(BMP24Image empty path)", [&]() {
-    image::writeBMP24("", img);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1627,7 +1592,8 @@ int main(int argc, char **argv) {
 
   CPUDriver driver("bmp_loader_test");
 
-  run_test("testGetBMP24RowStride", testGetBMP24RowStride);
+  run_test("testGetBMP8RowStride", testGetBMP8RowStride);
+  run_test("testQuantizeRGB332", testQuantizeRGB332);
   run_test("testReadBMPHeaderValid", testReadBMPHeaderValid);
   run_test("testReadBMPHeaderLena", testReadBMPHeaderLena);
   run_test("testReadBMPHeaderErrors", testReadBMPHeaderErrors);
@@ -1639,10 +1605,8 @@ int main(int argc, char **argv) {
   run_test("testCreateBMPColorByteStreamsValidation",
            testCreateBMPColorByteStreamsValidation, driver);
   run_test("testCropImage", testCropImage, driver);
-  run_test("testCreateBMP24PixelData", testCreateBMP24PixelData);
-  run_test("testWriteBMP24RoundTrip", testWriteBMP24RoundTrip);
+  run_test("testWriteBMP8RoundTrip", testWriteBMP8RoundTrip);
   run_test("testCreateBMP24Image", testCreateBMP24Image);
-  run_test("testWriteBMP24ImageRoundTrip", testWriteBMP24ImageRoundTrip);
   run_test("testLoadBMPCrop", testLoadBMPCrop, driver);
   run_test("testMaskImage", testMaskImage, driver);
   run_test("testMaskImageValidation", testMaskImageValidation, driver);

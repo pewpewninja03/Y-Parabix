@@ -47,12 +47,11 @@ static_assert(sizeof(BMPInfoHeader) == 40, "BMPInfoHeader must be 40 bytes");
 
 constexpr uint16_t RequiredBMPPlanes = 1u;
 constexpr uint16_t SupportedBitsPerPixel = 8u;
-constexpr uint16_t OutputBitsPerPixel = 24u;
+constexpr uint16_t OutputBitsPerPixel = 8u;
 constexpr uint32_t BMPInfoHeaderSize = 40u;
 constexpr uint32_t BMPRowAlignment = 4u;
 constexpr uint32_t PaletteSize = 256u;
 constexpr uint32_t PaletteEntryBytes = 4u;
-constexpr uint32_t OutputColorChannelCount = 3u;
 constexpr uint32_t BMPHeaderBytes =
     static_cast<uint32_t>(sizeof(BMPFileHeader) + sizeof(BMPInfoHeader));
 
@@ -61,14 +60,14 @@ uint64_t alignBMPRow(uint64_t rowBytes) {
          BMPRowAlignment;
 }
 
-uint32_t checkedBMP24ImageSize(const BMPInfo &info) {
+uint32_t checkedBMP8ImageSize(const BMPInfo &info) {
   if (info.height == 0 ||
       info.height >
           static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
     throw std::runtime_error("BMP output: height is outside the BMP range");
   }
   const uint64_t imageSize =
-      static_cast<uint64_t>(getBMP24RowStride(info.width)) * info.height;
+      static_cast<uint64_t>(getBMP8RowStride(info.width)) * info.height;
   if (imageSize >
       std::numeric_limits<uint32_t>::max() - BMPHeaderBytes) {
     throw std::runtime_error("BMP output: image is too large");
@@ -175,62 +174,34 @@ void readPalette(int fd, const BMPInfoHeader &infoHeader, BMPInfo &info) {
   }
 }
 
+uint8_t expandChannel3To8(unsigned value3) {
+  return static_cast<uint8_t>((value3 * 255u) / 7u);
+}
+
+// Expand a 2-bit channel value to its 8-bit RGB332 palette representative.
+uint8_t expandChannel2To8(unsigned value2) {
+  return static_cast<uint8_t>((value2 * 255u) / 3u);
+}
+
 } // namespace
 
-uint32_t getBMP24RowStride(uint32_t width) {
+uint32_t getBMP8RowStride(uint32_t width) {
   if (width == 0 ||
       width > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
     throw std::runtime_error("BMP output: width is outside the BMP range");
   }
-  const uint64_t rowBytes =
-      static_cast<uint64_t>(width) * OutputColorChannelCount;
-  const uint64_t rowStride = alignBMPRow(rowBytes);
+  const uint64_t rowStride = alignBMPRow(static_cast<uint64_t>(width));
   if (rowStride > std::numeric_limits<uint32_t>::max()) {
     throw std::runtime_error("BMP output: row stride is too large");
   }
   return static_cast<uint32_t>(rowStride);
 }
 
-std::vector<uint8_t>
-createBMP24PixelData(const kernel::StreamSetPtr &redBytes,
-                     const kernel::StreamSetPtr &greenBytes,
-                     const kernel::StreamSetPtr &blueBytes,
-                     const BMPInfo &outputInfo) {
-  const uint32_t imageSize = checkedBMP24ImageSize(outputInfo);
-  const uint64_t pixelCount =
-      static_cast<uint64_t>(outputInfo.width) * outputInfo.height;
-  if (redBytes.length() != pixelCount ||
-      greenBytes.length() != pixelCount ||
-      blueBytes.length() != pixelCount) {
-    throw std::runtime_error(
-        "BMP output: channel buffer lengths do not match the image dimensions");
-  }
-  if (pixelCount != 0 &&
-      (redBytes.data() == nullptr || greenBytes.data() == nullptr ||
-       blueBytes.data() == nullptr)) {
-    throw std::runtime_error("BMP output: channel buffer is null");
-  }
-
-  const uint32_t rowStride = getBMP24RowStride(outputInfo.width);
-  std::vector<uint8_t> bmpPixelData(imageSize, 0u);
-  const uint8_t *red = redBytes.data();
-  const uint8_t *green = greenBytes.data();
-  const uint8_t *blue = blueBytes.data();
-  for (uint32_t row = 0; row < outputInfo.height; ++row) {
-    const std::size_t inputRow =
-        static_cast<std::size_t>(row) * outputInfo.width;
-    const std::size_t outputRow =
-        static_cast<std::size_t>(row) * rowStride;
-    for (uint32_t column = 0; column < outputInfo.width; ++column) {
-      const std::size_t inputPixel = inputRow + column;
-      const std::size_t outputPixel =
-          outputRow + column * OutputColorChannelCount;
-      bmpPixelData[outputPixel] = blue[inputPixel];
-      bmpPixelData[outputPixel + 1u] = green[inputPixel];
-      bmpPixelData[outputPixel + 2u] = red[inputPixel];
-    }
-  }
-  return bmpPixelData;
+uint8_t quantizeRGB332(uint8_t red, uint8_t green, uint8_t blue) {
+  const unsigned r3 = static_cast<unsigned>(red) >> 5u;   // top 3 bits
+  const unsigned g3 = static_cast<unsigned>(green) >> 5u;
+  const unsigned b2 = static_cast<unsigned>(blue) >> 6u;  // top 2 bits
+  return static_cast<uint8_t>((r3 << 5u) | (g3 << 2u) | b2);
 }
 
 BMP24Image createBMP24Image(const kernel::StreamSetPtr &redBytes,
@@ -276,7 +247,7 @@ BMP24Image createBMP24Image(const kernel::StreamSetPtr &redBytes,
   return image;
 }
 
-void writeBMP24(const std::string &outputPath, const BMP24Image &image) {
+void writeBMP8(const std::string &outputPath, const BMP24Image &image) {
   if (outputPath.empty()) {
     throw std::runtime_error("BMP output: output path is empty");
   }
@@ -285,10 +256,25 @@ void writeBMP24(const std::string &outputPath, const BMP24Image &image) {
   outputInfo.width = image.width;
   outputInfo.height = image.height;
   outputInfo.rowsBottomUp = image.rowsBottomUp;
-  const uint32_t imageSize = checkedBMP24ImageSize(outputInfo);
-  const uint32_t rowStride = getBMP24RowStride(image.width);
+  const uint32_t imageSize = checkedBMP8ImageSize(outputInfo);
+  const uint32_t rowStride = getBMP8RowStride(image.width);
+  const uint32_t paletteBytes = PaletteSize * PaletteEntryBytes;
+  const uint32_t dataOffset = BMPHeaderBytes + paletteBytes;
 
-  std::vector<uint8_t> bmpPixelData(imageSize, 0u);
+  // Build the fixed 256-entry RGB332 palette in BGR0 layout.
+  std::vector<uint8_t> paletteData(paletteBytes, 0u);
+  for (uint32_t index = 0; index < PaletteSize; ++index) {
+    const unsigned r3 = (index >> 5u) & 0x7u;
+    const unsigned g3 = (index >> 2u) & 0x7u;
+    const unsigned b2 = index & 0x3u;
+    const uint32_t entry = PaletteEntryBytes * index;
+    paletteData[entry + 0u] = expandChannel2To8(b2); // Blue
+    paletteData[entry + 1u] = expandChannel3To8(g3); // Green
+    paletteData[entry + 2u] = expandChannel3To8(r3); // Red
+    paletteData[entry + 3u] = 0u;                    // reserved
+  }
+
+  std::vector<uint8_t> indexData(imageSize, 0u);
   const uint8_t *rgb = image.data();
   for (uint32_t row = 0; row < image.height; ++row) {
     const std::size_t sourceRow =
@@ -298,39 +284,21 @@ void writeBMP24(const std::string &outputPath, const BMP24Image &image) {
     const std::size_t outputRow =
         static_cast<std::size_t>(row) * rowStride;
     for (uint32_t column = 0; column < image.width; ++column) {
-      const std::size_t inputPixel =
-          sourceRow * image.width + column;
-      const std::size_t outputPixel =
-          outputRow + column * OutputColorChannelCount;
-      bmpPixelData[outputPixel] = rgb[inputPixel * 3u + 2u];     // blue
-      bmpPixelData[outputPixel + 1u] = rgb[inputPixel * 3u + 1u]; // green
-      bmpPixelData[outputPixel + 2u] = rgb[inputPixel * 3u];      // red
+      const std::size_t inputPixel = sourceRow * image.width + column;
+      const uint8_t r = rgb[inputPixel * 3u + 0u];
+      const uint8_t g = rgb[inputPixel * 3u + 1u];
+      const uint8_t b = rgb[inputPixel * 3u + 2u];
+      indexData[outputRow + column] = quantizeRGB332(r, g, b);
     }
-  }
-
-  writeBMP24(outputPath, bmpPixelData, outputInfo);
-}
-
-void writeBMP24(const std::string &outputPath,
-                const std::vector<uint8_t> &bmpPixelData,
-                const BMPInfo &outputInfo) {
-  if (outputPath.empty()) {
-    throw std::runtime_error("BMP output: output path is empty");
-  }
-
-  const uint32_t imageSize = checkedBMP24ImageSize(outputInfo);
-  if (bmpPixelData.size() != imageSize) {
-    throw std::runtime_error(
-        "BMP output: pixel buffer length is " +
-        std::to_string(bmpPixelData.size()) + ", expected " +
-        std::to_string(imageSize));
+    // Padding bytes at the end of each row are already zero from the
+    // value-initialized vector.
   }
 
   BMPFileHeader fileHeader{};
   fileHeader.signature[0] = 'B';
   fileHeader.signature[1] = 'M';
-  fileHeader.fileSize = BMPHeaderBytes + imageSize;
-  fileHeader.dataOffset = BMPHeaderBytes;
+  fileHeader.fileSize = dataOffset + imageSize;
+  fileHeader.dataOffset = dataOffset;
 
   BMPInfoHeader infoHeader{};
   infoHeader.size = sizeof(BMPInfoHeader);
@@ -339,7 +307,10 @@ void writeBMP24(const std::string &outputPath,
   infoHeader.height = outputInfo.rowsBottomUp ? height : -height;
   infoHeader.planes = RequiredBMPPlanes;
   infoHeader.bitsPerPixel = OutputBitsPerPixel;
+  infoHeader.compression = 0u; // BI_RGB
   infoHeader.imageSize = imageSize;
+  infoHeader.colorsUsed = PaletteSize;
+  infoHeader.importantColors = 0u;
 
   const int fd =
       ::open(outputPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
@@ -352,7 +323,8 @@ void writeBMP24(const std::string &outputPath,
 
   writeAll(output.get(), &fileHeader, sizeof(fileHeader), outputPath);
   writeAll(output.get(), &infoHeader, sizeof(infoHeader), outputPath);
-  writeAll(output.get(), bmpPixelData.data(), imageSize, outputPath);
+  writeAll(output.get(), paletteData.data(), paletteBytes, outputPath);
+  writeAll(output.get(), indexData.data(), imageSize, outputPath);
   output.closeOrThrow(outputPath);
 }
 

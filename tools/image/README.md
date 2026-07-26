@@ -26,7 +26,7 @@ make bmp_demo
 - `--mask-bright-green` — optional; same, for the green channel (`>= 128`)
 - `--mask-bright-blue` — optional; same, for the blue channel (`>= 128`)
 - `--no-blur` — optional; skip the 3×3 box blur and write the (masked) crop as-is
-- `-o` — output path for the crop
+- `-o` — output path for the crop, written as an 8-bit indexed BMP (fixed 256-color RGB332 palette: 3 red bits, 3 green bits, 2 blue bits)
 
 
 Example (full image, if it is 512×512):

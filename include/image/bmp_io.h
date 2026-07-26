@@ -29,19 +29,10 @@ struct BMPInfo {
 
 void readBMPHeader(int fd, BMPInfo &info);
 
+uint32_t getBMP8RowStride(uint32_t width);
 
-uint32_t getBMP24RowStride(uint32_t width);
-
-std::vector<uint8_t>
-createBMP24PixelData(const kernel::StreamSetPtr &redBytes,
-                     const kernel::StreamSetPtr &greenBytes,
-                     const kernel::StreamSetPtr &blueBytes,
-                     const BMPInfo &outputInfo);
-
-
-void writeBMP24(const std::string &outputPath,
-                const std::vector<uint8_t> &bmpPixelData,
-                const BMPInfo &outputInfo);
+// (3 red bits, 3 green bits, 2 blue bits: RRRGGGBB).
+uint8_t quantizeRGB332(uint8_t red, uint8_t green, uint8_t blue);
 
 struct BMP24Image {
   uint32_t width = 0;
@@ -67,6 +58,6 @@ BMP24Image createBMP24Image(const kernel::StreamSetPtr &redBytes,
                             uint32_t width, uint32_t height,
                             bool rowsBottomUp);
 
-void writeBMP24(const std::string &outputPath, const BMP24Image &image);
+void writeBMP8(const std::string &outputPath, const BMP24Image &image);
 
 } // namespace image
