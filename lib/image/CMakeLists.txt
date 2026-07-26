@@ -17,6 +17,7 @@ SRC
 DEPS
     pablo
     pablo.bixnum
+    kernel.bitwise
     kernel.io
     kernel.pipeline
     kernel.streamutils

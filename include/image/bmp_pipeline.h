@@ -6,8 +6,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <image/bmp_io.h>
 #include <kernel/core/relationship.h>
+#include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/program_builder.h>
 
 namespace image {
@@ -38,11 +40,38 @@ void CropImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
                uint32_t cropHeight, uint32_t cropX, uint32_t cropY,
                kernel::StreamSet *&croppedImageData);
 
+void MaskImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
+               kernel::StreamSet *maskImageData,
+               kernel::StreamSet *&maskedImageData);
+
 
 void CreateBMPColorByteStreams(kernel::ProgramBuilder &P,
                                kernel::StreamSet *sourceImageData,
                                kernel::StreamSet *redBytes,
                                kernel::StreamSet *greenBytes,
                                kernel::StreamSet *blueBytes);
+
+struct BMPCrop {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t x = 0;
+  uint32_t y = 0;
+};
+
+struct BMPCropResult {
+  BMPInfo sourceInfo;
+  BMP24Image image;
+};
+
+BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
+                          const BMPCrop &crop);
+
+using ColorStreamTransform =
+    std::function<kernel::StreamSet *(kernel::ProgramBuilder &P,
+                                      kernel::StreamSet *sourceImageData)>;
+
+BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
+                          const BMPCrop &crop,
+                          const ColorStreamTransform &transform);
 
 } // namespace image

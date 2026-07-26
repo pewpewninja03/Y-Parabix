@@ -6,14 +6,21 @@
 #include <image/bmp_pipeline.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
+#include <fcntl.h>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
+#include <kernel/bitwise/bixlogic.h>
+#include <kernel/core/attributes.h>
+#include <kernel/core/streamsetptr.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
@@ -59,6 +66,16 @@ void requireColorStream(const kernel::StreamSet *stream,
   }
 }
 
+void requireMaskStream(const kernel::StreamSet *stream,
+                       const std::string &operation) {
+  if (stream == nullptr || stream->getNumElements() != 1u ||
+      stream->getFieldWidth() != 1u) {
+    throw std::runtime_error(operation +
+                             ": mask image data must be a 1x1 bit stream "
+                             "aligned with the source color stream");
+  }
+}
+
 bool isByteStream(const kernel::StreamSet *stream) {
   return stream != nullptr && stream->getNumElements() == 1 &&
          stream->getFieldWidth() == ChannelBits;
@@ -84,14 +101,45 @@ ColorChannels selectColorChannels(kernel::ProgramBuilder &P,
   };
 }
 
+std::string makePaletteLUTSignature(const std::vector<unsigned> &b,
+                                     const std::vector<unsigned> &g,
+                                     const std::vector<unsigned> &r) {
+  std::string signature = "palette_lut";
+  auto appendTable = [&](const std::vector<unsigned> &table) {
+    signature += '[';
+    signature += std::to_string(table.size());
+    for (unsigned value : table) {
+      signature += ',';
+      signature += std::to_string(value);
+    }
+    signature += ']';
+  };
+  appendTable(b);
+  appendTable(g);
+  appendTable(r);
+  return signature;
+}
+
+std::string makePaletteLUTName(const std::vector<unsigned> &b,
+                                const std::vector<unsigned> &g,
+                                const std::vector<unsigned> &r) {
+  return "palette_lut_" +
+         kernel::Kernel::getStringHash(makePaletteLUTSignature(b, g, r));
+}
+
 class PaletteLUTKernel final : public pablo::PabloKernel {
 public:
   PaletteLUTKernel(LLVMTypeSystemInterface &ts, kernel::StreamSet *index,
                    kernel::StreamSet *color, std::vector<unsigned> bTable,
                    std::vector<unsigned> gTable, std::vector<unsigned> rTable)
-      : pablo::PabloKernel(ts, "palette_lut", {kernel::Binding{"index", index}},
+      : pablo::PabloKernel(ts, makePaletteLUTName(bTable, gTable, rTable),
+                           {kernel::Binding{"index", index}},
                            {kernel::Binding{"color", color}}),
-        mB(std::move(bTable)), mG(std::move(gTable)), mR(std::move(rTable)) {}
+        mB(std::move(bTable)), mG(std::move(gTable)), mR(std::move(rTable)),
+        mSignature(makePaletteLUTSignature(mB, mG, mR)) {}
+
+  llvm::StringRef getSignature() const override { return mSignature; }
+  bool hasSignature() const override { return true; }
 
 protected:
   void generatePabloMethod() override;
@@ -100,6 +148,7 @@ private:
   std::vector<unsigned> mB;
   std::vector<unsigned> mG;
   std::vector<unsigned> mR;
+  std::string mSignature;
 };
 
 void PaletteLUTKernel::generatePabloMethod() {
@@ -236,6 +285,20 @@ void CropImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
   SHOW_BIXNUM(croppedImageData);
 }
 
+void MaskImage(kernel::ProgramBuilder &P, kernel::StreamSet *sourceImageData,
+               kernel::StreamSet *maskImageData,
+               kernel::StreamSet *&maskedImageData) {
+  requireColorStream(sourceImageData, "BMP mask");
+  requireMaskStream(maskImageData, "BMP mask");
+
+  kernel::StreamSet *keepMask = P.CreateStreamSet(1);
+  kernel::Invert(P, maskImageData, keepMask);
+
+  maskedImageData = P.CreateStreamSet(ColorStreamCount);
+  kernel::ZeroByMask(P, keepMask, sourceImageData, maskedImageData);
+  SHOW_BIXNUM(maskedImageData);
+}
+
 void CreateBMPColorByteStreams(kernel::ProgramBuilder &P,
                                kernel::StreamSet *sourceImageData,
                                kernel::StreamSet *redBytes,
@@ -255,6 +318,74 @@ void CreateBMPColorByteStreams(kernel::ProgramBuilder &P,
   SHOW_BYTES(redBytes);
   SHOW_BYTES(greenBytes);
   SHOW_BYTES(blueBytes);
+}
+
+BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
+                          const BMPCrop &crop,
+                          const ColorStreamTransform &transform) {
+  if (inputPath.empty()) {
+    throw std::runtime_error("BMP: input path is empty");
+  }
+
+  int fd = ::open(inputPath.c_str(), O_RDONLY);
+  if (fd < 0) {
+    const int error = errno;
+    throw std::runtime_error("BMP: failed to open " + inputPath + ": " +
+                             std::strerror(error));
+  }
+
+  BMPCropResult result;
+  kernel::StreamSetPtr redBytes;
+  kernel::StreamSetPtr greenBytes;
+  kernel::StreamSetPtr blueBytes;
+  try {
+    readBMPHeader(fd, result.sourceInfo);
+
+    auto P = kernel::CreatePipeline(
+        driver,
+        kernel::Output<kernel::streamset_t>{"redBytes", 1, ChannelBits,
+                                             kernel::ReturnedBuffer(1)},
+        kernel::Output<kernel::streamset_t>{"greenBytes", 1, ChannelBits,
+                                             kernel::ReturnedBuffer(1)},
+        kernel::Output<kernel::streamset_t>{"blueBytes", 1, ChannelBits,
+                                             kernel::ReturnedBuffer(1)},
+        kernel::Input<uint32_t>{"fd"});
+
+    kernel::Scalar *fdScalar = P.getInputScalar("fd");
+    kernel::StreamSet *colorStream = nullptr;
+    ParseBMPColorStreams(P, fdScalar, result.sourceInfo, colorStream);
+
+    kernel::StreamSet *croppedColorStream = nullptr;
+    CropImage(P, colorStream, result.sourceInfo, crop.width, crop.height,
+              crop.x, crop.y, croppedColorStream);
+
+    kernel::StreamSet *transformedColorStream =
+        transform ? transform(P, croppedColorStream) : croppedColorStream;
+    if (transformedColorStream == nullptr) {
+      throw std::runtime_error(
+          "BMP crop: color-stream transform returned a null stream");
+    }
+
+    CreateBMPColorByteStreams(
+        P, transformedColorStream, P.getOutputStreamSet("redBytes"),
+        P.getOutputStreamSet("greenBytes"), P.getOutputStreamSet("blueBytes"));
+
+    auto pipelineFn = P.compile();
+    pipelineFn(redBytes, greenBytes, blueBytes, static_cast<uint32_t>(fd));
+  } catch (...) {
+    ::close(fd);
+    throw;
+  }
+  ::close(fd);
+
+  result.image = createBMP24Image(redBytes, greenBytes, blueBytes, crop.width,
+                                  crop.height, result.sourceInfo.rowsBottomUp);
+  return result;
+}
+
+BMPCropResult LoadBMPCrop(CPUDriver &driver, const std::string &inputPath,
+                          const BMPCrop &crop) {
+  return LoadBMPCrop(driver, inputPath, crop, ColorStreamTransform{});
 }
 
 } // namespace image

@@ -10,4 +10,5 @@ DEPS
     image
     kernel.basis
     kernel.io
+    kernel.streamutils
 )
