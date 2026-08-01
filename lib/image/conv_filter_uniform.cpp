@@ -1,4 +1,5 @@
 #include "conv_filter_common.h"
+#include "conv_filter_uniform_illustration.h"
 
 #include <kernel/core/kernel.h>
 #include <kernel/core/kernel_builder.h>
@@ -11,7 +12,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstring>
+#include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 using namespace kernel;
@@ -28,11 +33,233 @@ struct UniformKernelConfiguration {
     float weight;
 };
 
+Bindings uniformScalarBindings(
+    LLVMTypeSystemInterface & typeSystem, Scalar * inputPixels, Scalar * outputPixels, Scalar * workspace, const IllustrationScalars illustration
+) {
+    Bindings bindings{
+        Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels},
+        Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels},
+        Binding{typeSystem.getInt8PtrTy(), "workspace", workspace},
+    };
+    if (illustration) {
+        bindings.emplace_back(typeSystem.getInt8PtrTy(), "captureContext", illustration.captureContext);
+        bindings.emplace_back(typeSystem.getInt32Ty(), "selectionKind", illustration.selectionKind);
+        bindings.emplace_back(typeSystem.getSizeTy(), "selectionRow", illustration.selectionRow);
+        bindings.emplace_back(typeSystem.getSizeTy(), "selectionColumn", illustration.selectionColumn);
+    }
+    return bindings;
+}
+
 uint32_t floatBits(const float floatingValue) {
     uint32_t bits;
     std::memcpy(&bits, &floatingValue, sizeof(bits));
     return bits;
 }
+
+struct UniformIllustrationMetadata {
+    UniformIllustrationPath path;
+    std::uint32_t channel;
+    Value * outputRow;
+    Value * outputColumn;
+    Value * groupStart;
+    Value * workspaceColumn;
+    Value * sourceInputRow;
+    Value * recurrenceSource;
+    Value * recurrenceDestination;
+};
+
+class UniformIllustrationEmitter {
+   public:
+    UniformIllustrationEmitter(
+        KernelBuilder & builder,
+        Value * captureContext,
+        Value * selectionKind,
+        Value * selectionRow,
+        Value * selectionColumn,
+        const unsigned imageWidth,
+        const unsigned kernelWidth,
+        const unsigned kernelHeight,
+        const unsigned logicalOutputs
+    )
+        : builder(builder),
+          captureContext(captureContext),
+          selectionKind(selectionKind),
+          selectionRow(selectionRow),
+          selectionColumn(selectionColumn),
+          imageWidth(imageWidth),
+          kernelWidth(kernelWidth),
+          kernelHeight(kernelHeight),
+          logicalOutputs(logicalOutputs) {
+        captureFunction = builder.getModule()->getFunction("captureUniformConvFilterValue");
+        if (captureFunction == nullptr)
+            throw std::logic_error("Uniform illustration callback is not declared");
+    }
+
+    Value * selectedOperation(Value * row, Value * firstColumn, const unsigned outputCount) const {
+        Value * selected = builder.getInt1(false);
+        for (unsigned position = 0; position < outputCount; ++position)
+            selected = builder.CreateOr(selected, selectedOutputState(row, builder.CreateAdd(firstColumn, builder.getSize(position))));
+        return selected;
+    }
+
+    Value * selectedOutputOperation(Value * row, Value * firstColumn, const unsigned outputCount) const {
+        Value * selected = builder.getInt1(false);
+        for (unsigned position = 0; position < outputCount; ++position)
+            selected = builder.CreateOr(selected, selectedOutputCoordinate(row, builder.CreateAdd(firstColumn, builder.getSize(position))));
+        return selected;
+    }
+
+    Value * selectedOutputState(Value * row, Value * column) const {
+        Value * outputSelected = selectedOutputCoordinate(row, column);
+        Value * inputSelected =
+            builder.CreateAnd(isInputSelection(), builder.CreateICmpULE(row, builder.CreateAdd(selectionRow, builder.getSize(kernelHeight / 2U))));
+        inputSelected =
+            builder.CreateAnd(inputSelected, builder.CreateICmpULE(selectionRow, builder.CreateAdd(row, builder.getSize(kernelHeight / 2U))));
+        inputSelected =
+            builder.CreateAnd(inputSelected, builder.CreateICmpULE(column, builder.CreateAdd(selectionColumn, builder.getSize(kernelWidth / 2U))));
+        inputSelected =
+            builder.CreateAnd(inputSelected, builder.CreateICmpULE(selectionColumn, builder.CreateAdd(column, builder.getSize(kernelWidth / 2U))));
+        return builder.CreateOr(outputSelected, inputSelected);
+    }
+
+    Value * horizontalInitializationSelected(Value * row) const {
+        Value * selected = builder.CreateAnd(isOutputSelection(), builder.CreateICmpEQ(row, selectionRow));
+        Value * operationStartsAtZero = builder.CreateICmpEQ(selectionColumn, builder.getSize(0));
+        if (kernelWidth == 1U && logicalOutputs < imageWidth)
+            operationStartsAtZero = builder.CreateICmpULT(selectionColumn, builder.getSize(logicalOutputs));
+        return builder.CreateAnd(selected, operationStartsAtZero);
+    }
+
+    Value * selectedInput(Value * workspaceColumn, Value * sourceInputRow) const {
+        Value * selected = builder.CreateAnd(isInputSelection(), builder.CreateICmpEQ(workspaceColumn, selectionColumn));
+        return builder.CreateAnd(selected, builder.CreateICmpEQ(sourceInputRow, selectionRow));
+    }
+
+    Value * workspaceSummarySelected(Value * row, Value * workspaceColumn) const {
+        Value * selected = builder.CreateAnd(isInputSelection(), builder.CreateICmpEQ(workspaceColumn, selectionColumn));
+        selected = builder.CreateAnd(selected, builder.CreateICmpULE(row, builder.CreateAdd(selectionRow, builder.getSize(kernelHeight / 2U))));
+        return builder.CreateAnd(selected, builder.CreateICmpULE(selectionRow, builder.CreateAdd(row, builder.getSize(kernelHeight / 2U))));
+    }
+
+    Value * selectedOutputCoordinate(Value * row, Value * column) const {
+        Value * selected = builder.CreateAnd(isOutputSelection(), builder.CreateICmpEQ(row, selectionRow));
+        return builder.CreateAnd(selected, builder.CreateICmpEQ(column, selectionColumn));
+    }
+
+    Value * groupRecurrenceSelected(Value * row, Value * groupStart, Value * destinationColumn, const bool destinationInsideGroup) const {
+        Value * selected = selectedOutputCoordinate(row, destinationColumn);
+        if (destinationInsideGroup)
+            selected = builder.CreateOr(selected, selectedOutputOperation(row, groupStart, logicalOutputs));
+        return selected;
+    }
+
+    void captureRgb(Value * condition, const UniformIllustrationEvent event, Value * value, const UniformIllustrationMetadata & metadata) const {
+        auto * vectorType = dyn_cast<FixedVectorType>(value->getType());
+        if (vectorType == nullptr || vectorType->getNumElements() != 4U)
+            throw std::logic_error("Uniform illustration RGB projection requires four elements");
+        Value * rgb = builder.CreateShuffleVector(value, UndefValue::get(vectorType), ArrayRef<int>({0, 1, 2}));
+        capture(condition, event, rgb, metadata);
+    }
+
+    void captureDirect(Value * condition, const UniformIllustrationEvent event, Value * value, const UniformIllustrationMetadata & metadata) const {
+        capture(condition, event, value, metadata);
+    }
+
+    UniformIllustrationMetadata metadata(
+        const UniformIllustrationPath path,
+        Value * outputRow,
+        Value * outputColumn = nullptr,
+        Value * groupStart = nullptr,
+        Value * workspaceColumn = nullptr,
+        Value * sourceInputRow = nullptr,
+        Value * recurrenceSource = nullptr,
+        Value * recurrenceDestination = nullptr,
+        const std::uint32_t channel = NoUniformIllustrationChannel
+    ) const {
+        Value * absent = builder.getSize(NoUniformIllustrationCoordinate);
+        return {
+            path,
+            channel,
+            outputRow == nullptr ? absent : outputRow,
+            outputColumn == nullptr ? absent : outputColumn,
+            groupStart == nullptr ? absent : groupStart,
+            workspaceColumn == nullptr ? absent : workspaceColumn,
+            sourceInputRow == nullptr ? absent : sourceInputRow,
+            recurrenceSource == nullptr ? absent : recurrenceSource,
+            recurrenceDestination == nullptr ? absent : recurrenceDestination,
+        };
+    }
+
+   private:
+    Value * isInputSelection() const {
+        return builder.CreateICmpEQ(selectionKind, builder.getInt32(static_cast<std::uint32_t>(ConvFilterIllustrationSelectionKind::Input)));
+    }
+
+    Value * isOutputSelection() const {
+        return builder.CreateICmpEQ(selectionKind, builder.getInt32(static_cast<std::uint32_t>(ConvFilterIllustrationSelectionKind::Output)));
+    }
+
+    void capture(Value * condition, const UniformIllustrationEvent event, Value * value, const UniformIllustrationMetadata & metadata) const {
+        auto * vectorType = dyn_cast<FixedVectorType>(value->getType());
+        if (vectorType == nullptr)
+            throw std::logic_error("Uniform illustration capture requires a fixed vector");
+        Type * elementType = vectorType->getElementType();
+        std::size_t elementByteCount = 0;
+        UniformIllustrationValueType valueType;
+        if (elementType->isFloatTy()) {
+            valueType = UniformIllustrationValueType::Float32;
+            elementByteCount = sizeof(float);
+        } else if (elementType->isIntegerTy(32)) {
+            valueType = UniformIllustrationValueType::Int32;
+            elementByteCount = sizeof(std::uint32_t);
+        } else if (elementType->isIntegerTy(8)) {
+            valueType = UniformIllustrationValueType::UInt8;
+            elementByteCount = sizeof(std::uint8_t);
+        } else {
+            throw std::logic_error("Uniform illustration capture element type is unsupported");
+        }
+        if (valueType != uniformIllustrationValueType(event) || elementByteCount != uniformIllustrationElementByteCount(event))
+            throw std::logic_error("Uniform illustration capture event type mismatch");
+
+        BasicBlock * captureBlock = builder.CreateBasicBlock("capture_uniform_value");
+        BasicBlock * continueBlock = builder.CreateBasicBlock("after_uniform_capture");
+        builder.CreateCondBr(condition, captureBlock, continueBlock);
+        builder.SetInsertPoint(captureBlock);
+        Value * storage = builder.CreateAllocaAtEntryPoint(value->getType());
+        builder.CreateStore(value, storage);
+        builder.CreateCall(
+            captureFunction->getFunctionType(),
+            captureFunction,
+            {captureContext,
+             builder.getInt32(static_cast<std::uint32_t>(event)),
+             builder.getInt32(static_cast<std::uint32_t>(metadata.path)),
+             builder.getInt32(metadata.channel),
+             builder.getSize(vectorType->getNumElements()),
+             builder.getSize(elementByteCount),
+             builder.CreatePointerCast(storage, builder.getInt8PtrTy()),
+             metadata.outputRow,
+             metadata.outputColumn,
+             metadata.groupStart,
+             metadata.workspaceColumn,
+             metadata.sourceInputRow,
+             metadata.recurrenceSource,
+             metadata.recurrenceDestination}
+        );
+        builder.CreateBr(continueBlock);
+        builder.SetInsertPoint(continueBlock);
+    }
+
+    KernelBuilder & builder;
+    Value * const captureContext;
+    Value * const selectionKind;
+    Value * const selectionRow;
+    Value * const selectionColumn;
+    const unsigned imageWidth;
+    const unsigned kernelWidth;
+    const unsigned kernelHeight;
+    const unsigned logicalOutputs;
+    Function * captureFunction = nullptr;
+};
 
 class UniformConvolutionKernel final : public SegmentOrientedKernel {
    public:
@@ -43,18 +270,17 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         Scalar * outputPixels,
         Scalar * workspace,
         const UniformKernelConfiguration & configuration,
-        const std::string & persistentIdentity
+        const std::string & persistentIdentity,
+        const IllustrationScalars illustration = {}
     )
         : SegmentOrientedKernel(
               typeSystem,
-              "uniform_convolution_" + std::to_string(configuration.imageWidth) + "x" + std::to_string(configuration.imageHeight) + "_k"
-                  + std::to_string(configuration.kernelHeight) + "x" + std::to_string(configuration.kernelWidth) + "_w"
-                  + std::to_string(floatBits(configuration.weight)) + "_c" + persistentIdentity,
+              std::string(illustration ? "illustrated_uniform_convolution_" : "uniform_convolution_") + std::to_string(configuration.imageWidth) + "x"
+                  + std::to_string(configuration.imageHeight) + "_k" + std::to_string(configuration.kernelHeight) + "x"
+                  + std::to_string(configuration.kernelWidth) + "_w" + std::to_string(floatBits(configuration.weight)) + "_c" + persistentIdentity,
               {Binding{"triggerStream", triggerStream}},
               {},
-              {Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels},
-               Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels},
-               Binding{typeSystem.getInt8PtrTy(), "workspace", workspace}},
+              uniformScalarBindings(typeSystem, inputPixels, outputPixels, workspace, illustration),
               {},
               {}
           ),
@@ -62,11 +288,37 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
           imageHeight(configuration.imageHeight),
           kernelHeight(configuration.kernelHeight),
           kernelWidth(configuration.kernelWidth),
-          uniformWeight(configuration.weight) {
+          uniformWeight(configuration.weight),
+          illustrated(static_cast<bool>(illustration)) {
         addAttribute(SideEffecting());
     }
 
    private:
+    void linkExternalMethods(KernelBuilder & builder) final {
+        SegmentOrientedKernel::linkExternalMethods(builder);
+        if (!illustrated)
+            return;
+        auto * captureType = FunctionType::get(
+            builder.getVoidTy(),
+            {builder.getInt8PtrTy(),
+             builder.getInt32Ty(),
+             builder.getInt32Ty(),
+             builder.getInt32Ty(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getInt8PtrTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy()},
+            false
+        );
+        builder.LinkFunction("captureUniformConvFilterValue", captureType, reinterpret_cast<void *>(&captureUniformConvFilterValue));
+    }
+
     Value * pixelByteOffset(KernelBuilder & builder, Value * row, Value * column, const unsigned channel) const {
         Value * offset = builder.CreateMul(row, builder.getSize(imageWidth));
         offset = builder.CreateAdd(offset, column);
@@ -74,14 +326,35 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         return builder.CreateAdd(offset, builder.getSize(channel));
     }
 
-    Value * convertWindowSum(KernelBuilder & builder, Value * sum, const unsigned laneCount) const {
+    Value * convertWindowSum(
+        KernelBuilder & builder,
+        Value * sum,
+        const unsigned laneCount,
+        UniformIllustrationEmitter * illustration,
+        Value * illustrationCondition,
+        Value * weightedIllustrationCondition,
+        const UniformIllustrationMetadata & metadata,
+        const bool grouped
+    ) const {
         auto * integerType = FixedVectorType::get(builder.getInt32Ty(), laneCount);
+        if (illustration != nullptr) {
+            if (grouped)
+                illustration->captureDirect(illustrationCondition, UniformIllustrationEvent::GroupSum, sum, metadata);
+            else
+                illustration->captureRgb(illustrationCondition, UniformIllustrationEvent::SingleSum, sum, metadata);
+        }
         if (uniformWeight <= 0.0F)
             return Constant::getNullValue(integerType);
         auto * floatType = FixedVectorType::get(builder.getFloatTy(), laneCount);
         Value * weighted = builder.CreateFMul(
             builder.CreateSIToFP(sum, floatType), builder.getSplat(laneCount, ConstantFP::get(builder.getFloatTy(), uniformWeight))
         );
+        if (illustration != nullptr) {
+            if (grouped)
+                illustration->captureDirect(weightedIllustrationCondition, UniformIllustrationEvent::GroupWeighted, weighted, metadata);
+            else
+                illustration->captureRgb(weightedIllustrationCondition, UniformIllustrationEvent::SingleWeighted, weighted, metadata);
+        }
         Value * maximum = builder.getSplat(laneCount, ConstantFP::get(builder.getFloatTy(), 255.0F));
         Value * rounding = builder.getSplat(laneCount, ConstantFP::get(builder.getFloatTy(), 0.5F));
         Value * bounded = builder.CreateSelect(builder.CreateFCmpOGT(weighted, maximum), maximum, weighted);
@@ -95,13 +368,25 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * columnGroupStart,
         const std::array<Value *, ColorChannelCount> & roundedChannels,
-        const unsigned laneCount
+        const unsigned laneCount,
+        UniformIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
         auto * channelByteType = FixedVectorType::get(builder.getInt8Ty(), laneCount);
         auto * interleavedType = FixedVectorType::get(builder.getInt8Ty(), laneCount * ColorChannelCount);
         std::array<Value *, ColorChannelCount> channelBytes;
         for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
             channelBytes[channel] = builder.CreateTrunc(roundedChannels[channel], channelByteType);
+            if (illustration != nullptr) {
+                illustration->captureDirect(
+                    illustrationCondition,
+                    UniformIllustrationEvent::GroupOutputBytes,
+                    channelBytes[channel],
+                    illustration->metadata(
+                        UniformIllustrationPath::AdjacentOutputs, row, columnGroupStart, columnGroupStart, nullptr, nullptr, nullptr, nullptr, channel
+                    )
+                );
+            }
         }
         SmallVector<int, 16> redGreenIndexes;
         for (unsigned lane = 0; lane < laneCount; ++lane) {
@@ -122,6 +407,14 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
             interleavedIndexes.push_back(static_cast<int>(laneCount * 2U + lane));
         }
         Value * interleavedBytes = builder.CreateShuffleVector(redGreenBytes, blueBytes, interleavedIndexes);
+        if (illustration != nullptr) {
+            illustration->captureDirect(
+                illustrationCondition,
+                UniformIllustrationEvent::GroupPackedOutput,
+                interleavedBytes,
+                illustration->metadata(UniformIllustrationPath::AdjacentOutputs, row, columnGroupStart, columnGroupStart)
+            );
+        }
         Value * outputPointer = builder.CreatePointerCast(
             builder.CreateGEP(builder.getInt8Ty(), outputPixels, pixelByteOffset(builder, row, columnGroupStart, 0)), interleavedType->getPointerTo()
         );
@@ -134,7 +427,7 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         return builder.CreateMul(column, builder.getSize(4));
     }
 
-    Value * loadPixel(KernelBuilder & builder, Value * inputPixels, Value * row, Value * column) const {
+    Value * loadPixel(KernelBuilder & builder, Value * inputPixels, Value * row, Value * column, Value ** packedValue = nullptr) const {
         auto * vectorType = FixedVectorType::get(builder.getInt32Ty(), 4);
         auto * packedType = FixedVectorType::get(builder.getInt8Ty(), ColorChannelCount);
         Value * inputPointer = builder.CreatePointerCast(
@@ -142,6 +435,8 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         );
         LoadInst * packedBytes = builder.CreateLoad(packedType, inputPointer);
         packedBytes->setAlignment(Align(1));
+        if (packedValue != nullptr)
+            *packedValue = packedBytes;
         Value * withPadding = builder.CreateShuffleVector(packedBytes, UndefValue::get(packedType), ArrayRef<int>({0, 1, 2, -1}));
         return builder.CreateZExt(withPadding, vectorType);
     }
@@ -165,28 +460,77 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         store->setAlignment(Align(1));
     }
 
-    Value * adjustHorizontalSum(KernelBuilder & builder, Value * sum, Value * workspace, Value * column, Value * valid, const bool addition) const {
+    Value * adjustHorizontalSum(
+        KernelBuilder & builder,
+        Value * sum,
+        Value * workspace,
+        Value * column,
+        Value * valid,
+        const bool addition,
+        UniformIllustrationEmitter * illustration,
+        Value * row,
+        Value * recurrenceSource,
+        Value * illustrationCondition
+    ) const {
         BasicBlock * unchangedBlock = builder.GetInsertBlock();
         BasicBlock * adjustBlock = builder.CreateBasicBlock(addition ? "add_entering_column" : "subtract_leaving_column");
         BasicBlock * joinBlock = builder.CreateBasicBlock("column_adjustment_join");
         builder.CreateCondBr(valid, adjustBlock, joinBlock);
         builder.SetInsertPoint(adjustBlock);
         Value * columnSum = loadWorkspace(builder, workspace, column);
+        if (illustration != nullptr) {
+            const UniformIllustrationEvent event =
+                addition ? UniformIllustrationEvent::HorizontalEnteringOperand : UniformIllustrationEvent::HorizontalLeavingOperand;
+            Value * operandCondition = illustrationCondition;
+            if (addition)
+                operandCondition = builder.CreateOr(operandCondition, illustration->workspaceSummarySelected(row, column));
+            illustration->captureRgb(
+                operandCondition,
+                event,
+                columnSum,
+                illustration->metadata(
+                    UniformIllustrationPath::SingleOutput,
+                    row,
+                    recurrenceSource,
+                    nullptr,
+                    column,
+                    nullptr,
+                    recurrenceSource,
+                    builder.CreateAdd(recurrenceSource, builder.getSize(1))
+                )
+            );
+        }
         Value * adjusted = addition ? builder.CreateAdd(sum, columnSum) : builder.CreateSub(sum, columnSum);
+        BasicBlock * adjustedBlock = builder.GetInsertBlock();
         builder.CreateBr(joinBlock);
         builder.SetInsertPoint(joinBlock);
         PHINode * selectedSum = builder.CreatePHI(sum->getType(), 2);
         selectedSum->addIncoming(sum, unchangedBlock);
-        selectedSum->addIncoming(adjusted, adjustBlock);
+        selectedSum->addIncoming(adjusted, adjustedBlock);
         return selectedSum;
     }
 
-    void storeSinglePixel(KernelBuilder & builder, Value * outputPixels, Value * row, Value * column, Value * sum) const {
-        Value * rounded = convertWindowSum(builder, sum, 4);
+    void storeSinglePixel(
+        KernelBuilder & builder,
+        Value * outputPixels,
+        Value * row,
+        Value * column,
+        Value * sum,
+        UniformIllustrationEmitter * illustration,
+        Value * illustrationCondition,
+        Value * weightedIllustrationCondition
+    ) const {
+        const UniformIllustrationMetadata metadata =
+            illustration == nullptr ? UniformIllustrationMetadata{} : illustration->metadata(UniformIllustrationPath::SingleOutput, row, column);
+        Value * rounded = convertWindowSum(builder, sum, 4, illustration, illustrationCondition, weightedIllustrationCondition, metadata, false);
         auto * channelType = FixedVectorType::get(builder.getInt8Ty(), 4);
         auto * packedType = FixedVectorType::get(builder.getInt8Ty(), ColorChannelCount);
         Value * channelBytes = builder.CreateTrunc(rounded, channelType);
         Value * packedBytes = builder.CreateShuffleVector(channelBytes, UndefValue::get(channelType), ArrayRef<int>({0, 1, 2}));
+        if (illustration != nullptr) {
+            illustration->captureRgb(illustrationCondition, UniformIllustrationEvent::SingleOutputBytes, channelBytes, metadata);
+            illustration->captureDirect(illustrationCondition, UniformIllustrationEvent::SinglePackedOutput, packedBytes, metadata);
+        }
         Value * outputPointer = builder.CreatePointerCast(
             builder.CreateGEP(builder.getInt8Ty(), outputPixels, pixelByteOffset(builder, row, column, 0)), packedType->getPointerTo()
         );
@@ -199,8 +543,24 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         Value * outputPixels = builder.getScalarField("outputPixels");
         Value * workspace = builder.CreatePointerCast(builder.getScalarField("workspace"), builder.getInt32Ty()->getPointerTo());
         auto * vectorType = FixedVectorType::get(builder.getInt32Ty(), 4);
+        const unsigned outputLaneCount = builder.getBitBlockWidth() / 32U;
         const unsigned initialRowCount = std::min(imageHeight, kernelHeight / 2U + 1U);
         const unsigned initialColumnCount = std::min(imageWidth, kernelWidth / 2U + 1U);
+        std::optional<UniformIllustrationEmitter> illustration;
+        if (illustrated) {
+            illustration.emplace(
+                builder,
+                builder.getScalarField("captureContext"),
+                builder.getScalarField("selectionKind"),
+                builder.getScalarField("selectionRow"),
+                builder.getScalarField("selectionColumn"),
+                imageWidth,
+                kernelWidth,
+                kernelHeight,
+                outputLaneCount
+            );
+        }
+        UniformIllustrationEmitter * const illustrationEmitter = illustration ? &*illustration : nullptr;
 
         BasicBlock * entry = builder.GetInsertBlock();
         BasicBlock * initializeColumns = builder.CreateBasicBlock("initialize_columns");
@@ -217,7 +577,18 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         initialRow->addIncoming(builder.getSize(0), initializeColumns);
         PHINode * initialSum = builder.CreatePHI(vectorType, 2);
         initialSum->addIncoming(Constant::getNullValue(vectorType), initializeColumns);
-        Value * nextInitialSum = builder.CreateAdd(initialSum, loadPixel(builder, inputPixels, initialRow, initialColumn));
+        Value * packedInitialPixel = nullptr;
+        Value * initialPixel =
+            loadPixel(builder, inputPixels, initialRow, initialColumn, illustrationEmitter == nullptr ? nullptr : &packedInitialPixel);
+        if (illustrationEmitter != nullptr) {
+            Value * condition = illustrationEmitter->selectedInput(initialColumn, initialRow);
+            const auto metadata = illustrationEmitter->metadata(
+                UniformIllustrationPath::ColumnInitialization, builder.getSize(0), nullptr, nullptr, initialColumn, initialRow
+            );
+            illustrationEmitter->captureDirect(condition, UniformIllustrationEvent::PackedInput, packedInitialPixel, metadata);
+            illustrationEmitter->captureRgb(condition, UniformIllustrationEvent::InputRgb, initialPixel, metadata);
+        }
+        Value * nextInitialSum = builder.CreateAdd(initialSum, initialPixel);
         Value * nextInitialRow = builder.CreateAdd(initialRow, builder.getSize(1));
         BasicBlock * initialRowBack = builder.GetInsertBlock();
         builder.CreateCondBr(builder.CreateICmpULT(nextInitialRow, builder.getSize(initialRowCount)), initializeRows, columnInitialized);
@@ -245,7 +616,29 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         windowColumn->addIncoming(builder.getSize(0), rowLoop);
         PHINode * windowSum = builder.CreatePHI(vectorType, 2);
         windowSum->addIncoming(Constant::getNullValue(vectorType), rowLoop);
-        Value * nextWindowSum = builder.CreateAdd(windowSum, loadWorkspace(builder, workspace, windowColumn));
+        Value * workspaceOperand = loadWorkspace(builder, workspace, windowColumn);
+        Value * horizontalInitializationCondition = nullptr;
+        Value * horizontalOperandCondition = nullptr;
+        UniformIllustrationMetadata horizontalInitializationMetadata{};
+        if (illustrationEmitter != nullptr) {
+            horizontalInitializationCondition = illustrationEmitter->horizontalInitializationSelected(row);
+            horizontalOperandCondition =
+                builder.CreateOr(horizontalInitializationCondition, illustrationEmitter->workspaceSummarySelected(row, windowColumn));
+            horizontalInitializationMetadata =
+                illustrationEmitter->metadata(UniformIllustrationPath::WindowInitialization, row, builder.getSize(0), nullptr, windowColumn);
+            illustrationEmitter->captureRgb(
+                horizontalOperandCondition, UniformIllustrationEvent::HorizontalInitialOperand, workspaceOperand, horizontalInitializationMetadata
+            );
+        }
+        Value * nextWindowSum = builder.CreateAdd(windowSum, workspaceOperand);
+        if (illustrationEmitter != nullptr) {
+            illustrationEmitter->captureRgb(
+                horizontalInitializationCondition,
+                UniformIllustrationEvent::HorizontalInitialAfterAdd,
+                nextWindowSum,
+                horizontalInitializationMetadata
+            );
+        }
         Value * nextWindowColumn = builder.CreateAdd(windowColumn, builder.getSize(1));
         BasicBlock * windowBack = builder.GetInsertBlock();
         builder.CreateCondBr(builder.CreateICmpULT(nextWindowColumn, builder.getSize(initialColumnCount)), initializeHorizontal, horizontalReady);
@@ -261,7 +654,6 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         column->addIncoming(builder.getSize(0), horizontalReady);
         PHINode * rollingSum = builder.CreatePHI(vectorType, 2);
         rollingSum->addIncoming(nextWindowSum, horizontalReady);
-        const unsigned outputLaneCount = builder.getBitBlockWidth() / 32U;
         const unsigned horizontalRadius = kernelWidth / 2U;
         Value * groupEligible = builder.CreateICmpUGE(column, builder.getSize(horizontalRadius));
         groupEligible = builder.CreateAnd(
@@ -276,14 +668,47 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
         builder.SetInsertPoint(groupBlock);
         std::array<Value *, ColorChannelCount> groupedChannels;
         auto * outputVectorType = FixedVectorType::get(builder.getInt32Ty(), outputLaneCount);
+        Value * groupIllustrationCondition =
+            illustrationEmitter == nullptr ? nullptr : illustrationEmitter->selectedOperation(row, column, outputLaneCount);
+        Value * groupWeightedIllustrationCondition =
+            illustrationEmitter == nullptr ? nullptr : illustrationEmitter->selectedOutputOperation(row, column, outputLaneCount);
         Value * nextGroupSum = rollingSum;
         SmallVector<Value *, 16> pixelSums(outputLaneCount);
         for (unsigned lane = 0; lane < outputLaneCount; ++lane) {
             pixelSums[lane] = nextGroupSum;
             Value * removeColumn = builder.CreateAdd(builder.CreateSub(column, builder.getSize(horizontalRadius)), builder.getSize(lane));
             Value * addColumn = builder.CreateAdd(column, builder.getSize(horizontalRadius + lane + 1U));
-            nextGroupSum = builder.CreateSub(nextGroupSum, loadWorkspace(builder, workspace, removeColumn));
-            nextGroupSum = builder.CreateAdd(nextGroupSum, loadWorkspace(builder, workspace, addColumn));
+            Value * recurrenceSource = builder.CreateAdd(column, builder.getSize(lane));
+            Value * recurrenceDestination = builder.CreateAdd(recurrenceSource, builder.getSize(1));
+            Value * recurrenceCondition =
+                illustrationEmitter == nullptr
+                    ? nullptr
+                    : illustrationEmitter->groupRecurrenceSelected(row, column, recurrenceDestination, lane + 1U < outputLaneCount);
+            Value * leavingColumnSum = loadWorkspace(builder, workspace, removeColumn);
+            if (illustrationEmitter != nullptr) {
+                illustrationEmitter->captureRgb(
+                    recurrenceCondition,
+                    UniformIllustrationEvent::HorizontalLeavingOperand,
+                    leavingColumnSum,
+                    illustrationEmitter->metadata(
+                        UniformIllustrationPath::AdjacentOutputs, row, nullptr, column, removeColumn, nullptr, recurrenceSource, recurrenceDestination
+                    )
+                );
+            }
+            nextGroupSum = builder.CreateSub(nextGroupSum, leavingColumnSum);
+            Value * enteringColumnSum = loadWorkspace(builder, workspace, addColumn);
+            if (illustrationEmitter != nullptr) {
+                Value * operandCondition = builder.CreateOr(recurrenceCondition, illustrationEmitter->workspaceSummarySelected(row, addColumn));
+                illustrationEmitter->captureRgb(
+                    operandCondition,
+                    UniformIllustrationEvent::HorizontalEnteringOperand,
+                    enteringColumnSum,
+                    illustrationEmitter->metadata(
+                        UniformIllustrationPath::AdjacentOutputs, row, nullptr, column, addColumn, nullptr, recurrenceSource, recurrenceDestination
+                    )
+                );
+            }
+            nextGroupSum = builder.CreateAdd(nextGroupSum, enteringColumnSum);
         }
         for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
             Value * channelSums = Constant::getNullValue(outputVectorType);
@@ -292,21 +717,48 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
                     channelSums, builder.CreateExtractElement(pixelSums[lane], builder.getInt32(channel)), builder.getInt32(lane)
                 );
             }
-            groupedChannels[channel] = convertWindowSum(builder, channelSums, outputLaneCount);
+            const UniformIllustrationMetadata metadata =
+                illustrationEmitter == nullptr
+                    ? UniformIllustrationMetadata{}
+                    : illustrationEmitter->metadata(
+                          UniformIllustrationPath::AdjacentOutputs, row, nullptr, column, nullptr, nullptr, nullptr, nullptr, channel
+                      );
+            groupedChannels[channel] = convertWindowSum(
+                builder,
+                channelSums,
+                outputLaneCount,
+                illustrationEmitter,
+                groupIllustrationCondition,
+                groupWeightedIllustrationCondition,
+                metadata,
+                true
+            );
         }
-        storePackedGroup(builder, outputPixels, row, column, groupedChannels, outputLaneCount);
+        storePackedGroup(builder, outputPixels, row, column, groupedChannels, outputLaneCount, illustrationEmitter, groupIllustrationCondition);
         Value * nextGroupedColumn = builder.CreateAdd(column, builder.getSize(outputLaneCount));
         BasicBlock * groupBack = builder.GetInsertBlock();
         builder.CreateBr(outputJoin);
 
         builder.SetInsertPoint(scalarBlock);
-        storeSinglePixel(builder, outputPixels, row, column, rollingSum);
+        Value * scalarIllustrationCondition = illustrationEmitter == nullptr ? nullptr : illustrationEmitter->selectedOperation(row, column, 1U);
+        Value * scalarWeightedIllustrationCondition =
+            illustrationEmitter == nullptr ? nullptr : illustrationEmitter->selectedOutputOperation(row, column, 1U);
+        storeSinglePixel(
+            builder, outputPixels, row, column, rollingSum, illustrationEmitter, scalarIllustrationCondition, scalarWeightedIllustrationCondition
+        );
         Value * removeValid = builder.CreateICmpUGE(column, builder.getSize(horizontalRadius));
         Value * removeColumn = builder.CreateSub(column, builder.getSize(horizontalRadius));
-        Value * nextScalarSum = adjustHorizontalSum(builder, rollingSum, workspace, removeColumn, removeValid, false);
+        Value * recurrenceDestination = builder.CreateAdd(column, builder.getSize(1));
+        Value * scalarRecurrenceCondition =
+            illustrationEmitter == nullptr ? nullptr : illustrationEmitter->selectedOutputCoordinate(row, recurrenceDestination);
+        Value * nextScalarSum = adjustHorizontalSum(
+            builder, rollingSum, workspace, removeColumn, removeValid, false, illustrationEmitter, row, column, scalarRecurrenceCondition
+        );
         Value * addColumn = builder.CreateAdd(column, builder.getSize(horizontalRadius + 1U));
         Value * addValid = builder.CreateICmpULT(addColumn, builder.getSize(imageWidth));
-        nextScalarSum = adjustHorizontalSum(builder, nextScalarSum, workspace, addColumn, addValid, true);
+        nextScalarSum = adjustHorizontalSum(
+            builder, nextScalarSum, workspace, addColumn, addValid, true, illustrationEmitter, row, column, scalarRecurrenceCondition
+        );
         Value * nextScalarColumn = builder.CreateAdd(column, builder.getSize(1));
         BasicBlock * scalarBack = builder.GetInsertBlock();
         builder.CreateBr(outputJoin);
@@ -355,8 +807,20 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
             Value * updatedColumnSum = loadWorkspace(builder, workspace, updateColumn);
             if (removeSample)
                 updatedColumnSum = builder.CreateSub(updatedColumnSum, loadPixel(builder, inputPixels, removeRow, updateColumn));
-            if (addSample)
-                updatedColumnSum = builder.CreateAdd(updatedColumnSum, loadPixel(builder, inputPixels, addRow, updateColumn));
+            if (addSample) {
+                Value * packedAddedPixel = nullptr;
+                Value * addedPixel =
+                    loadPixel(builder, inputPixels, addRow, updateColumn, illustrationEmitter == nullptr ? nullptr : &packedAddedPixel);
+                if (illustrationEmitter != nullptr) {
+                    Value * condition = illustrationEmitter->selectedInput(updateColumn, addRow);
+                    const auto metadata = illustrationEmitter->metadata(
+                        UniformIllustrationPath::ColumnUpdate, nextRow, nullptr, nullptr, updateColumn, addRow, row, nextRow
+                    );
+                    illustrationEmitter->captureDirect(condition, UniformIllustrationEvent::PackedInput, packedAddedPixel, metadata);
+                    illustrationEmitter->captureRgb(condition, UniformIllustrationEvent::InputRgb, addedPixel, metadata);
+                }
+                updatedColumnSum = builder.CreateAdd(updatedColumnSum, addedPixel);
+            }
             storeWorkspace(builder, workspace, updateColumn, updatedColumnSum);
             Value * nextUpdateColumn = builder.CreateAdd(updateColumn, builder.getSize(1));
             BasicBlock * updateBack = builder.GetInsertBlock();
@@ -378,9 +842,12 @@ class UniformConvolutionKernel final : public SegmentOrientedKernel {
     const unsigned kernelHeight;
     const unsigned kernelWidth;
     const float uniformWeight;
+    const bool illustrated;
 };
 
 using UniformFunction = void (*)(const uint8_t *, uint8_t *, uint8_t *, uint8_t *, std::size_t);
+using IllustratedUniformFunction =
+    void (*)(const uint8_t *, uint8_t *, uint8_t *, uint8_t *, std::uint32_t, std::size_t, std::size_t, uint8_t *, std::size_t);
 
 class UniformFilterImplementation final : public CompiledFilterImplementation {
    public:
@@ -436,6 +903,138 @@ class UniformFilterImplementation final : public CompiledFilterImplementation {
     UniformFunction compiledFunction = nullptr;
 };
 
+class UniformFilterIllustrationImplementation final : public CompiledFilterIllustrationImplementation {
+   public:
+    UniformFilterIllustrationImplementation(
+        std::unique_ptr<CPUDriver> cpuDriver,
+        const unsigned imageWidth,
+        const unsigned imageHeight,
+        const unsigned kernelWidth,
+        const unsigned kernelHeight,
+        const float weight,
+        const std::string & persistentIdentity
+    )
+        : driver(std::move(cpuDriver)),
+          imageWidthInPixels(imageWidth),
+          imageHeightInPixels(imageHeight),
+          kernelWidthInPixels(kernelWidth),
+          kernelHeightInPixels(kernelHeight),
+          uniformWeight(weight),
+          imageByteCount(checkedImageByteCount(imageWidth, imageHeight)),
+          workspaceByteCount(checkedUniformWorkspaceByteCount(imageWidth)),
+          logicalOutputs(driver->getBitBlockWidth() / 32U) {
+        const UniformKernelConfiguration configuration{imageWidth, imageHeight, kernelHeight, kernelWidth, weight};
+        auto pipeline = CreatePipeline(
+            *driver,
+            Input<const uint8_t *>("inputPixels"),
+            Input<uint8_t *>("outputPixels"),
+            Input<uint8_t *>("workspace"),
+            Input<uint8_t *>("captureContext"),
+            Input<std::uint32_t>("selectionKind"),
+            Input<std::size_t>("selectionRow"),
+            Input<std::size_t>("selectionColumn"),
+            Input<uint8_t *>("triggerBuffer"),
+            Input<std::size_t>("triggerLength")
+        );
+        StreamSet * triggerStream = pipeline.CreateStreamSet(1, 8);
+        pipeline.CreateKernelCall<MemorySourceKernel>(
+            pipeline.getInputScalar("triggerBuffer"), pipeline.getInputScalar("triggerLength"), triggerStream
+        );
+        const IllustrationScalars illustration{
+            pipeline.getInputScalar("captureContext"),
+            pipeline.getInputScalar("selectionKind"),
+            pipeline.getInputScalar("selectionRow"),
+            pipeline.getInputScalar("selectionColumn"),
+        };
+        pipeline.CreateKernelCall<UniformConvolutionKernel>(
+            triggerStream,
+            pipeline.getInputScalar("inputPixels"),
+            pipeline.getInputScalar("outputPixels"),
+            pipeline.getInputScalar("workspace"),
+            configuration,
+            persistentIdentity,
+            illustration
+        );
+        compiledFunction = pipeline.compile();
+    }
+
+    unsigned imageWidth() const noexcept final {
+        return imageWidthInPixels;
+    }
+
+    unsigned imageHeight() const noexcept final {
+        return imageHeightInPixels;
+    }
+
+    std::size_t workspaceSize() const noexcept final {
+        return workspaceByteCount;
+    }
+
+    std::size_t workspaceAlignment() const noexcept final {
+        return alignof(std::uint32_t);
+    }
+
+    bool apply(
+        const std::uint8_t * input, std::uint8_t * output, void * workspace, const ConvFilterIllustrationSelection selection, std::string & trace
+    ) const final {
+        assert(input != nullptr);
+        assert(output != nullptr);
+        assert(workspace != nullptr);
+        assert(reinterpret_cast<std::uintptr_t>(workspace) % alignof(std::uint32_t) == 0U);
+        switch (selection.kind) {
+        case ConvFilterIllustrationSelectionKind::Input:
+        case ConvFilterIllustrationSelectionKind::Output:
+            break;
+        default:
+            return false;
+        }
+        if (selection.row >= imageHeightInPixels || selection.column >= imageWidthInPixels)
+            return false;
+        if (!hasDisjointImageRanges(input, output, imageByteCount))
+            return false;
+
+        UniformIllustrationCaptureLog capture;
+        capture.logicalOutputs = logicalOutputs;
+        std::uint8_t triggerByte = 0;
+        compiledFunction(
+            input,
+            output,
+            static_cast<std::uint8_t *>(workspace),
+            reinterpret_cast<std::uint8_t *>(&capture),
+            static_cast<std::uint32_t>(selection.kind),
+            selection.row,
+            selection.column,
+            &triggerByte,
+            1U
+        );
+        if (capture.failure)
+            std::rethrow_exception(capture.failure);
+        const UniformIllustrationConfiguration configuration{
+            imageWidthInPixels,
+            imageHeightInPixels,
+            kernelWidthInPixels,
+            kernelHeightInPixels,
+            uniformWeight,
+            logicalOutputs,
+        };
+        std::string completeTrace = formatUniformConvFilterIllustration(configuration, selection, capture);
+        trace = std::move(completeTrace);
+        return true;
+    }
+
+   private:
+    std::unique_ptr<CPUDriver> driver;
+    const unsigned imageWidthInPixels;
+    const unsigned imageHeightInPixels;
+    const unsigned kernelWidthInPixels;
+    const unsigned kernelHeightInPixels;
+    const float uniformWeight;
+    const std::size_t imageByteCount;
+    const std::size_t workspaceByteCount;
+    const unsigned logicalOutputs;
+    IllustratedUniformFunction compiledFunction = nullptr;
+};
+
 }  // namespace
 
 std::shared_ptr<const CompiledFilterImplementation> compileUniformFilter(
@@ -448,6 +1047,20 @@ std::shared_ptr<const CompiledFilterImplementation> compileUniformFilter(
     std::string persistentIdentity
 ) {
     return std::make_shared<UniformFilterImplementation>(
+        std::move(driver), imageWidth, imageHeight, kernelWidth, kernelHeight, weight, persistentIdentity
+    );
+}
+
+std::shared_ptr<const CompiledFilterIllustrationImplementation> compileUniformFilterIllustration(
+    std::unique_ptr<CPUDriver> driver,
+    const unsigned imageWidth,
+    const unsigned imageHeight,
+    const unsigned kernelWidth,
+    const unsigned kernelHeight,
+    const float weight,
+    std::string persistentIdentity
+) {
+    return std::make_shared<UniformFilterIllustrationImplementation>(
         std::move(driver), imageWidth, imageHeight, kernelWidth, kernelHeight, weight, persistentIdentity
     );
 }

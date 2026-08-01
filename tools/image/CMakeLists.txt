@@ -3,9 +3,9 @@
 
 parabix_add_executable(
 NAME
-    bmp_demo
+    demo
 SRC
-    bmp_demo.cpp
+    demo.cpp
 DEPS
     image
     kernel.basis

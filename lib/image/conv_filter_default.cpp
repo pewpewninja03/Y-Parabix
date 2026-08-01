@@ -1,4 +1,5 @@
 #include "conv_filter_common.h"
+#include "conv_filter_default_illustration.h"
 
 #include <kernel/core/kernel.h>
 #include <kernel/core/kernel_builder.h>
@@ -12,9 +13,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -24,17 +29,13 @@ using namespace llvm;
 namespace kernel::image::internal {
 namespace {
 
-uint64_t appendBytesToHash(uint64_t hash, const void * byteData, const std::size_t byteCount) {
-    const auto * bytes = static_cast<const uint8_t *>(byteData);
-    for (std::size_t index = 0; index < byteCount; ++index) {
-        hash ^= bytes[index];
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
-
 Bindings convolutionScalarBindings(
-    LLVMTypeSystemInterface & typeSystem, Scalar * inputPixels, Scalar * outputPixels, Scalar * borderLoopWeights, Scalar * borderLoopWeightCount
+    LLVMTypeSystemInterface & typeSystem,
+    Scalar * inputPixels,
+    Scalar * outputPixels,
+    Scalar * borderLoopWeights,
+    Scalar * borderLoopWeightCount,
+    const IllustrationScalars illustration
 ) {
     Bindings bindings{
         Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels}, Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels}
@@ -43,8 +44,406 @@ Bindings convolutionScalarBindings(
         bindings.emplace_back(typeSystem.getInt8PtrTy(), "borderLoopWeights", borderLoopWeights);
         bindings.emplace_back(typeSystem.getSizeTy(), "borderLoopWeightCount", borderLoopWeightCount);
     }
+    if (illustration) {
+        bindings.emplace_back(typeSystem.getInt8PtrTy(), "captureContext", illustration.captureContext);
+        bindings.emplace_back(typeSystem.getInt32Ty(), "selectionKind", illustration.selectionKind);
+        bindings.emplace_back(typeSystem.getSizeTy(), "selectionRow", illustration.selectionRow);
+        bindings.emplace_back(typeSystem.getSizeTy(), "selectionColumn", illustration.selectionColumn);
+    }
     return bindings;
 }
+
+bool usesBorderTapLoop(const std::vector<float> & weights) {
+    return weights.size() >= 25U && std::all_of(weights.begin(), weights.end(), [](const float weight) { return weight != 0.0F; });
+}
+
+class DefaultIllustrationEmitter {
+   public:
+    DefaultIllustrationEmitter(
+        KernelBuilder & builder,
+        Value * captureContext,
+        Value * selectionKind,
+        Value * selectionRow,
+        Value * selectionColumn,
+        const unsigned imageWidth,
+        const unsigned kernelWidth,
+        const unsigned kernelHeight,
+        const std::vector<float> & weights,
+        const bool useBorderTapLoop,
+        const unsigned laneCount
+    )
+        : builder(builder),
+          captureContext(captureContext),
+          selectionKind(selectionKind),
+          selectionRow(selectionRow),
+          selectionColumn(selectionColumn),
+          imageWidth(imageWidth),
+          kernelWidth(kernelWidth),
+          kernelHeight(kernelHeight),
+          weights(weights),
+          useBorderTapLoop(useBorderTapLoop),
+          laneCount(laneCount) {
+        captureFunction = builder.getModule()->getFunction("captureDefaultConvFilterValue");
+        assert(captureFunction != nullptr);
+    }
+
+    Value * selectedGroup(Value * row, Value * columnGroupStart) const {
+        Value * selected = builder.CreateAnd(isOutputSelection(), outputSelectionMatchesGroup(row, columnGroupStart));
+        Value * inputGroup = builder.getInt1(false);
+        for (unsigned position = 0; position < laneCount; ++position) {
+            Value * column = builder.CreateAdd(columnGroupStart, builder.getSize(position));
+            Value * positionSelected =
+                builder.CreateAnd(builder.CreateICmpULT(column, builder.getSize(imageWidth)), inputSelectionAffectsPosition(row, column));
+            inputGroup = builder.CreateOr(inputGroup, positionSelected);
+        }
+        return builder.CreateOr(selected, builder.CreateAnd(isInputSelection(), inputGroup));
+    }
+
+    Value * selectedTap(Value * row, Value * columnGroupStart, Value * kernelRow, Value * kernelColumn) const {
+        Value * selected = builder.CreateAnd(isOutputSelection(), outputSelectionMatchesGroup(row, columnGroupStart));
+        Value * inputTap = builder.getInt1(false);
+        for (unsigned position = 0; position < laneCount; ++position) {
+            Value * column = builder.CreateAdd(columnGroupStart, builder.getSize(position));
+            Value * relationship = inputSelectionMatchesTap(row, column, kernelRow, kernelColumn);
+            relationship = builder.CreateAnd(relationship, builder.CreateICmpULT(column, builder.getSize(imageWidth)));
+            inputTap = builder.CreateOr(inputTap, relationship);
+        }
+        return builder.CreateOr(selected, builder.CreateAnd(isInputSelection(), inputTap));
+    }
+
+    void captureGroup(Value * condition, Value * row, Value * columnGroupStart) const {
+        capture(
+            condition,
+            DefaultIllustrationEvent::OutputColumns,
+            outputColumns(columnGroupStart),
+            builder.getSize(0),
+            builder.getSize(0),
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+        capture(
+            condition,
+            DefaultIllustrationEvent::SelectedPositions,
+            selectedPositionMask(row, columnGroupStart),
+            builder.getSize(0),
+            builder.getSize(0),
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+        capture(
+            condition,
+            DefaultIllustrationEvent::OutputValid,
+            outputMask(columnGroupStart),
+            builder.getSize(0),
+            builder.getSize(0),
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+    }
+
+    void captureInteriorTap(
+        Value * condition,
+        Value * row,
+        Value * columnGroupStart,
+        const unsigned kernelRow,
+        const unsigned kernelColumn,
+        Value * packedInput,
+        const std::array<Value *, ColorChannelCount> & samples,
+        Value * weight,
+        const std::array<Value *, ColorChannelCount> & accumulators
+    ) const {
+        Value * kernelRowValue = builder.getSize(kernelRow);
+        Value * kernelColumnValue = builder.getSize(kernelColumn);
+        captureTapCoordinates(
+            condition,
+            row,
+            columnGroupStart,
+            kernelRowValue,
+            kernelColumnValue,
+            Constant::getAllOnesValue(FixedVectorType::get(builder.getInt8Ty(), laneCount))
+        );
+        capture(
+            condition,
+            DefaultIllustrationEvent::PackedInput,
+            packedInput,
+            kernelRowValue,
+            kernelColumnValue,
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+        for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
+            capture(condition, DefaultIllustrationEvent::Sample, samples[channel], kernelRowValue, kernelColumnValue, channel, row, columnGroupStart);
+        }
+        capture(
+            condition,
+            DefaultIllustrationEvent::Weight,
+            weight,
+            kernelRowValue,
+            kernelColumnValue,
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+        for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
+            capture(
+                condition,
+                DefaultIllustrationEvent::Accumulator,
+                accumulators[channel],
+                kernelRowValue,
+                kernelColumnValue,
+                channel,
+                row,
+                columnGroupStart
+            );
+        }
+    }
+
+    void captureBorderTap(
+        Value * condition,
+        Value * row,
+        Value * columnGroupStart,
+        Value * kernelRow,
+        Value * kernelColumn,
+        const unsigned channel,
+        Value * sourceValid,
+        Value * sample,
+        Value * weight,
+        Value * accumulator
+    ) const {
+        if (channel == 0U)
+            captureTapCoordinates(condition, row, columnGroupStart, kernelRow, kernelColumn, sourceValid);
+        capture(condition, DefaultIllustrationEvent::Sample, sample, kernelRow, kernelColumn, channel, row, columnGroupStart);
+        if (channel == 0U) {
+            capture(
+                condition, DefaultIllustrationEvent::Weight, weight, kernelRow, kernelColumn, NoDefaultIllustrationChannel, row, columnGroupStart
+            );
+        }
+        capture(condition, DefaultIllustrationEvent::Accumulator, accumulator, kernelRow, kernelColumn, channel, row, columnGroupStart);
+    }
+
+    void captureValue(
+        Value * condition, const DefaultIllustrationEvent event, Value * value, const std::uint32_t channel, Value * row, Value * columnGroupStart
+    ) const {
+        capture(condition, event, value, builder.getSize(0), builder.getSize(0), channel, row, columnGroupStart);
+    }
+
+   private:
+    Value * isInputSelection() const {
+        return builder.CreateICmpEQ(selectionKind, builder.getInt32(static_cast<std::uint32_t>(ConvFilterIllustrationSelectionKind::Input)));
+    }
+
+    Value * isOutputSelection() const {
+        return builder.CreateICmpEQ(selectionKind, builder.getInt32(static_cast<std::uint32_t>(ConvFilterIllustrationSelectionKind::Output)));
+    }
+
+    Value * outputSelectionMatchesGroup(Value * row, Value * columnGroupStart) const {
+        Value * sameRow = builder.CreateICmpEQ(row, selectionRow);
+        Value * startsBefore = builder.CreateICmpULE(columnGroupStart, selectionColumn);
+        Value * endsAfter = builder.CreateICmpULT(selectionColumn, builder.CreateAdd(columnGroupStart, builder.getSize(laneCount)));
+        return builder.CreateAnd(sameRow, builder.CreateAnd(startsBefore, endsAfter));
+    }
+
+    Value * inputSelectionMatchesTap(Value * row, Value * column, Value * kernelRow, Value * kernelColumn) const {
+        Value * paddedInputRow = builder.CreateAdd(selectionRow, builder.getSize(kernelHeight / 2U));
+        Value * paddedInputColumn = builder.CreateAdd(selectionColumn, builder.getSize(kernelWidth / 2U));
+        Value * sameRow = builder.CreateICmpEQ(builder.CreateAdd(row, kernelRow), paddedInputRow);
+        Value * sameColumn = builder.CreateICmpEQ(builder.CreateAdd(column, kernelColumn), paddedInputColumn);
+        return builder.CreateAnd(sameRow, sameColumn);
+    }
+
+    Value * denseInputSelectionAffectsPosition(Value * row, Value * column) const {
+        Value * paddedInputRow = builder.CreateAdd(selectionRow, builder.getSize(kernelHeight / 2U));
+        Value * paddedInputColumn = builder.CreateAdd(selectionColumn, builder.getSize(kernelWidth / 2U));
+        Value * rowStartsBefore = builder.CreateICmpULE(row, paddedInputRow);
+        Value * rowEndsAfter = builder.CreateICmpULT(paddedInputRow, builder.CreateAdd(row, builder.getSize(kernelHeight)));
+        Value * columnStartsBefore = builder.CreateICmpULE(column, paddedInputColumn);
+        Value * columnEndsAfter = builder.CreateICmpULT(paddedInputColumn, builder.CreateAdd(column, builder.getSize(kernelWidth)));
+        return builder.CreateAnd(builder.CreateAnd(rowStartsBefore, rowEndsAfter), builder.CreateAnd(columnStartsBefore, columnEndsAfter));
+    }
+
+    Value * inputSelectionAffectsPosition(Value * row, Value * column) const {
+        if (useBorderTapLoop)
+            return denseInputSelectionAffectsPosition(row, column);
+        Value * selected = builder.getInt1(false);
+        for (unsigned kernelRow = 0; kernelRow < kernelHeight; ++kernelRow) {
+            for (unsigned kernelColumn = 0; kernelColumn < kernelWidth; ++kernelColumn) {
+                if (weights[static_cast<std::size_t>(kernelRow) * kernelWidth + kernelColumn] == 0.0F)
+                    continue;
+                selected =
+                    builder.CreateOr(selected, inputSelectionMatchesTap(row, column, builder.getSize(kernelRow), builder.getSize(kernelColumn)));
+            }
+        }
+        return selected;
+    }
+
+    Value * selectedPositionMask(Value * row, Value * columnGroupStart) const {
+        auto * type = FixedVectorType::get(builder.getInt8Ty(), laneCount);
+        Value * mask = Constant::getNullValue(type);
+        for (unsigned position = 0; position < laneCount; ++position) {
+            Value * column = builder.CreateAdd(columnGroupStart, builder.getSize(position));
+            Value * outputSelected = builder.CreateAnd(builder.CreateICmpEQ(row, selectionRow), builder.CreateICmpEQ(column, selectionColumn));
+            Value * inputSelected =
+                builder.CreateAnd(builder.CreateICmpULT(column, builder.getSize(imageWidth)), inputSelectionAffectsPosition(row, column));
+            Value * selected =
+                builder.CreateOr(builder.CreateAnd(isOutputSelection(), outputSelected), builder.CreateAnd(isInputSelection(), inputSelected));
+            mask = builder.CreateInsertElement(mask, builder.CreateZExt(selected, builder.getInt8Ty()), builder.getInt32(position));
+        }
+        return mask;
+    }
+
+    Value * outputMask(Value * columnGroupStart) const {
+        auto * type = FixedVectorType::get(builder.getInt8Ty(), laneCount);
+        Value * mask = Constant::getNullValue(type);
+        for (unsigned position = 0; position < laneCount; ++position) {
+            Value * column = builder.CreateAdd(columnGroupStart, builder.getSize(position));
+            Value * valid = builder.CreateICmpULT(column, builder.getSize(imageWidth));
+            mask = builder.CreateInsertElement(mask, builder.CreateZExt(valid, builder.getInt8Ty()), builder.getInt32(position));
+        }
+        return mask;
+    }
+
+    Value * outputColumns(Value * columnGroupStart) const {
+        auto * type = FixedVectorType::get(builder.getInt32Ty(), laneCount);
+        Value * columns = Constant::getNullValue(type);
+        for (unsigned position = 0; position < laneCount; ++position) {
+            Value * column = builder.CreateTrunc(builder.CreateAdd(columnGroupStart, builder.getSize(position)), builder.getInt32Ty());
+            columns = builder.CreateInsertElement(columns, column, builder.getInt32(position));
+        }
+        return columns;
+    }
+
+    Value * sourceRows(Value * row, Value * kernelRow) const {
+        auto * type = FixedVectorType::get(builder.getInt64Ty(), laneCount);
+        Value * coordinates = Constant::getNullValue(type);
+        Value * coordinate = builder.CreateSub(
+            builder.CreateAdd(builder.CreateZExtOrTrunc(row, builder.getInt64Ty()), builder.CreateZExtOrTrunc(kernelRow, builder.getInt64Ty())),
+            builder.getInt64(kernelHeight / 2U)
+        );
+        for (unsigned position = 0; position < laneCount; ++position)
+            coordinates = builder.CreateInsertElement(coordinates, coordinate, builder.getInt32(position));
+        return coordinates;
+    }
+
+    Value * sourceColumns(Value * columnGroupStart, Value * kernelColumn) const {
+        auto * type = FixedVectorType::get(builder.getInt64Ty(), laneCount);
+        Value * coordinates = Constant::getNullValue(type);
+        Value * firstCoordinate = builder.CreateSub(
+            builder.CreateAdd(
+                builder.CreateZExtOrTrunc(columnGroupStart, builder.getInt64Ty()), builder.CreateZExtOrTrunc(kernelColumn, builder.getInt64Ty())
+            ),
+            builder.getInt64(kernelWidth / 2U)
+        );
+        for (unsigned position = 0; position < laneCount; ++position) {
+            Value * coordinate = builder.CreateAdd(firstCoordinate, builder.getInt64(position));
+            coordinates = builder.CreateInsertElement(coordinates, coordinate, builder.getInt32(position));
+        }
+        return coordinates;
+    }
+
+    void captureTapCoordinates(
+        Value * condition, Value * row, Value * columnGroupStart, Value * kernelRow, Value * kernelColumn, Value * sourceValid
+    ) const {
+        capture(
+            condition,
+            DefaultIllustrationEvent::SourceRows,
+            sourceRows(row, kernelRow),
+            kernelRow,
+            kernelColumn,
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+        capture(
+            condition,
+            DefaultIllustrationEvent::SourceColumns,
+            sourceColumns(columnGroupStart, kernelColumn),
+            kernelRow,
+            kernelColumn,
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+        capture(
+            condition,
+            DefaultIllustrationEvent::SourceValid,
+            sourceValid,
+            kernelRow,
+            kernelColumn,
+            NoDefaultIllustrationChannel,
+            row,
+            columnGroupStart
+        );
+    }
+
+    void capture(
+        Value * condition,
+        const DefaultIllustrationEvent event,
+        Value * value,
+        Value * kernelRow,
+        Value * kernelColumn,
+        const std::uint32_t channel,
+        Value * row,
+        Value * columnGroupStart
+    ) const {
+        auto * vectorType = dyn_cast<FixedVectorType>(value->getType());
+        if (vectorType == nullptr)
+            throw std::logic_error("Default illustration capture requires a fixed vector");
+        Type * elementType = vectorType->getElementType();
+        std::size_t elementByteCount = 0;
+        if (elementType->isFloatTy()) {
+            elementByteCount = sizeof(float);
+        } else if (auto * integerType = dyn_cast<IntegerType>(elementType)) {
+            if (integerType->getBitWidth() % 8U != 0U)
+                throw std::logic_error("Default illustration capture requires byte-sized elements");
+            elementByteCount = integerType->getBitWidth() / 8U;
+        } else {
+            throw std::logic_error("Default illustration capture element type is unsupported");
+        }
+
+        if (elementByteCount != defaultIllustrationElementByteCount(event))
+            throw std::logic_error("Default illustration capture event type mismatch");
+
+        BasicBlock * captureBlock = builder.CreateBasicBlock("capture_default_value");
+        BasicBlock * continueBlock = builder.CreateBasicBlock("after_default_capture");
+        builder.CreateCondBr(condition, captureBlock, continueBlock);
+        builder.SetInsertPoint(captureBlock);
+        Value * storage = builder.CreateAllocaAtEntryPoint(value->getType());
+        builder.CreateStore(value, storage);
+        builder.CreateCall(
+            captureFunction->getFunctionType(),
+            captureFunction,
+            {captureContext,
+             builder.getInt32(static_cast<std::uint32_t>(event)),
+             kernelRow,
+             kernelColumn,
+             builder.getInt32(channel),
+             builder.getSize(vectorType->getNumElements()),
+             builder.getSize(elementByteCount),
+             builder.CreatePointerCast(storage, builder.getInt8PtrTy()),
+             row,
+             columnGroupStart}
+        );
+        builder.CreateBr(continueBlock);
+        builder.SetInsertPoint(continueBlock);
+    }
+
+    KernelBuilder & builder;
+    Value * const captureContext;
+    Value * const selectionKind;
+    Value * const selectionRow;
+    Value * const selectionColumn;
+    const unsigned imageWidth;
+    const unsigned kernelWidth;
+    const unsigned kernelHeight;
+    const std::vector<float> & weights;
+    const bool useBorderTapLoop;
+    const unsigned laneCount;
+    Function * captureFunction = nullptr;
+};
 
 class ConvolutionKernel final : public SegmentOrientedKernel {
    public:
@@ -55,6 +454,7 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         Scalar * outputPixels,
         Scalar * borderLoopWeights,
         Scalar * borderLoopWeightCount,
+        const IllustrationScalars illustration,
         const unsigned imageWidth,
         const unsigned imageHeight,
         const unsigned kernelHeight,
@@ -64,11 +464,17 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
     )
         : SegmentOrientedKernel(
               typeSystem,
-              "convolution_" + std::to_string(imageWidth) + "x" + std::to_string(imageHeight) + "_k" + std::to_string(kernelHeight) + "x"
-                  + std::to_string(kernelWidth) + "_h" + std::to_string(computeWeightHash(weightValues)) + "_c" + persistentIdentity,
+              std::string(illustration ? "illustrated_convolution_" : "convolution_") + std::to_string(imageWidth) + "x" + std::to_string(imageHeight)
+                  + "_k" + std::to_string(kernelHeight) + "x" + std::to_string(kernelWidth) + "_h"
+                  + std::to_string(appendKernelNameHashBytes(
+                      KernelNameHashInitialValue,
+                      weightValues.data(),
+                      checkedMultiply(weightValues.size(), sizeof(float), "default kernel-name weight byte count overflow")
+                  ))
+                  + "_c" + persistentIdentity,
               {Binding{"triggerStream", triggerStream}},
               {},
-              convolutionScalarBindings(typeSystem, inputPixels, outputPixels, borderLoopWeights, borderLoopWeightCount),
+              convolutionScalarBindings(typeSystem, inputPixels, outputPixels, borderLoopWeights, borderLoopWeightCount, illustration),
               {},
               {}
           ),
@@ -77,16 +483,31 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
           kernelHeight(kernelHeight),
           kernelWidth(kernelWidth),
           weights(std::move(weightValues)),
-          useBorderTapLoop(borderLoopWeights != nullptr) {
+          useBorderTapLoop(borderLoopWeights != nullptr),
+          illustrated(static_cast<bool>(illustration)) {
         addAttribute(SideEffecting());
     }
 
    private:
-    static uint64_t computeWeightHash(const std::vector<float> & weights) {
-        uint64_t hash = 1469598103934665603ULL;
-        hash =
-            appendBytesToHash(hash, weights.data(), checkedMultiply(weights.size(), sizeof(float), "default kernel-name weight byte count overflow"));
-        return hash;
+    void linkExternalMethods(KernelBuilder & builder) final {
+        SegmentOrientedKernel::linkExternalMethods(builder);
+        if (!illustrated)
+            return;
+        auto * captureType = FunctionType::get(
+            builder.getVoidTy(),
+            {builder.getInt8PtrTy(),
+             builder.getInt32Ty(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getInt32Ty(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getInt8PtrTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy()},
+            false
+        );
+        builder.LinkFunction("captureDefaultConvFilterValue", captureType, reinterpret_cast<void *>(&captureDefaultConvFilterValue));
     }
 
     Value * pixelByteOffset(KernelBuilder & builder, Value * row, Value * column, const unsigned channelIndex) const {
@@ -104,9 +525,12 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         const unsigned channelIndex,
         Value * kernelRow,
         Value * kernelColumn,
-        const unsigned laneCount
+        const unsigned laneCount,
+        Value ** sourceValidity
     ) const {
         Value * samples = Constant::getNullValue(FixedVectorType::get(builder.getFloatTy(), laneCount));
+        Value * sourceValid =
+            sourceValidity == nullptr ? nullptr : static_cast<Value *>(Constant::getNullValue(FixedVectorType::get(builder.getInt8Ty(), laneCount)));
         const unsigned verticalRadius = kernelHeight / 2U;
         const unsigned horizontalRadius = kernelWidth / 2U;
         for (unsigned laneIndex = 0; laneIndex < laneCount; ++laneIndex) {
@@ -126,6 +550,10 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
                     paddedColumn, builder.getSize(checkedAdd(imageWidth, horizontalRadius, "default padded column extent overflow"))
                 )
             );
+            if (sourceValid != nullptr) {
+                sourceValid =
+                    builder.CreateInsertElement(sourceValid, builder.CreateZExt(isValidLane, builder.getInt8Ty()), builder.getInt32(laneIndex));
+            }
 
             BasicBlock * zeroBlock = builder.GetInsertBlock();
             BasicBlock * loadBlock = builder.CreateBasicBlock("border_load");
@@ -148,6 +576,8 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
             selectedSample->addIncoming(sample, loadBlock);
             samples = builder.CreateInsertElement(samples, selectedSample, builder.getInt32(laneIndex));
         }
+        if (sourceValidity != nullptr)
+            *sourceValidity = sourceValid;
         return samples;
     }
 
@@ -158,7 +588,8 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         Value * columnGroupStart,
         const unsigned kernelRow,
         const unsigned kernelColumn,
-        const unsigned laneCount
+        const unsigned laneCount,
+        Value ** packedInput
     ) const {
         const unsigned verticalRadius = kernelHeight / 2U;
         const unsigned horizontalRadius = kernelWidth / 2U;
@@ -171,6 +602,8 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
             builder.CreatePointerCast(builder.CreateGEP(builder.getInt8Ty(), inputPixels, firstChannelOffset), interleavedByteType->getPointerTo());
         LoadInst * interleavedBytes = builder.CreateLoad(interleavedByteType, sourcePointer);
         interleavedBytes->setAlignment(Align(1));
+        if (packedInput != nullptr)
+            *packedInput = interleavedBytes;
 
         std::array<Value *, ColorChannelCount> channelSamples;
         auto * integerVectorType = FixedVectorType::get(builder.getInt32Ty(), laneCount);
@@ -204,7 +637,8 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         const unsigned channelIndex,
         Value * borderLoopWeights,
         Value * borderLoopWeightCount,
-        const unsigned laneCount
+        const unsigned laneCount,
+        DefaultIllustrationEmitter * illustration
     ) const {
         Value * accumulator = Constant::getNullValue(FixedVectorType::get(builder.getFloatTy(), laneCount));
         Function * multiplyAddIntrinsic = Intrinsic::getDeclaration(builder.getModule(), Intrinsic::fmuladd, {accumulator->getType()});
@@ -225,7 +659,18 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
             builder.SetInsertPoint(tapBody);
             Value * kernelRow = builder.CreateUDiv(tapIndex, builder.getSize(kernelWidth));
             Value * kernelColumn = builder.CreateURem(tapIndex, builder.getSize(kernelWidth));
-            Value * samples = loadBorderSamples(builder, inputPixels, row, columnGroupStart, channelIndex, kernelRow, kernelColumn, laneCount);
+            Value * sourceValid = nullptr;
+            Value * samples = loadBorderSamples(
+                builder,
+                inputPixels,
+                row,
+                columnGroupStart,
+                channelIndex,
+                kernelRow,
+                kernelColumn,
+                laneCount,
+                illustration == nullptr ? nullptr : &sourceValid
+            );
             Value * weightPointer = builder.CreateGEP(builder.getFloatTy(), borderLoopWeights, tapIndex);
             LoadInst * weightValue = builder.CreateLoad(builder.getFloatTy(), weightPointer);
             weightValue->setAlignment(Align(sizeof(float)));
@@ -233,6 +678,20 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
                 builder.CreateBitCast(builder.simd_fill(32, builder.CreateBitCast(weightValue, builder.getInt32Ty())), accumulator->getType());
             Value * nextAccumulator =
                 builder.CreateCall(multiplyAddIntrinsic->getFunctionType(), multiplyAddIntrinsic, {samples, weight, runningAccumulator});
+            if (illustration != nullptr) {
+                illustration->captureBorderTap(
+                    illustration->selectedTap(row, columnGroupStart, kernelRow, kernelColumn),
+                    row,
+                    columnGroupStart,
+                    kernelRow,
+                    kernelColumn,
+                    channelIndex,
+                    sourceValid,
+                    samples,
+                    weight,
+                    nextAccumulator
+                );
+            }
             Value * nextTap = builder.CreateAdd(tapIndex, builder.getSize(1));
             BasicBlock * loopBack = builder.GetInsertBlock();
             builder.CreateBr(tapLoop);
@@ -247,18 +706,46 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
                 const std::size_t weightIndex = static_cast<std::size_t>(kernelRow) * kernelWidth + kernelColumn;
                 if (weights[weightIndex] == 0.0F)
                     continue;
+                Value * sourceValid = nullptr;
                 Value * samples = loadBorderSamples(
-                    builder, inputPixels, row, columnGroupStart, channelIndex, builder.getSize(kernelRow), builder.getSize(kernelColumn), laneCount
+                    builder,
+                    inputPixels,
+                    row,
+                    columnGroupStart,
+                    channelIndex,
+                    builder.getSize(kernelRow),
+                    builder.getSize(kernelColumn),
+                    laneCount,
+                    illustration == nullptr ? nullptr : &sourceValid
                 );
                 Value * weight = builder.getSplat(laneCount, ConstantFP::get(builder.getFloatTy(), weights[weightIndex]));
                 accumulator = builder.CreateCall(multiplyAddIntrinsic->getFunctionType(), multiplyAddIntrinsic, {samples, weight, accumulator});
+                if (illustration != nullptr) {
+                    illustration->captureBorderTap(
+                        illustration->selectedTap(row, columnGroupStart, builder.getSize(kernelRow), builder.getSize(kernelColumn)),
+                        row,
+                        columnGroupStart,
+                        builder.getSize(kernelRow),
+                        builder.getSize(kernelColumn),
+                        channelIndex,
+                        sourceValid,
+                        samples,
+                        weight,
+                        accumulator
+                    );
+                }
             }
         }
         return clampAndRound(builder, accumulator, laneCount);
     }
 
     std::array<Value *, ColorChannelCount> computeInteriorChannels(
-        KernelBuilder & builder, Value * inputPixels, Value * row, Value * columnGroupStart, const unsigned laneCount
+        KernelBuilder & builder,
+        Value * inputPixels,
+        Value * row,
+        Value * columnGroupStart,
+        const unsigned laneCount,
+        DefaultIllustrationEmitter * illustration
     ) const {
         auto * floatVectorType = FixedVectorType::get(builder.getFloatTy(), laneCount);
         std::array<Value *, ColorChannelCount> accumulators;
@@ -269,11 +756,27 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
                 const std::size_t weightIndex = static_cast<std::size_t>(kernelRow) * kernelWidth + kernelColumn;
                 if (weights[weightIndex] == 0.0F)
                     continue;
-                const auto samples = loadInteriorSamples(builder, inputPixels, row, columnGroupStart, kernelRow, kernelColumn, laneCount);
+                Value * packedInput = nullptr;
+                const auto samples = loadInteriorSamples(
+                    builder, inputPixels, row, columnGroupStart, kernelRow, kernelColumn, laneCount, illustration == nullptr ? nullptr : &packedInput
+                );
                 Value * weight = builder.getSplat(laneCount, ConstantFP::get(builder.getFloatTy(), weights[weightIndex]));
                 for (unsigned channelIndex = 0; channelIndex < ColorChannelCount; ++channelIndex) {
                     accumulators[channelIndex] = builder.CreateCall(
                         multiplyAddIntrinsic->getFunctionType(), multiplyAddIntrinsic, {samples[channelIndex], weight, accumulators[channelIndex]}
+                    );
+                }
+                if (illustration != nullptr) {
+                    illustration->captureInteriorTap(
+                        illustration->selectedTap(row, columnGroupStart, builder.getSize(kernelRow), builder.getSize(kernelColumn)),
+                        row,
+                        columnGroupStart,
+                        kernelRow,
+                        kernelColumn,
+                        packedInput,
+                        samples,
+                        weight,
+                        accumulators
                     );
                 }
             }
@@ -291,12 +794,26 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         Value * columnGroupStart,
         const unsigned channelIndex,
         Value * roundedValues,
-        const unsigned laneCount
+        const unsigned laneCount,
+        DefaultIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
+        Value * storeMask = nullptr;
+        if (illustration != nullptr) {
+            auto * channelByteType = FixedVectorType::get(builder.getInt8Ty(), laneCount);
+            Value * channelBytes = builder.CreateTrunc(roundedValues, channelByteType);
+            illustration->captureValue(
+                illustrationCondition, DefaultIllustrationEvent::OutputBytes, channelBytes, channelIndex, row, columnGroupStart
+            );
+            storeMask = Constant::getNullValue(channelByteType);
+        }
         for (unsigned laneIndex = 0; laneIndex < laneCount; ++laneIndex) {
             Value * column = builder.CreateAdd(columnGroupStart, builder.getSize(laneIndex));
             Value * outputByte = builder.CreateTrunc(builder.CreateExtractElement(roundedValues, builder.getInt32(laneIndex)), builder.getInt8Ty());
             Value * isValidLane = builder.CreateICmpULT(column, builder.getSize(imageWidth));
+            if (storeMask != nullptr) {
+                storeMask = builder.CreateInsertElement(storeMask, builder.CreateZExt(isValidLane, builder.getInt8Ty()), builder.getInt32(laneIndex));
+            }
             BasicBlock * storeBlock = builder.CreateBasicBlock("store_checked");
             BasicBlock * joinBlock = builder.CreateBasicBlock("store_join");
             builder.CreateCondBr(isValidLane, storeBlock, joinBlock);
@@ -307,6 +824,11 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
             builder.CreateBr(joinBlock);
             builder.SetInsertPoint(joinBlock);
         }
+        if (illustration != nullptr && channelIndex == 0U) {
+            illustration->captureValue(
+                illustrationCondition, DefaultIllustrationEvent::StoreMask, storeMask, NoDefaultIllustrationChannel, row, columnGroupStart
+            );
+        }
     }
 
     void storeInteriorPixels(
@@ -315,13 +837,20 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * columnGroupStart,
         const std::array<Value *, ColorChannelCount> & roundedChannels,
-        const unsigned laneCount
+        const unsigned laneCount,
+        DefaultIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
         auto * channelByteType = FixedVectorType::get(builder.getInt8Ty(), laneCount);
         auto * interleavedByteType = FixedVectorType::get(builder.getInt8Ty(), laneCount * ColorChannelCount);
         std::array<Value *, ColorChannelCount> channelBytes;
         for (unsigned channelIndex = 0; channelIndex < ColorChannelCount; ++channelIndex) {
             channelBytes[channelIndex] = builder.CreateTrunc(roundedChannels[channelIndex], channelByteType);
+            if (illustration != nullptr) {
+                illustration->captureValue(
+                    illustrationCondition, DefaultIllustrationEvent::OutputBytes, channelBytes[channelIndex], channelIndex, row, columnGroupStart
+                );
+            }
         }
         SmallVector<int, 16> redGreenIndexes;
         for (unsigned laneIndex = 0; laneIndex < laneCount; ++laneIndex) {
@@ -342,12 +871,23 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
             interleavedIndexes.push_back(static_cast<int>(laneCount * 2U + laneIndex));
         }
         Value * interleavedBytes = builder.CreateShuffleVector(redGreenBytes, blueBytes, interleavedIndexes);
+        if (illustration != nullptr) {
+            illustration->captureValue(
+                illustrationCondition, DefaultIllustrationEvent::PackedOutput, interleavedBytes, NoDefaultIllustrationChannel, row, columnGroupStart
+            );
+        }
         Value * outputPointer = builder.CreatePointerCast(
             builder.CreateGEP(builder.getInt8Ty(), outputPixels, pixelByteOffset(builder, row, columnGroupStart, 0)),
             interleavedByteType->getPointerTo()
         );
         StoreInst * store = builder.CreateStore(interleavedBytes, outputPointer);
         store->setAlignment(Align(1));
+        if (illustration != nullptr) {
+            Value * storeMask = Constant::getAllOnesValue(FixedVectorType::get(builder.getInt8Ty(), laneCount));
+            illustration->captureValue(
+                illustrationCondition, DefaultIllustrationEvent::StoreMask, storeMask, NoDefaultIllustrationChannel, row, columnGroupStart
+            );
+        }
     }
 
     void generateDoSegmentMethod(KernelBuilder & builder) final {
@@ -358,6 +898,23 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         const unsigned laneCount = builder.getBitBlockWidth() / 32U;
         const unsigned verticalRadius = kernelHeight / 2U;
         const unsigned horizontalRadius = kernelWidth / 2U;
+        std::optional<DefaultIllustrationEmitter> illustration;
+        if (illustrated) {
+            illustration.emplace(
+                builder,
+                builder.getScalarField("captureContext"),
+                builder.getScalarField("selectionKind"),
+                builder.getScalarField("selectionRow"),
+                builder.getScalarField("selectionColumn"),
+                imageWidth,
+                kernelWidth,
+                kernelHeight,
+                weights,
+                useBorderTapLoop,
+                laneCount
+            );
+        }
+        DefaultIllustrationEmitter * const illustrationEmitter = illustration ? &*illustration : nullptr;
 
         BasicBlock * entry = builder.GetInsertBlock();
         BasicBlock * rowLoop = builder.CreateBasicBlock("row_loop");
@@ -375,6 +932,11 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
         builder.SetInsertPoint(columnLoop);
         PHINode * columnGroupStart = builder.CreatePHI(builder.getSizeTy(), 2);
         columnGroupStart->addIncoming(builder.getSize(0), rowLoop);
+        Value * illustrationCondition = nullptr;
+        if (illustrationEmitter != nullptr) {
+            illustrationCondition = illustrationEmitter->selectedGroup(row, columnGroupStart);
+            illustrationEmitter->captureGroup(illustrationCondition, row, columnGroupStart);
+        }
 
         Value * isInteriorGroup = builder.CreateICmpUGE(row, builder.getSize(verticalRadius));
         isInteriorGroup = builder.CreateAnd(
@@ -406,15 +968,43 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
             );
             LoadInst * interleavedBytes = builder.CreateLoad(interleavedByteType, inputPointer);
             interleavedBytes->setAlignment(Align(1));
+            if (illustrationEmitter != nullptr) {
+                illustrationEmitter->captureValue(
+                    illustrationCondition,
+                    DefaultIllustrationEvent::IdentityPackedInput,
+                    interleavedBytes,
+                    NoDefaultIllustrationChannel,
+                    row,
+                    columnGroupStart
+                );
+            }
             Value * outputPointer = builder.CreatePointerCast(
                 builder.CreateGEP(builder.getInt8Ty(), outputPixels, pixelByteOffset(builder, row, columnGroupStart, 0)),
                 interleavedByteType->getPointerTo()
             );
             StoreInst * store = builder.CreateStore(interleavedBytes, outputPointer);
             store->setAlignment(Align(1));
+            if (illustrationEmitter != nullptr) {
+                illustrationEmitter->captureValue(
+                    illustrationCondition,
+                    DefaultIllustrationEvent::IdentityPackedOutput,
+                    interleavedBytes,
+                    NoDefaultIllustrationChannel,
+                    row,
+                    columnGroupStart
+                );
+                illustrationEmitter->captureValue(
+                    illustrationCondition,
+                    DefaultIllustrationEvent::StoreMask,
+                    Constant::getAllOnesValue(FixedVectorType::get(builder.getInt8Ty(), laneCount)),
+                    NoDefaultIllustrationChannel,
+                    row,
+                    columnGroupStart
+                );
+            }
         } else {
-            const auto roundedChannels = computeInteriorChannels(builder, inputPixels, row, columnGroupStart, laneCount);
-            storeInteriorPixels(builder, outputPixels, row, columnGroupStart, roundedChannels, laneCount);
+            const auto roundedChannels = computeInteriorChannels(builder, inputPixels, row, columnGroupStart, laneCount, illustrationEmitter);
+            storeInteriorPixels(builder, outputPixels, row, columnGroupStart, roundedChannels, laneCount, illustrationEmitter, illustrationCondition);
         }
         builder.CreateBr(nextColumnGroup);
 
@@ -428,9 +1018,12 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
                 channelIndex,
                 useBorderTapLoop ? borderLoopWeights : nullptr,
                 borderLoopWeightCount,
-                laneCount
+                laneCount,
+                illustrationEmitter
             );
-            storeCheckedChannel(builder, outputPixels, row, columnGroupStart, channelIndex, roundedChannel, laneCount);
+            storeCheckedChannel(
+                builder, outputPixels, row, columnGroupStart, channelIndex, roundedChannel, laneCount, illustrationEmitter, illustrationCondition
+            );
         }
         builder.CreateBr(nextColumnGroup);
 
@@ -453,7 +1046,52 @@ class ConvolutionKernel final : public SegmentOrientedKernel {
     const unsigned kernelWidth;
     const std::vector<float> weights;
     const bool useBorderTapLoop;
+    const bool illustrated;
 };
+
+void populateConvolutionPipeline(
+    ProgramBuilder & pipeline,
+    const bool hasRuntimeWeights,
+    const bool illustrated,
+    const unsigned imageWidth,
+    const unsigned imageHeight,
+    const unsigned kernelHeight,
+    const unsigned kernelWidth,
+    const std::vector<float> & weights,
+    const std::string & persistentIdentity
+) {
+    Scalar * borderLoopWeights = nullptr;
+    Scalar * borderLoopWeightCount = nullptr;
+    if (hasRuntimeWeights) {
+        borderLoopWeights = pipeline.getInputScalar("borderLoopWeights");
+        borderLoopWeightCount = pipeline.getInputScalar("borderLoopWeightCount");
+    }
+    IllustrationScalars illustration;
+    if (illustrated) {
+        illustration = {
+            pipeline.getInputScalar("captureContext"),
+            pipeline.getInputScalar("selectionKind"),
+            pipeline.getInputScalar("selectionRow"),
+            pipeline.getInputScalar("selectionColumn"),
+        };
+    }
+    StreamSet * triggerStream = pipeline.CreateStreamSet(1, 8);
+    pipeline.CreateKernelCall<MemorySourceKernel>(pipeline.getInputScalar("triggerBuffer"), pipeline.getInputScalar("triggerLength"), triggerStream);
+    pipeline.CreateKernelCall<ConvolutionKernel>(
+        triggerStream,
+        pipeline.getInputScalar("inputPixels"),
+        pipeline.getInputScalar("outputPixels"),
+        borderLoopWeights,
+        borderLoopWeightCount,
+        illustration,
+        imageWidth,
+        imageHeight,
+        kernelHeight,
+        kernelWidth,
+        weights,
+        persistentIdentity
+    );
+}
 
 class DefaultFilterImplementation final : public CompiledFilterImplementation {
    public:
@@ -469,9 +1107,7 @@ class DefaultFilterImplementation final : public CompiledFilterImplementation {
         : CompiledFilterImplementation(ConvFilterMode::Default, imageWidth, imageHeight, checkedImageByteCount(imageWidth, imageHeight), 0, 1),
           driver(std::move(cpuDriver)),
           kernelWeights(std::move(weights)),
-          useBorderTapLoop(kernelWeights.size() >= 25U && std::all_of(kernelWeights.begin(), kernelWeights.end(), [](const float weight) {
-                               return weight != 0.0F;
-                           })) {
+          useBorderTapLoop(usesBorderTapLoop(kernelWeights)) {
         if (useBorderTapLoop) {
             auto pipeline = CreatePipeline(
                 *driver,
@@ -482,23 +1118,7 @@ class DefaultFilterImplementation final : public CompiledFilterImplementation {
                 Input<uint8_t *>("triggerBuffer"),
                 Input<std::size_t>("triggerLength")
             );
-            StreamSet * triggerStream = pipeline.CreateStreamSet(1, 8);
-            pipeline.CreateKernelCall<MemorySourceKernel>(
-                pipeline.getInputScalar("triggerBuffer"), pipeline.getInputScalar("triggerLength"), triggerStream
-            );
-            pipeline.CreateKernelCall<ConvolutionKernel>(
-                triggerStream,
-                pipeline.getInputScalar("inputPixels"),
-                pipeline.getInputScalar("outputPixels"),
-                pipeline.getInputScalar("borderLoopWeights"),
-                pipeline.getInputScalar("borderLoopWeightCount"),
-                imageWidth,
-                imageHeight,
-                kernelHeight,
-                kernelWidth,
-                kernelWeights,
-                persistentIdentity
-            );
+            populateConvolutionPipeline(pipeline, true, false, imageWidth, imageHeight, kernelHeight, kernelWidth, kernelWeights, persistentIdentity);
             borderLoopFunction = pipeline.compile();
         } else {
             auto pipeline = CreatePipeline(
@@ -508,22 +1128,8 @@ class DefaultFilterImplementation final : public CompiledFilterImplementation {
                 Input<uint8_t *>("triggerBuffer"),
                 Input<std::size_t>("triggerLength")
             );
-            StreamSet * triggerStream = pipeline.CreateStreamSet(1, 8);
-            pipeline.CreateKernelCall<MemorySourceKernel>(
-                pipeline.getInputScalar("triggerBuffer"), pipeline.getInputScalar("triggerLength"), triggerStream
-            );
-            pipeline.CreateKernelCall<ConvolutionKernel>(
-                triggerStream,
-                pipeline.getInputScalar("inputPixels"),
-                pipeline.getInputScalar("outputPixels"),
-                nullptr,
-                nullptr,
-                imageWidth,
-                imageHeight,
-                kernelHeight,
-                kernelWidth,
-                kernelWeights,
-                persistentIdentity
+            populateConvolutionPipeline(
+                pipeline, false, false, imageWidth, imageHeight, kernelHeight, kernelWidth, kernelWeights, persistentIdentity
             );
             fixedWeightFunction = pipeline.compile();
         }
@@ -546,6 +1152,131 @@ class DefaultFilterImplementation final : public CompiledFilterImplementation {
     void (*borderLoopFunction)(const uint8_t *, uint8_t *, const float *, std::size_t, uint8_t *, std::size_t) = nullptr;
 };
 
+class DefaultFilterIllustrationImplementation final : public CompiledFilterIllustrationImplementation {
+   public:
+    DefaultFilterIllustrationImplementation(
+        std::unique_ptr<CPUDriver> cpuDriver,
+        const unsigned imageWidth,
+        const unsigned imageHeight,
+        const unsigned kernelWidth,
+        const unsigned kernelHeight,
+        std::vector<float> weights,
+        const std::string & persistentIdentity
+    )
+        : driver(std::move(cpuDriver)),
+          imageWidthInPixels(imageWidth),
+          imageHeightInPixels(imageHeight),
+          imageByteCount(checkedImageByteCount(imageWidth, imageHeight)),
+          kernelWeights(std::move(weights)),
+          useBorderTapLoop(usesBorderTapLoop(kernelWeights)) {
+        if (useBorderTapLoop) {
+            auto pipeline = CreatePipeline(
+                *driver,
+                Input<const uint8_t *>("inputPixels"),
+                Input<uint8_t *>("outputPixels"),
+                Input<const float *>("borderLoopWeights"),
+                Input<std::size_t>("borderLoopWeightCount"),
+                Input<uint8_t *>("captureContext"),
+                Input<std::uint32_t>("selectionKind"),
+                Input<std::size_t>("selectionRow"),
+                Input<std::size_t>("selectionColumn"),
+                Input<uint8_t *>("triggerBuffer"),
+                Input<std::size_t>("triggerLength")
+            );
+            populateConvolutionPipeline(pipeline, true, true, imageWidth, imageHeight, kernelHeight, kernelWidth, kernelWeights, persistentIdentity);
+            borderLoopFunction = pipeline.compile();
+        } else {
+            auto pipeline = CreatePipeline(
+                *driver,
+                Input<const uint8_t *>("inputPixels"),
+                Input<uint8_t *>("outputPixels"),
+                Input<uint8_t *>("captureContext"),
+                Input<std::uint32_t>("selectionKind"),
+                Input<std::size_t>("selectionRow"),
+                Input<std::size_t>("selectionColumn"),
+                Input<uint8_t *>("triggerBuffer"),
+                Input<std::size_t>("triggerLength")
+            );
+            populateConvolutionPipeline(pipeline, false, true, imageWidth, imageHeight, kernelHeight, kernelWidth, kernelWeights, persistentIdentity);
+            fixedWeightFunction = pipeline.compile();
+        }
+    }
+
+    unsigned imageWidth() const noexcept final {
+        return imageWidthInPixels;
+    }
+
+    unsigned imageHeight() const noexcept final {
+        return imageHeightInPixels;
+    }
+
+    std::size_t workspaceSize() const noexcept final {
+        return 0;
+    }
+
+    std::size_t workspaceAlignment() const noexcept final {
+        return 1;
+    }
+
+    bool apply(
+        const std::uint8_t * input, std::uint8_t * output, void *, const ConvFilterIllustrationSelection selection, std::string & trace
+    ) const final {
+        assert(input != nullptr);
+        assert(output != nullptr);
+        switch (selection.kind) {
+        case ConvFilterIllustrationSelectionKind::Input:
+        case ConvFilterIllustrationSelectionKind::Output:
+            break;
+        default:
+            return false;
+        }
+        if (selection.row >= imageHeightInPixels || selection.column >= imageWidthInPixels)
+            return false;
+        if (!hasDisjointImageRanges(input, output, imageByteCount))
+            return false;
+
+        DefaultIllustrationCaptureLog capture;
+        std::uint8_t triggerByte = 0;
+        const auto selectionKind = static_cast<std::uint32_t>(selection.kind);
+        if (useBorderTapLoop) {
+            borderLoopFunction(
+                input,
+                output,
+                kernelWeights.data(),
+                kernelWeights.size(),
+                reinterpret_cast<std::uint8_t *>(&capture),
+                selectionKind,
+                selection.row,
+                selection.column,
+                &triggerByte,
+                1U
+            );
+        } else {
+            fixedWeightFunction(
+                input, output, reinterpret_cast<std::uint8_t *>(&capture), selectionKind, selection.row, selection.column, &triggerByte, 1U
+            );
+        }
+        if (capture.failure)
+            std::rethrow_exception(capture.failure);
+        trace = formatDefaultConvFilterIllustration(std::move(capture), selection.kind == ConvFilterIllustrationSelectionKind::Input);
+        return true;
+    }
+
+   private:
+    using FixedWeightFunction = void (*)(const uint8_t *, uint8_t *, uint8_t *, std::uint32_t, std::size_t, std::size_t, uint8_t *, std::size_t);
+    using BorderLoopFunction =
+        void (*)(const uint8_t *, uint8_t *, const float *, std::size_t, uint8_t *, std::uint32_t, std::size_t, std::size_t, uint8_t *, std::size_t);
+
+    std::unique_ptr<CPUDriver> driver;
+    const unsigned imageWidthInPixels;
+    const unsigned imageHeightInPixels;
+    const std::size_t imageByteCount;
+    const std::vector<float> kernelWeights;
+    const bool useBorderTapLoop;
+    FixedWeightFunction fixedWeightFunction = nullptr;
+    BorderLoopFunction borderLoopFunction = nullptr;
+};
+
 }  // namespace
 
 std::shared_ptr<const CompiledFilterImplementation> compileDefaultFilter(
@@ -558,6 +1289,20 @@ std::shared_ptr<const CompiledFilterImplementation> compileDefaultFilter(
     std::string persistentIdentity
 ) {
     return std::make_shared<DefaultFilterImplementation>(
+        std::move(driver), imageWidth, imageHeight, kernelWidth, kernelHeight, std::move(weights), persistentIdentity
+    );
+}
+
+std::shared_ptr<const CompiledFilterIllustrationImplementation> compileDefaultFilterIllustration(
+    std::unique_ptr<CPUDriver> driver,
+    const unsigned imageWidth,
+    const unsigned imageHeight,
+    const unsigned kernelWidth,
+    const unsigned kernelHeight,
+    std::vector<float> weights,
+    std::string persistentIdentity
+) {
+    return std::make_shared<DefaultFilterIllustrationImplementation>(
         std::move(driver), imageWidth, imageHeight, kernelWidth, kernelHeight, std::move(weights), persistentIdentity
     );
 }

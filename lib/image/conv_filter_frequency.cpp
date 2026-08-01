@@ -37,48 +37,21 @@ struct FrequencyKernelConfiguration {
 };
 
 uint64_t computeConfigurationHash(const FrequencyKernelConfiguration & configuration, const FrequencyLayout & layout, const unsigned bitBlockWidth) {
-    uint64_t hash = 1469598103934665603ULL;
-    const auto append = [&](const void * byteData, const std::size_t byteCount) {
-        const auto * bytes = static_cast<const uint8_t *>(byteData);
-        for (std::size_t index = 0; index < byteCount; ++index) {
-            hash ^= bytes[index];
-            hash *= 1099511628211ULL;
-        }
-    };
-    append(&ArithmeticContractVersion, sizeof(ArithmeticContractVersion));
-    append(&bitBlockWidth, sizeof(bitBlockWidth));
-    append(&layout.logicalFloatLanes, sizeof(layout.logicalFloatLanes));
-    append(&layout.independentVectorCount, sizeof(layout.independentVectorCount));
-    append(&configuration.imageWidth, sizeof(configuration.imageWidth));
-    append(&configuration.imageHeight, sizeof(configuration.imageHeight));
-    append(&configuration.kernelHeight, sizeof(configuration.kernelHeight));
-    append(&configuration.kernelWidth, sizeof(configuration.kernelWidth));
-    append(&configuration.transformExtent, sizeof(configuration.transformExtent));
-    append(
-        configuration.weights.data(), checkedMultiply(configuration.weights.size(), sizeof(float), "frequency kernel-name weight byte count overflow")
+    uint64_t hash = KernelNameHashInitialValue;
+    hash = appendKernelNameHashBytes(hash, &ArithmeticContractVersion, sizeof(ArithmeticContractVersion));
+    hash = appendKernelNameHashBytes(hash, &bitBlockWidth, sizeof(bitBlockWidth));
+    hash = appendKernelNameHashBytes(hash, &layout.logicalFloatLanes, sizeof(layout.logicalFloatLanes));
+    hash = appendKernelNameHashBytes(hash, &layout.independentVectorCount, sizeof(layout.independentVectorCount));
+    hash = appendKernelNameHashBytes(hash, &configuration.imageWidth, sizeof(configuration.imageWidth));
+    hash = appendKernelNameHashBytes(hash, &configuration.imageHeight, sizeof(configuration.imageHeight));
+    hash = appendKernelNameHashBytes(hash, &configuration.kernelHeight, sizeof(configuration.kernelHeight));
+    hash = appendKernelNameHashBytes(hash, &configuration.kernelWidth, sizeof(configuration.kernelWidth));
+    hash = appendKernelNameHashBytes(hash, &configuration.transformExtent, sizeof(configuration.transformExtent));
+    return appendKernelNameHashBytes(
+        hash,
+        configuration.weights.data(),
+        checkedMultiply(configuration.weights.size(), sizeof(float), "frequency kernel-name weight byte count overflow")
     );
-    return hash;
-}
-
-std::vector<Binding> scalarBindings(
-    LLVMTypeSystemInterface & typeSystem,
-    Scalar * inputPixels,
-    Scalar * outputPixels,
-    Scalar * workspace,
-    Scalar * bitReverse,
-    Scalar * weights,
-    Scalar * control,
-    Scalar * frequencyData
-) {
-    return {
-        Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels},
-        Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels},
-        Binding{typeSystem.getInt8PtrTy(), "workspace", workspace},
-        Binding{typeSystem.getInt32PtrTy(), "bitReverse", bitReverse},
-        Binding{typeSystem.getFloatTy()->getPointerTo(), "weights", weights},
-        Binding{typeSystem.getInt32PtrTy(), "control", control},
-        Binding{typeSystem.getFloatTy()->getPointerTo(), "frequencyData", frequencyData}
-    };
 }
 
 class FrequencyConvolutionKernel final : public SegmentOrientedKernel {
@@ -107,7 +80,13 @@ class FrequencyConvolutionKernel final : public SegmentOrientedKernel {
                   + std::to_string(computeConfigurationHash(configuration, layout, bitBlockWidth)) + "_c" + persistentIdentity,
               {Binding{"triggerStream", triggerStream}},
               {},
-              scalarBindings(typeSystem, inputPixels, outputPixels, workspace, bitReverse, weights, control, frequencyData),
+              {Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels},
+               Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels},
+               Binding{typeSystem.getInt8PtrTy(), "workspace", workspace},
+               Binding{typeSystem.getInt32PtrTy(), "bitReverse", bitReverse},
+               Binding{typeSystem.getFloatTy()->getPointerTo(), "weights", weights},
+               Binding{typeSystem.getInt32PtrTy(), "control", control},
+               Binding{typeSystem.getFloatTy()->getPointerTo(), "frequencyData", frequencyData}},
               {},
               {}
           ),
@@ -123,10 +102,6 @@ class FrequencyConvolutionKernel final : public SegmentOrientedKernel {
     }
 
    private:
-    FixedVectorType * floatVectorType(KernelBuilder & builder, const unsigned laneCount) const {
-        return FixedVectorType::get(builder.getFloatTy(), laneCount);
-    }
-
     template <typename Body>
     void emitLoop(KernelBuilder & builder, const std::string & loopName, const uint64_t iterationCount, const Body & emitBody) const {
         BasicBlock * entry = builder.GetInsertBlock();
@@ -145,10 +120,7 @@ class FrequencyConvolutionKernel final : public SegmentOrientedKernel {
     }
 
     Value * splat(KernelBuilder & builder, Value * scalarValue, const unsigned laneCount) const {
-        FixedVectorType * vectorType = floatVectorType(builder, laneCount);
-        Value * seed = builder.CreateInsertElement(UndefValue::get(vectorType), scalarValue, builder.getInt32(0));
-        SmallVector<int, 16> indexes(laneCount, 0);
-        return builder.CreateShuffleVector(seed, UndefValue::get(vectorType), indexes);
+        return builder.CreateVectorSplat(laneCount, scalarValue);
     }
 
     Value * complexPartPointer(
@@ -162,14 +134,14 @@ class FrequencyConvolutionKernel final : public SegmentOrientedKernel {
             builder.getSize(static_cast<uint64_t>(vectorIndex) * vectorStride + planeOffset), builder.CreateMul(index, builder.getSize(laneCount))
         );
         return builder.CreatePointerCast(
-            builder.CreateGEP(builder.getFloatTy(), floatBase, offset), floatVectorType(builder, laneCount)->getPointerTo()
+            builder.CreateGEP(builder.getFloatTy(), floatBase, offset), FixedVectorType::get(builder.getFloatTy(), laneCount)->getPointerTo()
         );
     }
 
     Value * loadComplexPart(
         KernelBuilder & builder, Value * base, Value * index, const unsigned laneCount, const unsigned vectorIndex, const bool imaginary
     ) const {
-        FixedVectorType * vectorType = floatVectorType(builder, laneCount);
+        FixedVectorType * vectorType = FixedVectorType::get(builder.getFloatTy(), laneCount);
         LoadInst * load = builder.CreateLoad(vectorType, complexPartPointer(builder, base, index, laneCount, vectorIndex, imaginary));
         load->setAlignment(Align(4));
         return load;
@@ -334,7 +306,7 @@ class FrequencyConvolutionKernel final : public SegmentOrientedKernel {
         Value * pointColumn,
         const unsigned vectorIndex
     ) const {
-        FixedVectorType * vectorType = floatVectorType(builder, logicalFloatLanes);
+        FixedVectorType * vectorType = FixedVectorType::get(builder.getFloatTy(), logicalFloatLanes);
         Value * realSamples = Constant::getNullValue(vectorType);
         Value * imaginarySamples = Constant::getNullValue(vectorType);
         const unsigned validExtent = transformExtent - kernelExtent + 1U;

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace kernel::image {
 
@@ -44,9 +45,21 @@ struct FrequencyConvFilter {
     FloatArrayView weights;
 };
 
+enum class ConvFilterIllustrationSelectionKind {
+    Input,
+    Output
+};
+
+struct ConvFilterIllustrationSelection {
+    ConvFilterIllustrationSelectionKind kind;
+    unsigned row;
+    unsigned column;
+};
+
 namespace internal {
 class CompiledFilterImplementation;
-}
+class CompiledFilterIllustrationImplementation;
+}  // namespace internal
 
 class CompiledConvFilter {
    public:
@@ -69,6 +82,27 @@ class CompiledConvFilter {
     friend std::shared_ptr<const CompiledConvFilter> compileConvFilter(unsigned, unsigned, const FrequencyConvFilter &);
 };
 
+class CompiledConvFilterIllustration {
+   public:
+    unsigned imageWidth() const noexcept;
+    unsigned imageHeight() const noexcept;
+    std::size_t workspaceSize() const noexcept;
+    std::size_t workspaceAlignment() const noexcept;
+
+    bool apply(
+        const std::uint8_t * input, std::uint8_t * output, void * workspace, ConvFilterIllustrationSelection selection, std::string & trace
+    ) const;
+
+   private:
+    explicit CompiledConvFilterIllustration(std::shared_ptr<const internal::CompiledFilterIllustrationImplementation> implementation);
+
+    std::shared_ptr<const internal::CompiledFilterIllustrationImplementation> implementation;
+
+    friend std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(unsigned, unsigned, const DefaultConvFilter &);
+    friend std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(unsigned, unsigned, const UniformConvFilter &);
+    friend std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(unsigned, unsigned, const LowRankConvFilter &);
+};
+
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(unsigned imageWidth, unsigned imageHeight, const DefaultConvFilter & configuration);
 
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(unsigned imageWidth, unsigned imageHeight, const UniformConvFilter & configuration);
@@ -76,5 +110,17 @@ std::shared_ptr<const CompiledConvFilter> compileConvFilter(unsigned imageWidth,
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(unsigned imageWidth, unsigned imageHeight, const LowRankConvFilter & configuration);
 
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(unsigned imageWidth, unsigned imageHeight, const FrequencyConvFilter & configuration);
+
+std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(
+    unsigned imageWidth, unsigned imageHeight, const DefaultConvFilter & configuration
+);
+
+std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(
+    unsigned imageWidth, unsigned imageHeight, const UniformConvFilter & configuration
+);
+
+std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(
+    unsigned imageWidth, unsigned imageHeight, const LowRankConvFilter & configuration
+);
 
 }  // namespace kernel::image

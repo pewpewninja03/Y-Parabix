@@ -1,27 +1,23 @@
-#  Part of the Parabix Project, under the Open Software License 3.0.
-#  SPDX-License-Identifier: OSL-3.0
-
-# module: image
-
 parabix_add_module(
 NAME
     image
 SRC
     bmp_io.cpp
-    bmp_pipeline.cpp
+    bmp_crop.cpp
+    bmp_mask.cpp
     conv_filter.cpp
     conv_filter_default.cpp
+    conv_filter_default_illustration.cpp
     conv_filter_uniform.cpp
+    conv_filter_uniform_illustration.cpp
     conv_filter_low_rank.cpp
+    conv_filter_low_rank_illustration.cpp
     conv_filter_frequency.cpp
 DEPS
-    pablo
-    pablo.bixnum
-    kernel.bitwise
-    kernel.io
-    kernel.pipeline
-    kernel.streamutils
     kernel.basis
-    kernel.util
-    toolchain
+    kernel.bitwise
+    kernel.pipeline
+    kernel.io
+    kernel.streamutils
+    pablo.bixnum
 )
