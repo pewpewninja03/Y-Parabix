@@ -12,3 +12,15 @@ DEPS
     kernel.io
     kernel.streamutils
 )
+
+parabix_add_executable(
+NAME
+    bench
+SRC
+    bench/bench.cpp
+DEPS
+    image
+    kernel.basis
+    kernel.io
+    kernel.streamutils
+)
