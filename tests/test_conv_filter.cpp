@@ -1,13 +1,19 @@
 #include <image/conv_filter.h>
 
+#include <testing/testing.h>
+#include <toolchain/toolchain.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+using namespace testing;
 
 namespace {
 
@@ -283,6 +289,41 @@ bool testFrequency() {
 
 }  // namespace
 
-int main() {
-    return testDefault() && testUniform() && testLowRank() && testFrequency() ? 0 : 1;
+namespace {
+
+int32_t runNamedTest(const char * name, bool (*test)()) {
+    try {
+        return test() ? 0 : 1;
+    } catch (const std::exception & error) {
+        std::cerr << name << ": " << error.what() << '\n';
+        return 1;
+    }
+}
+
+}  // namespace
+
+int32_t invoke_Default() {
+    return runNamedTest("Default", testDefault);
+}
+
+int32_t invoke_Uniform() {
+    return runNamedTest("Uniform", testUniform);
+}
+
+int32_t invoke_LowRank() {
+    return runNamedTest("LowRank", testLowRank);
+}
+
+int32_t invoke_Frequency() {
+    return runNamedTest("Frequency", testFrequency);
+}
+
+int main(int argc, char ** argv) {
+    codegen::ParseCommandLineOptions(argc, argv, {&codegen::JIT_InfoOptions, testing::cli::testFlags()});
+    return testing::RunTestSuite({
+        CASE(Default),
+        CASE(Uniform),
+        CASE(LowRank),
+        CASE(Frequency),
+    });
 }

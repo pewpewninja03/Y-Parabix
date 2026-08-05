@@ -2,6 +2,7 @@
 #include <image/bmp_io.h>
 #include <image/bmp_mask.h>
 
+#include <testing/testing.h>
 #include <toolchain/toolchain.h>
 
 #include <array>
@@ -16,6 +17,8 @@
 #include <vector>
 
 #include <unistd.h>
+
+using namespace testing;
 
 namespace {
 
@@ -255,16 +258,47 @@ bool testSave(const std::filesystem::path & directory) {
 
 }  // namespace
 
-int main(int argc, char ** argv) {
-    codegen::ParseCommandLineOptions(argc, argv, {&codegen::JIT_InfoOptions});
-    const std::filesystem::path directory = std::filesystem::temp_directory_path() / ("parabix_test_bmp_" + std::to_string(::getpid()));
+namespace {
+
+std::filesystem::path gFixtureDirectory;
+
+int32_t runNamedTest(const char * name, bool (*test)(const std::filesystem::path &)) {
     try {
-        std::filesystem::create_directory(directory);
-        const bool passed = testEightBitLoadAndCrop(directory) && testOneBitMask(directory) && testSave(directory);
-        std::filesystem::remove_all(directory);
-        return passed ? 0 : 1;
+        return test(gFixtureDirectory) ? 0 : 1;
     } catch (const std::exception & error) {
-        std::filesystem::remove_all(directory);
+        std::cerr << name << ": " << error.what() << '\n';
+        return 1;
+    }
+}
+
+}  // namespace
+
+int32_t invoke_eightBitLoadAndCrop() {
+    return runNamedTest("eightBitLoadAndCrop", testEightBitLoadAndCrop);
+}
+
+int32_t invoke_oneBitMask() {
+    return runNamedTest("oneBitMask", testOneBitMask);
+}
+
+int32_t invoke_save() {
+    return runNamedTest("save", testSave);
+}
+
+int main(int argc, char ** argv) {
+    codegen::ParseCommandLineOptions(argc, argv, {&codegen::JIT_InfoOptions, testing::cli::testFlags()});
+    gFixtureDirectory = std::filesystem::temp_directory_path() / ("parabix_test_bmp_" + std::to_string(::getpid()));
+    try {
+        std::filesystem::create_directory(gFixtureDirectory);
+        const int32_t result = testing::RunTestSuite({
+            CASE(eightBitLoadAndCrop),
+            CASE(oneBitMask),
+            CASE(save),
+        });
+        std::filesystem::remove_all(gFixtureDirectory);
+        return result;
+    } catch (const std::exception & error) {
+        std::filesystem::remove_all(gFixtureDirectory);
         std::cerr << "test_bmp: " << error.what() << '\n';
         return 1;
     }
