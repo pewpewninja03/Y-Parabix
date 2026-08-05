@@ -63,4 +63,6 @@ BGRImage materializeColor(
     bool rowsBottomUp
 );
 
+BGRImage materializePackedColor(const kernel::StreamSetPtr & packedBytes, std::uint32_t width, std::uint32_t height);
+
 }  // namespace image::internal

@@ -59,6 +59,13 @@ std::shared_ptr<const Implementation> getOrCompile(
     CompilationFuture<Implementation> pendingCompilation;
     {
         const std::lock_guard<std::mutex> lock(compiledFilterCacheMutex);
+        for (auto entry = compiledObjects.begin(); entry != compiledObjects.end();) {
+            if (entry->second.expired()) {
+                entry = compiledObjects.erase(entry);
+            } else {
+                ++entry;
+            }
+        }
         const auto cacheEntry = compiledObjects.find(cacheKey);
         if (cacheEntry != compiledObjects.end()) {
             if (auto compiledObject = cacheEntry->second.lock())

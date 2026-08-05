@@ -277,6 +277,11 @@ Value * StreamSetBuffer::getRawItemPointer(KernelBuilder & b, Value * streamInde
         const Rational itemsPerByte{8, itemWidth};
         pos = b.CreateUDivRational(pos, itemsPerByte);
         itemTy = b.getInt8Ty();
+    } else if (LLVM_UNLIKELY(itemWidth == 24U)) {
+        Value * const byteOffset = b.CreateMul(pos, b.getSize(3));
+        addr = b.CreatePointerCast(addr, b.getInt8Ty()->getPointerTo(mAddressSpace));
+        addr = b.CreateInBoundsGEP(b.getInt8Ty(), addr, byteOffset);
+        return b.CreatePointerCast(addr, itemTy->getPointerTo(mAddressSpace));
     }
     addr = b.CreatePointerCast(addr, itemTy->getPointerTo(mAddressSpace));
     return b.CreateInBoundsGEP(itemTy, addr, pos);

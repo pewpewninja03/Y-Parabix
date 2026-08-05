@@ -39,6 +39,7 @@ public:
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
+    void generateI24Logic(KernelBuilder & b, llvm::Value * numOfStrides);
     const unsigned mElemWidth;
 };
 
@@ -85,7 +86,131 @@ ElemFilterKernel::ElemFilterKernel(LLVMTypeSystemInterface & ts,
 {}, {}, {}), mElemWidth(source->getFieldWidth()) {
 
 }
+
+void ElemFilterKernel::generateI24Logic(KernelBuilder & b, Value * const numOfStrides) {
+    constexpr unsigned FIELD_WIDTH = 24;
+    constexpr unsigned BYTES_PER_PIXEL = FIELD_WIDTH / 8;
+    constexpr unsigned PIXELS_PER_GROUP = 32;
+    const unsigned bitBlockWidth = b.getBitBlockWidth();
+    const unsigned groupsPerBlock = bitBlockWidth / PIXELS_PER_GROUP;
+
+    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const fieldTy = b.getIntNTy(FIELD_WIDTH);
+    IntegerType * const maskTy = b.getInt32Ty();
+    IntegerType * const metaMaskTy = b.getIntNTy(groupsPerBlock);
+    Type * const packTy = FixedVectorType::get(b.getInt8Ty(), bitBlockWidth / 8U);
+    Constant * const ZERO = b.getSize(0);
+
+    BasicBlock * const entry = b.GetInsertBlock();
+    BasicBlock * const blockLoop = b.CreateBasicBlock("blockLoop");
+    BasicBlock * const inspectGroups = b.CreateBasicBlock("inspectGroups");
+    BasicBlock * const copyBlock = b.CreateBasicBlock("copyBlock");
+    BasicBlock * const groupLoop = b.CreateBasicBlock("groupLoop");
+    BasicBlock * const copyGroup = b.CreateBasicBlock("copyGroup");
+    BasicBlock * const scalarLoop = b.CreateBasicBlock("scalarLoop");
+    BasicBlock * const groupDone = b.CreateBasicBlock("groupDone");
+    BasicBlock * const blockDone = b.CreateBasicBlock("blockDone");
+    BasicBlock * const filterDone = b.CreateBasicBlock("filterDone");
+
+    Value * const initialSourcePos = b.getProcessedItemCount("source");
+    Value * const initialOutputPos = b.getProducedItemCount("filtered");
+    Value * numOfBlocks = numOfStrides;
+    if (getStride() != bitBlockWidth) {
+        assert((getStride() % bitBlockWidth) == 0);
+        numOfBlocks = b.CreateMul(numOfStrides, b.getSize(getStride() / bitBlockWidth));
+    }
+
+    b.CreateBr(blockLoop);
+
+    b.SetInsertPoint(blockLoop);
+    PHINode * const blockNoPhi = b.CreatePHI(sizeTy, 2);
+    blockNoPhi->addIncoming(ZERO, entry);
+    PHINode * const blockOutputPosPhi = b.CreatePHI(sizeTy, 2);
+    blockOutputPosPhi->addIncoming(initialOutputPos, entry);
+    Value * const blockInputPos = b.CreateAdd(initialSourcePos, b.CreateMul(blockNoPhi, b.getSize(bitBlockWidth)));
+    Value * const nextBlock = b.CreateAdd(blockNoPhi, b.getSize(1));
+    Value * const maskVector = b.loadInputStreamBlock("mask", ZERO, blockNoPhi);
+    Value * const metaMask = b.CreateZExtOrTrunc(b.hsimd_signmask(32, b.simd_any(32, maskVector)), metaMaskTy);
+    Value * const rawMaskPtr = b.getInputStreamBlockPtr("mask", ZERO, blockNoPhi);
+    Value * const maskBasePtr = b.CreatePointerCast(rawMaskPtr, maskTy->getPointerTo());
+    b.CreateCondBr(b.CreateIsNull(metaMask), blockDone, inspectGroups);
+
+    b.SetInsertPoint(inspectGroups);
+    Value * const allGroupsSelected = b.CreateIsNull(b.bitblock_any(b.simd_not(maskVector)));
+    b.CreateCondBr(allGroupsSelected, copyBlock, groupLoop);
+
+    b.SetInsertPoint(copyBlock);
+    Value * const blockSource = b.getRawInputPointer("source", blockInputPos);
+    Value * const blockOutput = b.getRawOutputPointer("filtered", blockOutputPosPhi);
+    for (unsigned pack = 0; pack < FIELD_WIDTH; ++pack) {
+        Value * const byteOffset = b.getSize(pack * (bitBlockWidth / 8U));
+        Value * const sourcePtr = b.CreatePointerCast(b.CreateGEP(b.getInt8Ty(), blockSource, byteOffset), packTy->getPointerTo());
+        Value * const bytes = b.CreateAlignedLoad(packTy, sourcePtr, 1);
+        Value * const outputPtr = b.CreatePointerCast(b.CreateGEP(b.getInt8Ty(), blockOutput, byteOffset), packTy->getPointerTo());
+        b.CreateAlignedStore(bytes, outputPtr, 1);
+    }
+    Value * const copiedBlockOutputPos = b.CreateAdd(blockOutputPosPhi, b.getSize(bitBlockWidth));
+    b.CreateBr(blockDone);
+
+    b.SetInsertPoint(groupLoop);
+    PHINode * const metaMaskPhi = b.CreatePHI(metaMaskTy, 2);
+    metaMaskPhi->addIncoming(metaMask, inspectGroups);
+    PHINode * const groupOutputPosPhi = b.CreatePHI(sizeTy, 2);
+    groupOutputPosPhi->addIncoming(blockOutputPosPhi, inspectGroups);
+    Value * const groupNo = b.CreateZExtOrTrunc(b.CreateCountForwardZeroes(metaMaskPhi), sizeTy);
+    Value * const groupMask = b.CreateLoad(maskTy, b.CreateGEP(maskTy, maskBasePtr, groupNo));
+    Value * const groupInputPos = b.CreateAdd(blockInputPos, b.CreateMul(groupNo, b.getSize(PIXELS_PER_GROUP)));
+    b.CreateCondBr(b.CreateICmpEQ(groupMask, ConstantInt::getAllOnesValue(maskTy)), copyGroup, scalarLoop);
+
+    b.SetInsertPoint(copyGroup);
+    Value * const groupSource = b.getRawInputPointer("source", groupInputPos);
+    Value * const groupOutput = b.getRawOutputPointer("filtered", groupOutputPosPhi);
+    b.CreateMemCpy(groupOutput, groupSource, b.getSize(PIXELS_PER_GROUP * BYTES_PER_PIXEL), 1);
+    Value * const copiedGroupOutputPos = b.CreateAdd(groupOutputPosPhi, b.getSize(PIXELS_PER_GROUP));
+    b.CreateBr(groupDone);
+
+    b.SetInsertPoint(scalarLoop);
+    PHINode * const remainingMaskPhi = b.CreatePHI(maskTy, 2);
+    remainingMaskPhi->addIncoming(groupMask, groupLoop);
+    PHINode * const scalarOutputPosPhi = b.CreatePHI(sizeTy, 2);
+    scalarOutputPosPhi->addIncoming(groupOutputPosPhi, groupLoop);
+    Value * const selectedPixel = b.CreateZExtOrTrunc(b.CreateCountForwardZeroes(remainingMaskPhi), sizeTy);
+    Value * const sourcePos = b.CreateAdd(groupInputPos, selectedPixel);
+    Value * const pixel = b.readRawInputPointer(fieldTy, "source", sourcePos);
+    b.writeRawOutputPointer("filtered", scalarOutputPosPhi, pixel);
+    Value * const nextScalarOutputPos = b.CreateAdd(scalarOutputPosPhi, b.getSize(1));
+    Value * const nextMask = b.CreateResetLowestBit(remainingMaskPhi);
+    remainingMaskPhi->addIncoming(nextMask, scalarLoop);
+    scalarOutputPosPhi->addIncoming(nextScalarOutputPos, scalarLoop);
+    b.CreateCondBr(b.CreateIsNull(nextMask), groupDone, scalarLoop);
+
+    b.SetInsertPoint(groupDone);
+    PHINode * const completedGroupOutputPos = b.CreatePHI(sizeTy, 2);
+    completedGroupOutputPos->addIncoming(copiedGroupOutputPos, copyGroup);
+    completedGroupOutputPos->addIncoming(nextScalarOutputPos, scalarLoop);
+    Value * const nextMetaMask = b.CreateResetLowestBit(metaMaskPhi);
+    metaMaskPhi->addIncoming(nextMetaMask, groupDone);
+    groupOutputPosPhi->addIncoming(completedGroupOutputPos, groupDone);
+    b.CreateCondBr(b.CreateIsNull(nextMetaMask), blockDone, groupLoop);
+
+    b.SetInsertPoint(blockDone);
+    PHINode * const completedBlockOutputPos = b.CreatePHI(sizeTy, 3);
+    completedBlockOutputPos->addIncoming(blockOutputPosPhi, blockLoop);
+    completedBlockOutputPos->addIncoming(copiedBlockOutputPos, copyBlock);
+    completedBlockOutputPos->addIncoming(completedGroupOutputPos, groupDone);
+    blockNoPhi->addIncoming(nextBlock, blockDone);
+    blockOutputPosPhi->addIncoming(completedBlockOutputPos, blockDone);
+    b.CreateCondBr(b.CreateICmpNE(nextBlock, numOfBlocks), blockLoop, filterDone);
+
+    b.SetInsertPoint(filterDone);
+}
+
 void ElemFilterKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
+    if (mElemWidth == 24) {
+        generateI24Logic(b, numOfStrides);
+        return;
+    }
+
     const unsigned maskWidth = b.getBitBlockWidth()/mElemWidth;
     IntegerType * const sizeTy = b.getSizeTy();
     IntegerType * const maskTy = b.getIntNTy(maskWidth);

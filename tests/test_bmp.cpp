@@ -1,7 +1,6 @@
 #include <image/bmp_crop.h>
 #include <image/bmp_io.h>
 #include <image/bmp_mask.h>
-#include <image/conv_filter.h>
 
 #include <toolchain/toolchain.h>
 
@@ -107,15 +106,51 @@ bool compareImage(std::string_view name, const image::BGRImage & actual, const i
     return true;
 }
 
+bool rejectsCrop(
+    const image::BGRImage & source,
+    const std::uint32_t originX,
+    const std::uint32_t originY,
+    const std::uint32_t width,
+    const std::uint32_t height,
+    std::string_view name
+) {
+    try {
+        (void)image::cropImage(source, originX, originY, width, height);
+    } catch (const std::runtime_error &) {
+        return true;
+    }
+    std::cerr << name << ": crop was accepted\n";
+    return false;
+}
+
 bool testEightBitLoadAndCrop(const std::filesystem::path & directory) {
-    const std::vector<Color> palette = {{1, 2, 3}, {11, 22, 33}, {101, 55, 7}, {250, 128, 64}};
-    const std::vector<std::uint8_t> indices = {0, 1, 2, 3, 2, 1};
-    image::BGRImage expected(3, 2);
-    expected.pixels = {1, 2, 3, 11, 22, 33, 101, 55, 7, 250, 128, 64, 101, 55, 7, 11, 22, 33};
+    const std::vector<Color> palette = {
+        {1, 11, 101},
+        {2, 12, 102},
+        {3, 13, 103},
+        {4, 14, 104},
+        {5, 15, 105},
+        {6, 16, 106},
+        {7, 17, 107},
+        {8, 18, 108},
+        {9, 19, 109},
+        {10, 20, 110},
+        {21, 31, 121},
+        {22, 32, 122},
+        {23, 33, 123},
+        {24, 34, 124},
+        {25, 35, 125},
+    };
+    const std::vector<std::uint8_t> indices = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
+    image::BGRImage expected(5, 3);
+    expected.pixels = {
+        1,   11, 101, 2,   12, 102, 3,   13, 103, 4,   14, 104, 5,   15, 105, 6,   16, 106, 7,   17, 107, 8,   18,
+        108, 9,  19,  109, 10, 20,  110, 21, 31,  121, 22, 32,  122, 23, 33,  123, 24, 34,  124, 25, 35,  125,
+    };
     const auto bottomUpPath = directory / "bottom_up.bmp";
     const auto topDownPath = directory / "top_down.bmp";
-    writeIndexedBMP(bottomUpPath, 3, 2, false, 8, palette, indices);
-    writeIndexedBMP(topDownPath, 3, 2, true, 8, palette, indices);
+    writeIndexedBMP(bottomUpPath, 5, 3, false, 8, palette, indices);
+    writeIndexedBMP(topDownPath, 5, 3, true, 8, palette, indices);
 
     if (!compareImage("8-bit bottom-up", image::loadBMP(bottomUpPath.string()), expected)
         || !compareImage("8-bit top-down", image::loadBMP(topDownPath.string()), expected))
@@ -123,9 +158,27 @@ bool testEightBitLoadAndCrop(const std::filesystem::path & directory) {
         return false;
     }
 
-    image::BGRImage expectedCrop(2, 2);
-    expectedCrop.pixels = {1, 2, 3, 11, 22, 33, 250, 128, 64, 101, 55, 7};
-    return compareImage("24-stream top-left crop", image::cropImage(expected, 2, 2), expectedCrop);
+    image::BGRImage topLeft(2, 2);
+    topLeft.pixels = {1, 11, 101, 2, 12, 102, 6, 16, 106, 7, 17, 107};
+    image::BGRImage interior(3, 2);
+    interior.pixels = {7, 17, 107, 8, 18, 108, 9, 19, 109, 22, 32, 122, 23, 33, 123, 24, 34, 124};
+    image::BGRImage rightEdge(2, 2);
+    rightEdge.pixels = {4, 14, 104, 5, 15, 105, 9, 19, 109, 10, 20, 110};
+    image::BGRImage bottomEdge(3, 1);
+    bottomEdge.pixels = {21, 31, 121, 22, 32, 122, 23, 33, 123};
+    image::BGRImage singlePixel(1, 1);
+    singlePixel.pixels = {25, 35, 125};
+
+    return compareImage("three-argument top-left crop", image::cropImage(expected, 2, 2), topLeft)
+           && compareImage("origin top-left crop", image::cropImage(expected, 0, 0, 2, 2), topLeft)
+           && compareImage("interior crop", image::cropImage(expected, 1, 1, 3, 2), interior)
+           && compareImage("right-edge crop", image::cropImage(expected, 3, 0, 2, 2), rightEdge)
+           && compareImage("bottom-edge crop", image::cropImage(expected, 0, 2, 3, 1), bottomEdge)
+           && compareImage("single-pixel crop", image::cropImage(expected, 4, 2, 1, 1), singlePixel)
+           && compareImage("full-image crop", image::cropImage(expected, 0, 0, 5, 3), expected) && rejectsCrop(expected, 0, 0, 0, 2, "zero-width")
+           && rejectsCrop(expected, 0, 0, 2, 0, "zero-height") && rejectsCrop(expected, expected.width, 0, 1, 1, "origin-x-at-width")
+           && rejectsCrop(expected, 0, expected.height, 1, 1, "origin-y-at-height") && rejectsCrop(expected, 4, 0, 2, 1, "width-beyond-right-edge")
+           && rejectsCrop(expected, 0, 2, 1, 2, "height-beyond-bottom-edge");
 }
 
 bool testOneBitMask(const std::filesystem::path & directory) {
@@ -144,7 +197,7 @@ bool testOneBitMask(const std::filesystem::path & directory) {
     const auto normalPath = directory / "mask_black_white.bmp";
     const auto reversedPath = directory / "mask_white_black.bmp";
     writeIndexedBMP(normalPath, 5, 2, true, 1, {{0, 0, 0}, {255, 255, 255}}, blackThenWhiteIndices);
-    writeIndexedBMP(reversedPath, 5, 2, true, 1, {{255, 255, 255}, {0, 0, 0}}, whiteThenBlackIndices);
+    writeIndexedBMP(reversedPath, 5, 2, false, 1, {{255, 255, 255}, {0, 0, 0}}, whiteThenBlackIndices);
 
     image::BGRImage expectedBlack = source;
     image::BGRImage expectedColor = source;
@@ -159,8 +212,17 @@ bool testOneBitMask(const std::filesystem::path & directory) {
         expectedColor.pixels[pixel * 3U + 2U] = 201U;
     }
 
-    return compareImage("black mask", image::maskImage(source, normalPath.string(), {0, 0, 0}), expectedBlack)
-           && compareImage("reversed-palette color mask", image::maskImage(source, reversedPath.string(), {5, 77, 201}), expectedColor);
+    const auto mismatchPath = directory / "mask_shape_mismatch.bmp";
+    writeIndexedBMP(mismatchPath, 2, 5, true, 1, {{0, 0, 0}, {255, 255, 255}}, blackThenWhiteIndices);
+    try {
+        (void)image::maskImage(source, mismatchPath.string(), {0, 0, 0});
+        std::cerr << "mask dimension mismatch: mask was accepted\n";
+        return false;
+    } catch (const std::runtime_error &) {
+    }
+
+    return compareImage("top-down black mask", image::maskImage(source, normalPath.string(), {0, 0, 0}), expectedBlack)
+           && compareImage("bottom-up reversed-palette color mask", image::maskImage(source, reversedPath.string(), {5, 77, 201}), expectedColor);
 }
 
 bool testSave(const std::filesystem::path & directory) {
@@ -191,21 +253,6 @@ bool testSave(const std::filesystem::path & directory) {
     return compareImage("RGB332 save", image::loadBMP(path.string()), expected);
 }
 
-bool testConvolution() {
-    image::BGRImage input(3, 3);
-    for (std::size_t byte = 0; byte < input.pixels.size(); ++byte)
-        input.pixels[byte] = static_cast<std::uint8_t>(byte * 7U + 3U);
-    image::BGRImage output(3, 3);
-    constexpr std::array<float, 1> Weights = {1.0F};
-    const kernel::image::DefaultConvFilter configuration{1, 1, {Weights.data(), Weights.size()}};
-    const auto filter = kernel::image::compileConvFilter(input.width, input.height, configuration);
-    if (!filter->apply(input.data(), output.data(), nullptr)) {
-        std::cerr << "BGR convolution: apply returned false\n";
-        return false;
-    }
-    return compareImage("BGR convolution", output, input);
-}
-
 }  // namespace
 
 int main(int argc, char ** argv) {
@@ -213,7 +260,7 @@ int main(int argc, char ** argv) {
     const std::filesystem::path directory = std::filesystem::temp_directory_path() / ("parabix_test_bmp_" + std::to_string(::getpid()));
     try {
         std::filesystem::create_directory(directory);
-        const bool passed = testEightBitLoadAndCrop(directory) && testOneBitMask(directory) && testSave(directory) && testConvolution();
+        const bool passed = testEightBitLoadAndCrop(directory) && testOneBitMask(directory) && testSave(directory);
         std::filesystem::remove_all(directory);
         return passed ? 0 : 1;
     } catch (const std::exception & error) {

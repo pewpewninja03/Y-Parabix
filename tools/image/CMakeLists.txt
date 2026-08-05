@@ -1,6 +1,3 @@
-#  Part of the Parabix Project, under the Open Software License 3.0.
-#  SPDX-License-Identifier: OSL-3.0
-
 parabix_add_executable(
 NAME
     demo
@@ -15,12 +12,13 @@ DEPS
 
 parabix_add_executable(
 NAME
-    bench
+    image_benchmark
 SRC
-    bench/bench.cpp
+    benchmark.cpp
 DEPS
     image
-    kernel.basis
     kernel.io
     kernel.streamutils
 )
+
+target_include_directories(image_benchmark PRIVATE ${PROJECT_SOURCE_DIR}/lib/image)

@@ -22,7 +22,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -245,17 +245,27 @@ BGRImage materializeColor(
     const std::uint32_t height,
     const bool rowsBottomUp
 ) {
+    const std::unique_ptr<std::uint8_t, decltype(&std::free)> blue(blueBytes.data(), &std::free);
+    const std::unique_ptr<std::uint8_t, decltype(&std::free)> green(greenBytes.data(), &std::free);
+    const std::unique_ptr<std::uint8_t, decltype(&std::free)> red(redBytes.data(), &std::free);
     BGRImage image(width, height);
     for (std::uint32_t outputRow = 0; outputRow < height; ++outputRow) {
         const std::uint32_t inputRow = rowsBottomUp ? height - outputRow - 1U : outputRow;
         for (std::uint32_t column = 0; column < width; ++column) {
             const std::size_t inputPixel = static_cast<std::size_t>(inputRow) * width + column;
             const std::size_t outputPixel = static_cast<std::size_t>(outputRow) * width + column;
-            image.pixels[outputPixel * 3U] = blueBytes.data()[inputPixel];
-            image.pixels[outputPixel * 3U + 1U] = greenBytes.data()[inputPixel];
-            image.pixels[outputPixel * 3U + 2U] = redBytes.data()[inputPixel];
+            image.pixels[outputPixel * 3U] = blue.get()[inputPixel];
+            image.pixels[outputPixel * 3U + 1U] = green.get()[inputPixel];
+            image.pixels[outputPixel * 3U + 2U] = red.get()[inputPixel];
         }
     }
+    return image;
+}
+
+BGRImage materializePackedColor(const kernel::StreamSetPtr & packedBytes, const std::uint32_t width, const std::uint32_t height) {
+    const std::unique_ptr<std::uint8_t, decltype(&std::free)> bytes(packedBytes.data(), &std::free);
+    BGRImage image(width, height);
+    std::copy_n(bytes.get(), image.pixels.size(), image.pixels.begin());
     return image;
 }
 
