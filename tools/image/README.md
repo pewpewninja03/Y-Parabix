@@ -1,43 +1,45 @@
-# bmp_demo
+# Image tools
 
+## `mask.py`
 
-## Build
+Creates a 1-bit mask BMP: white background with a black rectangle. Black pixels are masked out by `demo`.
+
+```bash
+python3 mask.py <input.bmp> [-o mask.bmp] \
+  [--out-width W] [--out-height H] \
+  [--x X] [--y Y] [--width W] [--height H]
+```
+
+- `input.bmp` — image used to pick the default mask size
+- `-o` — where to write the mask (default: `<input>_mask.bmp`)
+- `--out-width` / `--out-height` — mask size (default: same as the input)
+- `--x` / `--y` — top-left corner of the black rectangle (default: `0 0`)
+- `--width` / `--height` — size of the black rectangle (default: half the mask)
+
+## `demo`
+
+Crops the input to the mask size, then runs sharpen → blur → mask → Sobel and writes the result.
+
+The mask width and height must be less than or equal to the input BMP. The output BMP is the same size as the mask (a top-left crop of the input).
+
+### Build
 
 From the `build` folder:
 
 ```bash
-make bmp_demo
+make
 ```
 
-## Run
+### Run
 
 ```bash
-./bin/bmp_demo <input.bmp> \
-  --crop-width=<w> --crop-height=<h> \
-  --crop-x=<x> --crop-y=<y> \
-  [--mask-bright-red] [--mask-bright-green] [--mask-bright-blue] \
-  [--no-blur] \
-  -o <output.bmp>
+./bin/demo <input.bmp> <mask.bmp> <output.bmp>
 ```
 
-- `--crop-x` / `--crop-y` — top-left of the crop (use `0 0` for the image origin)
-- `--crop-width` / `--crop-height` — size of the crop
-- `--mask-bright-red` — optional; before blurring, black out every cropped pixel whose red value is `>= 128`
-- `--mask-bright-green` — optional; same, for the green channel (`>= 128`)
-- `--mask-bright-blue` — optional; same, for the blue channel (`>= 128`)
-- `--no-blur` — optional; skip the 3×3 box blur and write the (masked) crop as-is
-- `-o` — output path for the crop, written as an 8-bit indexed BMP (fixed 256-color RGB332 palette: 3 red bits, 3 green bits, 2 blue bits)
-
-
-Example (full image, if it is 512×512):
+Example:
 
 ```bash
-./bin/bmp_demo ../tools/image/lena_gray.bmp \
-  --crop-width=512 --crop-height=512 \
-  --crop-x=0 --crop-y=0 \
-  --mask-bright-red \
-  -o blurred.bmp
+python3 ../tools/image/mask.py input.bmp -o mask.bmp
+./bin/demo input.bmp mask.bmp output.bmp
 ```
-
-If BMP image is grayscale (R = G = B), the red, green, and blue masks all black out the same pixels on that fixture.
 
