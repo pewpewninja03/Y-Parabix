@@ -43,3 +43,46 @@ python3 ../tools/image/mask.py input.bmp -o mask.bmp
 ./bin/demo input.bmp mask.bmp output.bmp
 ```
 
+## File navigation
+
+### Public API (`include/image/`)
+
+| File | Role |
+|------|------|
+| `bmp_io.h` | `BGRImage`, `loadBMP`, `saveBMP` |
+| `bmp_crop.h` | `cropImage` |
+| `bmp_mask.h` | `maskImage`, `BGRColor` |
+| `conv_filter.h` | Convolution filter modes and pipeline API |
+
+### Library (`lib/image/`)
+
+| File | Role |
+|------|------|
+| `bmp_io.cpp` | BMP load/save; row-padding strip via `FilterByMask` |
+| `bmp_crop.cpp` | Rectangular crop via keep/discard mask + `FilterByMask` |
+| `bmp_mask.cpp` | Apply 1-bit mask BMP onto a BGR image |
+| `bmp_pipeline_internal.h` | Shared pipeline helpers (`AlignedByteBuffer`, materialize, color streams) |
+| `conv_filter.cpp` | Conv filter orchestration / shared logic |
+| `conv_filter_default.cpp` | Default (dense) convolution |
+| `conv_filter_uniform.cpp` | Uniform-weight convolution |
+| `conv_filter_low_rank.cpp` | Low-rank separable convolution |
+| `conv_filter_frequency.cpp` | Frequency-domain convolution |
+| `conv_filter_*_illustration.*` | Illustrator / debug capture for conv modes |
+| `conv_filter_common.h` | Shared conv-filter internals |
+| `CMakeLists.txt` | Builds the `image` module |
+
+### Tools (`tools/image/`)
+
+| File | Role |
+|------|------|
+| `demo.cpp` | End-to-end demo: crop → filters → mask → Sobel |
+| `benchmark.cpp` | Image pipeline benchmarks (`image_benchmark`) |
+| `mask.py` | Generate 1-bit mask BMPs for `demo` |
+
+### Tests
+
+| File | Role |
+|------|------|
+| `tests/test_bmp.cpp` | BMP load/crop (and related) unit tests |
+| `tests/test_conv_filter.cpp` | Convolution filter unit tests |
+
