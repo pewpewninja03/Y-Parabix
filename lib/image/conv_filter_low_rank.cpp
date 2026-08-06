@@ -1,4 +1,5 @@
 #include "conv_filter_common.h"
+#include "conv_filter_low_rank_illustration.h"
 
 #include <kernel/core/kernel.h>
 #include <kernel/core/kernel_builder.h>
@@ -11,9 +12,13 @@
 #include <llvm/IR/Intrinsics.h>
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -33,24 +38,225 @@ struct LowRankKernelConfiguration {
     unsigned rankCount;
 };
 
-std::uint64_t computeConfigurationHash(const LowRankKernelConfiguration & configuration) {
-    std::uint64_t hash = 1469598103934665603ULL;
-    const auto append = [&hash](const void * byteData, const std::size_t byteCount) {
-        const auto * bytes = static_cast<const std::uint8_t *>(byteData);
-        for (std::size_t index = 0; index < byteCount; ++index) {
-            hash = (hash ^ bytes[index]) * 1099511628211ULL;
-        }
+Bindings lowRankScalarBindings(
+    LLVMTypeSystemInterface & typeSystem,
+    Scalar * inputPixels,
+    Scalar * outputPixels,
+    Scalar * workspace,
+    Scalar * horizontalFactors,
+    Scalar * verticalFactors,
+    const IllustrationScalars illustration
+) {
+    Bindings bindings{
+        Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels},
+        Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels},
+        Binding{typeSystem.getInt8PtrTy(), "workspace", workspace},
+        Binding{typeSystem.getFloatTy()->getPointerTo(), "horizontalFactors", horizontalFactors},
+        Binding{typeSystem.getFloatTy()->getPointerTo(), "verticalFactors", verticalFactors},
     };
-    append(
+    if (illustration) {
+        bindings.emplace_back(typeSystem.getInt8PtrTy(), "captureContext", illustration.captureContext);
+        bindings.emplace_back(typeSystem.getInt32Ty(), "selectionKind", illustration.selectionKind);
+        bindings.emplace_back(typeSystem.getSizeTy(), "selectionRow", illustration.selectionRow);
+        bindings.emplace_back(typeSystem.getSizeTy(), "selectionColumn", illustration.selectionColumn);
+    }
+    return bindings;
+}
+
+struct LowRankIllustrationMetadata {
+    LowRankIllustrationPath path;
+    std::uint32_t channel;
+    Value * row;
+    Value * groupStart;
+    Value * rank;
+    Value * horizontalTap;
+    Value * verticalTap;
+    Value * paddedSourceRow;
+    Value * sourceColumn;
+    Value * lane;
+};
+
+class LowRankIllustrationEmitter {
+   public:
+    LowRankIllustrationEmitter(
+        KernelBuilder & builder,
+        Value * captureContext,
+        Value * selectionKind,
+        Value * selectionRow,
+        Value * selectionColumn,
+        const unsigned imageWidth,
+        const unsigned kernelWidth,
+        const unsigned kernelHeight,
+        const unsigned laneCount
+    )
+        : builder(builder),
+          captureContext(captureContext),
+          selectionKind(selectionKind),
+          selectionRow(selectionRow),
+          selectionColumn(selectionColumn),
+          imageWidth(imageWidth),
+          kernelWidth(kernelWidth),
+          kernelHeight(kernelHeight),
+          laneCount(laneCount) {
+        captureFunction = builder.getModule()->getFunction("captureLowRankConvFilterValue");
+        if (captureFunction == nullptr)
+            throw std::logic_error("LowRank illustration callback is not declared");
+    }
+
+    Value * horizontalGroupSelected(Value * row, Value * groupStart) const {
+        Value * outputSelected = builder.CreateAnd(isOutputSelection(), builder.CreateICmpEQ(row, selectionRow));
+        outputSelected = builder.CreateAnd(outputSelected, groupContains(groupStart, selectionColumn));
+
+        Value * inputSelected = builder.CreateAnd(isInputSelection(), builder.CreateICmpEQ(row, selectionRow));
+        inputSelected = builder.CreateAnd(inputSelected, groupContainsInputWindow(groupStart));
+        return builder.CreateOr(outputSelected, inputSelected);
+    }
+
+    Value * verticalGroupSelected(Value * row, Value * groupStart) const {
+        Value * outputSelected = builder.CreateAnd(isOutputSelection(), builder.CreateICmpEQ(row, selectionRow));
+        outputSelected = builder.CreateAnd(outputSelected, groupContains(groupStart, selectionColumn));
+
+        const unsigned radius = kernelHeight / 2U;
+        Value * selectedRow = builder.CreateICmpULE(row, builder.CreateAdd(selectionRow, builder.getSize(radius)));
+        selectedRow = builder.CreateAnd(selectedRow, builder.CreateICmpULE(selectionRow, builder.CreateAdd(row, builder.getSize(radius))));
+        Value * inputSelected = builder.CreateAnd(isInputSelection(), selectedRow);
+        inputSelected = builder.CreateAnd(inputSelected, groupContainsInputWindow(groupStart));
+        return builder.CreateOr(outputSelected, inputSelected);
+    }
+
+    LowRankIllustrationMetadata metadata(
+        const LowRankIllustrationPath path,
+        Value * row,
+        Value * groupStart,
+        Value * rank = nullptr,
+        Value * horizontalTap = nullptr,
+        Value * verticalTap = nullptr,
+        Value * paddedSourceRow = nullptr,
+        Value * sourceColumn = nullptr,
+        Value * lane = nullptr,
+        const std::uint32_t channel = NoLowRankIllustrationChannel
+    ) const {
+        Value * absent = builder.getSize(NoLowRankIllustrationCoordinate);
+        return {
+            path,
+            channel,
+            row == nullptr ? absent : row,
+            groupStart == nullptr ? absent : groupStart,
+            rank == nullptr ? absent : rank,
+            horizontalTap == nullptr ? absent : horizontalTap,
+            verticalTap == nullptr ? absent : verticalTap,
+            paddedSourceRow == nullptr ? absent : paddedSourceRow,
+            sourceColumn == nullptr ? absent : sourceColumn,
+            lane == nullptr ? absent : lane,
+        };
+    }
+
+    void capture(Value * condition, const LowRankIllustrationEvent event, Value * value, const LowRankIllustrationMetadata & metadata) const {
+        std::size_t elementCount = 1U;
+        Type * elementType = value->getType();
+        if (auto * vectorType = dyn_cast<FixedVectorType>(value->getType())) {
+            elementCount = vectorType->getNumElements();
+            elementType = vectorType->getElementType();
+        }
+
+        LowRankIllustrationElementType captureType;
+        std::size_t elementByteWidth;
+        if (elementType->isFloatTy()) {
+            captureType = LowRankIllustrationElementType::Float32;
+            elementByteWidth = sizeof(float);
+        } else if (elementType->isIntegerTy(8)) {
+            captureType = LowRankIllustrationElementType::UInt8;
+            elementByteWidth = sizeof(std::uint8_t);
+        } else {
+            throw std::logic_error("LowRank illustration capture element type is unsupported");
+        }
+        if (captureType != lowRankIllustrationElementType(event) || elementByteWidth != lowRankIllustrationElementByteWidth(captureType))
+            throw std::logic_error("LowRank illustration capture event type mismatch");
+
+        BasicBlock * captureBlock = builder.CreateBasicBlock("capture_low_rank_value");
+        BasicBlock * continueBlock = builder.CreateBasicBlock("after_low_rank_capture");
+        builder.CreateCondBr(condition, captureBlock, continueBlock);
+        builder.SetInsertPoint(captureBlock);
+        Value * storage = builder.CreateAllocaAtEntryPoint(value->getType());
+        builder.CreateStore(value, storage);
+        builder.CreateCall(
+            captureFunction->getFunctionType(),
+            captureFunction,
+            {captureContext,
+             builder.getInt32(static_cast<std::uint32_t>(event)),
+             builder.getInt32(static_cast<std::uint32_t>(metadata.path)),
+             builder.getInt32(static_cast<std::uint32_t>(captureType)),
+             builder.getInt32(metadata.channel),
+             builder.getSize(elementCount),
+             builder.getSize(elementByteWidth),
+             builder.CreatePointerCast(storage, builder.getInt8PtrTy()),
+             metadata.row,
+             metadata.groupStart,
+             metadata.rank,
+             metadata.horizontalTap,
+             metadata.verticalTap,
+             metadata.paddedSourceRow,
+             metadata.sourceColumn,
+             metadata.lane}
+        );
+        builder.CreateBr(continueBlock);
+        builder.SetInsertPoint(continueBlock);
+    }
+
+   private:
+    Value * isInputSelection() const {
+        return builder.CreateICmpEQ(selectionKind, builder.getInt32(static_cast<std::uint32_t>(ConvFilterIllustrationSelectionKind::Input)));
+    }
+
+    Value * isOutputSelection() const {
+        return builder.CreateICmpEQ(selectionKind, builder.getInt32(static_cast<std::uint32_t>(ConvFilterIllustrationSelectionKind::Output)));
+    }
+
+    Value * groupContains(Value * groupStart, Value * column) const {
+        Value * selected = builder.CreateICmpUGE(column, groupStart);
+        return builder.CreateAnd(selected, builder.CreateICmpULT(column, builder.CreateAdd(groupStart, builder.getSize(laneCount))));
+    }
+
+    Value * groupContainsInputWindow(Value * groupStart) const {
+        Value * selected = builder.getInt1(false);
+        const unsigned radius = kernelWidth / 2U;
+        for (unsigned lane = 0; lane < laneCount; ++lane) {
+            Value * outputColumn = builder.CreateAdd(groupStart, builder.getSize(lane));
+            Value * laneSelected = builder.CreateICmpULT(outputColumn, builder.getSize(imageWidth));
+            laneSelected =
+                builder.CreateAnd(laneSelected, builder.CreateICmpULE(outputColumn, builder.CreateAdd(selectionColumn, builder.getSize(radius))));
+            laneSelected =
+                builder.CreateAnd(laneSelected, builder.CreateICmpULE(selectionColumn, builder.CreateAdd(outputColumn, builder.getSize(radius))));
+            selected = builder.CreateOr(selected, laneSelected);
+        }
+        return selected;
+    }
+
+    KernelBuilder & builder;
+    Value * const captureContext;
+    Value * const selectionKind;
+    Value * const selectionRow;
+    Value * const selectionColumn;
+    const unsigned imageWidth;
+    const unsigned kernelWidth;
+    const unsigned kernelHeight;
+    const unsigned laneCount;
+    Function * captureFunction = nullptr;
+};
+
+std::uint64_t computeConfigurationHash(const LowRankKernelConfiguration & configuration) {
+    std::uint64_t hash = KernelNameHashInitialValue;
+    hash = appendKernelNameHashBytes(
+        hash,
         configuration.horizontalFactors.data(),
         checkedMultiply(configuration.horizontalFactors.size(), sizeof(float), "low-rank kernel-name horizontal byte count overflow")
     );
-    append(
+    hash = appendKernelNameHashBytes(
+        hash,
         configuration.verticalFactors.data(),
         checkedMultiply(configuration.verticalFactors.size(), sizeof(float), "low-rank kernel-name vertical byte count overflow")
     );
-    append(&configuration.rankCount, sizeof(configuration.rankCount));
-    return hash;
+    return appendKernelNameHashBytes(hash, &configuration.rankCount, sizeof(configuration.rankCount));
 }
 
 class LowRankConvolutionKernel final : public SegmentOrientedKernel {
@@ -64,20 +270,18 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Scalar * horizontalFactors,
         Scalar * verticalFactors,
         const LowRankKernelConfiguration & configuration,
-        const std::string & persistentIdentity
+        const std::string & persistentIdentity,
+        const IllustrationScalars illustration = {}
     )
         : SegmentOrientedKernel(
               typeSystem,
-              "low_rank_runtime_" + std::to_string(configuration.imageWidth) + "x" + std::to_string(configuration.imageHeight) + "_k"
-                  + std::to_string(configuration.kernelHeight) + "x" + std::to_string(configuration.kernelWidth) + "_h"
-                  + std::to_string(computeConfigurationHash(configuration)) + "_c" + persistentIdentity,
+              std::string(illustration ? "illustrated_low_rank_runtime_" : "low_rank_runtime_") + std::to_string(configuration.imageWidth) + "x"
+                  + std::to_string(configuration.imageHeight) + "_k" + std::to_string(configuration.kernelHeight) + "x"
+                  + std::to_string(configuration.kernelWidth) + "_h" + std::to_string(computeConfigurationHash(configuration)) + "_c"
+                  + persistentIdentity,
               {Binding{"triggerStream", triggerStream}},
               {},
-              {Binding{typeSystem.getInt8PtrTy(), "inputPixels", inputPixels},
-               Binding{typeSystem.getInt8PtrTy(), "outputPixels", outputPixels},
-               Binding{typeSystem.getInt8PtrTy(), "workspace", workspace},
-               Binding{typeSystem.getFloatTy()->getPointerTo(), "horizontalFactors", horizontalFactors},
-               Binding{typeSystem.getFloatTy()->getPointerTo(), "verticalFactors", verticalFactors}},
+              lowRankScalarBindings(typeSystem, inputPixels, outputPixels, workspace, horizontalFactors, verticalFactors, illustration),
               {},
               {}
           ),
@@ -85,11 +289,39 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
           imageHeight(configuration.imageHeight),
           kernelHeight(configuration.kernelHeight),
           kernelWidth(configuration.kernelWidth),
-          rankCount(configuration.rankCount) {
+          rankCount(configuration.rankCount),
+          illustrated(static_cast<bool>(illustration)) {
         addAttribute(SideEffecting());
     }
 
    private:
+    void linkExternalMethods(KernelBuilder & builder) final {
+        SegmentOrientedKernel::linkExternalMethods(builder);
+        if (!illustrated)
+            return;
+        auto * captureType = FunctionType::get(
+            builder.getVoidTy(),
+            {builder.getInt8PtrTy(),
+             builder.getInt32Ty(),
+             builder.getInt32Ty(),
+             builder.getInt32Ty(),
+             builder.getInt32Ty(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getInt8PtrTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy(),
+             builder.getSizeTy()},
+            false
+        );
+        builder.LinkFunction("captureLowRankConvFilterValue", captureType, reinterpret_cast<void *>(&captureLowRankConvFilterValue));
+    }
+
     Value * pixelByteOffset(KernelBuilder & builder, Value * row, Value * column, const unsigned channel = 0) const {
         Value * offset = builder.CreateMul(row, builder.getSize(imageWidth));
         offset = builder.CreateAdd(offset, column);
@@ -98,7 +330,14 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
     }
 
     std::array<Value *, ColorChannelCount> loadPackedFloatGroup(
-        KernelBuilder & builder, Value * inputPixels, Value * sourceRow, Value * sourceColumn, const unsigned laneCount
+        KernelBuilder & builder,
+        Value * inputPixels,
+        Value * sourceRow,
+        Value * sourceColumn,
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition,
+        const LowRankIllustrationMetadata & metadata
     ) const {
         auto * interleavedType = FixedVectorType::get(builder.getInt8Ty(), laneCount * ColorChannelCount);
         Value * bytePointer = builder.CreateGEP(builder.getInt8Ty(), inputPixels, pixelByteOffset(builder, sourceRow, sourceColumn));
@@ -130,6 +369,8 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
             load->setAlignment(Align(1));
             interleaved = load;
         }
+        if (illustration != nullptr)
+            illustration->capture(illustrationCondition, LowRankIllustrationEvent::HorizontalPackedInput, interleaved, metadata);
         auto * integerType = FixedVectorType::get(builder.getInt32Ty(), laneCount);
         auto * floatType = FixedVectorType::get(builder.getFloatTy(), laneCount);
         std::array<Value *, ColorChannelCount> channels;
@@ -190,7 +431,10 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         const unsigned channel,
         Value * kernelRow,
         Value * kernelColumn,
-        const unsigned laneCount
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition,
+        const LowRankIllustrationMetadata & metadata
     ) const {
         Value * samples = Constant::getNullValue(FixedVectorType::get(builder.getFloatTy(), laneCount));
         const unsigned verticalRadius = kernelHeight / 2U;
@@ -222,12 +466,20 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
             Value * byteValue = builder.CreateLoad(
                 builder.getInt8Ty(), builder.CreateGEP(builder.getInt8Ty(), inputPixels, pixelByteOffset(builder, sourceRow, sourceColumn, channel))
             );
+            if (illustration != nullptr) {
+                LowRankIllustrationMetadata byteMetadata = metadata;
+                byteMetadata.sourceColumn = sourceColumn;
+                byteMetadata.paddedSourceRow = sourceRow;
+                byteMetadata.lane = builder.getSize(lane);
+                illustration->capture(illustrationCondition, LowRankIllustrationEvent::HorizontalInputByte, byteValue, byteMetadata);
+            }
             Value * sample = builder.CreateUIToFP(builder.CreateZExt(byteValue, builder.getInt32Ty()), builder.getFloatTy());
+            BasicBlock * loadedBlock = builder.GetInsertBlock();
             builder.CreateBr(joinBlock);
             builder.SetInsertPoint(joinBlock);
             PHINode * selected = builder.CreatePHI(builder.getFloatTy(), 2);
             selected->addIncoming(ConstantFP::get(builder.getFloatTy(), 0.0F), zeroBlock);
-            selected->addIncoming(sample, loadBlock);
+            selected->addIncoming(sample, loadedBlock);
             samples = builder.CreateInsertElement(samples, selected, builder.getInt32(lane));
         }
         return samples;
@@ -249,13 +501,21 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * columnGroupStart,
         const std::array<Value *, ColorChannelCount> & roundedChannels,
-        const unsigned laneCount
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
         auto * channelByteType = FixedVectorType::get(builder.getInt8Ty(), laneCount);
         auto * interleavedType = FixedVectorType::get(builder.getInt8Ty(), laneCount * ColorChannelCount);
         std::array<Value *, ColorChannelCount> channelBytes;
         for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
             channelBytes[channel] = builder.CreateTrunc(roundedChannels[channel], channelByteType);
+            if (illustration != nullptr) {
+                const auto metadata = illustration->metadata(
+                    LowRankIllustrationPath::OutputFull, row, columnGroupStart, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, channel
+                );
+                illustration->capture(illustrationCondition, LowRankIllustrationEvent::OutputByteVector, channelBytes[channel], metadata);
+            }
         }
         SmallVector<int, 16> redGreenIndexes;
         for (unsigned lane = 0; lane < laneCount; ++lane) {
@@ -281,6 +541,12 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         );
         StoreInst * store = builder.CreateStore(interleaved, outputPointer);
         store->setAlignment(Align(1));
+        if (illustration != nullptr) {
+            const auto metadata = illustration->metadata(LowRankIllustrationPath::OutputFull, row, columnGroupStart);
+            illustration->capture(illustrationCondition, LowRankIllustrationEvent::PackedOutput, interleaved, metadata);
+            Value * storeMask = Constant::getAllOnesValue(FixedVectorType::get(builder.getInt8Ty(), laneCount));
+            illustration->capture(illustrationCondition, LowRankIllustrationEvent::StoreMask, storeMask, metadata);
+        }
     }
 
     void storeCheckedGroup(
@@ -289,11 +555,17 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * columnGroupStart,
         const std::array<Value *, ColorChannelCount> & roundedChannels,
-        const unsigned laneCount
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
+        Value * storeMask =
+            illustration == nullptr ? nullptr : static_cast<Value *>(Constant::getNullValue(FixedVectorType::get(builder.getInt8Ty(), laneCount)));
         for (unsigned lane = 0; lane < laneCount; ++lane) {
             Value * column = builder.CreateAdd(columnGroupStart, builder.getSize(lane));
             Value * valid = builder.CreateICmpULT(column, builder.getSize(imageWidth));
+            if (storeMask != nullptr)
+                storeMask = builder.CreateInsertElement(storeMask, builder.CreateZExt(valid, builder.getInt8Ty()), builder.getInt32(lane));
             BasicBlock * storeBlock = builder.CreateBasicBlock("checked_output_store");
             BasicBlock * joinBlock = builder.CreateBasicBlock("output_store_join");
             builder.CreateCondBr(valid, storeBlock, joinBlock);
@@ -301,10 +573,29 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
             for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
                 Value * byteValue =
                     builder.CreateTrunc(builder.CreateExtractElement(roundedChannels[channel], builder.getInt32(lane)), builder.getInt8Ty());
+                if (illustration != nullptr) {
+                    const auto metadata = illustration->metadata(
+                        LowRankIllustrationPath::OutputChecked,
+                        row,
+                        columnGroupStart,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        column,
+                        builder.getSize(lane),
+                        channel
+                    );
+                    illustration->capture(illustrationCondition, LowRankIllustrationEvent::StoredOutputByte, byteValue, metadata);
+                }
                 builder.CreateStore(byteValue, builder.CreateGEP(builder.getInt8Ty(), outputPixels, pixelByteOffset(builder, row, column, channel)));
             }
             builder.CreateBr(joinBlock);
             builder.SetInsertPoint(joinBlock);
+        }
+        if (illustration != nullptr) {
+            const auto metadata = illustration->metadata(LowRankIllustrationPath::OutputChecked, row, columnGroupStart);
+            illustration->capture(illustrationCondition, LowRankIllustrationEvent::StoreMask, storeMask, metadata);
         }
     }
 
@@ -383,8 +674,18 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * column,
         const std::array<Value *, ColorChannelCount> & channels,
-        const unsigned laneCount
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
+        if (illustration != nullptr) {
+            for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
+                const auto metadata = illustration->metadata(
+                    LowRankIllustrationPath::HorizontalResult, row, column, rank, nullptr, nullptr, nullptr, nullptr, nullptr, channel
+                );
+                illustration->capture(illustrationCondition, LowRankIllustrationEvent::HorizontalWorkspaceStore, channels[channel], metadata);
+            }
+        }
         Value * full = builder.CreateICmpULE(builder.CreateAdd(column, builder.getSize(laneCount)), builder.getSize(imageWidth));
         BasicBlock * packedBlock = builder.CreateBasicBlock("low_rank_runtime_workspace_packed");
         BasicBlock * checkedBlock = builder.CreateBasicBlock("low_rank_runtime_workspace_checked");
@@ -494,7 +795,9 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * column,
         const bool border,
-        const unsigned laneCount
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
         auto * floatType = FixedVectorType::get(builder.getFloatTy(), laneCount);
         Function * multiplyAdd = Intrinsic::getDeclaration(builder.getModule(), Intrinsic::fmuladd, {floatType});
@@ -511,23 +814,58 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
             accumulator->addIncoming(Constant::getNullValue(floatType), entry);
         }
         std::array<Value *, ColorChannelCount> samples;
+        const LowRankIllustrationPath illustrationPath =
+            border ? LowRankIllustrationPath::HorizontalBorder : LowRankIllustrationPath::HorizontalInterior;
+        const auto tapMetadata =
+            illustration == nullptr ? LowRankIllustrationMetadata{} : illustration->metadata(illustrationPath, row, column, rank, tap);
         if (border) {
             for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
-                samples[channel] =
-                    loadBorderFloatGroup(builder, inputPixels, row, column, channel, builder.getSize(kernelHeight / 2U), tap, laneCount);
+                LowRankIllustrationMetadata channelMetadata = tapMetadata;
+                channelMetadata.channel = channel;
+                samples[channel] = loadBorderFloatGroup(
+                    builder,
+                    inputPixels,
+                    row,
+                    column,
+                    channel,
+                    builder.getSize(kernelHeight / 2U),
+                    tap,
+                    laneCount,
+                    illustration,
+                    illustrationCondition,
+                    channelMetadata
+                );
             }
         } else {
             Value * sourceColumn = builder.CreateSub(builder.CreateAdd(column, tap), builder.getSize(kernelWidth / 2U));
-            samples = loadPackedFloatGroup(builder, inputPixels, row, sourceColumn, laneCount);
+            LowRankIllustrationMetadata packedMetadata = tapMetadata;
+            packedMetadata.sourceColumn = sourceColumn;
+            samples = loadPackedFloatGroup(builder, inputPixels, row, sourceColumn, laneCount, illustration, illustrationCondition, packedMetadata);
+        }
+        if (illustration != nullptr) {
+            for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
+                LowRankIllustrationMetadata channelMetadata = tapMetadata;
+                channelMetadata.channel = channel;
+                illustration->capture(illustrationCondition, LowRankIllustrationEvent::HorizontalSample, samples[channel], channelMetadata);
+            }
         }
         Value * factorIndex = builder.CreateAdd(builder.CreateMul(rank, builder.getSize(kernelWidth)), tap);
         LoadInst * factor = builder.CreateLoad(builder.getFloatTy(), builder.CreateGEP(builder.getFloatTy(), horizontalFactors, factorIndex));
         factor->setAlignment(Align(4));
+        if (illustration != nullptr)
+            illustration->capture(illustrationCondition, LowRankIllustrationEvent::HorizontalFactor, factor, tapMetadata);
         Value * weight = broadcastFloat(builder, factor, laneCount);
         std::array<Value *, ColorChannelCount> nextAccumulators;
         for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
             nextAccumulators[channel] =
                 builder.CreateCall(multiplyAdd->getFunctionType(), multiplyAdd, {samples[channel], weight, accumulators[channel]});
+            if (illustration != nullptr) {
+                LowRankIllustrationMetadata channelMetadata = tapMetadata;
+                channelMetadata.channel = channel;
+                illustration->capture(
+                    illustrationCondition, LowRankIllustrationEvent::HorizontalAccumulator, nextAccumulators[channel], channelMetadata
+                );
+            }
         }
         Value * nextTap = builder.CreateAdd(tap, builder.getSize(1));
         BasicBlock * loopBack = builder.GetInsertBlock();
@@ -541,7 +879,15 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
     }
 
     std::array<Value *, ColorChannelCount> accumulateHorizontal(
-        KernelBuilder & builder, Value * inputPixels, Value * horizontalFactors, Value * rank, Value * row, Value * column, const unsigned laneCount
+        KernelBuilder & builder,
+        Value * inputPixels,
+        Value * horizontalFactors,
+        Value * rank,
+        Value * row,
+        Value * column,
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
         const unsigned radius = kernelWidth / 2U;
         Value * interior = builder.CreateICmpUGE(column, builder.getSize(radius));
@@ -556,11 +902,15 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         BasicBlock * joinBlock = builder.CreateBasicBlock("low_rank_runtime_horizontal_path_done");
         builder.CreateCondBr(interior, interiorBlock, borderBlock);
         builder.SetInsertPoint(interiorBlock);
-        auto interiorAccumulators = accumulateHorizontalPath(builder, inputPixels, horizontalFactors, rank, row, column, false, laneCount);
+        auto interiorAccumulators = accumulateHorizontalPath(
+            builder, inputPixels, horizontalFactors, rank, row, column, false, laneCount, illustration, illustrationCondition
+        );
         BasicBlock * interiorDone = builder.GetInsertBlock();
         builder.CreateBr(joinBlock);
         builder.SetInsertPoint(borderBlock);
-        auto borderAccumulators = accumulateHorizontalPath(builder, inputPixels, horizontalFactors, rank, row, column, true, laneCount);
+        auto borderAccumulators = accumulateHorizontalPath(
+            builder, inputPixels, horizontalFactors, rank, row, column, true, laneCount, illustration, illustrationCondition
+        );
         BasicBlock * borderDone = builder.GetInsertBlock();
         builder.CreateBr(joinBlock);
         builder.SetInsertPoint(joinBlock);
@@ -575,7 +925,13 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
     }
 
     void generateHorizontalPass(
-        KernelBuilder & builder, Value * inputPixels, Value * workspace, const unsigned laneCount, BasicBlock * entry, BasicBlock * verticalEntry
+        KernelBuilder & builder,
+        Value * inputPixels,
+        Value * workspace,
+        const unsigned laneCount,
+        BasicBlock * entry,
+        BasicBlock * verticalEntry,
+        LowRankIllustrationEmitter * illustration
     ) const {
         builder.SetInsertPoint(entry);
         Value * horizontalFactors = builder.getScalarField("horizontalFactors");
@@ -597,8 +953,10 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         builder.SetInsertPoint(rankLoop);
         PHINode * rank = builder.CreatePHI(builder.getSizeTy(), 2);
         rank->addIncoming(builder.getSize(0), columnLoop);
-        auto accumulators = accumulateHorizontal(builder, inputPixels, horizontalFactors, rank, row, column, laneCount);
-        storeWorkspace(builder, workspace, rank, row, column, accumulators, laneCount);
+        Value * illustrationCondition = illustration == nullptr ? nullptr : illustration->horizontalGroupSelected(row, column);
+        auto accumulators =
+            accumulateHorizontal(builder, inputPixels, horizontalFactors, rank, row, column, laneCount, illustration, illustrationCondition);
+        storeWorkspace(builder, workspace, rank, row, column, accumulators, laneCount, illustration, illustrationCondition);
         Value * nextRank = builder.CreateAdd(rank, builder.getSize(1));
         BasicBlock * rankBack = builder.GetInsertBlock();
         builder.CreateCondBr(builder.CreateICmpULT(nextRank, builder.getSize(rankCount)), rankLoop, groupDone);
@@ -622,7 +980,9 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Value * row,
         Value * column,
         const bool checkedColumns,
-        const unsigned laneCount
+        const unsigned laneCount,
+        LowRankIllustrationEmitter * illustration,
+        Value * illustrationCondition
     ) const {
         auto * floatType = FixedVectorType::get(builder.getFloatTy(), laneCount);
         Function * multiplyAdd = Intrinsic::getDeclaration(builder.getModule(), Intrinsic::fmuladd, {floatType});
@@ -640,14 +1000,36 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         }
         Value * rank = builder.CreateUDiv(tap, builder.getSize(kernelHeight));
         Value * kernelRow = builder.CreateURem(tap, builder.getSize(kernelHeight));
-        auto samples = loadWorkspace(builder, workspace, rank, builder.CreateAdd(row, kernelRow), column, checkedColumns, laneCount);
+        Value * paddedSourceRow = builder.CreateAdd(row, kernelRow);
+        auto samples = loadWorkspace(builder, workspace, rank, paddedSourceRow, column, checkedColumns, laneCount);
+        const LowRankIllustrationPath illustrationPath =
+            checkedColumns ? LowRankIllustrationPath::VerticalEdge : LowRankIllustrationPath::VerticalFull;
+        const auto tapMetadata = illustration == nullptr
+                                     ? LowRankIllustrationMetadata{}
+                                     : illustration->metadata(illustrationPath, row, column, rank, nullptr, kernelRow, paddedSourceRow);
+        if (illustration != nullptr) {
+            for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
+                LowRankIllustrationMetadata channelMetadata = tapMetadata;
+                channelMetadata.channel = channel;
+                illustration->capture(illustrationCondition, LowRankIllustrationEvent::VerticalWorkspaceLoad, samples[channel], channelMetadata);
+            }
+        }
         LoadInst * factor = builder.CreateLoad(builder.getFloatTy(), builder.CreateGEP(builder.getFloatTy(), verticalFactors, tap));
         factor->setAlignment(Align(4));
+        if (illustration != nullptr)
+            illustration->capture(illustrationCondition, LowRankIllustrationEvent::VerticalFactor, factor, tapMetadata);
         Value * weight = broadcastFloat(builder, factor, laneCount);
         std::array<Value *, ColorChannelCount> nextAccumulators;
         for (unsigned channel = 0; channel < ColorChannelCount; ++channel) {
             nextAccumulators[channel] =
                 builder.CreateCall(multiplyAdd->getFunctionType(), multiplyAdd, {samples[channel], weight, accumulators[channel]});
+            if (illustration != nullptr) {
+                LowRankIllustrationMetadata channelMetadata = tapMetadata;
+                channelMetadata.channel = channel;
+                illustration->capture(
+                    illustrationCondition, LowRankIllustrationEvent::VerticalAccumulator, nextAccumulators[channel], channelMetadata
+                );
+            }
         }
         Value * nextTap = builder.CreateAdd(tap, builder.getSize(1));
         BasicBlock * loopBack = builder.GetInsertBlock();
@@ -665,7 +1047,13 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
     }
 
     void generateVerticalPass(
-        KernelBuilder & builder, Value * outputPixels, Value * workspace, const unsigned laneCount, BasicBlock * entry, BasicBlock * done
+        KernelBuilder & builder,
+        Value * outputPixels,
+        Value * workspace,
+        const unsigned laneCount,
+        BasicBlock * entry,
+        BasicBlock * done,
+        LowRankIllustrationEmitter * illustration
     ) const {
         builder.SetInsertPoint(entry);
         Value * verticalFactors = builder.getScalarField("verticalFactors");
@@ -686,18 +1074,22 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         BasicBlock * groupDone = builder.CreateBasicBlock("low_rank_runtime_vertical_group_done");
         builder.CreateCondBr(full, fullBlock, edgeBlock);
         builder.SetInsertPoint(fullBlock);
-        auto fullAccumulators = accumulateVertical(builder, workspace, verticalFactors, row, column, false, laneCount);
+        Value * fullIllustrationCondition = illustration == nullptr ? nullptr : illustration->verticalGroupSelected(row, column);
+        auto fullAccumulators =
+            accumulateVertical(builder, workspace, verticalFactors, row, column, false, laneCount, illustration, fullIllustrationCondition);
         for (Value *& roundedChannel : fullAccumulators) {
             roundedChannel = clampAndRound(builder, roundedChannel, laneCount);
         }
-        storePackedGroup(builder, outputPixels, row, column, fullAccumulators, laneCount);
+        storePackedGroup(builder, outputPixels, row, column, fullAccumulators, laneCount, illustration, fullIllustrationCondition);
         builder.CreateBr(groupDone);
         builder.SetInsertPoint(edgeBlock);
-        auto edgeAccumulators = accumulateVertical(builder, workspace, verticalFactors, row, column, true, laneCount);
+        Value * edgeIllustrationCondition = illustration == nullptr ? nullptr : illustration->verticalGroupSelected(row, column);
+        auto edgeAccumulators =
+            accumulateVertical(builder, workspace, verticalFactors, row, column, true, laneCount, illustration, edgeIllustrationCondition);
         for (Value *& roundedChannel : edgeAccumulators) {
             roundedChannel = clampAndRound(builder, roundedChannel, laneCount);
         }
-        storeCheckedGroup(builder, outputPixels, row, column, edgeAccumulators, laneCount);
+        storeCheckedGroup(builder, outputPixels, row, column, edgeAccumulators, laneCount, illustration, edgeIllustrationCondition);
         builder.CreateBr(groupDone);
         builder.SetInsertPoint(groupDone);
         Value * nextColumn = builder.CreateAdd(column, builder.getSize(laneCount));
@@ -715,17 +1107,36 @@ class LowRankConvolutionKernel final : public SegmentOrientedKernel {
         Value * outputPixels = builder.getScalarField("outputPixels");
         Value * workspace = builder.getScalarField("workspace");
         const unsigned laneCount = builder.getBitBlockWidth() / 32U;
+        std::optional<LowRankIllustrationEmitter> illustration;
+        if (illustrated) {
+            illustration.emplace(
+                builder,
+                builder.getScalarField("captureContext"),
+                builder.getScalarField("selectionKind"),
+                builder.getScalarField("selectionRow"),
+                builder.getScalarField("selectionColumn"),
+                imageWidth,
+                kernelWidth,
+                kernelHeight,
+                laneCount
+            );
+        }
+        LowRankIllustrationEmitter * const illustrationEmitter = illustration ? &*illustration : nullptr;
         BasicBlock * entry = builder.GetInsertBlock();
         BasicBlock * verticalEntry = builder.CreateBasicBlock("low_rank_runtime_vertical_entry");
         BasicBlock * done = builder.CreateBasicBlock("low_rank_runtime_done");
-        generateHorizontalPass(builder, inputPixels, workspace, laneCount, entry, verticalEntry);
-        generateVerticalPass(builder, outputPixels, workspace, laneCount, verticalEntry, done);
+        generateHorizontalPass(builder, inputPixels, workspace, laneCount, entry, verticalEntry, illustrationEmitter);
+        generateVerticalPass(builder, outputPixels, workspace, laneCount, verticalEntry, done, illustrationEmitter);
     }
 
     const unsigned rankCount;
+    const bool illustrated;
 };
 
 using LowRankFunction = void (*)(const uint8_t *, uint8_t *, uint8_t *, const float *, const float *, uint8_t *, std::size_t);
+using IllustratedLowRankFunction = void (*)(
+    const uint8_t *, uint8_t *, uint8_t *, const float *, const float *, uint8_t *, std::uint32_t, std::size_t, std::size_t, uint8_t *, std::size_t
+);
 
 class LowRankFilterImplementation final : public CompiledFilterImplementation {
    public:
@@ -793,6 +1204,160 @@ class LowRankFilterImplementation final : public CompiledFilterImplementation {
     LowRankFunction compiledFunction = nullptr;
 };
 
+class LowRankFilterIllustrationImplementation final : public CompiledFilterIllustrationImplementation {
+   public:
+    LowRankFilterIllustrationImplementation(
+        std::unique_ptr<CPUDriver> cpuDriver,
+        const unsigned imageWidth,
+        const unsigned imageHeight,
+        const unsigned kernelWidth,
+        const unsigned kernelHeight,
+        const unsigned rank,
+        std::vector<float> horizontalFactorValues,
+        std::vector<float> verticalFactorValues,
+        const std::string & persistentIdentity
+    )
+        : driver(std::move(cpuDriver)),
+          imageWidthInPixels(imageWidth),
+          imageHeightInPixels(imageHeight),
+          kernelWidthInPixels(kernelWidth),
+          kernelHeightInPixels(kernelHeight),
+          rankCount(rank),
+          imageByteCount(checkedImageByteCount(imageWidth, imageHeight)),
+          workspaceByteCount(checkedLowRankWorkspaceByteCount(imageWidth, imageHeight, rank)),
+          horizontalFactors(std::move(horizontalFactorValues)),
+          verticalFactors(std::move(verticalFactorValues)),
+          logicalOutputCount(driver->getBitBlockWidth() / 32U) {
+        const LowRankKernelConfiguration configuration{
+            imageWidth,
+            imageHeight,
+            kernelHeight,
+            kernelWidth,
+            horizontalFactors,
+            verticalFactors,
+            rank,
+        };
+        auto pipeline = CreatePipeline(
+            *driver,
+            Input<const uint8_t *>("inputPixels"),
+            Input<uint8_t *>("outputPixels"),
+            Input<uint8_t *>("workspace"),
+            Input<const float *>("horizontalFactors"),
+            Input<const float *>("verticalFactors"),
+            Input<uint8_t *>("captureContext"),
+            Input<std::uint32_t>("selectionKind"),
+            Input<std::size_t>("selectionRow"),
+            Input<std::size_t>("selectionColumn"),
+            Input<uint8_t *>("triggerBuffer"),
+            Input<std::size_t>("triggerLength")
+        );
+        StreamSet * triggerStream = pipeline.CreateStreamSet(1, 8);
+        pipeline.CreateKernelCall<MemorySourceKernel>(
+            pipeline.getInputScalar("triggerBuffer"), pipeline.getInputScalar("triggerLength"), triggerStream
+        );
+        const IllustrationScalars illustration{
+            pipeline.getInputScalar("captureContext"),
+            pipeline.getInputScalar("selectionKind"),
+            pipeline.getInputScalar("selectionRow"),
+            pipeline.getInputScalar("selectionColumn"),
+        };
+        pipeline.CreateKernelCall<LowRankConvolutionKernel>(
+            triggerStream,
+            pipeline.getInputScalar("inputPixels"),
+            pipeline.getInputScalar("outputPixels"),
+            pipeline.getInputScalar("workspace"),
+            pipeline.getInputScalar("horizontalFactors"),
+            pipeline.getInputScalar("verticalFactors"),
+            configuration,
+            persistentIdentity,
+            illustration
+        );
+        compiledFunction = pipeline.compile();
+    }
+
+    unsigned imageWidth() const noexcept final {
+        return imageWidthInPixels;
+    }
+
+    unsigned imageHeight() const noexcept final {
+        return imageHeightInPixels;
+    }
+
+    std::size_t workspaceSize() const noexcept final {
+        return workspaceByteCount;
+    }
+
+    std::size_t workspaceAlignment() const noexcept final {
+        return alignof(float);
+    }
+
+    bool apply(
+        const std::uint8_t * input, std::uint8_t * output, void * workspace, const ConvFilterIllustrationSelection selection, std::string & trace
+    ) const final {
+        assert(input != nullptr);
+        assert(output != nullptr);
+        assert(workspace != nullptr);
+        assert(reinterpret_cast<std::uintptr_t>(workspace) % alignof(float) == 0U);
+        switch (selection.kind) {
+        case ConvFilterIllustrationSelectionKind::Input:
+        case ConvFilterIllustrationSelectionKind::Output:
+            break;
+        default:
+            return false;
+        }
+        if (selection.row >= imageHeightInPixels || selection.column >= imageWidthInPixels)
+            return false;
+        if (!hasDisjointImageRanges(input, output, imageByteCount))
+            return false;
+
+        LowRankIllustrationCaptureLog capture;
+        capture.logicalOutputs = logicalOutputCount;
+        std::uint8_t triggerByte = 0;
+        compiledFunction(
+            input,
+            output,
+            static_cast<std::uint8_t *>(workspace),
+            horizontalFactors.data(),
+            verticalFactors.data(),
+            reinterpret_cast<std::uint8_t *>(&capture),
+            static_cast<std::uint32_t>(selection.kind),
+            selection.row,
+            selection.column,
+            &triggerByte,
+            1U
+        );
+        if (capture.failure)
+            std::rethrow_exception(capture.failure);
+
+        sortLowRankIllustrationEvents(capture);
+        const LowRankIllustrationConfiguration configuration{
+            imageWidthInPixels,
+            imageHeightInPixels,
+            kernelWidthInPixels,
+            kernelHeightInPixels,
+            rankCount,
+            logicalOutputCount,
+        };
+        std::string completeTrace = formatLowRankConvFilterIllustration(configuration, selection, capture);
+        trace = std::move(completeTrace);
+        return true;
+    }
+
+   private:
+    std::unique_ptr<CPUDriver> driver;
+    const unsigned imageWidthInPixels;
+    const unsigned imageHeightInPixels;
+    const unsigned kernelWidthInPixels;
+    const unsigned kernelHeightInPixels;
+    const unsigned rankCount;
+    const std::size_t imageByteCount;
+    const std::size_t workspaceByteCount;
+    const std::vector<float> horizontalFactors;
+    const std::vector<float> verticalFactors;
+    const unsigned logicalOutputCount;
+    IllustratedLowRankFunction compiledFunction = nullptr;
+};
+
 }  // namespace
 
 std::shared_ptr<const CompiledFilterImplementation> compileLowRankFilter(
@@ -807,6 +1372,30 @@ std::shared_ptr<const CompiledFilterImplementation> compileLowRankFilter(
     std::string persistentIdentity
 ) {
     return std::make_shared<LowRankFilterImplementation>(
+        std::move(driver),
+        imageWidth,
+        imageHeight,
+        kernelWidth,
+        kernelHeight,
+        rank,
+        std::move(horizontalFactors),
+        std::move(verticalFactors),
+        persistentIdentity
+    );
+}
+
+std::shared_ptr<const CompiledFilterIllustrationImplementation> compileLowRankFilterIllustration(
+    std::unique_ptr<CPUDriver> driver,
+    const unsigned imageWidth,
+    const unsigned imageHeight,
+    const unsigned kernelWidth,
+    const unsigned kernelHeight,
+    const unsigned rank,
+    std::vector<float> horizontalFactors,
+    std::vector<float> verticalFactors,
+    std::string persistentIdentity
+) {
+    return std::make_shared<LowRankFilterIllustrationImplementation>(
         std::move(driver),
         imageWidth,
         imageHeight,

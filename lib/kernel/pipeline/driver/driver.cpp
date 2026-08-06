@@ -25,8 +25,9 @@ StreamSet * BaseDriver::CreateStreamSet(const unsigned NumElements, const unsign
  ** ------------------------------------------------------------------------------------------------------------- */
 RepeatingStreamSet * BaseDriver::CreateRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t>> && stringSet, const bool isDynamic) noexcept {
     RelationshipAllocator A(mAllocator);
-    // TODO: the stringSet will probably cause a memleak
-    return new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet), isDynamic, false);
+    RepeatingStreamSet * const streamSet = new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet), isDynamic, false);
+    mRepeatingStreamSets.push_back(streamSet);
+    return streamSet;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -34,8 +35,9 @@ RepeatingStreamSet * BaseDriver::CreateRepeatingStreamSet(const unsigned FieldWi
  ** ------------------------------------------------------------------------------------------------------------- */
 RepeatingStreamSet * BaseDriver::CreateUnalignedRepeatingStreamSet(const unsigned FieldWidth, std::vector<std::vector<uint64_t>> && stringSet, const bool isDynamic) noexcept {
     RelationshipAllocator A(mAllocator);
-    // TODO: the stringSet will probably cause a memleak
-    return new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet), isDynamic, true);
+    RepeatingStreamSet * const streamSet = new (A) RepeatingStreamSet(getContext(), FieldWidth, std::move(stringSet), isDynamic, true);
+    mRepeatingStreamSets.push_back(streamSet);
+    return streamSet;
 }
 
 
@@ -189,6 +191,7 @@ BaseDriver::BaseDriver(std::string && moduleName)
 }
 
 BaseDriver::~BaseDriver() {
-
+    for (auto streamSet = mRepeatingStreamSets.rbegin(); streamSet != mRepeatingStreamSets.rend(); ++streamSet)
+        (*streamSet)->~RepeatingStreamSet();
 }
 

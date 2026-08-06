@@ -1,6 +1,7 @@
 #include "conv_filter_common.h"
 
 #include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/MC/TargetRegistry.h>
@@ -29,67 +30,95 @@ namespace internal {
 namespace {
 
 constexpr std::uint32_t DefaultImplementationVersion = 2;
+constexpr std::uint32_t DefaultIllustrationImplementationVersion = 1;
 constexpr std::uint32_t UniformImplementationVersion = 2;
+constexpr std::uint32_t UniformIllustrationImplementationVersion = 1;
 constexpr std::uint32_t LowRankImplementationVersion = 3;
+constexpr std::uint32_t LowRankIllustrationImplementationVersion = 1;
 constexpr std::uint32_t FrequencyImplementationVersion = 2;
 
 std::mutex compiledFilterCacheMutex;
 std::mutex jitCompilationMutex;
 std::unordered_map<std::string, std::weak_ptr<const CompiledFilterImplementation>> compiledFilterCache;
-using CompilationFuture = std::shared_future<std::shared_ptr<const CompiledFilterImplementation>>;
-std::unordered_map<std::string, CompilationFuture> pendingCompilations;
+std::unordered_map<std::string, std::weak_ptr<const CompiledFilterIllustrationImplementation>> compiledIllustrationCache;
 
-template <typename Factory>
-std::shared_ptr<const CompiledFilterImplementation> getOrCompile(const std::string & cacheKey, Factory compileFilter) {
-    std::shared_ptr<std::promise<std::shared_ptr<const CompiledFilterImplementation>>> compilationPromise;
-    CompilationFuture pendingCompilation;
+template <typename Implementation>
+using CompilationFuture = std::shared_future<std::shared_ptr<const Implementation>>;
+
+std::unordered_map<std::string, CompilationFuture<CompiledFilterImplementation>> pendingCompilations;
+std::unordered_map<std::string, CompilationFuture<CompiledFilterIllustrationImplementation>> pendingIllustrationCompilations;
+
+template <typename Implementation, typename Factory>
+std::shared_ptr<const Implementation> getOrCompile(
+    std::unordered_map<std::string, std::weak_ptr<const Implementation>> & compiledObjects,
+    std::unordered_map<std::string, CompilationFuture<Implementation>> & pendingObjects,
+    const std::string & cacheKey,
+    Factory compile
+) {
+    std::shared_ptr<std::promise<std::shared_ptr<const Implementation>>> compilationPromise;
+    CompilationFuture<Implementation> pendingCompilation;
     {
         const std::lock_guard<std::mutex> lock(compiledFilterCacheMutex);
-        const auto cacheEntry = compiledFilterCache.find(cacheKey);
-        if (cacheEntry != compiledFilterCache.end()) {
-            if (auto compiledFilter = cacheEntry->second.lock())
-                return compiledFilter;
+        for (auto entry = compiledObjects.begin(); entry != compiledObjects.end();) {
+            if (entry->second.expired()) {
+                entry = compiledObjects.erase(entry);
+            } else {
+                ++entry;
+            }
         }
-        const auto pendingEntry = pendingCompilations.find(cacheKey);
-        if (pendingEntry != pendingCompilations.end()) {
+        const auto cacheEntry = compiledObjects.find(cacheKey);
+        if (cacheEntry != compiledObjects.end()) {
+            if (auto compiledObject = cacheEntry->second.lock())
+                return compiledObject;
+        }
+        const auto pendingEntry = pendingObjects.find(cacheKey);
+        if (pendingEntry != pendingObjects.end()) {
             pendingCompilation = pendingEntry->second;
         } else {
-            compilationPromise = std::make_shared<std::promise<std::shared_ptr<const CompiledFilterImplementation>>>();
+            compilationPromise = std::make_shared<std::promise<std::shared_ptr<const Implementation>>>();
             pendingCompilation = compilationPromise->get_future().share();
-            pendingCompilations.emplace(cacheKey, pendingCompilation);
+            pendingObjects.emplace(cacheKey, pendingCompilation);
         }
     }
     if (!compilationPromise)
         return pendingCompilation.get();
 
     try {
-        std::shared_ptr<const CompiledFilterImplementation> compiledFilter;
+        std::shared_ptr<const Implementation> compiledObject;
         {
             const std::lock_guard<std::mutex> lock(jitCompilationMutex);
-            compiledFilter = std::move(compileFilter());
+            compiledObject = compile();
         }
         {
             const std::lock_guard<std::mutex> lock(compiledFilterCacheMutex);
-            compiledFilterCache[cacheKey] = compiledFilter;
-            pendingCompilations.erase(cacheKey);
+            compiledObjects[cacheKey] = compiledObject;
+            pendingObjects.erase(cacheKey);
         }
-        compilationPromise->set_value(compiledFilter);
-        return compiledFilter;
+        compilationPromise->set_value(compiledObject);
+        return compiledObject;
     } catch (...) {
         {
             const std::lock_guard<std::mutex> lock(compiledFilterCacheMutex);
-            pendingCompilations.erase(cacheKey);
+            pendingObjects.erase(cacheKey);
         }
         compilationPromise->set_exception(std::current_exception());
         throw;
     }
 }
 
+template <typename Factory>
+std::shared_ptr<const CompiledFilterImplementation> getOrCompile(const std::string & cacheKey, Factory compile) {
+    return getOrCompile(compiledFilterCache, pendingCompilations, cacheKey, std::move(compile));
+}
+
+template <typename Factory>
+std::shared_ptr<const CompiledFilterIllustrationImplementation> getOrCompileIllustration(const std::string & cacheKey, Factory compile) {
+    return getOrCompile(compiledIllustrationCache, pendingIllustrationCompilations, cacheKey, std::move(compile));
+}
+
 std::size_t validateDimensions(const unsigned imageWidth, const unsigned imageHeight, const unsigned kernelWidth, const unsigned kernelHeight) {
     if (imageWidth == 0U || imageHeight == 0U || kernelWidth == 0U || kernelHeight == 0U)
         throw std::invalid_argument("image and kernel dimensions must be nonzero");
-    assert(imageWidth != 0 && imageHeight != 0);
-    assert(kernelWidth != 0 && kernelHeight != 0);
     assert((kernelWidth & 1U) != 0 && (kernelHeight & 1U) != 0);
     checkedImageByteCount(imageWidth, imageHeight);
     const std::size_t kernelArea = checkedKernelArea(kernelWidth, kernelHeight);
@@ -116,6 +145,22 @@ void validateDefaultNumericalBound(const std::vector<float> & weights) {
             throw std::invalid_argument("default accumulated-value bound exceeds float range");
         accumulatedBound += termBound;
     }
+}
+
+std::vector<float> validateDefaultConfiguration(const unsigned imageWidth, const unsigned imageHeight, const DefaultConvFilter & configuration) {
+    const std::size_t kernelArea = validateDimensions(imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight);
+    auto weights = copyFiniteValues(configuration.weights, kernelArea, "default weights must be finite");
+    validateDefaultNumericalBound(weights);
+    return weights;
+}
+
+void validateUniformConfiguration(const unsigned imageWidth, const unsigned imageHeight, const UniformConvFilter & configuration) {
+    const std::size_t kernelArea = validateDimensions(imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight);
+    if (!std::isfinite(configuration.weight))
+        throw std::invalid_argument("uniform weight must be finite");
+    if (kernelArea > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) / 255U)
+        throw std::invalid_argument("uniform window sum exceeds int32 range");
+    checkedUniformWorkspaceByteCount(imageWidth);
 }
 
 void validateLowRankNumericalBound(
@@ -147,6 +192,25 @@ void validateLowRankNumericalBound(
     }
 }
 
+struct ValidatedLowRankConfiguration {
+    std::vector<float> horizontalFactors;
+    std::vector<float> verticalFactors;
+};
+
+ValidatedLowRankConfiguration validateLowRankConfiguration(
+    const unsigned imageWidth, const unsigned imageHeight, const LowRankConvFilter & configuration
+) {
+    validateDimensions(imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight);
+    assert(configuration.rank >= 1U && configuration.rank <= 3U);
+    checkedLowRankWorkspaceByteCount(imageWidth, imageHeight, configuration.rank);
+    const std::size_t horizontalFactorCount = checkedMultiply(configuration.rank, configuration.kernelWidth, "horizontal factor count overflow");
+    const std::size_t verticalFactorCount = checkedMultiply(configuration.rank, configuration.kernelHeight, "vertical factor count overflow");
+    auto horizontalFactors = copyFiniteValues(configuration.horizontalFactors, horizontalFactorCount, "horizontal factors must be finite");
+    auto verticalFactors = copyFiniteValues(configuration.verticalFactors, verticalFactorCount, "vertical factors must be finite");
+    validateLowRankNumericalBound(horizontalFactors, verticalFactors, configuration.kernelWidth, configuration.kernelHeight, configuration.rank);
+    return {std::move(horizontalFactors), std::move(verticalFactors)};
+}
+
 }  // namespace
 
 CacheKeyBuilder::CacheKeyBuilder(const ConvFilterMode mode) {
@@ -161,7 +225,7 @@ void CacheKeyBuilder::appendBytes(const void * byteData, const std::size_t byteC
     keyBytes.append(static_cast<const char *>(byteData), byteCount);
 }
 
-void CacheKeyBuilder::appendString(const std::string & value) {
+void CacheKeyBuilder::appendString(const std::string_view value) {
     appendBytes(value.data(), value.size());
 }
 
@@ -171,14 +235,7 @@ const std::string & CacheKeyBuilder::cacheKey() const noexcept {
 
 std::string CacheKeyBuilder::persistentIdentity() const {
     const auto digest = llvm::SHA256::hash(llvm::ArrayRef<std::uint8_t>(reinterpret_cast<const std::uint8_t *>(keyBytes.data()), keyBytes.size()));
-    static constexpr char HexDigits[] = "0123456789abcdef";
-    std::string identity;
-    identity.reserve(digest.size() * 2U);
-    for (const std::uint8_t byte : digest) {
-        identity.push_back(HexDigits[byte >> 4U]);
-        identity.push_back(HexDigits[byte & 0x0fU]);
-    }
-    return identity;
+    return llvm::toHex(digest, true);
 }
 
 CompiledFilterImplementation::CompiledFilterImplementation(
@@ -222,16 +279,7 @@ bool CompiledFilterImplementation::apply(const std::uint8_t * input, std::uint8_
     assert(workspaceByteCount == 0 || workspace != nullptr);
     assert(workspaceByteCount == 0 || reinterpret_cast<std::uintptr_t>(workspace) % workspaceByteAlignment == 0);
 
-    const auto inputAddress = reinterpret_cast<std::uintptr_t>(input);
-    const auto outputAddress = reinterpret_cast<std::uintptr_t>(output);
-    if (inputAddress > std::numeric_limits<std::uintptr_t>::max() - imageByteCount
-        || outputAddress > std::numeric_limits<std::uintptr_t>::max() - imageByteCount)
-    {
-        return false;
-    }
-    const auto inputEnd = inputAddress + imageByteCount;
-    const auto outputEnd = outputAddress + imageByteCount;
-    if (inputAddress < outputEnd && outputAddress < inputEnd)
+    if (!hasDisjointImageRanges(input, output, imageByteCount))
         return false;
     invoke(input, output, workspace);
     return true;
@@ -279,7 +327,20 @@ std::size_t checkedLowRankWorkspaceByteCount(const unsigned imageWidth, const un
     return checkedMultiply(values, sizeof(float), "low-rank workspace byte count overflow");
 }
 
-std::string targetIdentity() {
+bool hasDisjointImageRanges(const std::uint8_t * input, const std::uint8_t * output, const std::size_t imageByteCount) noexcept {
+    const auto inputAddress = reinterpret_cast<std::uintptr_t>(input);
+    const auto outputAddress = reinterpret_cast<std::uintptr_t>(output);
+    if (inputAddress > std::numeric_limits<std::uintptr_t>::max() - imageByteCount
+        || outputAddress > std::numeric_limits<std::uintptr_t>::max() - imageByteCount)
+    {
+        return false;
+    }
+    const auto inputEnd = inputAddress + imageByteCount;
+    const auto outputEnd = outputAddress + imageByteCount;
+    return inputAddress >= outputEnd || outputAddress >= inputEnd;
+}
+
+const std::string & targetIdentity() {
     static const std::string targetDescription = [] {
         llvm::InitializeNativeTarget();
         const std::string triple = llvm::sys::getDefaultTargetTriple();
@@ -386,12 +447,37 @@ bool CompiledConvFilter::apply(const std::uint8_t * input, std::uint8_t * output
     return implementation->apply(input, output, workspace);
 }
 
+CompiledConvFilterIllustration::CompiledConvFilterIllustration(
+    std::shared_ptr<const internal::CompiledFilterIllustrationImplementation> compiledImplementation
+)
+    : implementation(std::move(compiledImplementation)) {}
+
+unsigned CompiledConvFilterIllustration::imageWidth() const noexcept {
+    return implementation->imageWidth();
+}
+
+unsigned CompiledConvFilterIllustration::imageHeight() const noexcept {
+    return implementation->imageHeight();
+}
+
+std::size_t CompiledConvFilterIllustration::workspaceSize() const noexcept {
+    return implementation->workspaceSize();
+}
+
+std::size_t CompiledConvFilterIllustration::workspaceAlignment() const noexcept {
+    return implementation->workspaceAlignment();
+}
+
+bool CompiledConvFilterIllustration::apply(
+    const std::uint8_t * input, std::uint8_t * output, void * workspace, const ConvFilterIllustrationSelection selection, std::string & trace
+) const {
+    return implementation->apply(input, output, workspace, selection, trace);
+}
+
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(
     const unsigned imageWidth, const unsigned imageHeight, const DefaultConvFilter & configuration
 ) {
-    const std::size_t kernelArea = internal::validateDimensions(imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight);
-    auto weights = internal::copyFiniteValues(configuration.weights, kernelArea, "default weights must be finite");
-    internal::validateDefaultNumericalBound(weights);
+    auto weights = internal::validateDefaultConfiguration(imageWidth, imageHeight, configuration);
     auto driver = std::make_unique<CPUDriver>("image_default_convolution");
     const unsigned bitBlockWidth = driver->getBitBlockWidth();
     internal::CacheKeyBuilder cacheKey(ConvFilterMode::Default);
@@ -421,15 +507,44 @@ std::shared_ptr<const CompiledConvFilter> compileConvFilter(
     return std::shared_ptr<const CompiledConvFilter>(new CompiledConvFilter(std::move(compiledImplementation)));
 }
 
+std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(
+    const unsigned imageWidth, const unsigned imageHeight, const DefaultConvFilter & configuration
+) {
+    auto weights = internal::validateDefaultConfiguration(imageWidth, imageHeight, configuration);
+    auto driver = std::make_unique<CPUDriver>("image_default_convolution_illustration");
+    const unsigned bitBlockWidth = driver->getBitBlockWidth();
+    internal::CacheKeyBuilder cacheKey(ConvFilterMode::Default);
+    internal::appendCommonCacheIdentity(cacheKey, imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight, bitBlockWidth);
+    cacheKey.appendString("illustration");
+    cacheKey.append(internal::DefaultIllustrationImplementationVersion);
+    cacheKey.appendBytes(weights.data(), internal::checkedMultiply(weights.size(), sizeof(float), "default weight byte count overflow"));
+    auto persistentIdentity = cacheKey.persistentIdentity();
+    auto compiledImplementation = internal::getOrCompileIllustration(
+        cacheKey.cacheKey(),
+        [driver = std::move(driver),
+         imageWidth,
+         imageHeight,
+         configuration,
+         weights = std::move(weights),
+         persistentIdentity = std::move(persistentIdentity)]() mutable {
+            return internal::compileDefaultFilterIllustration(
+                std::move(driver),
+                imageWidth,
+                imageHeight,
+                configuration.kernelWidth,
+                configuration.kernelHeight,
+                std::move(weights),
+                std::move(persistentIdentity)
+            );
+        }
+    );
+    return std::shared_ptr<const CompiledConvFilterIllustration>(new CompiledConvFilterIllustration(std::move(compiledImplementation)));
+}
+
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(
     const unsigned imageWidth, const unsigned imageHeight, const UniformConvFilter & configuration
 ) {
-    const std::size_t kernelArea = internal::validateDimensions(imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight);
-    if (!std::isfinite(configuration.weight))
-        throw std::invalid_argument("uniform weight must be finite");
-    if (kernelArea > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) / 255U)
-        throw std::invalid_argument("uniform window sum exceeds int32 range");
-    internal::checkedUniformWorkspaceByteCount(imageWidth);
+    internal::validateUniformConfiguration(imageWidth, imageHeight, configuration);
     auto driver = std::make_unique<CPUDriver>("image_uniform_convolution");
     const unsigned bitBlockWidth = driver->getBitBlockWidth();
     internal::CacheKeyBuilder cacheKey(ConvFilterMode::Uniform);
@@ -454,21 +569,41 @@ std::shared_ptr<const CompiledConvFilter> compileConvFilter(
     return std::shared_ptr<const CompiledConvFilter>(new CompiledConvFilter(std::move(compiledImplementation)));
 }
 
+std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(
+    const unsigned imageWidth, const unsigned imageHeight, const UniformConvFilter & configuration
+) {
+    internal::validateUniformConfiguration(imageWidth, imageHeight, configuration);
+    auto driver = std::make_unique<CPUDriver>("image_uniform_convolution_illustration");
+    const unsigned bitBlockWidth = driver->getBitBlockWidth();
+    internal::CacheKeyBuilder cacheKey(ConvFilterMode::Uniform);
+    internal::appendCommonCacheIdentity(cacheKey, imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight, bitBlockWidth);
+    cacheKey.appendString("illustration");
+    cacheKey.append(internal::UniformIllustrationImplementationVersion);
+    cacheKey.append(configuration.weight);
+    auto persistentIdentity = cacheKey.persistentIdentity();
+    auto compiledImplementation = internal::getOrCompileIllustration(
+        cacheKey.cacheKey(),
+        [driver = std::move(driver), imageWidth, imageHeight, configuration, persistentIdentity = std::move(persistentIdentity)]() mutable {
+            return internal::compileUniformFilterIllustration(
+                std::move(driver),
+                imageWidth,
+                imageHeight,
+                configuration.kernelWidth,
+                configuration.kernelHeight,
+                configuration.weight,
+                std::move(persistentIdentity)
+            );
+        }
+    );
+    return std::shared_ptr<const CompiledConvFilterIllustration>(new CompiledConvFilterIllustration(std::move(compiledImplementation)));
+}
+
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(
     const unsigned imageWidth, const unsigned imageHeight, const LowRankConvFilter & configuration
 ) {
-    internal::validateDimensions(imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight);
-    assert(configuration.rank >= 1U && configuration.rank <= 3U);
-    internal::checkedLowRankWorkspaceByteCount(imageWidth, imageHeight, configuration.rank);
-    const std::size_t horizontalFactorCount =
-        internal::checkedMultiply(configuration.rank, configuration.kernelWidth, "horizontal factor count overflow");
-    const std::size_t verticalFactorCount =
-        internal::checkedMultiply(configuration.rank, configuration.kernelHeight, "vertical factor count overflow");
-    auto horizontalFactors = internal::copyFiniteValues(configuration.horizontalFactors, horizontalFactorCount, "horizontal factors must be finite");
-    auto verticalFactors = internal::copyFiniteValues(configuration.verticalFactors, verticalFactorCount, "vertical factors must be finite");
-    internal::validateLowRankNumericalBound(
-        horizontalFactors, verticalFactors, configuration.kernelWidth, configuration.kernelHeight, configuration.rank
-    );
+    auto validated = internal::validateLowRankConfiguration(imageWidth, imageHeight, configuration);
+    auto horizontalFactors = std::move(validated.horizontalFactors);
+    auto verticalFactors = std::move(validated.verticalFactors);
     auto driver = std::make_unique<CPUDriver>("image_low_rank_convolution");
     const unsigned bitBlockWidth = driver->getBitBlockWidth();
     internal::CacheKeyBuilder cacheKey(ConvFilterMode::LowRank);
@@ -505,6 +640,51 @@ std::shared_ptr<const CompiledConvFilter> compileConvFilter(
         }
     );
     return std::shared_ptr<const CompiledConvFilter>(new CompiledConvFilter(std::move(compiledImplementation)));
+}
+
+std::shared_ptr<const CompiledConvFilterIllustration> compileConvFilterIllustration(
+    const unsigned imageWidth, const unsigned imageHeight, const LowRankConvFilter & configuration
+) {
+    auto validated = internal::validateLowRankConfiguration(imageWidth, imageHeight, configuration);
+    auto horizontalFactors = std::move(validated.horizontalFactors);
+    auto verticalFactors = std::move(validated.verticalFactors);
+    auto driver = std::make_unique<CPUDriver>("image_low_rank_convolution_illustration");
+    const unsigned bitBlockWidth = driver->getBitBlockWidth();
+    internal::CacheKeyBuilder cacheKey(ConvFilterMode::LowRank);
+    internal::appendCommonCacheIdentity(cacheKey, imageWidth, imageHeight, configuration.kernelWidth, configuration.kernelHeight, bitBlockWidth);
+    cacheKey.appendString("illustration");
+    cacheKey.append(internal::LowRankIllustrationImplementationVersion);
+    cacheKey.append(configuration.rank);
+    cacheKey.appendBytes(
+        horizontalFactors.data(), internal::checkedMultiply(horizontalFactors.size(), sizeof(float), "horizontal factor byte count overflow")
+    );
+    cacheKey.appendBytes(
+        verticalFactors.data(), internal::checkedMultiply(verticalFactors.size(), sizeof(float), "vertical factor byte count overflow")
+    );
+    auto persistentIdentity = cacheKey.persistentIdentity();
+    auto compiledImplementation = internal::getOrCompileIllustration(
+        cacheKey.cacheKey(),
+        [driver = std::move(driver),
+         imageWidth,
+         imageHeight,
+         configuration,
+         horizontalFactors = std::move(horizontalFactors),
+         verticalFactors = std::move(verticalFactors),
+         persistentIdentity = std::move(persistentIdentity)]() mutable {
+            return internal::compileLowRankFilterIllustration(
+                std::move(driver),
+                imageWidth,
+                imageHeight,
+                configuration.kernelWidth,
+                configuration.kernelHeight,
+                configuration.rank,
+                std::move(horizontalFactors),
+                std::move(verticalFactors),
+                std::move(persistentIdentity)
+            );
+        }
+    );
+    return std::shared_ptr<const CompiledConvFilterIllustration>(new CompiledConvFilterIllustration(std::move(compiledImplementation)));
 }
 
 std::shared_ptr<const CompiledConvFilter> compileConvFilter(

@@ -108,6 +108,7 @@ protected:
     KernelSet                                               mCachedKernel;
     KernelSet                                               mCompiledKernel;
     KernelSet                                               mPreservedKernel;
+    std::vector<kernel::RepeatingStreamSet *>               mRepeatingStreamSets;
     SlabAllocator<>                                         mAllocator;
 };
 
